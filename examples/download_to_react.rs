@@ -37,36 +37,33 @@ async fn main() {
 
     website.scrape().await;
 
-    match website.get_pages() {
-        Some(pages) => {
-            for page in pages.iter() {
-                let download_file =
-                    percent_encode(page.get_url().as_bytes(), NON_ALPHANUMERIC).to_string();
+    if let Some(pages) = website.get_pages() {
+        for page in pages.iter() {
+            let download_file =
+                percent_encode(page.get_url().as_bytes(), NON_ALPHANUMERIC).to_string();
 
-                let download_file = if download_file.is_empty() {
-                    "index"
-                } else {
-                    &download_file
-                };
+            let download_file = if download_file.is_empty() {
+                "index"
+            } else {
+                &download_file
+            };
 
-                let mut file = OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .open(&format!("{}/downloads/{}.tsx", target_dir, download_file))
-                    .expect("Unable to open file");
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(format!("{}/downloads/{}.tsx", target_dir, download_file))
+                .expect("Unable to open file");
 
-                let download_file = download_file.to_case(Case::Camel);
-                let download_file = download_file[0..1].to_uppercase() + &download_file[1..];
+            let download_file = download_file.to_case(Case::Camel);
+            let download_file = download_file[0..1].to_uppercase() + &download_file[1..];
 
-                let react_component = convert_to_react(&page.get_html(), download_file.to_string());
-                let react_component = react_component.as_bytes();
+            let react_component = convert_to_react(&page.get_html(), download_file.to_string());
+            let react_component = react_component.as_bytes();
 
-                file.write_all(react_component).unwrap_or_default();
+            file.write_all(react_component).unwrap_or_default();
 
-                log("downloaded", download_file);
-            }
+            log("downloaded", download_file);
         }
-        _ => (),
     };
 }

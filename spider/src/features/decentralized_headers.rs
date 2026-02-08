@@ -6,7 +6,7 @@ use std::iter::FromIterator;
 use std::str::FromStr;
 
 /// The prefix of all header values retrieved & proxied by a worker
-pub const WORKER_PROXY_HEADER_PREFIX: &'static str = "zz-spider-r--";
+pub const WORKER_PROXY_HEADER_PREFIX: &str = "zz-spider-r--";
 
 /// The header name for a retrieved status code
 pub const STATUS_CODE_HEADER_FIELD: HeaderName = HeaderName::from_static("status-code");
@@ -55,6 +55,12 @@ pub struct WorkerProxyHeaderBuilder<T = HeaderValue> {
     status_code: Option<T>,
 }
 
+impl Default for WorkerProxyHeaderBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WorkerProxyHeaderBuilder {
     /// Creates a new builder for a proxied header of a worker.
     pub fn new() -> Self {
@@ -87,7 +93,7 @@ impl<T> WorkerProxyHeaderBuilder<T> {
     /// Sets the [status_code] to be stored in the proxied header.
     /// Returns the old value if one exists.
     pub fn set_status_code<S: Into<T>>(&mut self, status_code: S) -> Option<T> {
-        std::mem::replace(&mut self.status_code, Some(status_code.into()))
+        self.status_code.replace(status_code.into())
     }
 
     /// Writes the content of self into [target]. The
@@ -181,7 +187,7 @@ pub fn extract_proxy_headers<T: Clone>(src: &HeaderMap<T>) -> HeaderMap<T> {
 }
 
 #[cfg(test)]
-pub mod tests {
+mod tests {
     use super::{
         extract_proxy_headers, set_prefix, WorkerProxyHeaderBuilder, PROXIED_ORIGINAL_STATUS,
         STATUS_CODE_HEADER_FIELD,
@@ -189,7 +195,7 @@ pub mod tests {
     use reqwest::header::HeaderValue;
 
     #[test]
-    pub fn can_build_a_map() {
+    fn can_build_a_map() {
         let mut builder = WorkerProxyHeaderBuilder::new();
         builder.insert(
             reqwest::header::USER_AGENT,
@@ -211,7 +217,7 @@ pub mod tests {
     }
 
     #[test]
-    pub fn can_build_and_clean_a_map() {
+    fn can_build_and_clean_a_map() {
         let mut builder = WorkerProxyHeaderBuilder::new();
         builder.insert(
             reqwest::header::USER_AGENT,

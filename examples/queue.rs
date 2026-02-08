@@ -21,9 +21,9 @@ async fn main() {
             let mut segments: Vec<_> = url
                 .path_segments()
                 .map(|c| c.collect::<Vec<_>>())
-                .unwrap_or_else(Vec::new);
+                .unwrap_or_default();
 
-            if segments.len() > 0 && segments[0] == "en" {
+            if !segments.is_empty() && segments[0] == "en" {
                 segments[0] = "fr";
                 let new_path = segments.join("/");
                 url.set_path(&new_path);

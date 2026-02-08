@@ -19,7 +19,8 @@ static CONNECT_THREAD_POOL: OnceCell<
 /// Is the background thread connect enabled.
 static BACKGROUND_THREAD_CONNECT_ENABLED: AtomicBool = AtomicBool::new(true);
 
-/// Is the background thread inited.
+/// Is the background thread initialized and enabled.
+#[allow(dead_code)]
 pub(crate) fn background_connect_threading() -> bool {
     BACKGROUND_THREAD_CONNECT_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
 }
@@ -53,35 +54,38 @@ pub fn init_background_runtime() {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let builder = std::thread::Builder::new();
 
-        if let Err(_) = builder.spawn(move || {
-            match tokio::runtime::Builder::new_multi_thread()
-                .thread_name("connect-background-pool-thread")
-                .worker_threads(num_cpus::get() as usize)
-                .on_thread_start(move || {
-                    #[cfg(target_os = "linux")]
-                    unsafe {
-                        if libc::nice(10) == -1 && *libc::__errno_location() != 0 {
-                            let error = std::io::Error::last_os_error();
-                            log::error!("failed to set threadpool niceness: {}", error);
+        if builder
+            .spawn(move || {
+                match tokio::runtime::Builder::new_multi_thread()
+                    .thread_name("connect-background-pool-thread")
+                    .worker_threads(num_cpus::get())
+                    .on_thread_start(move || {
+                        #[cfg(target_os = "linux")]
+                        unsafe {
+                            if libc::nice(10) == -1 && *libc::__errno_location() != 0 {
+                                let error = std::io::Error::last_os_error();
+                                log::error!("failed to set threadpool niceness: {}", error);
+                            }
                         }
+                    })
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => {
+                        rt.block_on(async move {
+                            while let Some(work) = rx.recv().await {
+                                tokio::task::spawn(work);
+                            }
+                        });
                     }
-                })
-                .enable_all()
-                .build()
-            {
-                Ok(rt) => {
-                    rt.block_on(async move {
-                        while let Some(work) = rx.recv().await {
-                            tokio::task::spawn(work);
-                        }
-                    });
+                    _ => {
+                        BACKGROUND_THREAD_CONNECT_ENABLED
+                            .store(false, std::sync::atomic::Ordering::Relaxed);
+                    }
                 }
-                _ => {
-                    BACKGROUND_THREAD_CONNECT_ENABLED
-                        .store(false, std::sync::atomic::Ordering::Relaxed);
-                }
-            }
-        }) {
+            })
+            .is_err()
+        {
             let _ = tx.downgrade();
             BACKGROUND_THREAD_CONNECT_ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
         };
@@ -93,6 +97,12 @@ pub fn init_background_runtime() {
 /// This tower layer injects futures with a oneshot channel, and then sends them to the background runtime for processing.
 #[derive(Copy, Clone)]
 pub struct BackgroundProcessorLayer;
+
+impl Default for BackgroundProcessorLayer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl BackgroundProcessorLayer {
     /// A new background proccess layer shortcut.
@@ -201,7 +211,7 @@ where
         let this = self.project();
         match this.rx.poll(cx) {
             Poll::Ready(v) => match v {
-                Ok(v) => Poll::Ready(v.map_err(Into::into)),
+                Ok(v) => Poll::Ready(v),
                 Err(err) => Poll::Ready(Err(Box::new(err) as BoxError)),
             },
             Poll::Pending => Poll::Pending,

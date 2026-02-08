@@ -257,7 +257,7 @@ impl PageStateDiff {
 
         while let Some(pos) = html[search_start..].find(&open_tag) {
             let abs_pos = search_start + pos;
-            if idx.map_or(true, |i| i == current_idx) {
+            if idx.is_none_or(|i| i == current_idx) {
                 // Find the end of this element
                 if let Some(end_pos) = html[abs_pos..].find(&format!("</{}>", tag)) {
                     let content = &html[abs_pos..abs_pos + end_pos + tag.len() + 3];

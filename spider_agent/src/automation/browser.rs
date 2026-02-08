@@ -209,6 +209,7 @@ impl RemoteMultimodalEngine {
     }
 
     /// Build the user prompt for a round using captured state.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn build_user_prompt(
         &self,
         effective_cfg: &RemoteMultimodalConfig,
@@ -899,6 +900,7 @@ impl RemoteMultimodalEngine {
     }
 
     /// Infer plan with retry policy.
+    #[allow(clippy::too_many_arguments)]
     async fn infer_plan_with_retry(
         &self,
         effective_cfg: &RemoteMultimodalConfig,
@@ -958,6 +960,7 @@ impl RemoteMultimodalEngine {
     }
 
     /// Single plan inference attempt.
+    #[allow(clippy::too_many_arguments)]
     async fn infer_plan_once(
         &self,
         effective_cfg: &RemoteMultimodalConfig,
@@ -1042,7 +1045,7 @@ impl RemoteMultimodalEngine {
                 effective_cfg.max_skill_context_chars,
             );
             // Also inject agent-requested skills from memory
-            if let Some(ref mem) = memory {
+            if let Some(mem) = memory {
                 if let Some(active) = mem.get("_active_skill") {
                     if let Some(name) = active.as_str() {
                         if let Some(skill) = registry.get(name) {
@@ -1343,7 +1346,7 @@ impl RemoteMultimodalEngine {
         // Try to get extracted field, or fallback to the entire response when in extraction mode.
         // Treat `extracted: {}` (empty object) the same as missing for recovery purposes.
         let raw_extracted = parsed.get("extracted").cloned().and_then(|v| {
-            if v.as_object().map_or(false, |o| o.is_empty()) {
+            if v.as_object().is_some_and(|o| o.is_empty()) {
                 None // empty object → trigger fallback chain
             } else {
                 Some(v)
@@ -2093,8 +2096,9 @@ Only return the JSON object, no other text."#;
         let step = best_effort_parse_json_object(&content)?;
 
         // Execute the action
-        let (steps_executed, _spawn_pages) =
-            self.execute_steps(page, &[step.clone()], &self.cfg).await?;
+        let (steps_executed, _spawn_pages) = self
+            .execute_steps(page, std::slice::from_ref(&step), &self.cfg)
+            .await?;
 
         let action_type = step
             .get("action")

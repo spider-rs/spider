@@ -430,11 +430,7 @@ impl SynthesisResult {
         let page_contributions = value
             .get("page_contributions")
             .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| PageContribution::from_json(v))
-                    .collect()
-            })
+            .map(|arr| arr.iter().filter_map(PageContribution::from_json).collect())
             .unwrap_or_default();
 
         Some(Self {

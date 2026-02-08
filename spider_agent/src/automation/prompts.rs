@@ -287,31 +287,31 @@ mod tests {
 
     #[test]
     fn test_extract_system_prompt_nonempty() {
-        assert!(!EXTRACT_SYSTEM_PROMPT.is_empty());
+        assert_ne!(EXTRACT_SYSTEM_PROMPT, "");
         assert!(EXTRACT_SYSTEM_PROMPT.contains("extract"));
     }
 
     #[test]
     fn test_observe_system_prompt_nonempty() {
-        assert!(!OBSERVE_SYSTEM_PROMPT.is_empty());
+        assert_ne!(OBSERVE_SYSTEM_PROMPT, "");
         assert!(OBSERVE_SYSTEM_PROMPT.contains("interactive_elements"));
     }
 
     #[test]
     fn test_act_system_prompt_nonempty() {
-        assert!(!ACT_SYSTEM_PROMPT.is_empty());
+        assert_ne!(ACT_SYSTEM_PROMPT, "");
         assert!(ACT_SYSTEM_PROMPT.contains("action_taken"));
     }
 
     #[test]
     fn test_configuration_system_prompt_nonempty() {
-        assert!(!CONFIGURATION_SYSTEM_PROMPT.is_empty());
+        assert_ne!(CONFIGURATION_SYSTEM_PROMPT, "");
         assert!(CONFIGURATION_SYSTEM_PROMPT.contains("crawler"));
     }
 
     #[test]
     fn test_map_system_prompt_nonempty() {
-        assert!(!MAP_SYSTEM_PROMPT.is_empty());
+        assert_ne!(MAP_SYSTEM_PROMPT, "");
         assert!(MAP_SYSTEM_PROMPT.contains("URL"));
     }
 

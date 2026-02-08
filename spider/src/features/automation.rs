@@ -869,8 +869,8 @@ pub async fn process_spawn_pages_with_config(
 
             let total_bytes_clone = total_bytes.clone();
             let response_map_clone = response_map.clone();
-            let listener_handle = if let Some(mut listener) = bytes_listener {
-                Some(tokio::spawn(async move {
+            let listener_handle = bytes_listener.map(|mut listener| {
+                tokio::spawn(async move {
                     while let Some(event) = listener.next().await {
                         let bytes = event.encoded_data_length as u64;
                         total_bytes_clone.fetch_add(bytes, Ordering::Relaxed);
@@ -879,10 +879,8 @@ pub async fn process_spawn_pages_with_config(
                             .and_modify(|v| *v += bytes)
                             .or_insert(bytes);
                     }
-                }))
-            } else {
-                None
-            };
+                })
+            });
 
             // Build page-specific config from the full base config to preserve
             // routing, schemas, relevance gates, and other production knobs.

@@ -875,10 +875,7 @@ pub fn parse_tool_calls(response: &Value) -> Vec<ToolCall> {
         None => return Vec::new(),
     };
 
-    tool_calls
-        .iter()
-        .filter_map(|tc| ToolCall::from_json(tc))
-        .collect()
+    tool_calls.iter().filter_map(ToolCall::from_json).collect()
 }
 
 /// Convert tool calls to automation step actions.

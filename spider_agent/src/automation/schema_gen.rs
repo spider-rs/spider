@@ -457,7 +457,7 @@ mod tests {
         assert_eq!(infer_schema(&json!(null)), json!({"type": "null"}));
         assert_eq!(infer_schema(&json!(true)), json!({"type": "boolean"}));
         assert_eq!(infer_schema(&json!(42)), json!({"type": "integer"}));
-        assert_eq!(infer_schema(&json!(3.14)), json!({"type": "number"}));
+        assert_eq!(infer_schema(&json!(2.5)), json!({"type": "number"}));
         assert_eq!(infer_schema(&json!("hello")), json!({"type": "string"}));
     }
 

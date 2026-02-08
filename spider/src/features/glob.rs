@@ -54,7 +54,7 @@ pub fn expand_url(url: &str) -> Vec<CaseInsensitiveString> {
 
                 let width = match capture.name("padding") {
                     Some(padding) => {
-                        if padding.as_str().len() > 0 {
+                        if !padding.as_str().is_empty() {
                             start_str.len()
                         } else {
                             0
@@ -128,7 +128,7 @@ fn test_expand_url_list() {
             "https://choosealicense.com/licenses/mpl-2.0/"
         ]
         .iter()
-        .map(|url| CaseInsensitiveString::new(url))
+        .map(CaseInsensitiveString::new)
         .collect::<Vec<CaseInsensitiveString>>()
     );
 }
@@ -152,7 +152,7 @@ fn test_expand_url_numerical_range() {
             "https://choosealicense.com/licenses/bsd-4-clause/",
         ]
         .iter()
-        .map(|url| CaseInsensitiveString::new(url))
+        .map(CaseInsensitiveString::new)
         .collect::<Vec<CaseInsensitiveString>>()
     );
 }
@@ -165,7 +165,7 @@ fn test_expand_url_numerical_range_singe_item() {
         expand_url(url),
         ["https://choosealicense.com/licenses/bsd-4-clause/"]
             .iter()
-            .map(|url| CaseInsensitiveString::new(url))
+            .map(CaseInsensitiveString::new)
             .collect::<Vec<CaseInsensitiveString>>()
     );
 }
@@ -181,7 +181,7 @@ fn test_expand_url_numerical_range_with_step() {
             "https://choosealicense.com/licenses/bsd-4-clause/",
         ]
         .iter()
-        .map(|url| CaseInsensitiveString::new(url))
+        .map(CaseInsensitiveString::new)
         .collect::<Vec<CaseInsensitiveString>>()
     );
 }
@@ -198,7 +198,7 @@ fn test_expand_url_numerical_range_with_padding() {
             "https://choosealicense.com/licenses/bsd-004-clause/",
         ]
         .iter()
-        .map(|url| CaseInsensitiveString::new(url))
+        .map(CaseInsensitiveString::new)
         .collect::<Vec<CaseInsensitiveString>>()
     );
 }
@@ -215,7 +215,7 @@ fn test_expand_url_numerical_range_with_padding_ignore_end_padding() {
             "https://choosealicense.com/licenses/bsd-010-clause/",
         ]
         .iter()
-        .map(|url| CaseInsensitiveString::new(url))
+        .map(CaseInsensitiveString::new)
         .collect::<Vec<CaseInsensitiveString>>()
     );
 }
@@ -233,7 +233,7 @@ fn test_expand_url_alphabetical_range() {
             "https://choosealicense.com/licenses/zlib/",
         ]
         .iter()
-        .map(|url| CaseInsensitiveString::new(url))
+        .map(CaseInsensitiveString::new)
         .collect::<Vec<CaseInsensitiveString>>()
     );
 }
@@ -253,7 +253,7 @@ fn test_expand_url_combination() {
             "https://choosealicense.com/licenses/bsd-4-clause-clear/",
         ]
         .iter()
-        .map(|url| CaseInsensitiveString::new(url))
+        .map(CaseInsensitiveString::new)
         .collect::<Vec<CaseInsensitiveString>>()
     );
 }

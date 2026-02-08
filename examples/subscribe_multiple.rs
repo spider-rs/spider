@@ -39,7 +39,7 @@ async fn main() {
     };
 
     // you can also use a select to cancel a crawl if you want to see which proxy comes first.
-    let (mut stdout, _, __) = tokio::join!(sub, c1, c2);
+    let (mut stdout, _crawl_one, _crawl_two) = tokio::join!(sub, c1, c2);
 
     let duration = start.elapsed();
 

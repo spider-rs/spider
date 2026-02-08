@@ -14,7 +14,7 @@ use std::sync::LazyLock;
 static VISUAL_ELEMENT_MATCHER: LazyLock<AhoCorasick> = LazyLock::new(|| {
     AhoCorasick::builder()
         .ascii_case_insensitive(true)
-        .build(&["<iframe", "<video", "<canvas", "<embed", "<object"])
+        .build(["<iframe", "<video", "<canvas", "<embed", "<object"])
         .expect("valid patterns")
 });
 
@@ -22,7 +22,7 @@ static VISUAL_ELEMENT_MATCHER: LazyLock<AhoCorasick> = LazyLock::new(|| {
 static SPA_INDICATOR_MATCHER: LazyLock<AhoCorasick> = LazyLock::new(|| {
     AhoCorasick::builder()
         .ascii_case_insensitive(true)
-        .build(&[
+        .build([
             "data-reactroot",
             "__next",
             "id=\"app\"",
@@ -38,7 +38,7 @@ static SPA_INDICATOR_MATCHER: LazyLock<AhoCorasick> = LazyLock::new(|| {
 static SVG_MATCHER: LazyLock<AhoCorasick> = LazyLock::new(|| {
     AhoCorasick::builder()
         .ascii_case_insensitive(true)
-        .build(&["<svg"])
+        .build(["<svg"])
         .expect("valid patterns")
 });
 
@@ -278,7 +278,7 @@ fn count_script_tags_fast(html: &[u8]) -> usize {
     static SCRIPT_MATCHER: LazyLock<AhoCorasick> = LazyLock::new(|| {
         AhoCorasick::builder()
             .ascii_case_insensitive(true)
-            .build(&["<script"])
+            .build(["<script"])
             .expect("valid patterns")
     });
     SCRIPT_MATCHER.find_iter(html).count()
@@ -290,7 +290,7 @@ fn count_style_tags_fast(html: &[u8]) -> usize {
     static STYLE_MATCHER: LazyLock<AhoCorasick> = LazyLock::new(|| {
         AhoCorasick::builder()
             .ascii_case_insensitive(true)
-            .build(&["<style"])
+            .build(["<style"])
             .expect("valid patterns")
     });
     STYLE_MATCHER.find_iter(html).count()
@@ -364,7 +364,7 @@ fn estimate_base64_bytes(html: &str) -> usize {
     while let Some(pos) = html[search_start..].find("data:") {
         let abs_pos = search_start + pos;
         // Find the end of the data URI
-        if let Some(end) = html[abs_pos..].find(|c: char| c == '"' || c == '\'' || c == ')') {
+        if let Some(end) = html[abs_pos..].find(['"', '\'', ')']) {
             total += end;
         }
         search_start = abs_pos + 5;
@@ -378,7 +378,7 @@ fn estimate_base64_bytes_fast(html: &[u8]) -> usize {
     static DATA_URI_MATCHER: LazyLock<AhoCorasick> = LazyLock::new(|| {
         AhoCorasick::builder()
             .ascii_case_insensitive(true)
-            .build(&["data:"])
+            .build(["data:"])
             .expect("valid patterns")
     });
     // Count "data:" occurrences and estimate average size

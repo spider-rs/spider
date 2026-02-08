@@ -1785,17 +1785,21 @@ mod tests {
         use super::ContentAnalysis;
 
         // Test with high SVG bytes - should return Slim
-        let mut analysis = ContentAnalysis::default();
-        analysis.svg_bytes = 150_000; // > SVG_VERY_HEAVY_THRESHOLD
+        let analysis = ContentAnalysis {
+            svg_bytes: 150_000, // > SVG_VERY_HEAVY_THRESHOLD
+            ..Default::default()
+        };
         assert_eq!(
             HtmlCleaningProfile::from_content_analysis(&analysis),
             HtmlCleaningProfile::Slim
         );
 
         // Test with small HTML - should return Minimal
-        let mut analysis = ContentAnalysis::default();
-        analysis.html_length = 5_000;
-        analysis.text_ratio = 0.3;
+        let analysis = ContentAnalysis {
+            html_length: 5_000,
+            text_ratio: 0.3,
+            ..Default::default()
+        };
         assert_eq!(
             HtmlCleaningProfile::from_content_analysis(&analysis),
             HtmlCleaningProfile::Minimal
@@ -1806,11 +1810,13 @@ mod tests {
     fn test_html_cleaning_profile_estimate_savings() {
         use super::ContentAnalysis;
 
-        let mut analysis = ContentAnalysis::default();
-        analysis.script_bytes = 10_000;
-        analysis.style_bytes = 5_000;
-        analysis.cleanable_bytes = 20_000;
-        analysis.html_length = 50_000;
+        let analysis = ContentAnalysis {
+            script_bytes: 10_000,
+            style_bytes: 5_000,
+            cleanable_bytes: 20_000,
+            html_length: 50_000,
+            ..Default::default()
+        };
 
         assert_eq!(HtmlCleaningProfile::Raw.estimate_savings(&analysis), 0);
         assert_eq!(

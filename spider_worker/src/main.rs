@@ -8,6 +8,7 @@ extern crate lazy_static;
 lazy_static! {
     /// top level request client to re-use
     static ref CLIENT: spider::Client = {
+        #[allow(unused_mut)]
         let mut proxy_website = Website::new("proxy");
 
         utils::connect::init_background_runtime();
@@ -169,24 +170,20 @@ async fn scrape(path: FullPath, host: String) -> Result<impl warp::Reply, Infall
             };
             builder.set_status_code(data.status_code.as_u16());
 
-            match response.headers_mut() {
-                Some(headers) => {
-                    let h = builder.build();
+            if let Some(headers) = response.headers_mut() {
+                let h = builder.build();
 
-                    headers.extend(h.into_iter().filter_map(|(key, value)| {
-                        if let Some(name) = key {
-                            let header_name =
-                                warp::http::HeaderName::from_bytes(name.as_str().as_bytes())
-                                    .ok()?;
-                            let header_value =
-                                warp::http::HeaderValue::from_str(value.to_str().ok()?).ok()?;
-                            Some((Some(header_name), header_value))
-                        } else {
-                            None
-                        }
-                    }));
-                }
-                _ => (),
+                headers.extend(h.into_iter().filter_map(|(key, value)| {
+                    if let Some(name) = key {
+                        let header_name =
+                            warp::http::HeaderName::from_bytes(name.as_str().as_bytes()).ok()?;
+                        let header_value =
+                            warp::http::HeaderValue::from_str(value.to_str().ok()?).ok()?;
+                        Some((Some(header_name), header_value))
+                    } else {
+                        None
+                    }
+                }));
             }
         }
         Ok(response
@@ -337,9 +334,9 @@ async fn main() {
     let port: u16 = std::env::var("SPIDER_WORKER_SCRAPER_PORT")
         .unwrap_or_else(|_| "3031".into())
         .parse()
-        .unwrap_or_else(|_| 3031);
+        .unwrap_or(3031);
 
-    utils::log("Spider_Worker starting at 0.0.0.0:", &port.to_string());
+    utils::log("Spider_Worker starting at 0.0.0.0:", port.to_string());
 
     let pem_cert: String =
         std::env::var("SPIDER_WORKER_CERT_PATH").unwrap_or_else(|_| "/cert.pem".into());

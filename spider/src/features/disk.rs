@@ -60,7 +60,7 @@ impl DatabaseHandler {
             pool: tokio::sync::OnceCell::const_new(),
             crawl_id: match crawl_id {
                 Some(id) => {
-                    let sanitized_id = AC.replace_all(&id, &*AC_REPLACE);
+                    let sanitized_id = AC.replace_all(id, &*AC_REPLACE);
 
                     Some(format!("{}_{}", sanitized_id, get_id()))
                 }

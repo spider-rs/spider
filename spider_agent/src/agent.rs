@@ -815,9 +815,7 @@ impl Agent {
             .temp_storage
             .as_ref()
             .ok_or(AgentError::NotConfigured("temp storage"))?;
-        storage
-            .store_bytes(name, data)
-            .map_err(|e| AgentError::Io(e))
+        storage.store_bytes(name, data).map_err(AgentError::Io)
     }
 
     /// Store JSON in temp storage.
@@ -831,9 +829,7 @@ impl Agent {
             .temp_storage
             .as_ref()
             .ok_or(AgentError::NotConfigured("temp storage"))?;
-        storage
-            .store_json(name, data)
-            .map_err(|e| AgentError::Io(e))
+        storage.store_json(name, data).map_err(AgentError::Io)
     }
 
     /// Read data from temp storage.
@@ -843,7 +839,7 @@ impl Agent {
             .temp_storage
             .as_ref()
             .ok_or(AgentError::NotConfigured("temp storage"))?;
-        storage.read_bytes(name).map_err(|e| AgentError::Io(e))
+        storage.read_bytes(name).map_err(AgentError::Io)
     }
 
     /// Read JSON from temp storage.
@@ -853,7 +849,7 @@ impl Agent {
             .temp_storage
             .as_ref()
             .ok_or(AgentError::NotConfigured("temp storage"))?;
-        storage.read_json(name).map_err(|e| AgentError::Io(e))
+        storage.read_json(name).map_err(AgentError::Io)
     }
 
     // ==================== Helper Methods ====================
@@ -1175,13 +1171,13 @@ impl AgentBuilder {
         let client = reqwest::Client::builder()
             .timeout(self.config.timeout)
             .build()
-            .map_err(|e| AgentError::Http(e))?;
+            .map_err(AgentError::Http)?;
 
         let semaphore = Arc::new(Semaphore::new(self.config.max_concurrent_llm_calls));
 
         #[cfg(feature = "fs")]
         let temp_storage = if self.enable_temp_storage {
-            Some(TempStorage::new().map_err(|e| AgentError::Io(e))?)
+            Some(TempStorage::new().map_err(AgentError::Io)?)
         } else {
             None
         };
@@ -1208,6 +1204,12 @@ impl AgentBuilder {
             usage: Arc::new(UsageStats::new()),
             custom_tools,
         })
+    }
+}
+
+impl Default for AgentBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -1246,11 +1248,5 @@ mod tests {
         assert!(tools.contains(&"spider_cloud_ai_search".to_string()));
         assert!(tools.contains(&"spider_cloud_ai_browser".to_string()));
         assert!(tools.contains(&"spider_cloud_ai_links".to_string()));
-    }
-}
-
-impl Default for AgentBuilder {
-    fn default() -> Self {
-        Self::new()
     }
 }

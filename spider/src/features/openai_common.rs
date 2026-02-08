@@ -303,9 +303,6 @@ mod prompt_deserializer {
 #[cfg(feature = "openai")]
 fn deserialize_gpt_configs() {
     let gpt_configs_json = "{\"prompt\":\"change background blue\",\"model\":\"gpt-3.5-turbo-16k\",\"max_tokens\":256,\"temperature\":0.54,\"top_p\":0.17}";
-    let configs = match crate::features::serde_json::from_str::<GPTConfigs>(&gpt_configs_json) {
-        Ok(e) => Some(e),
-        _ => None,
-    };
+    let configs = crate::features::serde_json::from_str::<GPTConfigs>(gpt_configs_json).ok();
     assert!(configs.is_some())
 }

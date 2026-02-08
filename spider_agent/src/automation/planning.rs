@@ -149,9 +149,7 @@ impl PlannedStep {
             .to_string();
         let action = value.get("action")?.clone();
 
-        let checkpoint = value
-            .get("checkpoint")
-            .and_then(|v| Checkpoint::from_json(v));
+        let checkpoint = value.get("checkpoint").and_then(Checkpoint::from_json);
 
         let depends_on = value
             .get("depends_on")
@@ -394,11 +392,7 @@ impl ExecutionPlan {
         let steps = value
             .get("steps")
             .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| PlannedStep::from_json(v))
-                    .collect()
-            })
+            .map(|arr| arr.iter().filter_map(PlannedStep::from_json).collect())
             .unwrap_or_default();
 
         let confidence = value

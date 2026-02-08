@@ -46,7 +46,7 @@ fn normalize_lang_hint(lang_hint: Option<&str>) -> Lang {
         return Lang::En;
     }
     let s = s.as_bytes();
-    let a = s.get(0).copied().unwrap_or(b'e').to_ascii_lowercase();
+    let a = s.first().copied().unwrap_or(b'e').to_ascii_lowercase();
     let b = s.get(1).copied().unwrap_or(b'n').to_ascii_lowercase();
     match (a, b) {
         (b'e', b'n') => Lang::En,

@@ -44,7 +44,6 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use std::{
     error::Error,
     future::Future,
-    str::FromStr,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -79,6 +78,7 @@ pub(crate) type RequestError = wreq::Error;
 pub(crate) type RequestError = reqwest_middleware::Error;
 
 /// The request response.
+#[cfg(not(feature = "decentralized"))]
 pub(crate) type RequestResponse = Response;
 
 /// The wait for duration timeouts.
@@ -323,7 +323,7 @@ where
                 tokio::select! {
                     _ = sleep => (),
                     v = events.next() => {
-                        if !v.is_none () {
+                        if v.is_some() {
                             break;
                         }
                     }
@@ -733,10 +733,7 @@ pub fn detect_anti_bot_tech_response(
 /// Extract to JsonResponse struct. This does nothing without 'openai' feature flag.
 #[cfg(feature = "openai")]
 pub fn handle_ai_data(js: &str) -> Option<JsonResponse> {
-    match serde_json::from_str::<JsonResponse>(&js) {
-        Ok(x) => Some(x),
-        _ => None,
-    }
+    serde_json::from_str::<JsonResponse>(js).ok()
 }
 
 #[cfg(feature = "chrome")]
@@ -894,7 +891,7 @@ pub async fn perform_chrome_http_request(
                         }
 
                         status_code = StatusCode::from_u16(response.status as u16)
-                            .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
+                            .unwrap_or(StatusCode::EXPECTATION_FAILED);
                     } else if let Some(failure_text) = &http_request.failure_text {
                         if failure_text == "net::ERR_FAILED" {
                             waf_check = true;
@@ -967,7 +964,7 @@ pub async fn perform_chrome_http_request_cache(
         };
 
         let auth_opt = cache_auth_token(cache_options);
-        let cache_policy = cache_policy.as_ref().map(|f| f.from_basic());
+        let cache_policy = chrome_cache_policy(cache_policy);
         let cache_strategy = None;
         let remote = None;
 
@@ -1052,7 +1049,7 @@ pub async fn perform_chrome_http_request_cache(
                     }
 
                     status_code = StatusCode::from_u16(response.status as u16)
-                        .unwrap_or_else(|_| StatusCode::EXPECTATION_FAILED);
+                        .unwrap_or(StatusCode::EXPECTATION_FAILED);
                 } else if let Some(failure_text) = &http_request.failure_text {
                     if failure_text == "net::ERR_FAILED" {
                         waf_check = true;
@@ -1106,7 +1103,7 @@ pub async fn run_openai_request(
     page: &chromiumoxide::Page,
     wait_for: &Option<crate::configuration::WaitFor>,
     openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
-    mut page_response: &mut PageResponse,
+    page_response: &mut PageResponse,
     ok: bool,
 ) {
     if let Some(gpt_configs) = openai_config {
@@ -1114,9 +1111,9 @@ pub async fn run_openai_request(
             Some(h) => {
                 let c = h.get::<case_insensitive_string::CaseInsensitiveString>(&source.into());
 
-                if !c.is_some() && gpt_configs.paths_map {
+                if c.is_none() && gpt_configs.paths_map {
                     h.get::<case_insensitive_string::CaseInsensitiveString>(
-                        &get_path_from_url(&source).into(),
+                        &get_path_from_url(source).into(),
                     )
                 } else {
                     c
@@ -1136,7 +1133,7 @@ pub async fn run_openai_request(
                             Some(html) => auto_encoder::auto_encode_bytes(html),
                             _ => Default::default(),
                         },
-                        &source,
+                        source,
                         &prompt,
                     )
                     .await
@@ -1149,7 +1146,7 @@ pub async fn run_openai_request(
                 let gpt_error = gpt_results.error;
 
                 // set the credits used for the request
-                handle_openai_credits(&mut page_response, tokens_used);
+                handle_openai_credits(page_response, tokens_used);
 
                 let json_res = if gpt_configs.extra_ai_data {
                     match handle_ai_data(&js_script) {
@@ -1177,15 +1174,12 @@ pub async fn run_openai_request(
                         ))
                         .await
                     {
-                        Ok(h) => match h.into_value() {
-                            Ok(hh) => Some(hh),
-                            _ => None,
-                        },
+                        Ok(h) => h.into_value().ok(),
                         _ => None,
                     };
 
                     if html.is_some() {
-                        page_wait(&page, &wait_for).await;
+                        page_wait(page, wait_for).await;
                         if json_res.js.len() <= 400 && json_res.js.contains("window.location") {
                             if let Ok(b) = page.outer_html_bytes().await {
                                 page_response.content = Some(b.into());
@@ -1349,44 +1343,40 @@ pub async fn put_hybrid_cache(
     use crate::http_cache_reqwest::CacheManager;
     use http_cache_semantics::CachePolicy;
 
-    match http_response.url.as_str().parse::<http::uri::Uri>() {
-        Ok(u) => {
-            let req = HttpRequestLike {
-                uri: u,
-                method: reqwest::Method::from_bytes(method.as_bytes())
-                    .unwrap_or(reqwest::Method::GET),
-                headers: convert_headers(&http_response.headers),
-            };
+    if let Ok(u) = http_response.url.as_str().parse::<http::uri::Uri>() {
+        let req = HttpRequestLike {
+            uri: u,
+            method: reqwest::Method::from_bytes(method.as_bytes()).unwrap_or(reqwest::Method::GET),
+            headers: convert_headers(&http_response.headers),
+        };
 
-            let res = HttpResponseLike {
-                status: StatusCode::from_u16(http_response.status)
-                    .unwrap_or(StatusCode::EXPECTATION_FAILED),
-                headers: convert_headers(&http_request_headers),
-            };
+        let res = HttpResponseLike {
+            status: StatusCode::from_u16(http_response.status)
+                .unwrap_or(StatusCode::EXPECTATION_FAILED),
+            headers: convert_headers(&http_request_headers),
+        };
 
-            let policy = CachePolicy::new(&req, &res);
+        let policy = CachePolicy::new(&req, &res);
 
-            let _ = crate::website::CACACHE_MANAGER
-                .put(
-                    cache_key.into(),
-                    http_cache_reqwest::HttpResponse {
-                        url: http_response.url,
-                        body: http_response.body,
-                        headers: http_response.headers,
-                        version: match http_response.version {
-                            HttpVersion::H2 => http_cache::HttpVersion::H2,
-                            HttpVersion::Http10 => http_cache::HttpVersion::Http10,
-                            HttpVersion::H3 => http_cache::HttpVersion::H3,
-                            HttpVersion::Http09 => http_cache::HttpVersion::Http09,
-                            HttpVersion::Http11 => http_cache::HttpVersion::Http11,
-                        },
-                        status: http_response.status,
+        let _ = crate::website::CACACHE_MANAGER
+            .put(
+                cache_key.into(),
+                http_cache_reqwest::HttpResponse {
+                    url: http_response.url,
+                    body: http_response.body,
+                    headers: http_response.headers,
+                    version: match http_response.version {
+                        HttpVersion::H2 => http_cache::HttpVersion::H2,
+                        HttpVersion::Http10 => http_cache::HttpVersion::Http10,
+                        HttpVersion::H3 => http_cache::HttpVersion::H3,
+                        HttpVersion::Http09 => http_cache::HttpVersion::Http09,
+                        HttpVersion::Http11 => http_cache::HttpVersion::Http11,
                     },
-                    policy,
-                )
-                .await;
-        }
-        _ => (),
+                    status: http_response.status,
+                },
+                policy,
+            )
+            .await;
     }
 }
 
@@ -1406,10 +1396,7 @@ fn sub_duration(
     base_timeout: std::time::Duration,
     elapsed: std::time::Duration,
 ) -> std::time::Duration {
-    match base_timeout.checked_sub(elapsed) {
-        Some(remaining_time) => remaining_time,
-        None => Default::default(),
-    }
+    base_timeout.checked_sub(elapsed).unwrap_or_default()
 }
 
 /// Get the initial page headers of the page with navigation.
@@ -1611,7 +1598,7 @@ const HALF_MAX_PAGE_TIMEOUT: tokio::time::Duration =
 fn store_headers(page_response: &PageResponse, chrome_http_req_res: &mut ChromeHTTPReqRes) {
     if let Some(response_headers) = &page_response.headers {
         chrome_http_req_res.response_headers =
-            crate::utils::header_utils::header_map_to_hash_map(&response_headers);
+            crate::utils::header_utils::header_map_to_hash_map(response_headers);
     }
 }
 
@@ -1667,7 +1654,7 @@ async fn cache_chrome_response_from_cdp_body(
         let cache_key = create_cache_key_raw(
             target_url,
             Some(&chrome_http_req_res.method),
-            auth_opt.as_deref().map(|x| x.as_str()),
+            auth_opt.map(|x| x.as_str()),
         );
 
         put_hybrid_cache(
@@ -1844,7 +1831,7 @@ async fn set_document_content_if_requested(
             target_url,
             source,
             block_bytes,
-            &resp_headers,
+            resp_headers,
             chrome_intercept,
         )
         .await;
@@ -1864,11 +1851,11 @@ async fn set_document_content_if_requested_cached(
     chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
 ) {
     let auth_opt = cache_auth_token(cache_options);
-    let cache_policy = cache_policy.as_ref().map(|f| f.from_basic());
+    let cache_policy = chrome_cache_policy(cache_policy);
     let cache_strategy = None;
     let remote = Some("true");
     let target_url = url_target.unwrap_or_default();
-    let cache_site = chromiumoxide::cache::manager::site_key_for_target_url(&target_url, auth_opt);
+    let cache_site = chromiumoxide::cache::manager::site_key_for_target_url(target_url, auth_opt);
 
     let _ = page
         .set_cache_key((Some(cache_site.clone()), cache_policy.clone()))
@@ -1881,7 +1868,7 @@ async fn set_document_content_if_requested_cached(
                 target_url,
                 source,
                 block_bytes,
-                &resp_headers,
+                resp_headers,
                 chrome_intercept,
             )
             .await;
@@ -1892,10 +1879,10 @@ async fn set_document_content_if_requested_cached(
         page.spawn_cache_listener(
             &cache_site,
             auth_opt.map(|f| f.into()),
-            cache_strategy.clone(),
+            cache_strategy,
             remote.map(|f| f.into())
         ),
-        page.seed_cache(&target_url, auth_opt, remote),
+        page.seed_cache(target_url, auth_opt, remote),
         cache_future
     );
 
@@ -1973,11 +1960,8 @@ fn cache_enabled(cache_options: &Option<CacheOptions>) -> bool {
 /// The chrome cache policy
 fn chrome_cache_policy(
     cache_policy: &Option<BasicCachePolicy>,
-) -> chromiumoxide::cache::BasicCachePolicy {
-    cache_policy
-        .as_ref()
-        .map(|p| p.from_basic())
-        .unwrap_or(chromiumoxide::cache::BasicCachePolicy::Normal)
+) -> Option<chromiumoxide::cache::BasicCachePolicy> {
+    cache_policy.as_ref().map(BasicCachePolicy::from_basic)
 }
 
 #[cfg(all(feature = "chrome", not(feature = "chrome_remote_cache")))]
@@ -2074,7 +2058,7 @@ pub async fn run_navigate_or_content_set_core(
                 block_bytes,
                 cache_options,
                 cache_policy,
-                &resp_headers,
+                resp_headers,
                 chrome_intercept,
             )
             .await;
@@ -2126,7 +2110,7 @@ pub async fn get_final_redirect(
 ) -> Option<String> {
     let last_redirect = tokio::time::timeout(base_timeout, async {
         match page.wait_for_navigation_response().await {
-            Ok(u) => get_last_redirect(&source, &u, &page).await,
+            Ok(u) => get_last_redirect(source, &u, page).await,
             _ => None,
         }
     })
@@ -2562,7 +2546,7 @@ pub async fn fetch_page_html_chrome_base(
             referrer,
             &mut block_bytes,
             &cache_options,
-            &cache_policy,
+            cache_policy,
             resp_headers,
             chrome_intercept,
         )
@@ -2585,7 +2569,7 @@ pub async fn fetch_page_html_chrome_base(
                         _ = notify.notified() => {
                             break;
                         }
-                        _ = perform_smart_mouse_movement(&page, &viewport) => {
+                        _ = perform_smart_mouse_movement(page, viewport) => {
                             tokio::time::sleep(std::time::Duration::from_millis(WAIT_TIMEOUTS[index])).await;
                         }
                     }
@@ -2625,7 +2609,7 @@ pub async fn fetch_page_html_chrome_base(
 
     // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
     let final_url = if wait_for_navigation && !request_cancelled && !block_bytes {
-        let last_redirect = get_final_redirect(page, &source, base_timeout).await;
+        let last_redirect = get_final_redirect(page, source, base_timeout).await;
         base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
         last_redirect
     } else {
@@ -2662,11 +2646,9 @@ pub async fn fetch_page_html_chrome_base(
         let mut page_response = if run_events {
             if waf_check {
                 base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
-                if let Err(elasped) = tokio::time::timeout(
-                    base_timeout,
-                    perform_smart_mouse_movement(&page, &viewport),
-                )
-                .await
+                if let Err(elasped) =
+                    tokio::time::timeout(base_timeout, perform_smart_mouse_movement(page, viewport))
+                        .await
                 {
                     log::warn!("mouse movement timeout exceeded {elasped}");
                 }
@@ -2675,7 +2657,7 @@ pub async fn fetch_page_html_chrome_base(
             if wait_for.is_some() {
                 base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
                 if let Err(elasped) =
-                    tokio::time::timeout(base_timeout, page_wait(&page, &wait_for)).await
+                    tokio::time::timeout(base_timeout, page_wait(page, wait_for)).await
                 {
                     log::warn!("max wait for timeout {elasped}");
                 }
@@ -2696,14 +2678,14 @@ pub async fn fetch_page_html_chrome_base(
                     if track_automation {
                         tokio::join!(
                             crate::features::chrome_common::eval_execution_scripts(
-                                &page,
+                                page,
                                 &target_url,
-                                &execution_scripts
+                                execution_scripts
                             ),
                             crate::features::chrome_common::eval_automation_scripts_tracking(
-                                &page,
+                                page,
                                 &target_url,
-                                &automation_scripts,
+                                automation_scripts,
                                 &mut _metadata
                             )
                         );
@@ -2711,14 +2693,14 @@ pub async fn fetch_page_html_chrome_base(
                     } else {
                         tokio::join!(
                             crate::features::chrome_common::eval_execution_scripts(
-                                &page,
+                                page,
                                 &target_url,
-                                &execution_scripts
+                                execution_scripts
                             ),
                             crate::features::chrome_common::eval_automation_scripts(
-                                &page,
+                                page,
                                 &target_url,
-                                &automation_scripts
+                                automation_scripts
                             )
                         );
                     }
@@ -2761,10 +2743,7 @@ pub async fn fetch_page_html_chrome_base(
                         if crate::features::solvers::detect_cf_turnstyle(&res) {
                             if let Err(_e) = tokio::time::timeout(base_timeout, async {
                                 if let Ok(success) = crate::features::solvers::cf_handle(
-                                    &mut res,
-                                    &page,
-                                    &target_url,
-                                    &viewport,
+                                    &mut res, page, target_url, viewport,
                                 )
                                 .await
                                 {
@@ -2779,13 +2758,10 @@ pub async fn fetch_page_html_chrome_base(
                             }
                         }
                     } else if anti_bot_tech == AntiBotTech::Imperva {
-                        if crate::features::solvers::looks_like_imperva_verify(res.len(), &*res) {
+                        if crate::features::solvers::looks_like_imperva_verify(res.len(), &res) {
                             if let Err(_e) = tokio::time::timeout(base_timeout, async {
                                 if let Ok(success) = crate::features::solvers::imperva_handle(
-                                    &mut res,
-                                    &page,
-                                    &target_url,
-                                    &viewport,
+                                    &mut res, page, target_url, viewport,
                                 )
                                 .await
                                 {
@@ -2801,10 +2777,9 @@ pub async fn fetch_page_html_chrome_base(
                         }
                     } else if crate::features::solvers::detect_recaptcha(&res) {
                         if let Err(_e) = tokio::time::timeout(base_timeout, async {
-                            if let Ok(solved) = crate::features::solvers::recaptcha_handle(
-                                &mut res, &page, &viewport,
-                            )
-                            .await
+                            if let Ok(solved) =
+                                crate::features::solvers::recaptcha_handle(&mut res, page, viewport)
+                                    .await
                             {
                                 if solved {
                                     status_code = StatusCode::OK;
@@ -2818,7 +2793,7 @@ pub async fn fetch_page_html_chrome_base(
                     } else if crate::features::solvers::detect_geetest(&res) {
                         if let Err(_e) = tokio::time::timeout(base_timeout, async {
                             if let Ok(solved) =
-                                crate::features::solvers::geetest_handle(&mut res, &page, &viewport)
+                                crate::features::solvers::geetest_handle(&mut res, page, viewport)
                                     .await
                             {
                                 if solved {
@@ -2833,7 +2808,7 @@ pub async fn fetch_page_html_chrome_base(
                     } else if crate::features::solvers::detect_lemin(&res) {
                         if let Err(_e) = tokio::time::timeout(base_timeout, async {
                             if let Ok(solved) =
-                                crate::features::solvers::lemin_handle(&mut res, &page, &viewport)
+                                crate::features::solvers::lemin_handle(&mut res, page, viewport)
                                     .await
                             {
                                 if solved {
@@ -2852,12 +2827,12 @@ pub async fn fetch_page_html_chrome_base(
             let ok = !res.is_empty();
 
             #[cfg(feature = "real_browser")]
-            if validate_cf && ok {
-                if !crate::features::solvers::detect_cf_turnstyle(&res)
-                    && status_code == StatusCode::FORBIDDEN
-                {
-                    status_code = StatusCode::OK;
-                }
+            if validate_cf
+                && ok
+                && !crate::features::solvers::detect_cf_turnstyle(&res)
+                && status_code == StatusCode::FORBIDDEN
+            {
+                status_code = StatusCode::OK;
             }
 
             let mut page_response = set_page_response(
@@ -2888,7 +2863,7 @@ pub async fn fetch_page_html_chrome_base(
 
             let _ = tokio::time::timeout(
                 base_timeout,
-                set_page_response_cookies(&mut page_response, &page, jar, scope_url.as_ref()),
+                set_page_response_cookies(&mut page_response, page, jar, scope_url.as_ref()),
             )
             .await;
 
@@ -2981,7 +2956,7 @@ pub async fn fetch_page_html_chrome_base(
                         .ok()
                         .and_then(Result::ok)
                         .filter(|b| !b.is_empty())
-                        .map(|b| Box::new(b.into()));
+                        .map(Box::new);
 
                     if next_content.is_some() {
                         page_response.content = next_content;
@@ -3037,7 +3012,7 @@ pub async fn fetch_page_html_chrome_base(
 
                 let _ = tokio::time::timeout(
                     base_timeout,
-                    set_page_response_cookies(&mut page_response, &page, jar, scope_url.as_ref()),
+                    set_page_response_cookies(&mut page_response, page, jar, scope_url.as_ref()),
                 )
                 .await;
             }
@@ -3109,7 +3084,7 @@ pub async fn fetch_page_html_chrome_base(
 
                 let _ = tokio::time::timeout(
                     base_timeout,
-                    set_page_response_cookies(&mut page_response, &page, jar, scope_url.as_ref()),
+                    set_page_response_cookies(&mut page_response, page, jar, scope_url.as_ref()),
                 )
                 .await;
 
@@ -3123,7 +3098,7 @@ pub async fn fetch_page_html_chrome_base(
                         if !page_set && cache_request {
                             let _ = tokio::time::timeout(
                                 base_timeout,
-                                cache_chrome_response(&source, &page_response, chrome_http_req_res1, &cache_options),
+                                cache_chrome_response(source, &page_response, chrome_http_req_res1, &cache_options),
                             )
                             .await;
                         }
@@ -3143,12 +3118,9 @@ pub async fn fetch_page_html_chrome_base(
     page_response.status_code = chrome_http_req_res.status_code;
     page_response.waf_check = chrome_http_req_res.waf_check;
     page_response.content = match content {
-        Some(c) if !c.is_empty() => Some(c.into()),
+        Some(c) if !c.is_empty() => Some(c),
         _ => {
-            let needs_fill = page_response
-                .content
-                .as_ref()
-                .map_or(true, |b| b.is_empty());
+            let needs_fill = page_response.content.as_ref().is_none_or(|b| b.is_empty());
 
             if needs_fill {
                 tokio::time::timeout(base_timeout, page.outer_html_bytes())
@@ -3286,9 +3258,9 @@ pub async fn fetch_page_html_chrome_base(
                     if let Some(h) = &page_response.headers {
                         if let Some(content) = &page_response.content {
                             anti_bot_tech = detect_anti_bot_tech_response(
-                                &final_url,
+                                final_url,
                                 &HeaderSource::HeaderMap(h),
-                                &content,
+                                content,
                                 None,
                             );
                         }
@@ -3301,7 +3273,7 @@ pub async fn fetch_page_html_chrome_base(
                     if anti_bot_tech == AntiBotTech::Cloudflare
                         && page_response.status_code == StatusCode::FORBIDDEN
                     {
-                        let cf_turnstile = crate::features::solvers::detect_cf_turnstyle(&content);
+                        let cf_turnstile = crate::features::solvers::detect_cf_turnstyle(content);
 
                         if !cf_turnstile {
                             page_response.status_code = StatusCode::OK;
@@ -3313,7 +3285,7 @@ pub async fn fetch_page_html_chrome_base(
                     let _ = tokio::time::timeout(
                         base_timeout,
                         cache_chrome_response(
-                            &source,
+                            source,
                             &page_response,
                             chrome_http_req_res,
                             &cache_options,
@@ -3363,7 +3335,7 @@ fn set_page_response(
     final_url: Option<String>,
 ) -> PageResponse {
     PageResponse {
-        content: if ok { Some(res.into()) } else { None },
+        content: if ok { Some(res) } else { None },
         status_code,
         final_url,
         ..Default::default()
@@ -3475,7 +3447,7 @@ pub async fn perform_screenshot(
                     .cdp_params
                     .format
                     .as_ref()
-                    .unwrap_or_else(|| &crate::configuration::CaptureScreenshotFormat::Png)
+                    .unwrap_or(&crate::configuration::CaptureScreenshotFormat::Png)
                     .to_string()
             );
             let ss_params = chromiumoxide::page::ScreenshotParams::from(ss.params.clone());
@@ -3508,7 +3480,7 @@ pub async fn perform_screenshot(
                         if ss.save {
                             let output_path = create_output_path(
                                 &ss.output_dir.clone().unwrap_or_else(|| "./storage/".into()),
-                                &target_url,
+                                target_url,
                                 &output_format,
                             )
                             .await;
@@ -3534,8 +3506,8 @@ pub async fn perform_screenshot(
                 &std::env::var("SCREENSHOT_DIRECTORY")
                     .unwrap_or_else(|_| "./storage/".to_string())
                     .into(),
-                &target_url,
-                &".png",
+                target_url,
+                ".png",
             )
             .await;
 
@@ -3590,6 +3562,7 @@ pub async fn get_last_redirect(
 #[cfg(feature = "cookies")]
 pub fn get_cookies(res: &Response) -> Option<crate::client::header::HeaderMap> {
     use crate::client::header::{HeaderMap, HeaderName, HeaderValue};
+    use std::str::FromStr;
 
     let mut headers = HeaderMap::new();
 
@@ -3649,6 +3622,7 @@ pub async fn handle_response_bytes(
     let headers = res.headers().clone();
     #[cfg(feature = "remote_addr")]
     let remote_addr = res.remote_addr();
+    #[cfg(feature = "cookies")]
     let cookies = get_cookies(&res);
 
     let mut content: Option<Box<Vec<u8>>> = None;
@@ -3727,12 +3701,12 @@ pub async fn handle_response_bytes(
         }
 
         anti_bot_tech = detect_anti_bot_tech_response(
-            &target_url,
+            target_url,
             &HeaderSource::HeaderMap(&headers),
             &data,
             None,
         );
-        content.replace(Box::new(data.into()));
+        content.replace(Box::new(data));
     }
 
     PageResponse {
@@ -3772,6 +3746,7 @@ where
     let headers = res.headers().clone();
     #[cfg(feature = "remote_addr")]
     let remote_addr = res.remote_addr();
+    #[cfg(feature = "cookies")]
     let cookies = get_cookies(&res);
     let mut anti_bot_tech = AntiBotTech::default();
 
@@ -3800,10 +3775,8 @@ where
 
                     data_len += bytes_len;
 
-                    if !rewrite_error {
-                        if rewriter.write(&res_bytes).is_err() {
-                            rewrite_error = true;
-                        }
+                    if !rewrite_error && rewriter.write(&res_bytes).is_err() {
+                        rewrite_error = true;
                     }
 
                     collected_bytes.extend_from_slice(&res_bytes);
@@ -3816,9 +3789,9 @@ where
         }
 
         anti_bot_tech = detect_anti_bot_tech_response(
-            &target_url,
+            target_url,
             &HeaderSource::HeaderMap(&headers),
-            &collected_bytes,
+            collected_bytes,
             None,
         );
     }
@@ -3863,7 +3836,7 @@ fn build_error_page_response(target_url: &str, err: RequestError) -> PageRespons
 /// Build a cached page response from HTML.
 fn build_cached_html_page_response(target_url: &str, html: &str) -> PageResponse {
     PageResponse {
-        content: Some(Box::new(html.as_bytes().to_vec().into())),
+        content: Some(Box::new(html.as_bytes().to_vec())),
         status_code: StatusCode::OK,
         final_url: Some(target_url.to_string()),
         ..Default::default()
@@ -4117,13 +4090,13 @@ pub async fn fetch_page(target_url: &str, client: &Client) -> Option<Vec<u8>> {
         Ok(res) if valid_parsing_status(&res) => match res.bytes().await {
             Ok(text) => Some(text.into()),
             Err(_) => {
-                log("- error fetching {}", &target_url);
+                log("- error fetching {}", target_url);
                 None
             }
         },
         Ok(_) => None,
         Err(_) => {
-            log("- error parsing html bytes {}", &target_url);
+            log("- error parsing html bytes {}", target_url);
             None
         }
     }
@@ -4149,7 +4122,7 @@ pub async fn fetch_page_and_headers(target_url: &str, client: &Client) -> FetchP
             let b = match res.bytes().await {
                 Ok(text) => Some(text.to_vec()),
                 Err(_) => {
-                    log("- error fetching {}", &target_url);
+                    log("- error fetching {}", target_url);
                     None
                 }
             };
@@ -4157,7 +4130,7 @@ pub async fn fetch_page_and_headers(target_url: &str, client: &Client) -> FetchP
         }
         Ok(res) => FetchPageResult::NoSuccess(res.headers().clone()),
         Err(_) => {
-            log("- error parsing html bytes {}", &target_url);
+            log("- error parsing html bytes {}", target_url);
             FetchPageResult::FetchError
         }
     }
@@ -4339,7 +4312,7 @@ pub async fn fetch_page_html(
     let duration = Some(tokio::time::Instant::now());
 
     let skip_browser = cache_skip_browser(&cache_options);
-    let cached_html = get_cached_url(&target_url, cache_options.as_ref(), cache_policy).await;
+    let cached_html = get_cached_url(target_url, cache_options.as_ref(), cache_policy).await;
     let cached = cached_html.is_some();
 
     // Skip browser entirely if cached and skip_browser mode is enabled
@@ -4364,7 +4337,7 @@ pub async fn fetch_page_html(
                 } else {
                     target_url
                 },
-                &page,
+                page,
                 cached,
                 true,
                 wait_for,
@@ -4374,9 +4347,9 @@ pub async fn fetch_page_html(
                 if cached { Some(target_url) } else { None },
                 execution_scripts,
                 automation_scripts,
-                &viewport,
-                &request_timeout,
-                &track_events,
+                viewport,
+                request_timeout,
+                track_events,
                 referrer,
                 max_page_bytes,
                 cache_options,
@@ -4416,36 +4389,28 @@ pub async fn fetch_page_html(
                                         // perform operations entire in memory to build resource
                                         if !wrote_disk && data.capacity() < 8192 {
                                             data.extend_from_slice(&text);
-                                        } else {
-                                            if !wrote_disk {
-                                                file_path = string_concat!(
-                                                    TMP_DIR,
-                                                    &utf8_percent_encode(
-                                                        target_url,
-                                                        NON_ALPHANUMERIC
-                                                    )
+                                        } else if !wrote_disk {
+                                            file_path = string_concat!(
+                                                TMP_DIR,
+                                                &utf8_percent_encode(target_url, NON_ALPHANUMERIC)
                                                     .to_string()
-                                                );
-                                                match tokio::fs::File::create(&file_path).await {
-                                                    Ok(f) => {
-                                                        let file = file.insert(f);
+                                            );
+                                            match tokio::fs::File::create(&file_path).await {
+                                                Ok(f) => {
+                                                    let file = file.insert(f);
 
-                                                        data.extend_from_slice(&text);
+                                                    data.extend_from_slice(&text);
 
-                                                        if let Ok(_) =
-                                                            file.write_all(&data.as_ref()).await
-                                                        {
-                                                            data.clear();
-                                                        }
-                                                    }
-                                                    _ => data.extend_from_slice(&text),
-                                                };
-                                            } else {
-                                                if let Some(f) = file.as_mut() {
-                                                    if let Ok(_) = f.write_all(&text).await {
-                                                        data.extend_from_slice(&text)
+                                                    if (file.write_all(data.as_ref()).await).is_ok()
+                                                    {
+                                                        data.clear();
                                                     }
                                                 }
+                                                _ => data.extend_from_slice(&text),
+                                            };
+                                        } else if let Some(f) = file.as_mut() {
+                                            if (f.write_all(&text).await).is_ok() {
+                                                data.extend_from_slice(&text)
                                             }
                                         }
                                     }
@@ -4467,14 +4432,14 @@ pub async fn fetch_page_html(
                                     let mut buffer = vec![];
 
                                     if let Ok(mut b) = tokio::fs::File::open(&file_path).await {
-                                        if let Ok(_) = b.read_to_end(&mut buffer).await {
+                                        if (b.read_to_end(&mut buffer).await).is_ok() {
                                             let _ = tokio::fs::remove_file(file_path).await;
                                         }
                                     }
 
-                                    Box::new(buffer.into())
+                                    Box::new(buffer)
                                 } else {
-                                    Box::new(data.into())
+                                    Box::new(data)
                                 }),
                                 status_code,
                                 ..Default::default()
@@ -4525,16 +4490,12 @@ pub fn create_cache_key_raw(
     if let Some(authentication) = auth {
         format!(
             "{}:{}:{}",
-            override_method.unwrap_or_else(|| "GET".into()),
+            override_method.unwrap_or("GET"),
             uri,
             authentication
         )
     } else {
-        format!(
-            "{}:{}",
-            override_method.unwrap_or_else(|| "GET".into()),
-            uri
-        )
+        format!("{}:{}", override_method.unwrap_or("GET"), uri)
     }
 }
 
@@ -5028,7 +4989,7 @@ async fn _fetch_page_html_chrome(
     let cached_html = if resource.is_some() {
         resource
     } else {
-        get_cached_url(&target_url, cache_options.as_ref(), cache_policy).await
+        get_cached_url(target_url, cache_options.as_ref(), cache_policy).await
     };
 
     if skip_browser {
@@ -5045,11 +5006,11 @@ async fn _fetch_page_html_chrome(
         page => {
             match fetch_page_html_chrome_base(
                 if let Some(cached) = &cached_html {
-                    &cached
+                    cached
                 } else {
-                    &target_url
+                    target_url
                 },
-                &page,
+                page,
                 cached,
                 true,
                 wait_for,
@@ -5117,7 +5078,7 @@ async fn _fetch_page_html_chrome(
                                 remote_addr,
                                 #[cfg(feature = "cookies")]
                                 cookies,
-                                content: Some(Box::new(data.into())),
+                                content: Some(Box::new(data)),
                                 status_code,
                                 ..Default::default()
                             }
@@ -5314,19 +5275,16 @@ pub async fn openai_request_base(
                 _ => gpt_base,
             };
 
-            let core_bpe = match tiktoken_rs::get_bpe_from_model(&gpt_configs.model) {
-                Ok(bpe) => Some(bpe),
-                _ => None,
-            };
+            let core_bpe = tiktoken_rs::get_bpe_from_model(&gpt_configs.model).ok();
 
             let (tokens, prompt_tokens) = match &core_bpe {
                 Some(core_bpe) => (
                     core_bpe.encode_with_special_tokens(&resource),
-                    core_bpe.encode_with_special_tokens(&prompt),
+                    core_bpe.encode_with_special_tokens(prompt),
                 ),
                 _ => (
                     CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&resource),
-                    CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&prompt),
+                    CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(prompt),
                 ),
             };
 
@@ -5336,9 +5294,9 @@ pub async fn openai_request_base(
             let mut max_tokens = crate::features::openai::calculate_max_tokens(
                 &gpt_configs.model,
                 gpt_configs.max_tokens,
-                &&crate::features::openai::BROWSER_ACTIONS_SYSTEM_PROMPT_COMPLETION.clone(),
+                &crate::features::openai::BROWSER_ACTIONS_SYSTEM_PROMPT_COMPLETION.clone(),
                 &resource,
-                &prompt,
+                prompt,
             );
 
             // we need to slim down the content to fit the window.
@@ -5348,19 +5306,19 @@ pub async fn openai_request_base(
                 max_tokens = crate::features::openai::calculate_max_tokens(
                     &gpt_configs.model,
                     gpt_configs.max_tokens,
-                    &&crate::features::openai::BROWSER_ACTIONS_SYSTEM_PROMPT_COMPLETION.clone(),
+                    &crate::features::openai::BROWSER_ACTIONS_SYSTEM_PROMPT_COMPLETION.clone(),
                     &r,
-                    &prompt,
+                    prompt,
                 );
 
                 let (tokens, prompt_tokens) = match &core_bpe {
                     Some(core_bpe) => (
                         core_bpe.encode_with_special_tokens(&r),
-                        core_bpe.encode_with_special_tokens(&prompt),
+                        core_bpe.encode_with_special_tokens(prompt),
                     ),
                     _ => (
                         CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&r),
-                        CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&prompt),
+                        CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(prompt),
                     ),
                 };
 
@@ -5372,19 +5330,19 @@ pub async fn openai_request_base(
                     max_tokens = crate::features::openai::calculate_max_tokens(
                         &gpt_configs.model,
                         gpt_configs.max_tokens,
-                        &&crate::features::openai::BROWSER_ACTIONS_SYSTEM_PROMPT_COMPLETION.clone(),
+                        &crate::features::openai::BROWSER_ACTIONS_SYSTEM_PROMPT_COMPLETION.clone(),
                         &r,
-                        &prompt,
+                        prompt,
                     );
 
                     let (tokens, prompt_tokens) = match &core_bpe {
                         Some(core_bpe) => (
                             core_bpe.encode_with_special_tokens(&r),
-                            core_bpe.encode_with_special_tokens(&prompt),
+                            core_bpe.encode_with_special_tokens(prompt),
                         ),
                         _ => (
                             CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&r),
-                            CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(&prompt),
+                            CORE_BPE_TOKEN_COUNT.encode_with_special_tokens(prompt),
                         ),
                     };
 
@@ -5415,7 +5373,7 @@ pub async fn openai_request_base(
                 if let Some(structure) = &gpt_configs.json_schema {
                     if let Some(schema) = &structure.schema {
                         if let Ok(mut schema) =
-                            crate::features::serde_json::from_str::<serde_json::Value>(&schema)
+                            crate::features::serde_json::from_str::<serde_json::Value>(schema)
                         {
                             if json_mode {
                                 // Insert the "js" property into the schema's properties. Todo: capture if the js property exist and re-word prompt to match new js property with after removal.
@@ -6138,12 +6096,10 @@ pub(crate) fn get_domain_from_url(url: &str) -> &str {
         } else {
             &url[pos..]
         }
+    } else if let Some(first_slash_pos) = url.find('/') {
+        &url[..first_slash_pos]
     } else {
-        if let Some(first_slash_pos) = url.find('/') {
-            &url[..first_slash_pos]
-        } else {
-            &url
-        }
+        url
     }
 }
 
@@ -6243,8 +6199,8 @@ pub(crate) async fn hash_html(html: &[u8]) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut s = ahash::AHasher::default();
         normalized_html.hash(&mut s);
-        let key = s.finish();
-        key
+
+        s.finish()
     } else {
         Default::default()
     }

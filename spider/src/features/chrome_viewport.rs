@@ -72,7 +72,7 @@ pub fn get_random_viewport() -> Viewport {
     let mut rng = rand::rng();
     let device_types = [DeviceType::Mobile, DeviceType::Tablet, DeviceType::Desktop];
 
-    randomize_viewport(if let Ok(dist) = WeightedIndex::new(&[1, 1, 3]) {
+    randomize_viewport(if let Ok(dist) = WeightedIndex::new([1, 1, 3]) {
         &device_types[dist.sample(&mut rng)]
     } else {
         device_types

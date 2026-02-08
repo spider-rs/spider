@@ -71,7 +71,7 @@ fn determine_memory_state(usage: u64) -> i8 {
 fn update_memory(sys: &mut System) {
     sys.refresh_memory();
     MEMORY_STATE.store(
-        determine_memory_state(get_memory_limits(&sys)),
+        determine_memory_state(get_memory_limits(sys)),
         Ordering::Relaxed,
     );
 }
@@ -85,7 +85,7 @@ fn update_memory(_sys: &mut System) {}
 #[cfg(feature = "balance")]
 fn update_cpu(sys: &mut System) {
     sys.refresh_cpu_usage();
-    CPU_STATE.store(determine_cpu_state(get_cpu_usage(&sys)), Ordering::Relaxed);
+    CPU_STATE.store(determine_cpu_state(get_cpu_usage(sys)), Ordering::Relaxed);
 }
 
 /// Update the cpu usage being used.

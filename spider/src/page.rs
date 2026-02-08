@@ -4,10 +4,12 @@ use crate::configuration::{AutomationScripts, ExecutionScripts};
 use crate::features::automation::RemoteMultimodalConfigs;
 use crate::utils::abs::convert_abs_path;
 use crate::utils::templates::EMPTY_HTML_BASIC;
+#[cfg(not(feature = "decentralized"))]
+use crate::utils::RequestError;
 use crate::utils::{
     css_selectors::{BASE_CSS_SELECTORS, BASE_CSS_SELECTORS_WITH_XML},
     get_domain_from_url, hash_html, networking_capable, BasicCachePolicy, CacheOptions,
-    PageResponse, RequestError,
+    PageResponse,
 };
 use crate::CaseInsensitiveString;
 use crate::Client;
@@ -19,7 +21,9 @@ use lol_html::AsciiCompatibleEncoding;
 use phf::phf_set;
 use regex::bytes::Regex;
 use reqwest::StatusCode;
-use tokio::time::{Duration, Instant};
+use tokio::time::Duration;
+#[cfg(feature = "time")]
+use tokio::time::Instant;
 
 #[cfg(all(feature = "decentralized", feature = "headers"))]
 use crate::utils::FetchPageResult;
@@ -660,19 +664,16 @@ pub struct Page {
 /// Assign properties from a new page.
 #[cfg(feature = "smart")]
 pub fn page_assign(page: &mut Page, new_page: Page) {
-    match new_page.final_redirect_destination.as_deref() {
-        Some(s) => {
-            let bad = match s.as_bytes().first().copied() {
-                None => true,
-                Some(b'a') => s.starts_with("about:blank"),
-                Some(b'c') => s.starts_with("chrome-error://chromewebdata"),
-                _ => false,
-            };
-            if !bad {
-                page.final_redirect_destination = Some(s.into());
-            }
+    if let Some(s) = new_page.final_redirect_destination.as_deref() {
+        let bad = match s.as_bytes().first().copied() {
+            None => true,
+            Some(b'a') => s.starts_with("about:blank"),
+            Some(b'c') => s.starts_with("chrome-error://chromewebdata"),
+            _ => false,
+        };
+        if !bad {
+            page.final_redirect_destination = Some(s.into());
         }
-        None => {}
     }
 
     let chrome_default_empty_200 =
@@ -1006,7 +1007,7 @@ pub(crate) fn get_page_selectors_base(u: &str, subdomains: bool, tld: bool) -> R
 
 /// html selector for valid web pages for domain.
 pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> RelativeSelectors {
-    get_page_selectors_base(&url, subdomains, tld)
+    get_page_selectors_base(url, subdomains, tld)
 }
 
 #[cfg(not(feature = "decentralized"))]
@@ -1658,7 +1659,7 @@ impl Page {
                 let target_url = res.url().as_str();
 
                 // handle initial redirects
-                if ssg_map.is_some() && url != target_url && !exact_url_match(&url, &target_url) {
+                if ssg_map.is_some() && url != target_url && !exact_url_match(url, target_url) {
                     let mut url = Box::new(CaseInsensitiveString::new(&url));
 
                     modify_selectors(
@@ -1677,10 +1678,7 @@ impl Page {
                     domain_parsed
                 };
 
-                let original_page = match Url::parse(url) {
-                    Ok(u) => Some(u),
-                    _ => None,
-                };
+                let original_page = Url::parse(url).ok();
 
                 let parent_host = &selectors.1[0];
                 // the host schemes
@@ -1715,7 +1713,7 @@ impl Page {
                                 parent_host_scheme,
                                 base_input_domain,
                                 sub_matcher,
-                                &external_domains_caseless,
+                                external_domains_caseless,
                                 links_pages,
                             );
                         }
@@ -1750,7 +1748,7 @@ impl Page {
                                     parent_host_scheme,
                                     base_input_domain,
                                     sub_matcher,
-                                    &external_domains_caseless,
+                                    external_domains_caseless,
                                     links_pages,
                                 );
                             }
@@ -1881,7 +1879,7 @@ impl Page {
                                                     parent_host_scheme,
                                                     base_input_domain,
                                                     sub_matcher,
-                                                    &external_domains_caseless,
+                                                    external_domains_caseless,
                                                     &mut None,
                                                 );
                                             }
@@ -1990,10 +1988,7 @@ impl Page {
 
         let base_input_url = tokio::sync::OnceCell::new();
 
-        let original_page = match Url::parse(url) {
-            Ok(u) => Some(u),
-            _ => None,
-        };
+        let original_page = Url::parse(url).ok();
 
         if ssg_map.is_some() {
             let mut ci_url = Box::new(CaseInsensitiveString::new(url));
@@ -2046,7 +2041,7 @@ impl Page {
                         parent_host_scheme,
                         base_input_domain,
                         sub_matcher,
-                        &external_domains_caseless,
+                        external_domains_caseless,
                         links_pages,
                     );
                 }
@@ -2082,7 +2077,7 @@ impl Page {
                             parent_host_scheme,
                             base_input_domain,
                             sub_matcher,
-                            &external_domains_caseless,
+                            external_domains_caseless,
                             links_pages,
                         );
                     }
@@ -2354,7 +2349,7 @@ impl Page {
     pub async fn new(url: &str, client: &Client) -> Self {
         use crate::serde::Deserialize;
 
-        match crate::utils::fetch_page_and_headers(&url, &client).await {
+        match crate::utils::fetch_page_and_headers(url, client).await {
             FetchPageResult::Success(headers, page_content) => {
                 let links = match page_content {
                     Some(b) => match flexbuffers::Reader::get_root(b.as_slice()) {
@@ -2382,12 +2377,12 @@ impl Page {
     }
 
     /// Instantiate a new page and gather the links.
-    #[cfg(all(feature = "decentralized"))]
+    #[cfg(feature = "decentralized")]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all,))]
     pub async fn new_links_only(url: &str, client: &Client) -> Self {
         use crate::serde::Deserialize;
 
-        let links = match crate::utils::fetch_page(&url, &client).await {
+        let links = match crate::utils::fetch_page(url, client).await {
             Some(b) => match flexbuffers::Reader::get_root(b.as_slice()) {
                 Ok(buf) => match HashSet::<CaseInsensitiveString>::deserialize(buf) {
                     Ok(link) => link,
@@ -2754,7 +2749,7 @@ impl Page {
     }
 
     /// Get the response events mapped.
-    #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+    #[cfg(feature = "chrome")]
     pub fn get_responses(&self) -> &Option<hashbrown::HashMap<String, f64>> {
         &self.response_map
     }
@@ -2765,7 +2760,7 @@ impl Page {
     }
 
     /// Get the response events mapped.
-    #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+    #[cfg(feature = "chrome")]
     pub fn get_request(&self) -> &Option<hashbrown::HashMap<String, f64>> {
         &self.request_map
     }
@@ -2926,7 +2921,7 @@ impl Page {
 
     /// Find the links as a stream using string resource validation
     #[inline(always)]
-    #[cfg(all(not(feature = "decentralized")))]
+    #[cfg(not(feature = "decentralized"))]
     pub async fn links_stream_base<
         A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
     >(
@@ -3079,7 +3074,7 @@ impl Page {
 
     /// Find the links as a stream using string resource validation
     #[inline(always)]
-    #[cfg(all(not(feature = "decentralized")))]
+    #[cfg(not(feature = "decentralized"))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn links_stream_base_ssg<
         A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
@@ -3302,7 +3297,7 @@ impl Page {
     }
 
     /// Find the links as a stream using string resource validation and parsing the script for nextjs initial SSG paths.
-    #[cfg(all(not(feature = "decentralized")))]
+    #[cfg(not(feature = "decentralized"))]
     pub async fn links_stream_ssg<
         A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
     >(
@@ -3321,7 +3316,7 @@ impl Page {
 
     /// Find all href links and return them using CSS selectors.
     #[inline(always)]
-    #[cfg(all(not(feature = "decentralized")))]
+    #[cfg(not(feature = "decentralized"))]
     pub async fn links_ssg(
         &mut self,
         selectors: &RelativeSelectors,
@@ -4181,7 +4176,7 @@ impl Page {
 
     /// Find the links as a stream using string resource validation
     #[inline(always)]
-    #[cfg(all(not(feature = "decentralized")))]
+    #[cfg(not(feature = "decentralized"))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all,))]
     pub async fn links_stream_full_resource<
         A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
@@ -4373,7 +4368,7 @@ impl Page {
 
     /// Find all href links and return them using CSS selectors gathering all resources.
     #[inline(always)]
-    #[cfg(all(not(feature = "decentralized")))]
+    #[cfg(not(feature = "decentralized"))]
     pub async fn links_full(
         &mut self,
         selectors: &RelativeSelectors,

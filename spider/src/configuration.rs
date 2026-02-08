@@ -89,7 +89,7 @@ impl ChromeEventTracker {
 #[cfg(feature = "sitemap")]
 #[derive(Debug, Default)]
 /// Determine if the sitemap modified to the whitelist.
-pub(crate) struct SitemapWhitelistChanges {
+pub struct SitemapWhitelistChanges {
     /// Added the default sitemap.xml whitelist.
     pub added_default: bool,
     /// Added the custom whitelist path.
@@ -449,7 +449,7 @@ impl serde::Serialize for AllowListSet {
         {
             self.0
                 .patterns()
-                .into_iter()
+                .iter()
                 .collect::<Vec<&String>>()
                 .serialize(serializer)
         }
@@ -668,7 +668,7 @@ impl Configuration {
     pub fn add_sitemap_to_whitelist(&mut self) -> SitemapWhitelistChanges {
         let mut changes = SitemapWhitelistChanges::default();
 
-        if self.ignore_sitemap && !self.whitelist_url.is_some() {
+        if self.ignore_sitemap && self.whitelist_url.is_none() {
             return changes;
         }
 
@@ -701,7 +701,7 @@ impl Configuration {
         if let Some(list) = self.whitelist_url.as_mut() {
             if changes.added_default {
                 let default = CompactString::from("sitemap.xml");
-                if let Some(pos) = list.iter().position(|s| s == &default) {
+                if let Some(pos) = list.iter().position(|s| s == default) {
                     list.remove(pos);
                 }
             }
@@ -1197,10 +1197,7 @@ impl Configuration {
 
     /// Configures the viewport of the browser, which defaults to 800x600. This method does nothing if the 'chrome' feature is not enabled.
     pub fn with_viewport(&mut self, viewport: Option<crate::configuration::Viewport>) -> &mut Self {
-        self.viewport = match viewport {
-            Some(vp) => Some(vp.into()),
-            _ => None,
-        };
+        self.viewport = viewport.map(|vp| vp);
         self
     }
 
@@ -1544,10 +1541,7 @@ impl Configuration {
     #[cfg(feature = "chrome")]
     /// Overrides default host system timezone with the specified one. This does nothing without the `chrome` flag enabled.
     pub fn with_timezone_id(&mut self, timezone_id: Option<String>) -> &mut Self {
-        self.timezone_id = match timezone_id {
-            Some(timezone_id) => Some(timezone_id.into()),
-            _ => None,
-        };
+        self.timezone_id = timezone_id.map(|timezone_id| timezone_id.into());
         self
     }
 
@@ -1560,10 +1554,7 @@ impl Configuration {
     #[cfg(feature = "chrome")]
     /// Overrides default host system locale with the specified one. This does nothing without the `chrome` flag enabled.
     pub fn with_locale(&mut self, locale: Option<String>) -> &mut Self {
-        self.locale = match locale {
-            Some(locale) => Some(locale.into()),
-            _ => None,
-        };
+        self.locale = locale.map(|locale| locale.into());
         self
     }
 

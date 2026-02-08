@@ -216,12 +216,9 @@ where
                         selectors_vec_xpath.push(selector_str.as_ref().to_string())
                     } else {
                         warn!(
-                            "{}",
-                            format!(
-                                "Failed to parse selector '{}': {:?}",
-                                selector_str.as_ref(),
-                                err
-                            ),
+                            "Failed to parse selector '{}': {:?}",
+                            selector_str.as_ref(),
+                            err
                         )
                     }
                 }

@@ -116,10 +116,7 @@ impl RuleLine {
         use regex::Regex;
 
         RuleLine {
-            path: match Regex::new(path) {
-                Ok(r) => Some(r),
-                _ => None,
-            },
+            path: Regex::new(path).ok(),
             allowance: path.is_empty() && !allowance || allowance,
         }
     }
@@ -478,19 +475,17 @@ impl RobotFileParser {
                     if state != 0 {
                         state = 2;
                     }
-                } else if part0.eq_ignore_ascii_case("request-rate") {
-                    if state != 0 {
-                        let numbers: Vec<Result<usize, _>> =
-                            part1.split('/').map(|x| x.parse::<usize>()).collect();
-                        if numbers.len() == 2 && numbers[0].is_ok() && numbers[1].is_ok() {
-                            let req_rate = RequestRate {
-                                requests: numbers[0].clone().unwrap(),
-                                seconds: numbers[1].clone().unwrap(),
-                            };
-                            entry.set_req_rate(req_rate);
-                        }
-                        state = 2;
+                } else if part0.eq_ignore_ascii_case("request-rate") && state != 0 {
+                    let numbers: Vec<Result<usize, _>> =
+                        part1.split('/').map(|x| x.parse::<usize>()).collect();
+                    if numbers.len() == 2 && numbers[0].is_ok() && numbers[1].is_ok() {
+                        let req_rate = RequestRate {
+                            requests: numbers[0].clone().unwrap(),
+                            seconds: numbers[1].clone().unwrap(),
+                        };
+                        entry.set_req_rate(req_rate);
                     }
+                    state = 2;
                 }
             }
         }
@@ -537,15 +532,13 @@ impl RobotFileParser {
     #[cfg(feature = "regex")]
     pub fn build_disallow_list(&mut self) {
         if !self.disallow_paths.is_empty() {
-            match RegexSet::new(&self.disallow_paths) {
-                Ok(s) => self.disallow_paths_regex = s,
-                _ => (),
+            if let Ok(s) = RegexSet::new(&self.disallow_paths) {
+                self.disallow_paths_regex = s
             }
         }
         if !self.disallow_agents.is_empty() {
-            match RegexSet::new(&self.disallow_agents) {
-                Ok(s) => self.disallow_agents_regex = s,
-                _ => (),
+            if let Ok(s) = RegexSet::new(&self.disallow_agents) {
+                self.disallow_agents_regex = s
             }
         }
     }
@@ -773,7 +766,7 @@ mod tests {
         parser.parse(&lines);
 
         let entries = parser.get_entries();
-        assert!(entries.len() >= 1);
+        assert!(!entries.is_empty());
     }
 
     #[test]

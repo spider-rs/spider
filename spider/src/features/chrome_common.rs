@@ -353,18 +353,12 @@ impl ScreenshotParams {
 impl From<ScreenshotParams> for chromiumoxide::page::ScreenshotParams {
     fn from(params: ScreenshotParams) -> Self {
         let full_page = if params.full_page.is_some() {
-            match params.full_page {
-                Some(v) => v,
-                _ => false,
-            }
+            params.full_page.unwrap_or_default()
         } else {
             std::env::var("SCREENSHOT_FULL_PAGE").unwrap_or_default() == "true"
         };
         let omit_background = if params.omit_background.is_some() {
-            match params.omit_background {
-                Some(v) => v,
-                _ => false,
-            }
+            params.omit_background.unwrap_or_default()
         } else {
             match std::env::var("SCREENSHOT_OMIT_BACKGROUND") {
                 Ok(t) => t == "true",
@@ -781,7 +775,7 @@ impl WebAutomation {
 
             WebAutomation::WaitForWithTimeout { selector, timeout } => {
                 valid =
-                    wait_for_selector(page, Some(Duration::from_millis(*timeout)), &selector).await;
+                    wait_for_selector(page, Some(Duration::from_millis(*timeout)), selector).await;
             }
             WebAutomation::Wait(ms) => {
                 tokio::time::sleep(Duration::from_millis(*ms)).await;
@@ -868,13 +862,13 @@ impl WebAutomation {
                     .is_ok();
             }
             WebAutomation::WaitFor(selector) => {
-                valid = wait_for_selector(page, Some(Duration::from_secs(60)), &selector).await;
+                valid = wait_for_selector(page, Some(Duration::from_secs(60)), selector).await;
             }
             WebAutomation::WaitForNavigation => {
                 valid = page.wait_for_navigation().await.is_ok();
             }
             WebAutomation::WaitForAndClick(selector) => {
-                valid = wait_for_selector(page, Some(Duration::from_secs(60)), &selector).await;
+                valid = wait_for_selector(page, Some(Duration::from_secs(60)), selector).await;
                 if let Ok(ele) = page.find_element(selector).await {
                     valid = ele.click().await.is_ok();
                 }
@@ -1201,11 +1195,7 @@ pub async fn eval_automation_scripts_tracking(
         drain_eval: &str,
     ) -> Option<serde_json::Value> {
         if let Ok(eval) = page.evaluate(eval_value(drain_eval)).await {
-            if let Some(value) = eval.value() {
-                Some(value.clone())
-            } else {
-                None
-            }
+            eval.value().cloned()
         } else {
             None
         }

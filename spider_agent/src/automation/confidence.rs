@@ -108,16 +108,10 @@ impl ConfidentStep {
         let alternatives = value
             .get("alternatives")
             .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| Alternative::from_json(v))
-                    .collect()
-            })
+            .map(|arr| arr.iter().filter_map(Alternative::from_json).collect())
             .unwrap_or_default();
 
-        let verification = value
-            .get("verification")
-            .and_then(|v| Verification::from_json(v));
+        let verification = value.get("verification").and_then(Verification::from_json);
 
         let description = value
             .get("description")

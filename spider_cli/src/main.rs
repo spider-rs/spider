@@ -256,7 +256,9 @@ async fn main() {
                         log_website_status(&website);
                     });
 
-                    while let Ok(mut res) = rx2.recv().await {
+                    while let Ok(res) = rx2.recv().await {
+                        #[allow(unused_mut)]
+                        let mut res = res;
                         if let Some(parsed_url) = res.get_url_parsed() {
                             log("Storing", parsed_url);
                             let mut url_path = parsed_url.path().to_string();

@@ -51,7 +51,7 @@ pub(crate) fn block_website(u: &Url) -> bool {
     let mut blocked = false;
 
     if let Some(host) = u.host_str() {
-        if spider_firewall::is_bad_website_url(&host) {
+        if spider_firewall::is_bad_website_url(host) {
             blocked = true;
         }
     }
@@ -98,12 +98,10 @@ fn handle_base(href: &str) -> LinkReturn {
             // The full protocol with "://" is &href[..protocol_end + 3].
             // All entries in PROTOCOLS are ASCII, so byte indexing is always valid.
             let proto_end = protocol_end + 3;
-            if proto_end <= href.len() {
-                if PROTOCOLS.contains(&href[..proto_end]) {
-                    if let Ok(mut next_url) = Url::parse(href) {
-                        next_url.set_fragment(None);
-                        return LinkReturn::Absolute(next_url);
-                    }
+            if proto_end <= href.len() && PROTOCOLS.contains(&href[..proto_end]) {
+                if let Ok(mut next_url) = Url::parse(href) {
+                    next_url.set_fragment(None);
+                    return LinkReturn::Absolute(next_url);
                 }
             }
         }

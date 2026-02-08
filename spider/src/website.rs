@@ -7,8 +7,6 @@ use crate::configuration::{
 };
 use crate::{page::build, utils::PageResponse};
 
-#[cfg(feature = "smart")]
-use crate::features::chrome::OnceBrowser;
 use crate::features::chrome_common::RequestInterceptConfiguration;
 #[cfg(feature = "disk")]
 use crate::features::disk::DatabaseHandler;
@@ -107,7 +105,7 @@ pub fn is_safe_javascript_challenge(page: &Page) -> bool {
 ))]
 /// Bind connections only on the specified network interface.
 pub fn set_interface(client: ClientBuilder, network_interface: &str) -> ClientBuilder {
-    client.interface(&network_interface)
+    client.interface(network_interface)
 }
 
 #[cfg(not(any(
@@ -485,7 +483,7 @@ impl Website {
         let mut status = CrawlStatus::Start;
 
         if let Some(u) = &domain_parsed {
-            if check_firewall && crate::utils::abs::block_website(&u) {
+            if check_firewall && crate::utils::abs::block_website(u) {
                 status = CrawlStatus::FirewallBlocked;
             }
         }
@@ -542,7 +540,7 @@ impl Website {
         let domain: Box<CaseInsensitiveString> = if networking_capable(url) {
             CaseInsensitiveString::new(&url).into()
         } else {
-            CaseInsensitiveString::new(&prepare_url(&url)).into()
+            CaseInsensitiveString::new(&prepare_url(url)).into()
         };
 
         self.domain_parsed = parse_absolute_url(&domain);
@@ -590,11 +588,9 @@ impl Website {
     #[cfg(feature = "disk")]
     /// Set the sqlite disk persistance.
     pub fn set_disk_persistance(&mut self, persist: bool) -> &mut Self {
-        if self.enable_sqlite {
-            if !self.sqlite.is_none() {
-                if let Some(sqlite) = self.sqlite.as_mut() {
-                    sqlite.persist = persist;
-                }
+        if self.enable_sqlite && self.sqlite.is_some() {
+            if let Some(sqlite) = self.sqlite.as_mut() {
+                sqlite.persist = persist;
             }
         }
         self
@@ -684,12 +680,6 @@ impl Website {
     /// Clear the disk. This does nothing with `disk` flag enabled.
     #[cfg(not(feature = "disk"))]
     pub async fn clear_disk(&self) {}
-
-    /// Check if the disk is enabled. This does nothing with `disk` flag enabled.
-    #[cfg(not(feature = "disk"))]
-    pub(crate) fn shared_disk_enabled(&self) -> bool {
-        false
-    }
 
     /// Check if the disk is enabled. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
@@ -881,10 +871,8 @@ impl Website {
     pub fn is_allowed(&mut self, link: &CaseInsensitiveString) -> ProcessLinkStatus {
         let status = self.is_allowed_budgetless(link);
 
-        if status.eq(&ProcessLinkStatus::Allowed) {
-            if self.is_over_budget(link) {
-                return ProcessLinkStatus::BudgetExceeded;
-            }
+        if status.eq(&ProcessLinkStatus::Allowed) && self.is_over_budget(link) {
+            return ProcessLinkStatus::BudgetExceeded;
         }
         status
     }
@@ -928,10 +916,8 @@ impl Website {
             ProcessLinkStatus::Blocked
         } else {
             let status = self.is_allowed_default(link);
-            if status.eq(&ProcessLinkStatus::Allowed) {
-                if self.is_over_depth(link) {
-                    return ProcessLinkStatus::Blocked;
-                }
+            if status.eq(&ProcessLinkStatus::Allowed) && self.is_over_depth(link) {
+                return ProcessLinkStatus::Blocked;
             }
             status
         }
@@ -948,10 +934,10 @@ impl Website {
         let blacklist = self.configuration.get_blacklist_compiled();
         let whitelist = self.configuration.get_whitelist_compiled();
 
-        let blocked_whitelist = !whitelist.is_empty() && !contains(&whitelist, link.inner());
-        let blocked_blacklist = !blacklist.is_empty() && contains(&blacklist, link.inner());
+        let blocked_whitelist = !whitelist.is_empty() && !contains(whitelist, link.inner());
+        let blocked_blacklist = !blacklist.is_empty() && contains(blacklist, link.inner());
 
-        if blocked_whitelist || blocked_blacklist || !self.is_allowed_robots(&link.as_ref()) {
+        if blocked_whitelist || blocked_blacklist || !self.is_allowed_robots(link.as_ref()) {
             ProcessLinkStatus::Blocked
         } else {
             ProcessLinkStatus::Allowed
@@ -1029,13 +1015,7 @@ impl Website {
         let exceeded_wild_budget = if self.configuration.wild_card_budgeting {
             match budget {
                 Some(budget) => match budget.get(&*WILD_CARD_PATH) {
-                    Some(budget) => {
-                        if budget.abs_diff(0) == 1 {
-                            true
-                        } else {
-                            false
-                        }
-                    }
+                    Some(budget) => budget.abs_diff(0) == 1,
                     _ => false,
                 },
                 _ => false,
@@ -1130,6 +1110,7 @@ impl Website {
     }
 
     /// Restore one wildcard budget credit (for relevance-gated irrelevant pages).
+    #[cfg(all(feature = "agent", feature = "serde"))]
     pub(crate) fn restore_wildcard_budget(&mut self) {
         if self.configuration.wild_card_budgeting {
             if let Some(budget) = self.configuration.inner_budget.as_mut() {
@@ -1157,8 +1138,8 @@ impl Website {
         let disk_count = if let Some(sqlite) = &self.sqlite {
             if sqlite.pool_inited() {
                 let disk_count = DatabaseHandler::count_records(sqlite.get_db_pool().await).await;
-                let disk_count = disk_count.unwrap_or_default() as usize;
-                disk_count
+
+                disk_count.unwrap_or_default() as usize
             } else {
                 0
             }
@@ -1443,10 +1424,10 @@ impl Website {
 
                 if !host_str.is_empty() {
                     if host_str.ends_with('/') {
-                        robot_file_parser.read(&client, host_str).await;
+                        robot_file_parser.read(client, host_str).await;
                     } else {
                         robot_file_parser
-                            .read(&client, &string_concat!(host_str, "/"))
+                            .read(client, &string_concat!(host_str, "/"))
                             .await;
                     }
                 }
@@ -2230,7 +2211,7 @@ impl Website {
         let mut client = reqwest::Client::builder()
             .user_agent(match &self.configuration.user_agent {
                 Some(ua) => ua.as_str(),
-                _ => &get_ua(self.configuration.only_chrome_agent()),
+                _ => get_ua(self.configuration.only_chrome_agent()),
             })
             .redirect(policy)
             .tcp_keepalive(Duration::from_millis(500));
@@ -2336,7 +2317,7 @@ impl Website {
                     let n = &*l.borrow();
                     let (target, rest) = n;
 
-                    if target_id.eq_ignore_ascii_case(&target) {
+                    if target_id.eq_ignore_ascii_case(target) {
                         if rest == &Handler::Resume {
                             c.store(0, Ordering::Relaxed);
                         }
@@ -2444,9 +2425,9 @@ impl Website {
     /// Get all the expanded links.
     #[cfg(feature = "glob")]
     pub fn get_expanded_links(&self, domain_name: &str) -> Vec<CaseInsensitiveString> {
-        let mut expanded = crate::features::glob::expand_url(&domain_name);
+        let mut expanded = crate::features::glob::expand_url(domain_name);
 
-        if expanded.len() == 0 {
+        if expanded.is_empty() {
             if let Some(u) = self.get_absolute_path(Some(domain_name)) {
                 expanded.push(u.as_str().into());
             }
@@ -2464,7 +2445,7 @@ impl Website {
         use crate::utils::{detect_open_resty_forbidden, APACHE_FORBIDDEN};
 
         if page.status_code == reqwest::StatusCode::FORBIDDEN && links.is_empty() {
-            if is_safe_javascript_challenge(&page) {
+            if is_safe_javascript_challenge(page) {
                 self.website_meta_info = WebsiteMetaInfo::RequiresJavascript;
             } else if page.get_html_bytes_u8() == *APACHE_FORBIDDEN {
                 self.website_meta_info = WebsiteMetaInfo::Apache403;
@@ -2569,7 +2550,7 @@ impl Website {
                     &page_links_settings,
                     &mut links,
                     Some(&mut links_ssg),
-                    &mut domain_parsed,
+                    &domain_parsed,
                     &mut domain_parsed_out,
                     &mut links_pages,
                 )
@@ -2601,12 +2582,9 @@ impl Website {
             }
 
             if retry_count == 0 {
-                let err = last_err.take().unwrap_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "cmd fetch failed (unknown error)",
-                    )
-                });
+                let err = last_err
+                    .take()
+                    .unwrap_or_else(|| std::io::Error::other("cmd fetch failed (unknown error)"));
                 break build_error_page(StatusCode::BAD_GATEWAY, err);
             }
 
@@ -2878,10 +2856,9 @@ impl Website {
             let code = out.status.code().unwrap_or(-1);
             let stderr = String::from_utf8_lossy(&out.stderr);
 
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("cmd exit={code} stderr={stderr}"),
-            ));
+            return Err(std::io::Error::other(format!(
+                "cmd exit={code} stderr={stderr}"
+            )));
         }
 
         Ok(out.stdout)
@@ -2927,13 +2904,13 @@ impl Website {
 
             let bytes = match Self::run_via_cmd(&cmd, &cmd_args, target).await {
                 Ok(b) => b,
-                Err(e) => {
+                Err(_err) => {
                     let mut page = Page::default();
                     page.url = target.to_string();
                     page.status_code = StatusCode::BAD_GATEWAY;
                     #[cfg(not(feature = "page_error_status_details"))]
                     {
-                        page.error_status = Some(e.to_string());
+                        page.error_status = Some(_err.to_string());
                     }
                     channel_send_page(&self.channel, page, &self.channel_guard);
                     return;
@@ -3124,10 +3101,10 @@ impl Website {
                                     let mut p = Page::default();
                                     p.url = target_url.to_string();
                                     p.status_code = StatusCode::BAD_GATEWAY;
-                                    if let Some(e) = last_err {
+                                    if let Some(_e) = last_err {
                                         #[cfg(not(feature = "page_error_status_details"))]
                                         {
-                                            p.error_status = Some(e.to_string());
+                                            p.error_status = Some(_e.to_string());
                                         }
                                     }
                                     p
@@ -3216,7 +3193,7 @@ impl Website {
         if let Some(seeded_html) = self.get_seeded_html() {
             let mut page_response = PageResponse::default();
             page_response.content = Some(Box::new(seeded_html.as_bytes().to_vec()));
-            Some(build(&self.url.inner(), page_response))
+            Some(build(self.url.inner(), page_response))
         } else {
             None
         }
@@ -3817,7 +3794,7 @@ impl Website {
         http_worker: bool,
     ) -> HashSet<CaseInsensitiveString> {
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
-        let expanded = self.get_expanded_links(&self.url.inner().as_str());
+        let expanded = self.get_expanded_links(self.url.inner().as_str());
         self.configuration.configure_allowlist();
 
         for link in expanded {
@@ -3836,7 +3813,7 @@ impl Website {
                 } else {
                     link.inner().to_string()
                 },
-                &client,
+                client,
                 self.configuration.get_cache_options(),
                 &self.configuration.cache_policy,
             )
@@ -3862,7 +3839,7 @@ impl Website {
 
             channel_send_page(&self.channel, page.clone(), &self.channel_guard);
 
-            let page_links = HashSet::from(page.links);
+            let page_links = page.links;
 
             links.extend(page_links);
         }
@@ -3962,7 +3939,7 @@ impl Website {
         }
         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
         let domain_name = self.url.inner();
-        let expanded = self.get_expanded_links(&domain_name.as_str());
+        let expanded = self.get_expanded_links(domain_name.as_str());
 
         self.configuration.configure_allowlist();
 
@@ -3999,7 +3976,7 @@ impl Website {
                     &page_links_settings,
                     &mut links,
                     Some(&mut links_ssg),
-                    &mut domain_parsed, // original domain
+                    &domain_parsed, // original domain
                     &mut self.domain_parsed,
                     &mut links_pages,
                 )
@@ -4035,7 +4012,7 @@ impl Website {
                                     &page_links_settings,
                                     &mut links,
                                     Some(&mut links_ssg),
-                                    &mut domain_parsed,
+                                    &domain_parsed,
                                     &mut domain_parsed_clone,
                                     &mut links_pages,
                                 )
@@ -4059,7 +4036,7 @@ impl Website {
                                 &page_links_settings,
                                 &mut links,
                                 Some(&mut links_ssg),
-                                &mut domain_parsed,
+                                &domain_parsed,
                                 &mut self.domain_parsed,
                                 &mut links_pages,
                             )
@@ -4504,6 +4481,10 @@ impl Website {
             }
         }
     }
+
+    #[cfg(all(feature = "chrome", feature = "decentralized"))]
+    /// In decentralized builds, chrome send crawling is not supported and this is a no-op.
+    pub async fn crawl_chrome_send(&self, _url: Option<&str>) {}
 
     #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
     /// Initiates a single fetch with chrome for one page with the ability to send it across threads for subscriptions.
@@ -5509,6 +5490,7 @@ impl Website {
     }
 
     /// Start to crawl website concurrently using chrome with the ability to send it across threads for subscriptions.
+    #[cfg(not(feature = "decentralized"))]
     #[cfg_attr(
         all(feature = "tracing", not(feature = "decentralized")),
         tracing::instrument(skip_all)
@@ -6612,11 +6594,7 @@ impl Website {
             .starts_with("http:");
 
         let mut links: HashSet<CaseInsensitiveString> = self
-            .crawl_establish(
-                &client,
-                &mut (domain.into(), Default::default()),
-                http_worker,
-            )
+            .crawl_establish(client, &(domain.into(), Default::default()), http_worker)
             .await;
 
         let mut set: JoinSet<HashSet<CaseInsensitiveString>> = JoinSet::new();
@@ -6636,7 +6614,7 @@ impl Website {
                     Some(link) => {
                         if !self
                             .handle_process(handle, &mut interval, async {
-                                emit_log_shutdown(&link.inner());
+                                emit_log_shutdown(link.inner());
                                 set.shutdown().await;
                             })
                             .await
@@ -6656,7 +6634,7 @@ impl Website {
                             continue;
                         }
 
-                        emit_log(&link.inner());
+                        emit_log(link.inner());
 
                         self.insert_link(link.clone()).await;
 
@@ -6746,7 +6724,7 @@ impl Website {
         use tokio::sync::OnceCell;
         self.start();
         self.status = CrawlStatus::Active;
-        let browser: OnceBrowser = OnceCell::new();
+        let browser: crate::features::chrome::OnceBrowser = OnceCell::new();
 
         let mut selectors: (
             CompactString,
@@ -7114,13 +7092,13 @@ impl Website {
             let selectors = self.setup_selectors();
             let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
             let domain = self.url.inner().as_str();
-            self.domain_parsed = parse_absolute_url(&domain);
+            self.domain_parsed = parse_absolute_url(domain);
 
             let persist_links = self.status == CrawlStatus::Start;
 
             let mut interval: Interval = tokio::time::interval(Duration::from_millis(15));
 
-            let (sitemap_path, needs_trailing) = self.get_sitemap_setup(&domain);
+            let (sitemap_path, needs_trailing) = self.get_sitemap_setup(domain);
 
             self.configuration.sitemap_url = Some(Box::new(
                 string_concat!(domain, if needs_trailing { "/" } else { "" }, sitemap_path).into(),
@@ -7144,7 +7122,7 @@ impl Website {
             let return_page_links = self.configuration.return_page_links;
 
             let mut extra_links = self.extra_links.clone();
-            self.dequeue(&mut q, &mut *extra_links, &mut exceeded_budget)
+            self.dequeue(&mut q, &mut extra_links, &mut exceeded_budget)
                 .await;
             self.extra_links.clone_from(&extra_links);
 
@@ -7306,7 +7284,7 @@ impl Website {
                     }
                 }
 
-                if sitemaps.len() == 0 || exceeded_budget {
+                if sitemaps.is_empty() || exceeded_budget {
                     break;
                 }
             }
@@ -7859,7 +7837,7 @@ impl Website {
         sitemap_url: &mut Box<CompactString>,
         attempted_correct: &mut bool,
     ) -> bool {
-        let mut valid = *attempted_correct == false;
+        let mut valid = !*attempted_correct;
 
         if valid {
             if let Some(domain) = &self.domain_parsed {
@@ -7924,7 +7902,7 @@ impl Website {
                                     *first_request = true;
                                 }
 
-                                if let Err(_) = domain.join(sitemap) {
+                                if domain.join(sitemap).is_err() {
                                     *first_request = true;
                                 }
                                 // if we retried the request here it should succeed.
@@ -7954,7 +7932,7 @@ impl Website {
         client: &Client,
         handle: &Option<Arc<AtomicI8>>,
         b: bytes::Bytes,
-        mut interval: &mut Interval,
+        interval: &mut Interval,
         exceeded_budget: &mut bool,
         tx: &tokio::sync::mpsc::Sender<Page>,
         sitemaps: &mut Vec<Box<CompactString>>,
@@ -7969,7 +7947,7 @@ impl Website {
             let retry = self.configuration.retry;
 
             while let Some(entity) = stream.next().await {
-                if !self.handle_process(handle, &mut interval, async {}).await {
+                if !self.handle_process(handle, interval, async {}).await {
                     break;
                 }
                 match entity {
@@ -7998,7 +7976,7 @@ impl Website {
 
                                 crate::utils::spawn_task("page_fetch", async move {
                                     let mut page = Page::new_page_with_cache(
-                                        &link.inner(),
+                                        link.inner(),
                                         &client,
                                         cache_options.clone(),
                                         &cache_policy,
@@ -8033,7 +8011,7 @@ impl Website {
                     },
                     SiteMapEntity::SiteMap(sitemap_entry) => match sitemap_entry.loc {
                         Location::Url(url) => {
-                            sitemaps.push(Box::new(CompactString::new(&url.as_str())));
+                            sitemaps.push(Box::new(CompactString::new(url.as_str())));
                         }
                         Location::None | Location::ParseErr(_) => (),
                     },
@@ -8079,7 +8057,7 @@ impl Website {
         url_parsed: &Option<Box<Url>>,
         jar: Option<&Arc<crate::client::cookie::Jar>>,
     ) -> Option<crate::features::chrome::BrowserController> {
-        match crate::features::chrome::launch_browser_cookies(&config, url_parsed, jar).await {
+        match crate::features::chrome::launch_browser_cookies(config, url_parsed, jar).await {
             Some((browser, browser_handle, context_id)) => {
                 let browser: Arc<chromiumoxide::Browser> = Arc::new(browser);
                 let b = (browser, Some(browser_handle), context_id);
@@ -8989,7 +8967,7 @@ impl Website {
     ///     website.crawl().await;
     /// }
     /// ```
-    pub fn subscribe(&mut self, capacity: usize) -> Option<broadcast::Receiver<Page>> {
+    pub fn subscribe(&mut self, _capacity: usize) -> Option<broadcast::Receiver<Page>> {
         None
     }
 
@@ -9444,6 +9422,7 @@ pub struct ChannelGuard(Arc<(AtomicBool, AtomicUsize, AtomicUsize)>);
 
 impl ChannelGuard {
     /// Create a new channel guard. The tuple has the guard control and the counter.
+    #[cfg(feature = "sync")]
     pub(crate) fn new() -> ChannelGuard {
         ChannelGuard(Arc::new((
             AtomicBool::new(true),
@@ -9556,7 +9535,7 @@ async fn crawl() {
 #[cfg(feature = "cron")]
 async fn crawl_cron() {
     let url = "https://choosealicense.com";
-    let mut website: Website = Website::new(&url)
+    let mut website: Website = Website::new(url)
         .with_cron("1/5 * * * * *", Default::default())
         .build()
         .unwrap();
@@ -9590,7 +9569,7 @@ async fn crawl_cron() {
 #[cfg(feature = "cron")]
 async fn crawl_cron_own() {
     let url = "https://choosealicense.com";
-    let mut website: Website = Website::new(&url)
+    let mut website: Website = Website::new(url)
         .with_cron("1/5 * * * * *", Default::default())
         .build()
         .unwrap();
@@ -9683,7 +9662,7 @@ async fn not_crawl_blacklist_regex() {
 #[test]
 #[cfg(feature = "ua_generator")]
 fn randomize_website_agent() {
-    assert_eq!(get_ua(false).is_empty(), false);
+    assert!(!get_ua(false).is_empty());
 }
 
 #[tokio::test]
@@ -9894,7 +9873,7 @@ async fn test_crawl_pause_resume() {
     use crate::utils::{pause, resume};
 
     let domain = "https://choosealicense.com/";
-    let mut website: Website = Website::new(&domain);
+    let mut website: Website = Website::new(domain);
 
     let start = tokio::time::Instant::now();
 
@@ -9928,7 +9907,7 @@ async fn test_crawl_shutdown() {
 
     // use target blog to prevent shutdown of prior crawler
     let domain = "https://spider.cloud/";
-    let mut website: Website = Website::new(&domain);
+    let mut website: Website = Website::new(domain);
 
     tokio::spawn(async move {
         shutdown(domain).await;
@@ -10019,7 +9998,6 @@ async fn test_crawl_smart_uses_seeded_cache_with_skip_browser() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[cfg(not(feature = "decentralized"))]
     #[test]

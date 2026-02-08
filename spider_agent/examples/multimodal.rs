@@ -167,6 +167,7 @@ mod uuid {
             Self(bytes)
         }
 
+        #[allow(clippy::inherent_to_string)]
         pub fn to_string(&self) -> String {
             format!(
                 "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",

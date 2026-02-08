@@ -180,9 +180,6 @@ impl GeminiConfigs {
 #[cfg(feature = "gemini")]
 fn deserialize_gemini_configs() {
     let gemini_configs_json = r#"{"prompt":"change background blue","model":"gemini-flash-latest","max_tokens":256,"temperature":0.54,"top_p":0.17}"#;
-    let configs = match serde_json::from_str::<GeminiConfigs>(&gemini_configs_json) {
-        Ok(e) => Some(e),
-        _ => None,
-    };
+    let configs = serde_json::from_str::<GeminiConfigs>(gemini_configs_json).ok();
     assert!(configs.is_some())
 }

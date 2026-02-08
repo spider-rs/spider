@@ -433,7 +433,7 @@ pub async fn cf_handle(
         };
 
         // get the csp settings before hand
-        let _ = tokio::join!(page.disable_network_cache(true), page_navigate, perform_smart_mouse_movement(&page, &viewport));
+        let _ = tokio::join!(page.disable_network_cache(true), page_navigate, perform_smart_mouse_movement(page, viewport));
 
         for _ in 0..10 {
             let mut wait_for = CF_WAIT_FOR.clone();
@@ -452,7 +452,7 @@ pub async fn cf_handle(
                 )
                 .await
             {
-                perform_smart_mouse_movement(&page, &viewport).await;
+                perform_smart_mouse_movement(page, viewport).await;
                 for el in els {
                     let f = async {
                         match el.clickable_point().await {
@@ -462,7 +462,7 @@ pub async fn cf_handle(
                     };
 
                     let (did_click, _) =
-                        tokio::join!(f, perform_smart_mouse_movement(&page, &viewport));
+                        tokio::join!(f, perform_smart_mouse_movement(page, viewport));
 
                     if did_click {
                         clicks += 1;
@@ -473,8 +473,8 @@ pub async fn cf_handle(
                 hidden = true;
                 let wait = Some(wait_for.clone());
                 let _ = tokio::join!(
-                    page_wait(&page, &wait),
-                    perform_smart_mouse_movement(&page, &viewport)
+                    page_wait(page, &wait),
+                    perform_smart_mouse_movement(page, viewport)
                 );
             }
 
@@ -482,15 +482,15 @@ pub async fn cf_handle(
                 let f = page.evaluate(
                     r#"document.querySelectorAll("iframe,input")?.forEach(el => el.click());document.querySelector('.cf-turnstile')?.click();"#,
                 );
-                let _ = tokio::join!(f, perform_smart_mouse_movement(&page, &viewport));
+                let _ = tokio::join!(f, perform_smart_mouse_movement(page, viewport));
             }
 
             wait_for.page_navigations = true;
             let wait = Some(wait_for.clone());
 
             let _ = tokio::join!(
-                page_wait(&page, &wait),
-                perform_smart_mouse_movement(&page, &viewport),
+                page_wait(page, &wait),
+                perform_smart_mouse_movement(page, viewport),
             );
 
             if let Ok(mut next_content) = page.outer_html_bytes().await {
@@ -500,7 +500,7 @@ pub async fn cf_handle(
                         core::time::Duration::from_secs(4),
                     ))
                     .into();
-                    page_wait(&page, &Some(wait_for)).await;
+                    page_wait(page, &Some(wait_for)).await;
                     if let Ok(nc) = page.outer_html_bytes().await {
                         next_content = nc;
                     }
@@ -509,14 +509,14 @@ pub async fn cf_handle(
                         core::time::Duration::from_millis(3500),
                     ))
                     .into();
-                    page_wait(&page, &Some(wait_for.clone())).await;
+                    page_wait(page, &Some(wait_for.clone())).await;
 
                     if let Ok(nc) = page.outer_html_bytes().await {
                         next_content = nc;
                     }
                     if !detect_cf_turnstyle(&next_content) {
                         validated = true;
-                        page_wait(&page, &Some(wait_for)).await;
+                        page_wait(page, &Some(wait_for)).await;
                         if let Ok(nc) = page.outer_html_bytes().await {
                             next_content = nc;
                         }
@@ -604,7 +604,7 @@ fire(at(tx,ty)||el0,'mouseup',tx,ty);return true;}})()"#,
         // Disable cache + a little mouse‑movement jitter.
         let _ = tokio::join!(
             page.disable_network_cache(true),
-            perform_smart_mouse_movement(&page, &viewport)
+            perform_smart_mouse_movement(page, viewport)
         );
 
         for _ in 0..10 {
@@ -618,8 +618,8 @@ fire(at(tx,ty)||el0,'mouseup',tx,ty);return true;}})()"#,
                 Err(_) => {
                     let wait = Some(wait_for.clone());
                     let _ = tokio::join!(
-                        page_wait(&page, &wait),
-                        perform_smart_mouse_movement(&page, &viewport),
+                        page_wait(page, &wait),
+                        perform_smart_mouse_movement(page, viewport),
                     );
                     continue;
                 }
@@ -669,8 +669,8 @@ fire(at(tx,ty)||el0,'mouseup',tx,ty);return true;}})()"#,
 
                             let wait = Some(wait_for.clone());
                             let _ = tokio::join!(
-                                page_wait(&page, &wait),
-                                perform_smart_mouse_movement(&page, &viewport),
+                                page_wait(page, &wait),
+                                perform_smart_mouse_movement(page, viewport),
                             );
 
                             if let Ok(nc) = page.outer_html_bytes().await {
@@ -688,8 +688,8 @@ fire(at(tx,ty)||el0,'mouseup',tx,ty);return true;}})()"#,
                             .into();
                             let wait = Some(wait_for.clone());
                             let _ = tokio::join!(
-                                page_wait(&page, &wait),
-                                perform_smart_mouse_movement(&page, &viewport),
+                                page_wait(page, &wait),
+                                perform_smart_mouse_movement(page, viewport),
                             );
                         }
 
@@ -711,8 +711,8 @@ fire(at(tx,ty)||el0,'mouseup',tx,ty);return true;}})()"#,
 
                 let wait = Some(wait_for.clone());
                 let _ = tokio::join!(
-                    page_wait(&page, &wait),
-                    perform_smart_mouse_movement(&page, &viewport),
+                    page_wait(page, &wait),
+                    perform_smart_mouse_movement(page, viewport),
                 );
                 if let Ok(nc) = page.outer_html_bytes().await {
                     *b = nc;
@@ -740,8 +740,8 @@ fire(at(tx,ty)||el0,'mouseup',tx,ty);return true;}})()"#,
 
                 let wait = Some(wait_for.clone());
                 let _ = tokio::join!(
-                    page_wait(&page, &wait),
-                    perform_smart_mouse_movement(&page, &viewport),
+                    page_wait(page, &wait),
+                    perform_smart_mouse_movement(page, viewport),
                 );
 
                 if let Ok(nc) = page.outer_html_bytes().await {
@@ -808,7 +808,7 @@ fire(at(tx,ty)||el0,'mouseup',tx,ty);return true;}})()"#,
 
                                     // Small mouse‑move jitter before the drag.
                                     let _ = tokio::join!(
-                                        perform_smart_mouse_movement(&page, &viewport),
+                                        perform_smart_mouse_movement(page, viewport),
                                         async {
                                             let _ = page.move_mouse(from).await;
                                         }
@@ -885,8 +885,8 @@ fire(at(tx,ty)||el0,'mouseup',tx,ty);return true;}})()"#,
 
                 let wait = Some(wait_for.clone());
                 let _ = tokio::join!(
-                    page_wait(&page, &wait),
-                    perform_smart_mouse_movement(&page, &viewport),
+                    page_wait(page, &wait),
+                    perform_smart_mouse_movement(page, viewport),
                 );
 
                 if let Ok(nc) = page.outer_html_bytes().await {
@@ -915,8 +915,8 @@ fire(at(tx,ty)||el0,'mouseup',tx,ty);return true;}})()"#,
 
             let wait = Some(wait_for.clone());
             let _ = tokio::join!(
-                page_wait(&page, &wait),
-                perform_smart_mouse_movement(&page, &viewport),
+                page_wait(page, &wait),
+                perform_smart_mouse_movement(page, viewport),
             );
 
             if let Ok(nc) = page.outer_html_bytes().await {
@@ -1248,7 +1248,7 @@ pub async fn recaptcha_handle(
             // ---------------------------------------------------------
             // c) **Enterprise** handling – now solved with the built‑in Gemini.
             // ---------------------------------------------------------
-            if let Some(_) = extract_rc_enterprise_challenge(b.as_slice()) {
+            if extract_rc_enterprise_challenge(b.as_slice()).is_some() {
                 // 1️⃣  Ensure the anchor iframe exists (first click).
                 let anchor_present = page
                     .find_elements_pierced(r#"iframe[src*="/recaptcha/api2/anchor"]"#)
@@ -1271,8 +1271,8 @@ pub async fn recaptcha_handle(
                     wait_for.page_navigations = true;
                     let wait = Some(wait_for.clone());
                     let _ = tokio::join!(
-                        page_wait(&page, &wait),
-                        perform_smart_mouse_movement(&page, viewport),
+                        page_wait(page, &wait),
+                        perform_smart_mouse_movement(page, viewport),
                     );
                     continue; // retry outer loop
                 }
@@ -1319,8 +1319,8 @@ pub async fn recaptcha_handle(
                 wait_for.page_navigations = true;
                 let wait = Some(wait_for.clone());
                 let _ = tokio::join!(
-                    page_wait(&page, &wait),
-                    perform_smart_mouse_movement(&page, viewport),
+                    page_wait(page, &wait),
+                    perform_smart_mouse_movement(page, viewport),
                 );
 
                 // ---------------------------------------------------------
@@ -1399,8 +1399,8 @@ pub async fn recaptcha_handle(
                 wait_for.page_navigations = true;
                 let wait = Some(wait_for.clone());
                 let _ = tokio::join!(
-                    page_wait(&page, &wait),
-                    perform_smart_mouse_movement(&page, viewport),
+                    page_wait(page, &wait),
+                    perform_smart_mouse_movement(page, viewport),
                 );
 
                 // ---------------------------------------------------------
@@ -1437,8 +1437,8 @@ pub async fn recaptcha_handle(
                 wait_for.page_navigations = true;
                 let wait = Some(wait_for.clone());
                 let _ = tokio::join!(
-                    page_wait(&page, &wait),
-                    perform_smart_mouse_movement(&page, viewport),
+                    page_wait(page, &wait),
+                    perform_smart_mouse_movement(page, viewport),
                 );
                 continue;
             }
@@ -1481,8 +1481,8 @@ pub async fn recaptcha_handle(
             wait_for.page_navigations = true;
             let wait = Some(wait_for.clone());
             let _ = tokio::join!(
-                page_wait(&page, &wait),
-                perform_smart_mouse_movement(&page, viewport),
+                page_wait(page, &wait),
+                perform_smart_mouse_movement(page, viewport),
             );
 
             if let Ok(new_html) = page.outer_html_bytes().await {
@@ -1522,7 +1522,7 @@ pub async fn solve_lemin_with_external_gemini(image_dataurl: &str, timeout_ms: u
     /* ----------------------------------------------------------------- *
      * 3️⃣  Decode the `data:` URL into raw PNG bytes.
      * ----------------------------------------------------------------- */
-    let b64_part = match image_dataurl.splitn(2, ',').nth(1) {
+    let b64_part = match image_dataurl.split_once(',').map(|x| x.1) {
         Some(p) => p.trim(),
         None => return (0.0, 0.0),
     };
@@ -1984,7 +1984,7 @@ fn find_quote_end(h: &[u8], start: usize) -> Option<usize> {
 #[inline(always)]
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
 fn is_digit(b: u8) -> bool {
-    (b'0'..=b'9').contains(&b)
+    b.is_ascii_digit()
 }
 
 /// Convert a single ASCII digit to `u8`. Returns `None` for non‑digits.

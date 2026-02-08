@@ -72,7 +72,7 @@ impl ChainStep {
 }
 
 /// Condition for conditional execution in action chains.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub enum ChainCondition {
     /// Execute if URL contains this string.
     UrlContains(String),
@@ -87,6 +87,7 @@ pub enum ChainCondition {
     /// Execute if previous step failed.
     PreviousFailed,
     /// Always execute (default).
+    #[default]
     Always,
     /// Never execute (skip).
     Never,
@@ -98,9 +99,11 @@ pub enum ChainCondition {
     Not(Box<ChainCondition>),
 }
 
-impl Default for ChainCondition {
-    fn default() -> Self {
-        Self::Always
+impl std::ops::Not for ChainCondition {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        Self::Not(Box::new(self))
     }
 }
 
@@ -121,8 +124,9 @@ impl ChainCondition {
     }
 
     /// Negate this condition.
+    #[allow(clippy::should_implement_trait)]
     pub fn not(self) -> Self {
-        Self::Not(Box::new(self))
+        std::ops::Not::not(self)
     }
 
     /// Combine with AND.

@@ -37,9 +37,8 @@ pub fn bench_speed(c: &mut Criterion) {
     });
 
     drop(rt);
-    match worker.take() {
-        Some(mut worker) => worker.kill().expect("spider_worker wasn't running"),
-        _ => (),
+    if let Some(mut worker) = worker.take() {
+        worker.kill().expect("spider_worker wasn't running");
     };
     drop(worker);
 

@@ -16,7 +16,7 @@ pub fn setup_default_headers(
 
     if let Some(referer) = &configuration.referer {
         if !referer.is_empty() {
-            if let Ok(hv) = HeaderValue::from_str(&referer) {
+            if let Ok(hv) = HeaderValue::from_str(referer) {
                 headers.insert(REFERER, hv);
             }
         }

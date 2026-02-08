@@ -270,6 +270,7 @@ impl RemoteMultimodalEngine {
     /// Resolve per-URL runtime settings from prompt URL gate.
     ///
     /// Returns `None` when the URL is blocked by the gate.
+    #[allow(clippy::type_complexity)]
     fn resolve_runtime_for_url(
         &self,
         url: &str,
@@ -1503,9 +1504,11 @@ mod tests {
 
     #[test]
     fn test_engine_system_prompt_with_extraction() {
-        let mut cfg = RemoteMultimodalConfig::default();
-        cfg.extra_ai_data = true;
-        cfg.extraction_schema = Some(ExtractionSchema::new("products", r#"{"type":"array"}"#));
+        let cfg = RemoteMultimodalConfig {
+            extra_ai_data: true,
+            extraction_schema: Some(ExtractionSchema::new("products", r#"{"type":"array"}"#)),
+            ..Default::default()
+        };
 
         let engine = RemoteMultimodalEngine::new(
             "https://api.openai.com/v1/chat/completions",
@@ -1572,8 +1575,10 @@ mod tests {
         )
         .with_api_key(Some("sk-test"));
 
-        let mut new_cfg = RemoteMultimodalConfig::default();
-        new_cfg.max_rounds = 10;
+        let new_cfg = RemoteMultimodalConfig {
+            max_rounds: 10,
+            ..Default::default()
+        };
 
         let cloned = engine.clone_with_cfg(new_cfg);
         assert_eq!(cloned.api_key, Some("sk-test".to_string()));
@@ -1676,8 +1681,10 @@ mod tests {
     #[test]
     fn test_engine_system_prompt_multi_round_extraction_uses_default() {
         // extra_ai_data=true but max_rounds=6 → NOT extraction-only
-        let mut cfg = RemoteMultimodalConfig::default();
-        cfg.extra_ai_data = true;
+        let cfg = RemoteMultimodalConfig {
+            extra_ai_data: true,
+            ..Default::default()
+        };
         assert!(!cfg.is_extraction_only());
 
         let engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);

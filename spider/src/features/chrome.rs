@@ -1,5 +1,3 @@
-#[cfg(all(feature = "cookies", feature = "wreq"))]
-use crate::client::cookie::CookieStore as _;
 use crate::features::chrome_args::CHROME_ARGS;
 use crate::utils::{detect_chrome::get_detect_chrome_executable, log};
 use crate::{configuration::Configuration, tokio_stream::StreamExt};
@@ -432,7 +430,7 @@ pub async fn setup_browser_configuration(
             // experiencing shutdowns or degradation. This logic implements a retry
             // mechanism to improve robustness by allowing multiple attempts to establish.
             while attempts <= max_retries {
-                match Browser::connect_with_config(&*v, create_handler_config(&config)).await {
+                match Browser::connect_with_config(v, create_handler_config(config)).await {
                     Ok(b) => {
                         browser = Some(b);
                         break;
@@ -451,7 +449,7 @@ pub async fn setup_browser_configuration(
             browser
         }
         _ => match get_browser_config(
-            &proxies,
+            proxies,
             config.chrome_intercept.enabled,
             config.cache,
             match config.viewport {
@@ -493,10 +491,7 @@ pub async fn setup_browser_configuration(
                 browser_config.intercept_manager = config.chrome_intercept.intercept_manager;
                 browser_config.only_html = config.only_html && !config.full_resources;
 
-                match Browser::launch(browser_config).await {
-                    Ok(browser) => Some(browser),
-                    _ => None,
-                }
+                (Browser::launch(browser_config).await).ok()
             }
             _ => None,
         },
@@ -517,7 +512,7 @@ pub async fn launch_browser_base(
         cdp::browser_protocol::target::CreateBrowserContextParams, error::CdpError,
     };
 
-    let browser_configuration = setup_browser_configuration(&config).await;
+    let browser_configuration = setup_browser_configuration(config).await;
 
     match browser_configuration {
         Some(c) => {
@@ -561,7 +556,7 @@ pub async fn launch_browser_base(
                         // pick the socks:// proxy over http if found.
                         if proxie.starts_with("socks://") {
                             create_content.proxy_server =
-                                Some(proxie.replacen("socks://", "http://", 1).into());
+                                Some(proxie.replacen("socks://", "http://", 1));
                             // pref this connection
                             if use_plain_http {
                                 break;
@@ -582,8 +577,8 @@ pub async fn launch_browser_base(
             if let Ok(c) = browser.create_browser_context(create_content).await {
                 let _ = browser.send_new_context(c.clone()).await;
                 let _ = context_id.insert(c);
-                if let Some(jar) = jar.as_deref() {
-                    set_cookies(jar, &config, &url_parsed, &browser).await;
+                if let Some(jar) = jar {
+                    set_cookies(jar, config, url_parsed, &browser).await;
                 }
                 if let Some(id) = &browser.browser_context.id {
                     let cmd = SetDownloadBehaviorParamsBuilder::default();
@@ -629,7 +624,7 @@ pub async fn launch_browser_cookies(
     tokio::task::JoinHandle<()>,
     Option<BrowserContextId>,
 )> {
-    launch_browser_base(config, url_parsed, jar.as_deref()).await
+    launch_browser_base(config, url_parsed, jar).await
 }
 
 /// Represents IP-based geolocation and network metadata.
@@ -734,7 +729,7 @@ pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
 
     // get the locale of the proxy.
     if configuration.auto_geolocation && configuration.proxies.is_some() && !timezone && !locale {
-        if let Some(geo) = detect_geo_info(&new_page).await {
+        if let Some(geo) = detect_geo_info(new_page).await {
             if let Some(languages) = geo.languages {
                 if let Some(locale_v) = languages.split(',').next() {
                     if !locale_v.is_empty() {
@@ -887,7 +882,7 @@ pub async fn close_browser(
 }
 
 /// Setup interception for auth challenges. This does nothing without the 'chrome_intercept' flag.
-#[cfg(all(feature = "chrome"))]
+#[cfg(feature = "chrome")]
 pub async fn setup_auth_challenge_response(
     page: &chromiumoxide::Page,
     chrome_intercept: bool,
@@ -919,7 +914,7 @@ pub async fn setup_auth_challenge_response(
                                 }
                             }
                             _ => {
-                                log("Failed to get auth challege request handle ", &u);
+                                log("Failed to get auth challege request handle ", u);
                             }
                         }
                     }
@@ -930,7 +925,7 @@ pub async fn setup_auth_challenge_response(
 }
 
 /// Setup interception for chrome request. This does nothing without the 'chrome_intercept' flag.
-#[cfg(all(feature = "chrome"))]
+#[cfg(feature = "chrome")]
 pub async fn setup_chrome_interception_base(
     page: &chromiumoxide::Page,
     chrome_intercept: bool,
@@ -948,7 +943,7 @@ pub async fn setup_chrome_interception_base(
 pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Configuration) {
     let ua_opt = config.user_agent.as_deref().filter(|ua| !ua.is_empty());
 
-    let ua_for_profiles: &str = ua_opt.as_deref().map_or("", |v| v);
+    let ua_for_profiles: &str = ua_opt.map_or("", |v| v);
 
     let mut emulation_config =
         spider_fingerprint::EmulationConfiguration::setup_defaults(ua_for_profiles);
@@ -973,7 +968,7 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
         &emulation_config,
         &viewport.as_ref(),
         &config.evaluate_on_new_document,
-        &gpu_profile,
+        gpu_profile,
     );
 
     let should_inject_script =
@@ -1047,7 +1042,7 @@ pub(crate) type BrowserControl = (
 );
 
 /// Once cell browser
-#[cfg(feature = "smart")]
+#[cfg(all(feature = "smart", not(feature = "decentralized")))]
 pub(crate) type OnceBrowser = tokio::sync::OnceCell<Option<BrowserController>>;
 
 /// Create the browser controller to auto drop connections.

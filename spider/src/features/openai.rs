@@ -72,11 +72,10 @@ pub fn calculate_max_tokens(
             },
         ]
     };
-    let max_tokens = match get_chat_completion_max_tokens(&model_name, &messages) {
+
+    match get_chat_completion_max_tokens(model_name, &messages) {
         Ok(r) => r,
         _ => max_tokens.into(),
     }
-    .min(max_tokens.into());
-
-    max_tokens
+    .min(max_tokens.into())
 }
