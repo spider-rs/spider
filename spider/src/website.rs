@@ -10014,10 +10014,7 @@ async fn test_crawl_smart_uses_seeded_cache_with_skip_browser() {
         "expected smart crawl to visit the cached target"
     );
 
-    eprintln!(
-        "crawl_smart cached latency: {}ms",
-        elapsed.as_millis()
-    );
+    eprintln!("crawl_smart cached latency: {}ms", elapsed.as_millis());
 }
 
 #[cfg(test)]

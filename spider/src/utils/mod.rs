@@ -21,7 +21,7 @@ pub mod trie;
 /// Validate html false positives.
 pub mod validation;
 
-#[cfg(all(not(feature = "fs"), feature = "chrome"))]
+#[cfg(feature = "chrome")]
 use crate::features::automation::RemoteMultimodalConfigs;
 use crate::{
     page::{AntiBotTech, Metadata, STREAMING_CHUNK_SIZE},
@@ -1490,12 +1490,13 @@ pub async fn cache_chrome_response(
     target_url: &str,
     page_response: &PageResponse,
     chrome_http_req_res: ChromeHTTPReqRes,
+    cache_options: &Option<CacheOptions>,
 ) {
     if let Ok(u) = url::Url::parse(target_url) {
         let http_response = HttpResponse {
             url: u,
             body: match page_response.content.as_ref() {
-                Some(b) => b.into(),
+                Some(b) => b.to_vec(),
                 _ => Default::default(),
             },
             status: chrome_http_req_res.status_code.into(),
@@ -1518,7 +1519,7 @@ pub async fn cache_chrome_response(
         let cache_key = create_cache_key_raw(
             target_url,
             Some(&chrome_http_req_res.method),
-            auth_opt.as_deref(),
+            auth_opt.map(|token| token.as_ref()),
         );
 
         put_hybrid_cache(
@@ -1571,7 +1572,7 @@ pub async fn cache_chrome_response(
         let cache_key = create_cache_key_raw(
             target_url,
             Some(&chrome_http_req_res.method),
-            auth_opt.as_deref().map(|x| x.as_str()),
+            auth_opt.map(|token| token.as_ref()),
         );
         put_hybrid_cache(
             &cache_key,
@@ -4011,7 +4012,15 @@ pub async fn fetch_page_html_spider_cloud(
         .header("Authorization", format!("Bearer {}", config.api_key))
         .header("Content-Type", "application/json")
         .header("User-Agent", concat!("spider/", env!("CARGO_PKG_VERSION")))
-        .json(&body)
+        .body(match serde_json::to_vec(&body) {
+            Ok(payload) => payload,
+            Err(_) => {
+                return PageResponse {
+                    status_code: StatusCode::BAD_REQUEST,
+                    ..Default::default()
+                };
+            }
+        })
         .send()
         .await;
 
@@ -4138,7 +4147,7 @@ pub async fn fetch_page_and_headers(target_url: &str, client: &Client) -> FetchP
         Ok(res) if valid_parsing_status(&res) => {
             let headers = res.headers().clone();
             let b = match res.bytes().await {
-                Ok(text) => Some(text),
+                Ok(text) => Some(text.to_vec()),
                 Err(_) => {
                     log("- error fetching {}", &target_url);
                     None
@@ -4373,7 +4382,9 @@ pub async fn fetch_page_html(
                 cache_options,
                 cache_policy,
                 &None,
+                &None,
                 jar,
+                &None,
             )
             .await
             {
@@ -4389,6 +4400,8 @@ pub async fn fetch_page_html(
                             let headers = res.headers().clone();
                             let cookies = get_cookies(&res);
                             let status_code = res.status();
+                            #[cfg(feature = "remote_addr")]
+                            let remote_addr = res.remote_addr();
                             let mut stream = res.bytes_stream();
                             let mut data = Vec::new();
 
@@ -4447,7 +4460,7 @@ pub async fn fetch_page_html(
                                 #[cfg(feature = "headers")]
                                 headers: Some(headers),
                                 #[cfg(feature = "remote_addr")]
-                                remote_addr: res.remote_addr(),
+                                remote_addr,
                                 #[cfg(feature = "cookies")]
                                 cookies,
                                 content: Some(if file.is_some() {

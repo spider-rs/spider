@@ -19,12 +19,7 @@ use lol_html::AsciiCompatibleEncoding;
 use phf::phf_set;
 use regex::bytes::Regex;
 use reqwest::StatusCode;
-use tokio::time::Duration;
-
-#[cfg(all(feature = "time", not(feature = "decentralized")))]
-use tokio::time::Instant;
-#[cfg(all(not(feature = "time"), not(feature = "decentralized")))]
-use tokio::time::Instant;
+use tokio::time::{Duration, Instant};
 
 #[cfg(all(feature = "decentralized", feature = "headers"))]
 use crate::utils::FetchPageResult;
@@ -590,8 +585,15 @@ pub struct Page {
 pub struct Page {
     /// The bytes of the resource.
     html: Option<Box<Vec<u8>>>,
+    /// Base absolute url for page.
+    pub(crate) base: Option<Url>,
+    /// The raw url for the page. Useful since Url::parse adds a trailing slash.
+    pub(crate) url: String,
     /// The headers of the page request response.
     pub headers: Option<reqwest::header::HeaderMap>,
+    #[cfg(feature = "remote_addr")]
+    /// The remote address of the page.
+    pub remote_addr: Option<core::net::SocketAddr>,
     #[cfg(feature = "cookies")]
     /// The cookies of the page request response.
     pub cookies: Option<reqwest::header::HeaderMap>,
@@ -605,6 +607,9 @@ pub struct Page {
     pub external_domains_caseless: Box<HashSet<CaseInsensitiveString>>,
     /// The final destination of the page if redirects were performed [Unused].
     pub final_redirect_destination: Option<String>,
+    #[cfg(feature = "time")]
+    /// The duration from start of parsing to end of gathering links.
+    duration: Option<Instant>,
     #[cfg(feature = "chrome")]
     /// The screenshot bytes of the page.
     pub screenshot_bytes: Option<Vec<u8>>,
@@ -634,10 +639,18 @@ pub struct Page {
     pub should_retry: bool,
     /// A WAF was found on the page.
     pub waf_check: bool,
+    /// The total byte transferred for the page. Mainly used for chrome events.
+    pub bytes_transferred: Option<f64>,
     /// The page was blocked from crawling usual from using website::on_should_crawl_callback.
     pub blocked_crawl: bool,
     /// The signature of the page to de-duplicate content.
     pub signature: Option<u64>,
+    #[cfg(feature = "chrome")]
+    /// All of the response events mapped with the amount of bytes used.
+    pub response_map: Option<hashbrown::HashMap<String, f64>>,
+    #[cfg(feature = "chrome")]
+    /// All of the request events mapped with the time period of the event sent.
+    pub request_map: Option<hashbrown::HashMap<String, f64>>,
     /// The anti-bot tech used.
     pub anti_bot_tech: AntiBotTech,
     /// Page metadata.
@@ -2340,12 +2353,11 @@ impl Page {
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all,))]
     pub async fn new(url: &str, client: &Client) -> Self {
         use crate::serde::Deserialize;
-        use bytes::Buf;
 
         match crate::utils::fetch_page_and_headers(&url, &client).await {
             FetchPageResult::Success(headers, page_content) => {
                 let links = match page_content {
-                    Some(b) => match flexbuffers::Reader::get_root(b) {
+                    Some(b) => match flexbuffers::Reader::get_root(b.as_slice()) {
                         Ok(buf) => match HashSet::<CaseInsensitiveString>::deserialize(buf) {
                             Ok(link) => link,
                             _ => Default::default(),
@@ -2690,7 +2702,7 @@ impl Page {
     #[cfg(feature = "decentralized")]
     /// URL getter for page.
     pub fn get_url(&self) -> &str {
-        ""
+        &self.url
     }
 
     /// Html getter for bytes on the page.
@@ -2786,6 +2798,29 @@ impl Page {
 
     /// Get the elasped duration of the page since scraped.
     #[cfg(all(feature = "time", not(feature = "decentralized")))]
+    pub fn get_duration_elapsed(&self) -> Duration {
+        self.duration
+            .as_ref()
+            .map(|t| t.elapsed())
+            .unwrap_or_default()
+    }
+
+    /// Set the elapsed duration of the page since scraped from duration.
+    #[inline]
+    #[cfg(all(feature = "time", feature = "decentralized"))]
+    pub fn set_duration_elapsed(&mut self, scraped_at: Option<Instant>) {
+        self.duration = scraped_at;
+    }
+
+    /// Set the elapsed duration of the page since scraped from duration.
+    #[inline]
+    #[cfg(all(feature = "time", feature = "decentralized"))]
+    pub fn set_duration_elapsed_from_duration(&mut self, elapsed: Option<std::time::Duration>) {
+        self.duration = elapsed.map(|d| Instant::now().checked_sub(d).unwrap_or_else(Instant::now));
+    }
+
+    /// Get the elapsed duration of the page since scraped.
+    #[cfg(all(feature = "time", feature = "decentralized"))]
     pub fn get_duration_elapsed(&self) -> Duration {
         self.duration
             .as_ref()
@@ -4388,7 +4423,11 @@ impl Page {
     /// Find all href links and return them using CSS selectors.
     #[cfg(feature = "decentralized")]
     #[inline(always)]
-    pub async fn links(&self, _: &RelativeSelectors) -> HashSet<CaseInsensitiveString> {
+    pub async fn links(
+        &self,
+        _: &RelativeSelectors,
+        _: &Option<Box<Url>>,
+    ) -> HashSet<CaseInsensitiveString> {
         self.links.to_owned()
     }
 }

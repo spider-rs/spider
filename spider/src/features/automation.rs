@@ -1151,15 +1151,9 @@ mod tests {
         let filtered = prefilter_urls(&cfgs, &urls).await;
 
         assert_eq!(filtered.len(), 2);
-        assert!(filtered.contains(&CaseInsensitiveString::from(
-            "https://a.example.com/p/1"
-        )));
-        assert!(filtered.contains(&CaseInsensitiveString::from(
-            "https://c.example.com/p/3"
-        )));
-        assert!(!filtered.contains(&CaseInsensitiveString::from(
-            "https://b.example.com/p/2"
-        )));
+        assert!(filtered.contains(&CaseInsensitiveString::from("https://a.example.com/p/1")));
+        assert!(filtered.contains(&CaseInsensitiveString::from("https://c.example.com/p/3")));
+        assert!(!filtered.contains(&CaseInsensitiveString::from("https://b.example.com/p/2")));
     }
 
     #[cfg(all(feature = "agent", feature = "serde"))]

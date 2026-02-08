@@ -23,26 +23,21 @@ use string_interner::symbol::SymbolUsize;
 ))]
 use string_interner::StringInterner;
 
-#[cfg(all(
-    feature = "string_interner_bucket_backend",
-    not(feature = "string_interner_string_backend"),
-    not(feature = "string_interner_buffer_backend"),
-))]
-type Backend = string_interner::backend::BucketBackend<SymbolUsize>;
+#[cfg(feature = "string_interner_buffer_backend")]
+type Backend = string_interner::backend::BufferBackend<SymbolUsize>;
 
 #[cfg(all(
-    feature = "string_interner_string_backend",
-    not(feature = "string_interner_bucket_backend"),
     not(feature = "string_interner_buffer_backend"),
+    feature = "string_interner_string_backend",
 ))]
 type Backend = string_interner::backend::StringBackend<SymbolUsize>;
 
 #[cfg(all(
-    feature = "string_interner_buffer_backend",
-    not(feature = "string_interner_bucket_backend"),
+    not(feature = "string_interner_buffer_backend"),
     not(feature = "string_interner_string_backend"),
+    feature = "string_interner_bucket_backend",
 ))]
-type Backend = string_interner::backend::BufferBackend<SymbolUsize>;
+type Backend = string_interner::backend::BucketBackend<SymbolUsize>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg(any(

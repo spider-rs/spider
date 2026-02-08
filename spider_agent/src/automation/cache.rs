@@ -478,8 +478,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_smart_cache_concurrent_eviction_stays_bounded() {
-        let cache: Arc<SmartCache<String>> =
-            Arc::new(SmartCache::with_limits(64, 64 * 1024, Duration::from_secs(120)));
+        let cache: Arc<SmartCache<String>> = Arc::new(SmartCache::with_limits(
+            64,
+            64 * 1024,
+            Duration::from_secs(120),
+        ));
 
         let mut tasks = tokio::task::JoinSet::new();
         for worker in 0..24usize {
