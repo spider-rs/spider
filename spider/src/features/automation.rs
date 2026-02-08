@@ -260,6 +260,9 @@ pub struct RemoteMultimodalConfigs {
     pub api_key: Option<String>,
     /// Model name.
     pub model_name: String,
+    /// Use Chrome built-in AI (Gemini Nano) instead of a remote API.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub use_chrome_ai: bool,
 }
 
 #[cfg(not(feature = "agent"))]
@@ -277,6 +280,11 @@ impl RemoteMultimodalConfigs {
     pub fn with_api_key(mut self, api_key: Option<impl Into<String>>) -> Self {
         self.api_key = api_key.map(|k| k.into());
         self
+    }
+
+    /// Whether to use Chrome built-in AI (Gemini Nano) for inference.
+    pub fn should_use_chrome_ai(&self) -> bool {
+        self.use_chrome_ai || (self.api_url.is_empty() && self.api_key.is_none())
     }
 }
 
