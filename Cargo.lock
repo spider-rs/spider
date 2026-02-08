@@ -1121,8 +1121,8 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.44.38",
- "spider_utils 2.44.38",
+ "spider 2.44.39",
+ "spider_utils 2.44.39",
 ]
 
 [[package]]
@@ -7698,7 +7698,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.44.38"
+version = "2.44.39"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -7774,7 +7774,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent"
-version = "2.44.38"
+version = "2.44.39"
 dependencies = [
  "aho-corasick",
  "async-openai 0.29.6",
@@ -7844,7 +7844,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.44.38"
+version = "2.44.39"
 dependencies = [
  "clap",
  "env_logger",
@@ -7852,7 +7852,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.44.38",
+ "spider 2.44.39",
  "tikv-jemallocator",
  "tokio",
  "unicode-normalization",
@@ -7868,7 +7868,7 @@ dependencies = [
  "flexbuffers",
  "htr",
  "serde_json",
- "spider 2.44.38",
+ "spider 2.44.39",
  "spider_transformations",
  "spider_utils 2.44.36",
 ]
@@ -7943,9 +7943,9 @@ dependencies = [
 
 [[package]]
 name = "spider_skills"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa0cffd62d1168e4290d61fb6132037ee9a6db506bfb5d6f690c447af49ed077"
+checksum = "e8d89b6f84175f3388899aef3fde8def5d7d037e6cf652b93db6a1e6ba425bf3"
 dependencies = [
  "log",
  "serde",
@@ -7995,7 +7995,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.44.38"
+version = "2.44.39"
 dependencies = [
  "hashbrown 0.15.5",
  "indexmap 1.9.3",
@@ -8011,11 +8011,11 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.44.38"
+version = "2.44.39"
 dependencies = [
  "env_logger",
  "lazy_static",
- "spider 2.44.38",
+ "spider 2.44.39",
  "warp",
 ]
 
