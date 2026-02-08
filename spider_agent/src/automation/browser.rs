@@ -862,6 +862,61 @@ impl RemoteMultimodalEngine {
                                 }
                             }
 
+                            // WAM: Whack-a-Mole engine loop — repeatedly detect and click moles
+                            // since they appear/disappear too fast for LLM round-trips.
+                            if new_title.starts_with("WAM:") {
+                                let wam_js: Option<&str> = pre_evals.iter()
+                                    .find(|(name, _)| *name == "whack-a-mole")
+                                    .map(|(_, js)| *js);
+                                if let Some(wam_js) = wam_js {
+                                    let mut total_hits = 0u32;
+                                    // Run up to 20 iterations over ~10 seconds
+                                    for _wam_step in 0..20 {
+                                        if let Some(json_str) = title_now.strip_prefix("WAM:") {
+                                            if let Ok(data) = serde_json::from_str::<serde_json::Value>(json_str) {
+                                                let clicked = data.get("clicked").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                                                total_hits += clicked;
+                                            }
+                                        }
+                                        if total_hits >= 5 { break; }
+                                        // Wait for new moles to appear
+                                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                        // Re-run pre_evaluate to detect and click new moles
+                                        let _ = page.evaluate(wam_js).await;
+                                        let updated = self.title_context(page, &effective_cfg).await;
+                                        if !updated.is_empty() {
+                                            title_now = updated;
+                                        }
+                                    }
+                                    if total_hits >= 5 {
+                                        log::info!("WAM: engine hit {} moles, clicking verify", total_hits);
+                                        // Mark done to prevent re-running
+                                        let done_title = format!("WAM_DONE:{{\"hits\":{}}}", total_hits);
+                                        let marker_js = format!(
+                                            "document.title={t};if(!document.getElementById('wam-engine-done')){{var d=document.createElement('div');d.id='wam-engine-done';d.style.display='none';d.dataset.t={t};document.body.appendChild(d);}}",
+                                            t = serde_json::to_string(&done_title).unwrap_or_default()
+                                        );
+                                        let _ = page.evaluate(marker_js).await;
+                                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                        let verify_js = r#"(function(){
+                                            var btn=document.querySelector('#captcha-verify-button,button.captcha-verify,.verify-button,[class*=verify]');
+                                            if(btn){var r=btn.getBoundingClientRect();
+                                            var ev={bubbles:true,cancelable:true,clientX:r.x+r.width/2,clientY:r.y+r.height/2};
+                                            btn.dispatchEvent(new PointerEvent('pointerdown',ev));
+                                            btn.dispatchEvent(new MouseEvent('mousedown',ev));
+                                            btn.dispatchEvent(new PointerEvent('pointerup',ev));
+                                            btn.dispatchEvent(new MouseEvent('mouseup',ev));
+                                            btn.dispatchEvent(new MouseEvent('click',ev));
+                                            return 'clicked';}return 'not_found';})()
+                                        "#;
+                                        let _ = page.evaluate(verify_js).await;
+                                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                                        let post = self.title_context(page, &effective_cfg).await;
+                                        if !post.is_empty() { title_now = post; }
+                                    }
+                                }
+                            }
+
                             // WS_DRAG: engine clicks each word-search cell individually via CDP.
                             // Each cell gets a full click (move→press→release) for reliable
                             // click-to-select behavior, then engine clicks verify.
@@ -2152,12 +2207,18 @@ impl RemoteMultimodalEngine {
             Self::apply_text_only_prompt_flavor(&mut system_msg, false);
         }
 
+        // When stuck for 5+ rounds, destroy the LM session so the model
+        // restarts with a fresh system prompt. Prevents infinite loops.
+        if action_stuck_rounds >= 5 {
+            Self::invalidate_chrome_ai_session(page).await;
+        }
+
         // ── Probe interactive elements for small-model guidance ──
         // Annotates visible interactive elements with `data-spider-idx` attributes
         // and returns a numbered list. The model clicks by index (e.g. [0], [1])
         // instead of guessing CSS selectors — much more reliable for small models.
         let interactive_hint = {
-            let probe_js = r#"(()=>{try{document.querySelectorAll('[data-spider-idx]').forEach(el=>el.removeAttribute('data-spider-idx'));const els=document.querySelectorAll('button,input,select,textarea,[role="button"],[role="checkbox"],[role="link"],[onclick],a');const items=[];let idx=0;for(let i=0;i<els.length&&idx<15;i++){const el=els[i];const r=el.getBoundingClientRect();if(r.width<1||r.height<1)continue;if(el.closest('footer,nav,.footer,.nav,.site-footer'))continue;const tag=el.tagName.toLowerCase();const ty=el.getAttribute('type')||'';const role=el.getAttribute('role')||'';const txt=(el.textContent||el.getAttribute('aria-label')||el.getAttribute('placeholder')||'').trim().replace(/\s+/g,' ').slice(0,40);el.setAttribute('data-spider-idx',String(idx));const desc=role||ty||(tag==='a'?'link':tag);items.push('['+idx+'] '+desc+(txt?' "'+txt.replace(/"/g,"'")+'"':''));idx++;}return items.join('\n');}catch(e){return'';}})();"#;
+            let probe_js = r#"(()=>{try{document.querySelectorAll('[data-spider-idx]').forEach(el=>el.removeAttribute('data-spider-idx'));const seen=new Set();const items=[];let idx=0;function add(el,skipEmptyLinks){if(idx>=15||seen.has(el))return;const r=el.getBoundingClientRect();if(r.width<1||r.height<1)return;if(el.closest('footer,nav,.footer,.nav,.site-footer,.site-header,header'))return;seen.add(el);const tag=el.tagName.toLowerCase();const ty=el.getAttribute('type')||'';const role=el.getAttribute('role')||'';const txt=(el.textContent||el.getAttribute('aria-label')||el.getAttribute('placeholder')||'').trim().replace(/\s+/g,' ').slice(0,40);if(tag==='a'){if(!txt||skipEmptyLinks)return;const h=el.getAttribute('href')||'';if(h&&!h.startsWith('#')&&!h.startsWith('javascript')&&new URL(h,location.href).pathname!==location.pathname)return;}el.setAttribute('data-spider-idx',String(idx));const desc=role||ty||(tag==='a'?'link':tag);items.push('['+idx+'] '+desc+(txt?' "'+txt.replace(/"/g,"'")+'"':''));idx++;}const hi=document.querySelectorAll('button,input,select,textarea,label,[role="button"],[role="checkbox"],[role="link"],[onclick]');for(const el of hi)add(el,false);const links=document.querySelectorAll('a');for(const el of links)add(el,true);const all=document.querySelectorAll('div,span,li');for(const el of all){if(idx>=15)break;if(seen.has(el))continue;try{if(getComputedStyle(el).cursor==='pointer'){add(el,false);}}catch(e){}}return items.join('\n');}catch(e){return'';}})();"#;
             match page
                 .evaluate(
                     EvaluateParams::builder()
@@ -2174,6 +2235,10 @@ impl RemoteMultimodalEngine {
                 Err(_) => String::new(),
             }
         };
+
+        if !interactive_hint.is_empty() {
+            log::debug!("Chrome AI element probe found:\n{}", interactive_hint);
+        }
 
         // ── Build user prompt (reuse existing method) ──
         let mut user_text = self.build_user_prompt(
@@ -2654,6 +2719,8 @@ return await s.prompt(msg);
                 let lower = label.to_lowercase();
                 if lower.starts_with("click") || lower.starts_with("tap") {
                     action = "click".to_string();
+                } else if lower.starts_with("evaluat") {
+                    action = "evaluate".to_string();
                 } else if lower.starts_with("scroll") {
                     action = "scroll".to_string();
                 } else if lower.starts_with("fill") || lower.starts_with("type") {
@@ -2675,9 +2742,6 @@ return await s.prompt(msg);
                 || t.starts_with('#')
                 || t.starts_with('[')
                 || t.contains("data-spider-idx")
-        }
-        fn looks_like_index(s: &str) -> bool {
-            extract_index_from_str(s).is_some()
         }
         // Extract a numeric index from strings like "0", "[0]", "[0] link", etc.
         fn extract_index_from_str(s: &str) -> Option<u64> {
@@ -2831,6 +2895,18 @@ return await s.prompt(msg);
                     .and_then(|v| v.as_str())
                     .unwrap_or("Enter");
                 serde_json::json!({ "Press": key })
+            }
+            // Evaluate: small models sometimes emit {"label":"Evaluate","selector":"..."}
+            // Build a simple DOM-read JS snippet or pass through the element as a selector read.
+            "evaluate" | "eval" => {
+                let js_code = if let Some(v) = value.and_then(|v| v.as_str()) {
+                    v.to_string()
+                } else if !element.is_empty() {
+                    format!("document.title=document.querySelector('{}')?.textContent?.trim()?.slice(0,200)||'empty'", element.replace('\'', "\\'"))
+                } else {
+                    "document.title=document.body?.innerText?.slice(0,200)||'empty'".to_string()
+                };
+                serde_json::json!({ "Evaluate": js_code })
             }
             // If action is unrecognized but element is a valid selector, try Click
             _ if !element.is_empty() => {

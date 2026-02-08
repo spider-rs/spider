@@ -217,6 +217,83 @@ pub fn builtin_web_challenges() -> SkillRegistry {
             .with_content(CHECKBOX_SKILL),
     );
 
+    // L8: License plate — read plate from screenshot and type it
+    registry.add(
+        Skill::new(
+            "license-plate",
+            "Read a license plate from an image and type it",
+        )
+        .with_trigger(SkillTrigger::title_contains("license"))
+        .with_trigger(SkillTrigger::title_contains("plate"))
+        .with_priority(6)
+        .with_content(LICENSE_PLATE_SKILL),
+    );
+
+    // L9: Nested — recursive stop sign grid subdivision
+    registry.add(
+        Skill::new(
+            "nested-grid",
+            "Recursive grid where clicking correct squares subdivides them into smaller ones",
+        )
+        .with_trigger(SkillTrigger::title_contains("nested"))
+        .with_trigger(SkillTrigger::html_contains("nested-container"))
+        .with_priority(9) // higher than image-grid to override
+        .with_pre_evaluate(NESTED_PRE_EVALUATE_JS)
+        .with_content(NESTED_GRID_SKILL),
+    );
+
+    // L10: Whack-a-Mole — click moles that pop up
+    registry.add(
+        Skill::new("whack-a-mole", "Click moles as they pop up in a grid")
+            .with_trigger(SkillTrigger::title_contains("whack"))
+            .with_trigger(SkillTrigger::title_contains("mole"))
+            .with_priority(9)
+            .with_pre_evaluate(WHACK_A_MOLE_PRE_EVALUATE_JS)
+            .with_content(WHACK_A_MOLE_SKILL),
+    );
+
+    // L11: Waldo — find Waldo in a crowded scene
+    registry.add(
+        Skill::new("find-waldo", "Find Waldo in a crowded Where's Waldo scene")
+            .with_trigger(SkillTrigger::title_contains("waldo"))
+            .with_priority(9)
+            .with_content(FIND_WALDO_SKILL),
+    );
+
+    // L12: Muffins? — select chihuahuas, not muffins
+    registry.add(
+        Skill::new(
+            "chihuahua-muffin",
+            "Distinguish chihuahuas from muffins in image grid",
+        )
+        .with_trigger(SkillTrigger::title_contains("muffin"))
+        .with_trigger(SkillTrigger::title_contains("chihuahua"))
+        .with_priority(9)
+        .with_content(CHIHUAHUA_MUFFIN_SKILL),
+    );
+
+    // L13: Reverse — select images WITHOUT traffic lights
+    registry.add(
+        Skill::new(
+            "reverse-selection",
+            "Select images that do NOT contain the specified object",
+        )
+        .with_trigger(SkillTrigger::title_contains("reverse"))
+        .with_priority(9)
+        .with_content(REVERSE_SELECTION_SKILL),
+    );
+
+    // L14: Affirmations — find the captcha that says "I'm not a robot"
+    registry.add(
+        Skill::new(
+            "affirmations",
+            "Find and select the captcha with specific text",
+        )
+        .with_trigger(SkillTrigger::title_contains("affirm"))
+        .with_priority(6)
+        .with_content(AFFIRMATIONS_SKILL),
+    );
+
     registry
 }
 
@@ -567,6 +644,251 @@ Strategy for slider and drag-to-position challenges:
 5. **Verify position** after dragging, adjust if needed
 "#;
 
+// ─── L8-L14 skill content ────────────────────────────────────────────────
+
+const LICENSE_PLATE_SKILL: &str = r##"
+License plate challenge: Read the license plate from the car image and type it exactly.
+
+**CRITICAL RULES:**
+- Look at the screenshot carefully for the license plate on the back of the car.
+- Type the plate EXACTLY as shown — include spaces, dashes, and correct capitalization.
+- Letters are uppercase. Include any state/country text only if the input field expects it.
+
+**Steps (solve in 1 round):**
+```json
+"steps": [
+  {"Clear":".captcha-input-text"},
+  {"Fill":{"selector":".captcha-input-text","value":"ABC 1234"}},
+  {"Click":"#captcha-verify-button"}
+]
+```
+
+If wrong after 1 try: re-read the plate carefully — common confusions: 0↔O, 1↔I↔L, 8↔B, 5↔S.
+**After 2 fails → refresh:** `[{"Click":".captcha-refresh"},{"Wait":1000}]`
+"##;
+
+/// JS executed by the engine before the LLM sees the nested grid page.
+/// Tags each leaf box with `data-spider-id`, reads positions + selected state.
+const NESTED_PRE_EVALUATE_JS: &str = r##"try{
+var all=[...document.querySelectorAll('.box')];
+var leaf=all.filter(function(b){return !b.querySelector('.box')&&!b.querySelector('.nested-container');});
+leaf.forEach(function(b,i){b.setAttribute('data-spider-id',String(i));});
+var info=leaf.map(function(b,i){var r=b.getBoundingClientRect();return i+':['+Math.round(r.x)+','+Math.round(r.y)+','+Math.round(r.width)+'x'+Math.round(r.height)+']'+(b.classList.contains('selected')?'*':'');});
+var sel=leaf.filter(function(b){return b.classList.contains('selected');}).length;
+document.title='NEST:'+leaf.length+'boxes,'+sel+'sel|'+info.join(',');
+}catch(e){document.title='NEST_ERR:'+e.message;}
+"##;
+
+const NESTED_GRID_SKILL: &str = r##"
+Nested grid: "Select all squares with a stop sign" — squares SUBDIVIDE when clicked correctly.
+
+**Pre-evaluate tags each leaf box with `data-spider-id`.** Read `document.title` for state.
+
+Title format: `NEST:4boxes,0sel|0:[377,180,223x223],1:[600,180,223x223],2:[377,403,223x223],3:[600,403,223x223]`
+- Each entry: `id:[x,y,WxH]` — coordinates of leaf box center
+- `*` suffix = selected (blue)
+- After clicking a stop-sign box, it subdivides → more boxes appear next round
+
+**HOW IT WORKS:**
+1. Click a box containing part of the stop sign → it splits into 4 sub-boxes
+2. Click sub-boxes containing stop sign → they split again or turn blue (selected)
+3. When all stop-sign boxes are blue, click verify
+
+**CRITICAL: Use CSS Click with `[data-spider-id='N']` — NOT ClickPoint:**
+```json
+"steps": [
+  {"Click": "[data-spider-id='1']"},
+  {"Click": "[data-spider-id='3']"},
+  {"Wait": 1500}
+]
+```
+
+**Strategy (4-8 rounds):**
+1. Look at screenshot + title info. Identify which boxes overlap the stop sign.
+2. Click ALL boxes containing ANY part of the stop sign using `data-spider-id` selectors.
+3. Wait 1500ms for subdivision animation.
+4. Next round: new smaller boxes appear with new IDs. Repeat.
+5. When boxes stop subdividing (just turn blue), all selected → verify.
+
+**After clicking all stop-sign boxes, verify:**
+`[{"Click":"#captcha-verify-button"}]`
+
+**If verify fails:** Look for tiny missed boxes at stop sign edges. Click them + re-verify.
+**After 3 verify fails:** Refresh: `[{"Click":".captcha-refresh"},{"Wait":1000}]`
+
+**Ignore image-grid-selection skill** — this uses recursive subdivision, not simple grid.
+"##;
+
+/// JS executed by the engine for whack-a-mole — detects and clicks visible moles.
+const WHACK_A_MOLE_PRE_EVALUATE_JS: &str = r##"try{
+var done=document.getElementById('wam-engine-done');
+if(done){document.title=done.dataset.t;throw'done';}
+var moles=[...document.querySelectorAll('.grid-item,.mole,.whack-target,[class*=mole]')].filter(el=>{
+  var r=el.getBoundingClientRect();
+  if(r.width<10||r.height<10)return false;
+  var s=getComputedStyle(el);
+  if(s.display==='none'||s.visibility==='hidden'||s.opacity==='0')return false;
+  var img=el.querySelector('img');
+  if(img){var src=img.src||img.dataset.src||'';if(src.includes('mole')||src.includes('gopher'))return true;}
+  var bg=s.backgroundImage||'';
+  if(bg.includes('mole')||bg.includes('gopher'))return true;
+  var cls=(el.className||'').toLowerCase();
+  if(cls.includes('mole')||cls.includes('active')||cls.includes('visible'))return true;
+  return false;
+});
+var clicked=0;
+moles.forEach(function(el){
+  var r=el.getBoundingClientRect();
+  var ev={bubbles:true,cancelable:true,clientX:r.x+r.width/2,clientY:r.y+r.height/2};
+  el.dispatchEvent(new PointerEvent('pointerdown',ev));
+  el.dispatchEvent(new MouseEvent('mousedown',ev));
+  el.dispatchEvent(new PointerEvent('pointerup',ev));
+  el.dispatchEvent(new MouseEvent('mouseup',ev));
+  el.dispatchEvent(new MouseEvent('click',ev));
+  clicked++;
+});
+document.title='WAM:'+JSON.stringify({moles:moles.length,clicked:clicked});
+}catch(e){if(e!=='done')document.title='WAM_ERR:'+(e&&e.message||String(e));}
+"##;
+
+const WHACK_A_MOLE_SKILL: &str = r##"
+Whack-a-Mole: Click moles as they pop up. Hit 5 moles to pass.
+
+**Auto-detection runs via pre_evaluate.** Read `document.title` for state.
+
+Title format: `WAM:{"moles":N,"clicked":N}`
+
+**Rules (check title EVERY round):**
+- **clicked > 0** → moles were auto-clicked! Wait for more to appear: `[{"Wait":800}]`
+- **moles is 0** → no moles visible yet. Wait: `[{"Wait":500}]`
+- **WAM_ERR** → detection failed. Use screenshot to find moles visually.
+
+**If auto-detection misses moles (you see them in screenshot):**
+- Use ClickPoint on each visible mole: `[{"ClickPoint":{"x":300,"y":400}},{"Wait":300}]`
+- Moles pop up briefly — click fast, don't wait between clicks.
+- You need to hit 5 total. If you accidentally click grass, it may deselect.
+
+**After 5 hits, click verify:** `[{"Click":"#captcha-verify-button"}]`
+"##;
+
+const FIND_WALDO_SKILL: &str = r##"
+Where's Waldo: Find Waldo in a crowded beach scene grid.
+
+**Waldo's appearance:**
+- Tall man with dark brown hair and black glasses
+- Red and white horizontally STRIPED shirt (most distinctive feature)
+- Blue jeans
+- Red and white striped beanie/hat
+- Often partially hidden behind other characters
+
+**STRATEGY:**
+1. Scan the screenshot carefully for red-and-white stripes.
+2. Waldo is typically in the upper-right area of the image.
+3. Once found, click the grid square(s) containing Waldo.
+4. He spans 2 vertical squares — select BOTH (head square + body square).
+
+**Steps:**
+```json
+"steps": [
+  {"ClickPoint":{"x":WALDOx,"y":WALDOy_HEAD}},
+  {"ClickPoint":{"x":WALDOx,"y":WALDOy_BODY}},
+  {"Wait":500},
+  {"Click":"#captcha-verify-button"}
+]
+```
+
+**Tips:**
+- Look for the RED AND WHITE STRIPES pattern — it's the most visible feature.
+- Don't confuse with other striped items (umbrellas, towels). Waldo is a PERSON.
+- If verify fails, you may have missed a square. Check for his hat above.
+- After 2 fails → refresh: `[{"Click":".captcha-refresh"},{"Wait":1000}]`
+"##;
+
+const CHIHUAHUA_MUFFIN_SKILL: &str = r##"
+Muffins? challenge: Select all CHIHUAHUAS — not the muffins!
+
+**The classic chihuahua vs muffin visual trick.** Images of chihuahuas and blueberry muffins look very similar.
+
+**How to tell them apart:**
+- **Chihuahuas**: Have EYES (shiny, reflective), a NOSE (small dark triangle), EARS (pointed, stand up), fur texture varies
+- **Muffins**: Have a WRAPPER/PAPER cup at bottom, more uniform round dome shape, visible blueberries/chocolate chips as dark spots, crumbly top texture
+
+**Key differences:**
+- Chihuahuas have a visible snout/mouth area; muffins have a flat dome
+- Chihuahuas' eyes are positioned symmetrically and REFLECT light; muffin spots don't
+- Muffin wrappers have ridged edges at the base
+- Chihuahua ears are triangular and stick up; muffins have no pointy features
+
+**Steps:**
+```json
+"steps": [
+  {"Click":".grid-item:nth-child(N)"},
+  ... (all chihuahua tiles)
+  {"Wait":300},
+  {"Click":"#captcha-verify-button"}
+]
+```
+
+**SOLVE IN 2 ROUNDS MAX.** If verify fails, toggle your selections and retry.
+After 2 fails → refresh: `[{"Click":".captcha-refresh"},{"Wait":1000}]`
+"##;
+
+const REVERSE_SELECTION_SKILL: &str = r##"
+Reverse selection: Select all images that do NOT contain the specified object.
+
+**THIS IS THE OPPOSITE of normal selection.** The title says "select images WITHOUT [object]".
+
+**CRITICAL:** You must select tiles that DO NOT have the object. Leave tiles WITH the object unselected.
+
+**Strategy:**
+1. Read the instruction carefully — note what object to AVOID.
+2. Look at each grid tile in the screenshot.
+3. Click tiles that do NOT contain the specified object.
+4. Leave tiles containing the object UNCLICKED.
+
+**Common object: traffic lights**
+- Tiles WITH traffic lights → do NOT click
+- Tiles WITHOUT traffic lights → DO click
+
+**Steps:**
+```json
+"steps": [
+  {"Click":".grid-item:nth-child(1)"},
+  {"Click":".grid-item:nth-child(3)"},
+  {"Click":".grid-item:nth-child(5)"},
+  ... (all tiles WITHOUT the object)
+  {"Wait":300},
+  {"Click":"#captcha-verify-button"}
+]
+```
+
+**SOLVE IN 2 ROUNDS MAX.** After 2 fails → refresh: `[{"Click":".captcha-refresh"},{"Wait":1000}]`
+"##;
+
+const AFFIRMATIONS_SKILL: &str = r##"
+Affirmations: Find and click the captcha text that says "I'm not a robot" (or similar).
+
+**Multiple text options are displayed.** Only ONE says the right affirmation.
+
+**Strategy:**
+1. Read ALL visible text options in the screenshot carefully.
+2. Find the one that says "I'm not a robot" (exact or very close match).
+3. Click on that text element.
+4. Then click verify.
+
+**Steps:**
+```json
+"steps": [
+  {"ClickPoint":{"x":CAPTCHAx,"y":CAPTCHAy}},
+  {"Wait":300},
+  {"Click":"#captcha-verify-button"}
+]
+```
+
+If there are multiple similar texts, look for the EXACT phrase "I'm not a robot".
+Solve in 1-2 rounds.
+"##;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -663,7 +985,7 @@ Use Evaluate to click found cells programmatically."#;
     #[test]
     fn test_builtin_web_challenges() {
         let registry = builtin_web_challenges();
-        assert!(registry.len() >= 7);
+        assert!(registry.len() >= 14);
 
         // Image grid should match on grid-item class
         let ctx = registry.match_context("", "", "<div class='grid-item'>img</div>");
@@ -846,6 +1168,12 @@ Use Evaluate to click found cells programmatically."#;
             "text-captcha",
             "slider-drag",
             "checkbox-click",
+            "license-plate",
+            "nested-grid",
+            "find-waldo",
+            "chihuahua-muffin",
+            "reverse-selection",
+            "affirmations",
         ] {
             let skill = registry
                 .get(name)
@@ -856,5 +1184,61 @@ Use Evaluate to click found cells programmatically."#;
                 name
             );
         }
+    }
+
+    #[test]
+    fn test_new_level_skills_present() {
+        let registry = builtin_web_challenges();
+
+        // L8: License plate
+        let lp = registry.get("license-plate").expect("license-plate missing");
+        assert!(lp.matches("", "License Plate Challenge", ""));
+        assert!(lp.content.contains("license plate"));
+
+        // L9: Nested grid
+        let nested = registry.get("nested-grid").expect("nested-grid missing");
+        assert!(nested.matches("", "Nested Squares", ""));
+        assert!(nested.content.contains("SUBDIVIDE"));
+        assert!(nested.priority > 5, "nested-grid should override image-grid");
+
+        // L10: Whack-a-mole
+        let wam = registry.get("whack-a-mole").expect("whack-a-mole missing");
+        assert!(wam.matches("", "Whack a Mole!", ""));
+        assert!(wam.pre_evaluate.is_some(), "WAM should have pre_evaluate");
+        let js = wam.pre_evaluate.as_deref().unwrap();
+        assert!(js.contains("WAM:"), "WAM pre_evaluate should set WAM: prefix");
+
+        // L11: Waldo
+        let waldo = registry.get("find-waldo").expect("find-waldo missing");
+        assert!(waldo.matches("", "Where's Waldo", ""));
+        assert!(waldo.content.contains("striped"));
+
+        // L12: Chihuahua vs muffin
+        let cm = registry.get("chihuahua-muffin").expect("chihuahua-muffin missing");
+        assert!(cm.matches("", "Muffins? Or Chihuahuas", ""));
+        assert!(cm.content.contains("CHIHUAHUAS"));
+
+        // L13: Reverse selection
+        let rev = registry.get("reverse-selection").expect("reverse-selection missing");
+        assert!(rev.matches("", "Reverse CAPTCHA", ""));
+        assert!(rev.content.contains("OPPOSITE"));
+
+        // L14: Affirmations
+        let aff = registry.get("affirmations").expect("affirmations missing");
+        assert!(aff.matches("", "Affirmations Level", ""));
+        assert!(aff.content.contains("I'm not a robot"));
+    }
+
+    #[test]
+    fn test_nested_overrides_image_grid() {
+        let registry = builtin_web_challenges();
+        let nested = registry.get("nested-grid").unwrap();
+        let img_grid = registry.get("image-grid-selection").unwrap();
+        assert!(
+            nested.priority > img_grid.priority,
+            "nested-grid priority ({}) should be higher than image-grid ({})",
+            nested.priority,
+            img_grid.priority
+        );
     }
 }
