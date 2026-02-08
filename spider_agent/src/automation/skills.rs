@@ -294,6 +294,300 @@ pub fn builtin_web_challenges() -> SkillRegistry {
         .with_content(AFFIRMATIONS_SKILL),
     );
 
+    // L15: Parking — drag a car into the correct parking spot
+    registry.add(
+        Skill::new(
+            "parking-challenge",
+            "Navigate or drag an object into a target zone",
+        )
+        .with_trigger(SkillTrigger::title_contains("parking"))
+        .with_trigger(SkillTrigger::html_contains("parking"))
+        .with_priority(6)
+        .with_content(PARKING_SKILL),
+    );
+
+    // L16: 3D object — identify object shown in 3D perspective
+    registry.add(
+        Skill::new("3d-object", "Identify objects from 3D perspective")
+            .with_trigger(SkillTrigger::title_contains("3d"))
+            .with_trigger(SkillTrigger::title_contains("3D"))
+            .with_priority(6)
+            .with_content(THREE_D_SKILL),
+    );
+
+    // L17: Perfect Circle — draw a circle with mouse drag
+    registry.add(
+        Skill::new(
+            "draw-circle",
+            "Draw a shape by tracing a mouse path",
+        )
+        .with_trigger(SkillTrigger::title_contains("circle"))
+        .with_trigger(SkillTrigger::title_contains("draw"))
+        .with_priority(8)
+        .with_pre_evaluate(DRAW_CIRCLE_PRE_EVALUATE_JS)
+        .with_content(DRAW_CIRCLE_SKILL),
+    );
+
+    // L18: Sisyphus — push a boulder uphill by dragging
+    registry.add(
+        Skill::new("push-drag", "Repeatedly drag an object in a direction")
+            .with_trigger(SkillTrigger::title_contains("sisyphus"))
+            .with_trigger(SkillTrigger::html_contains("boulder"))
+            .with_priority(6)
+            .with_content(PUSH_DRAG_SKILL),
+    );
+
+    // L19: In the Dark — find and click elements on a dark screen
+    registry.add(
+        Skill::new("dark-hidden", "Find elements hidden in darkness")
+            .with_trigger(SkillTrigger::title_contains("dark"))
+            .with_priority(6)
+            .with_content(DARK_HIDDEN_SKILL),
+    );
+
+    // L20: Rorschach — describe an inkblot image
+    registry.add(
+        Skill::new("inkblot-choice", "Interpret or choose from visual prompts")
+            .with_trigger(SkillTrigger::title_contains("rorschach"))
+            .with_priority(6)
+            .with_content(INKBLOT_SKILL),
+    );
+
+    // L21: CRAFTCHA — crafting recipe challenge
+    registry.add(
+        Skill::new("crafting-recipe", "Solve crafting or assembly challenges")
+            .with_trigger(SkillTrigger::title_contains("craft"))
+            .with_trigger(SkillTrigger::html_contains("craft"))
+            .with_priority(6)
+            .with_content(CRAFTING_SKILL),
+    );
+
+    // L22: My Ducks — arrange or count ducks
+    registry.add(
+        Skill::new("counting-items", "Count or arrange items in correct order")
+            .with_trigger(SkillTrigger::title_contains("duck"))
+            .with_priority(6)
+            .with_content(COUNTING_SKILL),
+    );
+
+    // L23: Panora — match panorama segments
+    registry.add(
+        Skill::new("panorama-match", "Match or reorder panoramic image segments")
+            .with_trigger(SkillTrigger::title_contains("panora"))
+            .with_priority(6)
+            .with_content(PANORAMA_SKILL),
+    );
+
+    // L24: Eye Exam — read text from an eye chart
+    registry.add(
+        Skill::new("eye-chart", "Read text from decreasing-size visual display")
+            .with_trigger(SkillTrigger::title_contains("eye"))
+            .with_trigger(SkillTrigger::title_contains("exam"))
+            .with_priority(6)
+            .with_content(EYE_CHART_SKILL),
+    );
+
+    // L25: Creativity — draw or create something
+    registry.add(
+        Skill::new("creative-draw", "Draw or create something original")
+            .with_trigger(SkillTrigger::title_contains("creativ"))
+            .with_priority(6)
+            .with_content(CREATIVE_SKILL),
+    );
+
+    // L27: Networking — connect nodes or people
+    registry.add(
+        Skill::new("network-connect", "Connect nodes or items together")
+            .with_trigger(SkillTrigger::title_contains("network"))
+            .with_priority(6)
+            .with_content(NETWORK_SKILL),
+    );
+
+    // L28: Day Trader — buy/sell timing challenge
+    registry.add(
+        Skill::new("trading-timing", "Buy and sell at the right time")
+            .with_trigger(SkillTrigger::title_contains("trader"))
+            .with_trigger(SkillTrigger::title_contains("trading"))
+            .with_priority(6)
+            .with_content(TRADING_SKILL),
+    );
+
+    // L29: Soul — philosophical choice
+    registry.add(
+        Skill::new("text-choice", "Make a text-based choice or response")
+            .with_trigger(SkillTrigger::title_contains("soul"))
+            .with_priority(5)
+            .with_content(TEXT_CHOICE_SKILL),
+    );
+
+    // L30: Sliding Tiles — sliding puzzle solver
+    registry.add(
+        Skill::new("sliding-puzzle", "Solve a sliding tile puzzle")
+            .with_trigger(SkillTrigger::title_contains("sliding"))
+            .with_trigger(SkillTrigger::html_contains("sliding"))
+            .with_trigger(SkillTrigger::html_contains("puzzle-grid"))
+            .with_priority(8)
+            .with_pre_evaluate(SLIDING_PUZZLE_PRE_EVALUATE_JS)
+            .with_content(SLIDING_PUZZLE_SKILL),
+    );
+
+    // L31: Traffic Tree — traffic signal tree challenge
+    registry.add(
+        Skill::new("traffic-signal", "Interact with traffic signals or trees")
+            .with_trigger(SkillTrigger::title_contains("traffic"))
+            .with_priority(6)
+            .with_content(TRAFFIC_SIGNAL_SKILL),
+    );
+
+    // L32: Drum Verify — rhythm/drum pattern
+    registry.add(
+        Skill::new("rhythm-pattern", "Reproduce a rhythm or sound pattern")
+            .with_trigger(SkillTrigger::title_contains("drum"))
+            .with_trigger(SkillTrigger::title_contains("rhythm"))
+            .with_priority(7)
+            .with_content(RHYTHM_SKILL),
+    );
+
+    // L33: Brands — identify brand logos
+    registry.add(
+        Skill::new("brand-logo", "Identify brand logos from images")
+            .with_trigger(SkillTrigger::title_contains("brand"))
+            .with_priority(6)
+            .with_content(BRAND_LOGO_SKILL),
+    );
+
+    // L34: Mathematics — solve math equations
+    registry.add(
+        Skill::new("math-solver", "Solve mathematical equations or expressions")
+            .with_trigger(SkillTrigger::title_contains("math"))
+            .with_trigger(SkillTrigger::title_contains("equation"))
+            .with_priority(7)
+            .with_pre_evaluate(MATH_PRE_EVALUATE_JS)
+            .with_content(MATH_SKILL),
+    );
+
+    // L35: Shuffle — track card during shuffle
+    registry.add(
+        Skill::new("card-tracking", "Track an object through movement or shuffle")
+            .with_trigger(SkillTrigger::title_contains("shuffle"))
+            .with_priority(7)
+            .with_content(SHUFFLE_SKILL),
+    );
+
+    // L36: Not Candy Crush — match-3 game
+    registry.add(
+        Skill::new("match3-game", "Solve a match-3 or tile-matching puzzle")
+            .with_trigger(SkillTrigger::title_contains("candy"))
+            .with_trigger(SkillTrigger::title_contains("crush"))
+            .with_trigger(SkillTrigger::title_contains("match"))
+            .with_priority(7)
+            .with_content(MATCH3_SKILL),
+    );
+
+    // L37: Imposters — find the odd one out
+    registry.add(
+        Skill::new("odd-one-out", "Find the imposter or odd item among similar ones")
+            .with_trigger(SkillTrigger::title_contains("imposter"))
+            .with_trigger(SkillTrigger::title_contains("impostor"))
+            .with_priority(7)
+            .with_content(ODD_ONE_OUT_SKILL),
+    );
+
+    // L38: Tough Decisions — make a choice between options
+    registry.add(
+        Skill::new("decision-choice", "Make a decision between presented options")
+            .with_trigger(SkillTrigger::title_contains("decision"))
+            .with_trigger(SkillTrigger::title_contains("choose"))
+            .with_priority(5)
+            .with_content(DECISION_SKILL),
+    );
+
+    // L39: Facial Exam — face recognition or matching
+    registry.add(
+        Skill::new("face-matching", "Match or compare faces")
+            .with_trigger(SkillTrigger::title_contains("facial"))
+            .with_trigger(SkillTrigger::title_contains("face"))
+            .with_priority(6)
+            .with_content(FACE_MATCHING_SKILL),
+    );
+
+    // L40: Slot Machine — stop slots at the right time
+    registry.add(
+        Skill::new("slot-machine", "Stop a spinning element at the right moment")
+            .with_trigger(SkillTrigger::title_contains("slot"))
+            .with_priority(6)
+            .with_content(SLOT_MACHINE_SKILL),
+    );
+
+    // L41: Grave — dig or find hidden item
+    registry.add(
+        Skill::new("dig-find", "Dig or search for a hidden element")
+            .with_trigger(SkillTrigger::title_contains("grave"))
+            .with_priority(6)
+            .with_content(DIG_FIND_SKILL),
+    );
+
+    // L42: Reverse Turing — convince you're human via text
+    registry.add(
+        Skill::new("turing-text", "Type a convincing human-like text response")
+            .with_trigger(SkillTrigger::title_contains("turing"))
+            .with_priority(7)
+            .with_content(TURING_TEXT_SKILL),
+    );
+
+    // L43: Ikea — identify or assemble furniture
+    registry.add(
+        Skill::new("assembly-id", "Identify items from assembly instructions")
+            .with_trigger(SkillTrigger::title_contains("ikea"))
+            .with_trigger(SkillTrigger::title_contains("assembl"))
+            .with_priority(6)
+            .with_content(ASSEMBLY_SKILL),
+    );
+
+    // L44: Grandmaster — chess challenge
+    registry.add(
+        Skill::new("chess-challenge", "Make the best chess move")
+            .with_trigger(SkillTrigger::title_contains("chess"))
+            .with_trigger(SkillTrigger::title_contains("grandmaster"))
+            .with_trigger(SkillTrigger::html_contains("chess"))
+            .with_priority(8)
+            .with_content(CHESS_SKILL),
+    );
+
+    // L45: Jessica — find a specific person
+    registry.add(
+        Skill::new("find-person", "Find a specific person in a crowd or grid")
+            .with_trigger(SkillTrigger::title_contains("jessica"))
+            .with_priority(6)
+            .with_content(FIND_PERSON_SKILL),
+    );
+
+    // L46: Floors — navigate building floors
+    registry.add(
+        Skill::new("floor-nav", "Navigate through building floors")
+            .with_trigger(SkillTrigger::title_contains("floor"))
+            .with_priority(6)
+            .with_content(FLOOR_NAV_SKILL),
+    );
+
+    // L47: Din Don Dan — bell or sound pattern
+    registry.add(
+        Skill::new("bell-pattern", "Reproduce a bell or sound sequence")
+            .with_trigger(SkillTrigger::title_contains("din"))
+            .with_trigger(SkillTrigger::title_contains("don"))
+            .with_trigger(SkillTrigger::title_contains("dan"))
+            .with_priority(7)
+            .with_content(BELL_PATTERN_SKILL),
+    );
+
+    // L48: The Inventor — final creative challenge
+    registry.add(
+        Skill::new("final-creative", "Complete a creative final challenge")
+            .with_trigger(SkillTrigger::title_contains("inventor"))
+            .with_priority(6)
+            .with_content(FINAL_CREATIVE_SKILL),
+    );
+
     registry
 }
 
@@ -668,55 +962,37 @@ If wrong after 1 try: re-read the plate carefully — common confusions: 0↔O, 
 "##;
 
 /// JS executed by the engine before the LLM sees the nested grid page.
-/// Tags each leaf box with `data-spider-id`, reads positions + selected state.
+/// Detects stop sign image, computes bounding-rect overlap with leaf boxes,
+/// and reports JSON with toClick array for engine auto-clicking.
 const NESTED_PRE_EVALUATE_JS: &str = r##"try{
+var done=document.getElementById('nest-engine-done');
+if(done){document.title=done.dataset.t;throw'done';}
 var all=[...document.querySelectorAll('.box')];
 var leaf=all.filter(function(b){return !b.querySelector('.box')&&!b.querySelector('.nested-container');});
 leaf.forEach(function(b,i){b.setAttribute('data-spider-id',String(i));});
-var info=leaf.map(function(b,i){var r=b.getBoundingClientRect();return i+':['+Math.round(r.x)+','+Math.round(r.y)+','+Math.round(r.width)+'x'+Math.round(r.height)+']'+(b.classList.contains('selected')?'*':'');});
-var sel=leaf.filter(function(b){return b.classList.contains('selected');}).length;
-document.title='NEST:'+leaf.length+'boxes,'+sel+'sel|'+info.join(',');
-}catch(e){document.title='NEST_ERR:'+e.message;}
+var ssRect=null;
+var imgs=[...document.querySelectorAll('img')].filter(function(el){var r=el.getBoundingClientRect();return r.width>20&&r.height>20;});
+if(imgs.length>0){var best=imgs[0];for(var im of imgs){var rr=im.getBoundingClientRect();if(rr.width*rr.height>best.getBoundingClientRect().width*best.getBoundingClientRect().height)best=im;}ssRect=best.getBoundingClientRect();}
+if(!ssRect){var cands=[...document.querySelectorAll('[class*=sign],[class*=stop],[class*=image],[class*=captcha-image]')].filter(function(el){var r=el.getBoundingClientRect();return r.width>20&&r.height>20;});if(cands.length>0)ssRect=cands[0].getBoundingClientRect();}
+if(!ssRect){var bgEls=[...document.querySelectorAll('.nested-container,div')].filter(function(el){var bg=getComputedStyle(el).backgroundImage;return bg&&bg!=='none';});if(bgEls.length>0)ssRect=bgEls[0].getBoundingClientRect();}
+var toClick=[];var selected=[];
+var boxes=leaf.map(function(b,i){var r=b.getBoundingClientRect();var sel=b.classList.contains('selected');if(sel){selected.push(i);}else if(ssRect){var ox=Math.max(0,Math.min(r.right,ssRect.right)-Math.max(r.left,ssRect.left));var oy=Math.max(0,Math.min(r.bottom,ssRect.bottom)-Math.max(r.top,ssRect.top));if(ox>2&&oy>2)toClick.push(i);}
+return{id:i,x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2),w:Math.round(r.width),h:Math.round(r.height)};});
+document.title='NEST:'+JSON.stringify({total:leaf.length,sel:selected.length,toClick:toClick,selected:selected,hasSign:!!ssRect,boxes:boxes});
+}catch(e){if(e!=='done')document.title='NEST_ERR:'+e.message;}
 "##;
 
 const NESTED_GRID_SKILL: &str = r##"
 Nested grid: "Select all squares with a stop sign" — squares SUBDIVIDE when clicked correctly.
 
-**Pre-evaluate tags each leaf box with `data-spider-id`.** Read `document.title` for state.
+**Engine auto-solves this level.** Pre-evaluate detects stop sign overlap and clicks boxes automatically.
+Title format: `NEST:{"total":N,"sel":N,"toClick":[ids],"hasSign":true,"boxes":[...]}`
 
-Title format: `NEST:4boxes,0sel|0:[377,180,223x223],1:[600,180,223x223],2:[377,403,223x223],3:[600,403,223x223]`
-- Each entry: `id:[x,y,WxH]` — coordinates of leaf box center
-- `*` suffix = selected (blue)
-- After clicking a stop-sign box, it subdivides → more boxes appear next round
-
-**HOW IT WORKS:**
-1. Click a box containing part of the stop sign → it splits into 4 sub-boxes
-2. Click sub-boxes containing stop sign → they split again or turn blue (selected)
-3. When all stop-sign boxes are blue, click verify
-
-**CRITICAL: Use CSS Click with `[data-spider-id='N']` — NOT ClickPoint:**
-```json
-"steps": [
-  {"Click": "[data-spider-id='1']"},
-  {"Click": "[data-spider-id='3']"},
-  {"Wait": 1500}
-]
-```
-
-**Strategy (4-8 rounds):**
-1. Look at screenshot + title info. Identify which boxes overlap the stop sign.
-2. Click ALL boxes containing ANY part of the stop sign using `data-spider-id` selectors.
-3. Wait 1500ms for subdivision animation.
-4. Next round: new smaller boxes appear with new IDs. Repeat.
-5. When boxes stop subdividing (just turn blue), all selected → verify.
-
-**After clicking all stop-sign boxes, verify:**
+If engine already solved (title starts with NEST_DONE), just click verify:
 `[{"Click":"#captcha-verify-button"}]`
 
-**If verify fails:** Look for tiny missed boxes at stop sign edges. Click them + re-verify.
-**After 3 verify fails:** Refresh: `[{"Click":".captcha-refresh"},{"Wait":1000}]`
-
-**Ignore image-grid-selection skill** — this uses recursive subdivision, not simple grid.
+If engine missed boxes (verify failed), look at screenshot for any unselected boxes overlapping the stop sign.
+Click them with `[data-spider-id='N']` selectors, then re-verify.
 "##;
 
 /// JS executed by the engine for whack-a-mole — detects and clicks visible moles.
@@ -887,6 +1163,596 @@ Affirmations: Find and click the captcha text that says "I'm not a robot" (or si
 
 If there are multiple similar texts, look for the EXACT phrase "I'm not a robot".
 Solve in 1-2 rounds.
+"##;
+
+// ─── L15+ skill constants ─────────────────────────────────────────────────
+
+const PARKING_SKILL: &str = r##"
+Parking challenge: Drag or steer an object into the highlighted target zone.
+
+**Strategy:**
+1. Identify the car/object and the target parking spot in the screenshot.
+2. Use ClickDragPoint to drag the car from its current position INTO the parking spot.
+3. Or use arrow key presses if steering controls are present.
+
+**Drag approach:**
+```json
+"steps": [
+  {"ClickDragPoint":{"startX":CARx,"startY":CARy,"endX":SPOTx,"endY":SPOTy}},
+  {"Wait":500},
+  {"Click":"#captcha-verify-button"}
+]
+```
+
+**Arrow key approach:**
+```json
+"steps": [
+  {"KeyDown":"ArrowUp"},{"Wait":200},{"KeyDown":"ArrowUp"},{"Wait":200},
+  {"KeyDown":"ArrowLeft"},{"Wait":200},
+  {"Click":"#captcha-verify-button"}
+]
+```
+
+Look at the layout carefully. If there are steering wheel controls, click them. Solve in 3-5 rounds.
+"##;
+
+const THREE_D_SKILL: &str = r##"
+3D object challenge: Identify what the object is when shown in 3D perspective.
+
+**Strategy:**
+1. Look at the 3D-rendered object in the screenshot.
+2. Identify what it represents (common objects: chair, cup, car, shoe, etc.).
+3. Type the answer or click the matching option.
+
+If there's a text input, use Fill to type the object name.
+If there are clickable options, click the correct one.
+Solve in 2-3 rounds.
+"##;
+
+/// JS that computes a circular mouse path and reports center/radius for engine drag.
+const DRAW_CIRCLE_PRE_EVALUATE_JS: &str = r##"try{
+var done=document.getElementById('circle-engine-done');
+if(done){document.title=done.dataset.t;throw'done';}
+var canvas=document.querySelector('canvas');
+if(!canvas){var divs=[...document.querySelectorAll('div')].filter(function(d){var r=d.getBoundingClientRect();return r.width>100&&r.height>100&&r.width<800;});canvas=divs[0];}
+if(canvas){var r=canvas.getBoundingClientRect();var cx=Math.round(r.x+r.width/2);var cy=Math.round(r.y+r.height/2);var rad=Math.round(Math.min(r.width,r.height)*0.35);var pts=[];for(var i=0;i<=36;i++){var a=i*Math.PI*2/36;pts.push({x:Math.round(cx+rad*Math.cos(a)),y:Math.round(cy+rad*Math.sin(a))});}
+document.title='CIRCLE:'+JSON.stringify({cx:cx,cy:cy,rad:rad,pts:pts});}
+else{document.title='CIRCLE_ERR:no_canvas';}
+}catch(e){if(e!=='done')document.title='CIRCLE_ERR:'+e.message;}
+"##;
+
+const DRAW_CIRCLE_SKILL: &str = r##"
+Draw circle: Trace a circular path with the mouse.
+
+**Engine auto-draws when CIRCLE: title is set.** Pre-evaluate computes 36-point circle path.
+Title format: `CIRCLE:{"cx":N,"cy":N,"rad":N,"pts":[{x,y}...]}`
+
+If engine drew (CIRCLE_DONE), click verify.
+If engine couldn't find canvas, manually use ClickDragPoint to trace a rough circle.
+
+**Manual fallback:** estimate center and radius from screenshot, then drag in a loop.
+"##;
+
+const PUSH_DRAG_SKILL: &str = r##"
+Push/drag challenge: Continuously drag an object in a direction.
+
+**Strategy:**
+1. Find the draggable object (boulder, ball, etc.) in the screenshot.
+2. Drag it in the required direction — usually uphill or towards a target.
+3. Repeat the drag multiple times since the object may slide back.
+
+**Steps:**
+```json
+"steps": [
+  {"ClickDragPoint":{"startX":OBJx,"startY":OBJy,"endX":TARGETx,"endY":TARGETy}},
+  {"Wait":300},
+  {"ClickDragPoint":{"startX":OBJx2,"startY":OBJy2,"endX":TARGETx,"endY":TARGETy}},
+  {"Wait":300}
+]
+```
+
+Repeat dragging 3-5 times per round. Object position changes after each drag.
+After reaching the target, click verify. Solve in 3-6 rounds.
+"##;
+
+const DARK_HIDDEN_SKILL: &str = r##"
+Dark/hidden challenge: Find elements on a very dark or hidden screen.
+
+**Strategy:**
+1. The screen appears dark — look VERY carefully at the screenshot.
+2. There may be a faint outline, subtle glow, or slightly different shade.
+3. Move the mouse around to reveal hidden elements (some respond to hover).
+4. Use Evaluate to check for interactive elements: `document.querySelectorAll('[class*=hidden],[style*=opacity],[class*=dark]')`.
+5. Try clicking in the center area or where you see subtle differences.
+
+**Reveal approach:**
+```json
+"steps": [
+  {"ClickPoint":{"x":400,"y":300}},
+  {"Wait":500},
+  {"ClickPoint":{"x":600,"y":400}},
+  {"Wait":500}
+]
+```
+
+If nothing visible, try clicking around the center systematically.
+"##;
+
+const INKBLOT_SKILL: &str = r##"
+Inkblot/interpretation challenge: Choose what you see in an abstract image.
+
+**Strategy:**
+1. Look at the inkblot or abstract image in the screenshot.
+2. Read the available choice options.
+3. Pick the most common/obvious interpretation (butterfly, bat, moth, face are common Rorschach answers).
+4. Click the matching option.
+
+If there's a text input, type a common Rorschach answer.
+If there are clickable buttons/options, click the best match.
+Solve in 1-2 rounds.
+"##;
+
+const CRAFTING_SKILL: &str = r##"
+Crafting/assembly challenge: Combine items to create something.
+
+**Strategy:**
+1. Look at the crafting grid and available materials in the screenshot.
+2. Identify what needs to be crafted (check title or instructions).
+3. Drag items from inventory into the correct grid positions.
+4. For Minecraft-style: place items in the 3x3 grid pattern.
+
+**Common recipes:**
+- Stick: 2 planks vertically
+- Planks: 1 log anywhere
+- Torch: stick below, coal above
+- Sword: stick below, 2 material above
+
+Drag items using ClickDragPoint from source to grid cell. Solve in 2-4 rounds.
+"##;
+
+const COUNTING_SKILL: &str = r##"
+Counting/arrangement challenge: Count items or arrange them correctly.
+
+**Strategy:**
+1. Count the items in the screenshot carefully.
+2. Type the number or arrange items by dragging.
+3. If arranging: drag items to their correct positions using ClickDragPoint.
+4. If counting: enter the count via Fill in the input field.
+
+Double-check your count before submitting. Solve in 1-3 rounds.
+"##;
+
+const PANORAMA_SKILL: &str = r##"
+Panorama matching: Reorder or match panoramic image segments.
+
+**Strategy:**
+1. Look at the image segments in the screenshot.
+2. Identify the correct order that forms a continuous panoramic view.
+3. Drag segments into the correct positions using ClickDragPoint.
+4. Match edges — adjacent segments should have continuous lines/colors.
+
+Look for horizon lines, buildings, roads that continue across segments.
+Solve in 2-4 rounds.
+"##;
+
+const EYE_CHART_SKILL: &str = r##"
+Eye chart challenge: Read text from a vision-test style display.
+
+**Strategy:**
+1. Look at the eye chart in the screenshot — letters get smaller toward the bottom.
+2. Read the highlighted/indicated line of text.
+3. Type the letters exactly as shown using Fill.
+4. Pay attention to case and spacing.
+
+**Common confusions:** O vs 0, I vs l vs 1, S vs 5, B vs 8, Z vs 2.
+Read carefully and type in the input field. Solve in 1-2 rounds.
+"##;
+
+const CREATIVE_SKILL: &str = r##"
+Creative drawing: Draw or create something using mouse strokes.
+
+**Strategy:**
+1. Use ClickDragPoint to draw simple shapes (smiley face, house, star, etc.).
+2. Keep it simple — a few recognizable strokes.
+3. For a smiley: circle face, two dot eyes, curved mouth.
+
+**Simple smiley face (common safe choice):**
+Draw a circle for the head, two dots for eyes, a curve for mouth.
+Use ClickDragPoint for each stroke. Solve in 2-3 rounds, then verify.
+"##;
+
+const NETWORK_SKILL: &str = r##"
+Networking challenge: Connect nodes, people, or items together.
+
+**Strategy:**
+1. Look at the nodes/people displayed in the screenshot.
+2. Identify which ones should be connected (check labels, colors, instructions).
+3. Drag from one node to another using ClickDragPoint to create connections.
+4. Or click pairs of nodes sequentially to link them.
+
+Read the connection requirements from the instructions. Solve in 2-4 rounds.
+"##;
+
+const TRADING_SKILL: &str = r##"
+Trading/timing challenge: Buy low, sell high at the right moment.
+
+**Strategy:**
+1. Watch the chart/price indicator in the screenshot.
+2. Click BUY when the price is at a low point.
+3. Click SELL when the price peaks.
+4. Look for buttons labeled "Buy" or "Sell" or arrows.
+
+**Timing approach:**
+- If there's a moving line graph, click buy at valleys and sell at peaks.
+- Use Wait between actions to let the price change.
+- Target profit, not perfection.
+
+Solve in 3-5 rounds with Wait between buy/sell actions.
+"##;
+
+const TEXT_CHOICE_SKILL: &str = r##"
+Text choice challenge: Select or type a meaningful text response.
+
+**Strategy:**
+1. Read all available options in the screenshot.
+2. Choose the most genuine/human/meaningful response.
+3. If text input: type something thoughtful and human (not robotic).
+4. Click the chosen option or submit text.
+
+For philosophical questions: choose the empathetic, creative, or personal answer.
+Solve in 1-2 rounds.
+"##;
+
+/// JS that reads sliding puzzle tile positions and computes moves.
+const SLIDING_PUZZLE_PRE_EVALUATE_JS: &str = r##"try{
+var tiles=[...document.querySelectorAll('[class*=tile],[class*=slide],[class*=puzzle] > div')].filter(function(t){var r=t.getBoundingClientRect();return r.width>20&&r.height>20;});
+if(tiles.length>0){var info=tiles.map(function(t,i){var r=t.getBoundingClientRect();var txt=(t.textContent||'').trim().substring(0,5);return{id:i,x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height),txt:txt,cls:t.className.substring(0,30)};});
+document.title='SLIDE:'+JSON.stringify({n:tiles.length,tiles:info});}
+else{document.title='SLIDE_ERR:no_tiles';}
+}catch(e){document.title='SLIDE_ERR:'+e.message;}
+"##;
+
+const SLIDING_PUZZLE_SKILL: &str = r##"
+Sliding tile puzzle: Move tiles to solve the puzzle by sliding into the empty space.
+
+Title format: `SLIDE:{"n":N,"tiles":[{"id":N,"x":N,"y":N,"txt":"1"}...]}`
+
+**Strategy:**
+1. Read tile positions from the title data.
+2. Identify the empty space (missing tile in the grid).
+3. Click a tile adjacent to the empty space to slide it in.
+4. Work top-to-bottom, left-to-right: solve first row, then second row, etc.
+
+**Click the tile you want to move** (it slides into the empty space):
+```json
+"steps": [
+  {"ClickPoint":{"x":TILEx,"y":TILEy}},
+  {"Wait":300},
+  {"ClickPoint":{"x":TILE2x,"y":TILE2y}},
+  {"Wait":300}
+]
+```
+
+Make 2-4 moves per round. Verify when solved. Solve in 5-10 rounds.
+"##;
+
+const TRAFFIC_SIGNAL_SKILL: &str = r##"
+Traffic signal challenge: Interact with traffic lights or signals.
+
+**Strategy:**
+1. Look at the traffic signals in the screenshot.
+2. Click the green light, or set signals to the correct state.
+3. Follow the instructions — may need to click specific colored lights.
+4. If it's a tree of signals, click them in the correct order.
+
+Click the indicated signal elements. Solve in 2-3 rounds.
+"##;
+
+const RHYTHM_SKILL: &str = r##"
+Rhythm/drum challenge: Reproduce a rhythm or sound pattern.
+
+**Strategy:**
+1. First round: WATCH/LISTEN to the pattern being played. Note the order of drum hits.
+2. Second round: Click the drums/elements in the SAME order and timing.
+3. Each drum/pad is a clickable element — click them in sequence.
+
+**Pattern reproduction:**
+```json
+"steps": [
+  {"ClickPoint":{"x":DRUM1x,"y":DRUM1y}},
+  {"Wait":300},
+  {"ClickPoint":{"x":DRUM2x,"y":DRUM2y}},
+  {"Wait":300},
+  {"ClickPoint":{"x":DRUM1x,"y":DRUM1y}},
+  {"Wait":300}
+]
+```
+
+Watch the demo first (1 round), then reproduce (1-2 rounds). Solve in 3-4 rounds.
+"##;
+
+const BRAND_LOGO_SKILL: &str = r##"
+Brand logo challenge: Identify brands from their logos.
+
+**Strategy:**
+1. Look at the logo image in the screenshot.
+2. Identify the brand name (common: Apple, Nike, McDonald's, Google, Amazon, etc.).
+3. Type the brand name or click the matching option.
+4. Logos may be simplified, partial, or stylized.
+
+**Common logo features:**
+- Apple: bitten apple silhouette
+- Nike: swoosh
+- McDonald's: golden arches (M)
+- Starbucks: green mermaid/siren
+- Amazon: arrow from A to Z
+
+Type the brand name in the input field. Solve in 1-2 rounds.
+"##;
+
+/// JS that reads a math expression from the page and computes the answer.
+const MATH_PRE_EVALUATE_JS: &str = r##"try{
+var expr='';var els=[...document.querySelectorAll('h1,h2,h3,.math,.equation,.captcha-text,.challenge-text,p,span')];
+for(var el of els){var t=(el.textContent||'').trim();if(/[\d\+\-\*\/\=\^]+/.test(t)&&t.length>2&&t.length<100){expr=t;break;}}
+if(expr){try{var clean=expr.replace(/[^0-9\+\-\*\/\.\(\)\^%]/g,' ').trim().replace(/\^/g,'**');var ans=Function('"use strict";return ('+clean+')')();document.title='MATH:'+JSON.stringify({expr:expr,answer:String(ans)});}catch(ee){document.title='MATH:'+JSON.stringify({expr:expr,answer:''});}}
+else{document.title='MATH_ERR:no_expression';}
+}catch(e){document.title='MATH_ERR:'+e.message;}
+"##;
+
+const MATH_SKILL: &str = r##"
+Mathematics challenge: Solve a math equation or expression.
+
+Title format: `MATH:{"expr":"2 + 3 * 4","answer":"14"}`
+
+**Strategy:**
+1. Read the math expression from the title (pre-evaluate extracts and solves it).
+2. If answer is provided, type it directly using Fill.
+3. If answer is empty, solve the expression yourself and type the result.
+4. Submit via verify button.
+
+```json
+"steps": [
+  {"Fill":{"selector":"input","value":"ANSWER"}},
+  {"Wait":300},
+  {"Click":"#captcha-verify-button"}
+]
+```
+
+Solve in 1 round.
+"##;
+
+const SHUFFLE_SKILL: &str = r##"
+Shuffle tracking: Track an object (card, cup, ball) as it's shuffled.
+
+**Strategy:**
+1. First: identify which item hides the target (ball under cup, marked card, etc.).
+2. Watch the shuffle animation carefully in the screenshot sequence.
+3. Track the position through each swap.
+4. Click the final position of the target item.
+
+**Tips:**
+- Focus on one item only, ignore distractors.
+- The shuffle usually involves 3-7 swaps.
+- After shuffle ends, click the item at the tracked position.
+
+Solve in 2-3 rounds (watch, then click).
+"##;
+
+const MATCH3_SKILL: &str = r##"
+Match-3 puzzle: Swap adjacent tiles to create rows/columns of 3+ matching items.
+
+**Strategy:**
+1. Scan the grid for potential 3-in-a-row matches.
+2. Swap two adjacent tiles by clicking the first, then the second.
+3. Or drag one tile onto its neighbor.
+4. Look for where ONE swap creates a match of 3+ identical items.
+
+**Swap approach:**
+```json
+"steps": [
+  {"ClickPoint":{"x":TILE1x,"y":TILE1y}},
+  {"Wait":200},
+  {"ClickPoint":{"x":TILE2x,"y":TILE2y}},
+  {"Wait":500}
+]
+```
+
+Make 1-2 swaps per round. Verify when required matches are complete. Solve in 3-5 rounds.
+"##;
+
+const ODD_ONE_OUT_SKILL: &str = r##"
+Find the imposter: Identify the item that doesn't belong among similar items.
+
+**Strategy:**
+1. Look at ALL items in the grid carefully.
+2. Most items look alike — find the ONE that's different.
+3. Differences can be subtle: wrong color, mirrored, different expression, extra/missing detail.
+4. Click the odd one out.
+
+**Tips:**
+- Compare items systematically: top-left vs top-right, etc.
+- Look for: color differences, orientation, missing features, size.
+- The difference is usually small but visible.
+
+Click the imposter, then verify. Solve in 1-2 rounds.
+"##;
+
+const DECISION_SKILL: &str = r##"
+Decision challenge: Choose between presented options.
+
+**Strategy:**
+1. Read all available options carefully.
+2. Make a definitive choice — don't hesitate.
+3. Click the chosen option.
+4. For ethical dilemmas: choose the most commonly accepted answer.
+
+Just pick an option and click it. No overthinking needed. Solve in 1 round.
+"##;
+
+const FACE_MATCHING_SKILL: &str = r##"
+Face matching: Compare, match, or identify faces.
+
+**Strategy:**
+1. Look at the reference face(s) and the options.
+2. Compare facial features: eyes, nose, mouth shape, hair, jawline.
+3. Click the matching face or the correct answer.
+4. Pay attention to subtle differences: eyebrow shape, ear size, chin.
+
+Focus on distinctive features (glasses, facial hair, dimples). Solve in 1-2 rounds.
+"##;
+
+const SLOT_MACHINE_SKILL: &str = r##"
+Slot machine: Stop the reels to match symbols.
+
+**Strategy:**
+1. Watch the spinning reels.
+2. Click STOP or the reel itself to stop each one.
+3. Try to align matching symbols across reels.
+4. Timing is key — click when you see the target symbol.
+
+**Approach:**
+```json
+"steps": [
+  {"Click":"[class*=reel]:nth-child(1)"},
+  {"Wait":500},
+  {"Click":"[class*=reel]:nth-child(2)"},
+  {"Wait":500},
+  {"Click":"[class*=reel]:nth-child(3)"}
+]
+```
+
+Or look for a "Spin" then "Stop" button. Solve in 2-4 rounds.
+"##;
+
+const DIG_FIND_SKILL: &str = r##"
+Dig/find challenge: Search for something hidden by clicking or digging.
+
+**Strategy:**
+1. Click around the scene to dig/reveal hidden items.
+2. Look for subtle visual clues (disturbed ground, different texture).
+3. Click systematically across the area.
+4. When you find the item, click verify.
+
+Click multiple spots per round to search efficiently. Solve in 2-4 rounds.
+"##;
+
+const TURING_TEXT_SKILL: &str = r##"
+Reverse Turing test: Type text that proves you're human, not a robot.
+
+**Strategy:**
+1. Find the text input field.
+2. Type something genuinely human — personal, creative, emotional.
+3. Good examples: "I love the smell of rain on warm pavement" or "My grandma's cookies always made me smile"
+4. Avoid robotic/formal language. Be casual and personal.
+
+```json
+"steps": [
+  {"Fill":{"selector":"input,textarea","value":"I love watching sunsets while eating ice cream — the orange sky reminds me of childhood summers."}},
+  {"Wait":300},
+  {"Click":"#captcha-verify-button"}
+]
+```
+
+Be authentic, not formulaic. Solve in 1-2 rounds.
+"##;
+
+const ASSEMBLY_SKILL: &str = r##"
+Assembly/identification challenge: Identify items from instructions or blueprints.
+
+**Strategy:**
+1. Look at the assembly instructions or parts diagram in the screenshot.
+2. Identify the furniture/item being assembled.
+3. Select the correct item name or click the matching option.
+4. For drag challenges: drag parts to their correct positions.
+
+Match shapes and silhouettes to identify items. Solve in 1-3 rounds.
+"##;
+
+const CHESS_SKILL: &str = r##"
+Chess challenge: Make the best move or solve a chess puzzle.
+
+**Strategy:**
+1. Read the board position from the screenshot.
+2. Identify: whose turn it is, which pieces are where.
+3. Look for: checkmate in 1, forks, pins, skewers, hanging pieces.
+4. Click the piece to move, then click the destination square.
+
+**Common tactics:**
+- Queen + Rook battery for back-rank mate
+- Knight forks (attacking 2+ pieces)
+- Bishop pins against the king
+- Pawn promotion threats
+
+**Steps:**
+```json
+"steps": [
+  {"ClickPoint":{"x":PIECEx,"y":PIECEy}},
+  {"Wait":300},
+  {"ClickPoint":{"x":DESTx,"y":DESTy}},
+  {"Wait":500}
+]
+```
+
+Think carefully before moving. Solve in 3-8 rounds.
+"##;
+
+const FIND_PERSON_SKILL: &str = r##"
+Find person: Locate a specific named person in a crowd or scene.
+
+**Strategy:**
+1. Read the person's name from the title/instructions.
+2. Scan the screenshot for people — look at name tags, labels, distinctive features.
+3. Click on the correct person.
+4. If there are name labels, match the text exactly.
+
+Look for text labels near each person. Click the correct one. Solve in 1-2 rounds.
+"##;
+
+const FLOOR_NAV_SKILL: &str = r##"
+Floor navigation: Navigate through building floors to reach a target.
+
+**Strategy:**
+1. Read which floor you need to reach.
+2. Click elevator buttons, stairs, or floor selectors.
+3. Navigate up or down to the target floor.
+4. Click the door/room at the target floor.
+
+Look for UP/DOWN arrows or floor number buttons. Solve in 2-4 rounds.
+"##;
+
+const BELL_PATTERN_SKILL: &str = r##"
+Bell/sound pattern: Reproduce a sequence of bell rings or sounds.
+
+**Strategy:**
+1. First round: observe the pattern being demonstrated (which bells ring in which order).
+2. Note the sequence: left-right-left, or numbered positions.
+3. Reproduce by clicking bells/elements in the same order.
+
+**Pattern reproduction:**
+```json
+"steps": [
+  {"ClickPoint":{"x":BELL1x,"y":BELL1y}},
+  {"Wait":400},
+  {"ClickPoint":{"x":BELL2x,"y":BELL2y}},
+  {"Wait":400},
+  {"ClickPoint":{"x":BELL3x,"y":BELL3y}}
+]
+```
+
+Match the exact sequence and timing. Solve in 2-4 rounds.
+"##;
+
+const FINAL_CREATIVE_SKILL: &str = r##"
+Final challenge: Complete the last creative task.
+
+**Strategy:**
+1. Read the instructions carefully from the screenshot.
+2. This is usually a unique creative challenge.
+3. Follow the specific instructions — it may involve typing, drawing, or clicking.
+4. Be creative and genuine in your response.
+
+Adapt to whatever the challenge asks. Look at all interactive elements.
+Solve in 2-4 rounds.
 "##;
 
 #[cfg(test)]

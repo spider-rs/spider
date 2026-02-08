@@ -917,6 +917,187 @@ impl RemoteMultimodalEngine {
                                 }
                             }
 
+                            // NEST: Nested grid engine loop — detect stop sign overlap
+                            // and click boxes automatically, wait for subdivision, repeat.
+                            if new_title.starts_with("NEST:") {
+                                let nest_js: Option<&str> = pre_evals.iter()
+                                    .find(|(name, _)| *name == "nested-grid")
+                                    .map(|(_, js)| *js);
+                                if let Some(nest_js) = nest_js {
+                                    let mut total_clicked = 0u32;
+                                    // Up to 8 subdivision rounds
+                                    for _nest_step in 0..8 {
+                                        if let Some(json_str) = title_now.strip_prefix("NEST:") {
+                                            if let Ok(data) = serde_json::from_str::<serde_json::Value>(json_str) {
+                                                let has_sign = data.get("hasSign").and_then(|v| v.as_bool()).unwrap_or(false);
+                                                let to_click = data.get("toClick").and_then(|v| v.as_array());
+                                                let boxes = data.get("boxes").and_then(|v| v.as_array());
+                                                if !has_sign { break; } // can't detect sign, let LLM handle
+                                                if let (Some(to_click), Some(boxes)) = (to_click, boxes) {
+                                                    if to_click.is_empty() { break; } // all done
+                                                    // Build id→center map
+                                                    let box_map: std::collections::HashMap<i64, (f64, f64)> = boxes.iter().filter_map(|b| {
+                                                        let id = b.get("id").and_then(|v| v.as_i64())?;
+                                                        let x = b.get("x").and_then(|v| v.as_f64())?;
+                                                        let y = b.get("y").and_then(|v| v.as_f64())?;
+                                                        Some((id, (x, y)))
+                                                    }).collect();
+                                                    use chromiumoxide::cdp::browser_protocol::input::{
+                                                        DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
+                                                    };
+                                                    let mut clicked_this_round = 0u32;
+                                                    for tc_id in to_click {
+                                                        let id = tc_id.as_i64().unwrap_or(-1);
+                                                        if let Some((x, y)) = box_map.get(&id) {
+                                                            // CDP click: move → press → release
+                                                            if let Ok(cmd) = DispatchMouseEventParams::builder()
+                                                                .x(*x).y(*y)
+                                                                .button(MouseButton::None).buttons(0)
+                                                                .r#type(DispatchMouseEventType::MouseMoved).build() {
+                                                                let _ = page.send_command(cmd).await;
+                                                            }
+                                                            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+                                                            if let Ok(cmd) = DispatchMouseEventParams::builder()
+                                                                .x(*x).y(*y)
+                                                                .button(MouseButton::Left).buttons(1).click_count(1)
+                                                                .r#type(DispatchMouseEventType::MousePressed).build() {
+                                                                let _ = page.send_command(cmd).await;
+                                                            }
+                                                            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+                                                            if let Ok(cmd) = DispatchMouseEventParams::builder()
+                                                                .x(*x).y(*y)
+                                                                .button(MouseButton::Left).buttons(0).click_count(1)
+                                                                .r#type(DispatchMouseEventType::MouseReleased).build() {
+                                                                let _ = page.send_command(cmd).await;
+                                                            }
+                                                            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+                                                            clicked_this_round += 1;
+                                                        }
+                                                    }
+                                                    total_clicked += clicked_this_round;
+                                                    log::info!("NEST: clicked {} boxes (total {})", clicked_this_round, total_clicked);
+                                                    // Wait for subdivision animation
+                                                    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+                                                    // Re-run pre_evaluate to detect new leaf boxes
+                                                    let _ = page.evaluate(nest_js).await;
+                                                    let updated = self.title_context(page, &effective_cfg).await;
+                                                    if !updated.is_empty() {
+                                                        title_now = updated;
+                                                    }
+                                                } else { break; }
+                                            } else { break; }
+                                        } else { break; }
+                                    }
+                                    if total_clicked > 0 {
+                                        log::info!("NEST: engine auto-clicked {} total boxes, clicking verify", total_clicked);
+                                        let done_title = format!("NEST_DONE:{{\"clicked\":{}}}", total_clicked);
+                                        let marker_js = format!(
+                                            "document.title={t};if(!document.getElementById('nest-engine-done')){{var d=document.createElement('div');d.id='nest-engine-done';d.style.display='none';d.dataset.t={t};document.body.appendChild(d);}}",
+                                            t = serde_json::to_string(&done_title).unwrap_or_default()
+                                        );
+                                        let _ = page.evaluate(marker_js).await;
+                                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                        let verify_js = r#"(function(){
+                                            var btn=document.querySelector('#captcha-verify-button,button.captcha-verify,.verify-button,[class*=verify]');
+                                            if(btn){var r=btn.getBoundingClientRect();
+                                            var ev={bubbles:true,cancelable:true,clientX:r.x+r.width/2,clientY:r.y+r.height/2};
+                                            btn.dispatchEvent(new PointerEvent('pointerdown',ev));
+                                            btn.dispatchEvent(new MouseEvent('mousedown',ev));
+                                            btn.dispatchEvent(new PointerEvent('pointerup',ev));
+                                            btn.dispatchEvent(new MouseEvent('mouseup',ev));
+                                            btn.dispatchEvent(new MouseEvent('click',ev));
+                                            return 'clicked';}return 'not_found';})()
+                                        "#;
+                                        let _ = page.evaluate(verify_js).await;
+                                        log::info!("NEST: engine clicked verify");
+                                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                                        let post = self.title_context(page, &effective_cfg).await;
+                                        if !post.is_empty() { title_now = post; }
+                                    }
+                                }
+                            }
+
+                            // CIRCLE: engine draws a circle via CDP mouse drag through
+                            // pre-computed points, then clicks verify.
+                            if new_title.starts_with("CIRCLE:") {
+                                if let Some(json_str) = new_title.strip_prefix("CIRCLE:") {
+                                    if let Ok(data) = serde_json::from_str::<serde_json::Value>(json_str) {
+                                        let pts = data.get("pts").and_then(|v| v.as_array());
+                                        if let Some(pts) = pts {
+                                            let coords: Vec<(f64, f64)> = pts.iter().filter_map(|p| {
+                                                let x = p.get("x").and_then(|v| v.as_f64())?;
+                                                let y = p.get("y").and_then(|v| v.as_f64())?;
+                                                Some((x, y))
+                                            }).collect();
+                                            if coords.len() >= 2 {
+                                                use chromiumoxide::cdp::browser_protocol::input::{
+                                                    DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
+                                                };
+                                                // Move to start
+                                                let (sx, sy) = coords[0];
+                                                if let Ok(cmd) = DispatchMouseEventParams::builder()
+                                                    .x(sx).y(sy)
+                                                    .button(MouseButton::None).buttons(0)
+                                                    .r#type(DispatchMouseEventType::MouseMoved).build() {
+                                                    let _ = page.send_command(cmd).await;
+                                                }
+                                                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                                                // Press at start
+                                                if let Ok(cmd) = DispatchMouseEventParams::builder()
+                                                    .x(sx).y(sy)
+                                                    .button(MouseButton::Left).buttons(1)
+                                                    .r#type(DispatchMouseEventType::MousePressed).build() {
+                                                    let _ = page.send_command(cmd).await;
+                                                }
+                                                // Drag through all points
+                                                for (x, y) in &coords[1..] {
+                                                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                                                    if let Ok(cmd) = DispatchMouseEventParams::builder()
+                                                        .x(*x).y(*y)
+                                                        .button(MouseButton::Left).buttons(1)
+                                                        .r#type(DispatchMouseEventType::MouseMoved).build() {
+                                                        let _ = page.send_command(cmd).await;
+                                                    }
+                                                }
+                                                // Release at end
+                                                let (ex, ey) = *coords.last().unwrap_or(&(sx, sy));
+                                                tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+                                                if let Ok(cmd) = DispatchMouseEventParams::builder()
+                                                    .x(ex).y(ey)
+                                                    .button(MouseButton::Left).buttons(0)
+                                                    .r#type(DispatchMouseEventType::MouseReleased).build() {
+                                                    let _ = page.send_command(cmd).await;
+                                                }
+                                                log::info!("CIRCLE: engine drew circle with {} points", coords.len());
+                                                let done_title = format!("CIRCLE_DONE:{{\"points\":{}}}", coords.len());
+                                                let marker_js = format!(
+                                                    "document.title={t};if(!document.getElementById('circle-engine-done')){{var d=document.createElement('div');d.id='circle-engine-done';d.style.display='none';d.dataset.t={t};document.body.appendChild(d);}}",
+                                                    t = serde_json::to_string(&done_title).unwrap_or_default()
+                                                );
+                                                let _ = page.evaluate(marker_js).await;
+                                                tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+                                                let verify_js = r#"(function(){
+                                                    var btn=document.querySelector('#captcha-verify-button,button.captcha-verify,.verify-button,[class*=verify]');
+                                                    if(btn){var r=btn.getBoundingClientRect();
+                                                    var ev={bubbles:true,cancelable:true,clientX:r.x+r.width/2,clientY:r.y+r.height/2};
+                                                    btn.dispatchEvent(new PointerEvent('pointerdown',ev));
+                                                    btn.dispatchEvent(new MouseEvent('mousedown',ev));
+                                                    btn.dispatchEvent(new PointerEvent('pointerup',ev));
+                                                    btn.dispatchEvent(new MouseEvent('mouseup',ev));
+                                                    btn.dispatchEvent(new MouseEvent('click',ev));
+                                                    return 'clicked';}return 'not_found';})()
+                                                "#;
+                                                let _ = page.evaluate(verify_js).await;
+                                                log::info!("CIRCLE: engine clicked verify");
+                                                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                                                let post = self.title_context(page, &effective_cfg).await;
+                                                if !post.is_empty() { title_now = post; }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             // WS_DRAG: engine clicks each word-search cell individually via CDP.
                             // Each cell gets a full click (move→press→release) for reliable
                             // click-to-select behavior, then engine clicks verify.
