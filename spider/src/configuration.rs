@@ -563,6 +563,7 @@ impl Configuration {
         .with_vision_model(cfgs.vision_model.clone())
         .with_text_model(cfgs.text_model.clone())
         .with_vision_route_mode(cfgs.vision_route_mode)
+        .with_chrome_ai(cfgs.use_chrome_ai)
         .with_semaphore(sem)
         .to_owned();
 

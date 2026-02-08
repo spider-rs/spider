@@ -83,6 +83,13 @@ pub struct RemoteMultimodalEngine {
     #[cfg(feature = "memvid")]
     pub experience_memory:
         Option<std::sync::Arc<tokio::sync::RwLock<super::long_term_memory::ExperienceMemory>>>,
+    /// Use Chrome's built-in LanguageModel API (Gemini Nano) for inference.
+    ///
+    /// When `true`, uses `page.evaluate()` + `LanguageModel.create()` instead of
+    /// HTTP API calls. Also used as a last-resort fallback when `api_url` is empty.
+    pub use_chrome_ai: bool,
+    /// Maximum user-prompt characters for Chrome AI inference.
+    pub chrome_ai_max_user_chars: usize,
 }
 
 impl RemoteMultimodalEngine {
@@ -110,6 +117,8 @@ impl RemoteMultimodalEngine {
             skill_registry: None,
             #[cfg(feature = "memvid")]
             experience_memory: None,
+            use_chrome_ai: false,
+            chrome_ai_max_user_chars: 6000,
         }
     }
 
@@ -187,6 +196,26 @@ impl RemoteMultimodalEngine {
         self
     }
 
+    /// Enable Chrome built-in AI (LanguageModel / Gemini Nano) for inference.
+    pub fn with_chrome_ai(&mut self, enabled: bool) -> &mut Self {
+        self.use_chrome_ai = enabled;
+        self
+    }
+
+    /// Set the maximum user-prompt character budget for Chrome AI.
+    pub fn with_chrome_ai_max_user_chars(&mut self, chars: usize) -> &mut Self {
+        self.chrome_ai_max_user_chars = chars;
+        self
+    }
+
+    /// Whether Chrome AI should be used for inference.
+    ///
+    /// Returns `true` when explicitly enabled OR when no API endpoint is
+    /// configured (last-resort fallback).
+    pub fn should_use_chrome_ai(&self) -> bool {
+        self.use_chrome_ai || (self.api_url.is_empty() && self.api_key.is_none())
+    }
+
     /// Set the full runtime configuration.
     pub fn with_remote_multimodal_config(&mut self, cfg: RemoteMultimodalConfig) -> &mut Self {
         self.cfg = cfg;
@@ -246,6 +275,8 @@ impl RemoteMultimodalEngine {
             skill_registry: self.skill_registry.clone(),
             #[cfg(feature = "memvid")]
             experience_memory: self.experience_memory.clone(),
+            use_chrome_ai: self.use_chrome_ai,
+            chrome_ai_max_user_chars: self.chrome_ai_max_user_chars,
         }
     }
 

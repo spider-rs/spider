@@ -976,6 +976,10 @@ fn default_max_skill_context_chars() -> usize {
     4000
 }
 
+fn default_chrome_ai_max_user_chars() -> usize {
+    6000
+}
+
 impl RemoteMultimodalConfig {
     /// Create a new config with default settings.
     pub fn new() -> Self {
@@ -1223,6 +1227,31 @@ pub struct RemoteMultimodalConfigs {
     /// Routing mode controlling when vision vs text model is used.
     #[serde(default)]
     pub vision_route_mode: VisionRouteMode,
+    /// Use Chrome's built-in LanguageModel API (Gemini Nano) for inference.
+    ///
+    /// When `true`, the automation loop evaluates JavaScript on the page via
+    /// `page.evaluate()` calling `LanguageModel.create()` + `session.prompt()`
+    /// instead of making HTTP API calls. This enables running the agent
+    /// without any external API key.
+    ///
+    /// When left `false` (default), Chrome AI is still used as a **last-resort
+    /// fallback** if both `api_url` and `api_key` are empty.
+    ///
+    /// Requires Chrome with built-in AI enabled:
+    /// - `chrome://flags/#optimization-guide-on-device-model` → Enabled
+    /// - `chrome://flags/#prompt-api-for-gemini-nano` → Enabled
+    #[serde(default)]
+    pub use_chrome_ai: bool,
+    /// Maximum user-prompt characters for Chrome AI inference.
+    ///
+    /// Gemini Nano has limited context compared to cloud models. This budget
+    /// controls the max length of the user message (HTML context, URL, title,
+    /// task instructions). When the user prompt exceeds this limit, the HTML
+    /// context section is truncated while preserving task instructions and memory.
+    ///
+    /// Default: 6000 chars. Only used when Chrome AI is the active inference path.
+    #[serde(default = "default_chrome_ai_max_user_chars")]
+    pub chrome_ai_max_user_chars: usize,
     /// Optional skill registry for dynamic context injection.
     /// When set, matching skills are automatically injected into the system prompt
     /// based on current page state (URL, title, HTML) each round.
@@ -1260,6 +1289,8 @@ impl PartialEq for RemoteMultimodalConfigs {
             && self.vision_model == other.vision_model
             && self.text_model == other.text_model
             && self.vision_route_mode == other.vision_route_mode
+            && self.use_chrome_ai == other.use_chrome_ai
+            && self.chrome_ai_max_user_chars == other.chrome_ai_max_user_chars
         // NOTE: intentionally ignoring `semaphore` and `skill_registry`
     }
 }
@@ -1281,8 +1312,10 @@ impl Default for RemoteMultimodalConfigs {
             vision_model: None,
             text_model: None,
             vision_route_mode: VisionRouteMode::default(),
+            use_chrome_ai: false,
+            chrome_ai_max_user_chars: default_chrome_ai_max_user_chars(),
             #[cfg(feature = "skills")]
-            skill_registry: None,
+            skill_registry: Some(super::skills::builtin_web_challenges()),
             #[cfg(feature = "skills_s3")]
             s3_skill_source: None,
             semaphore: Self::default_semaphore(),
@@ -1497,6 +1530,33 @@ impl RemoteMultimodalConfigs {
             self.cfg.url_prefilter_batch_size = bs;
         }
         self
+    }
+
+    /// Enable Chrome built-in AI (LanguageModel / Gemini Nano) for inference.
+    ///
+    /// When enabled, the engine uses `page.evaluate()` to call Chrome's
+    /// `LanguageModel.create()` + `session.prompt()` instead of HTTP API calls.
+    /// No API key is required.
+    ///
+    /// Even when not explicitly enabled, Chrome AI is used as a last-resort
+    /// fallback if both `api_url` and `api_key` are empty.
+    pub fn with_chrome_ai(mut self, enabled: bool) -> Self {
+        self.use_chrome_ai = enabled;
+        self
+    }
+
+    /// Set the maximum user-prompt character budget for Chrome AI inference.
+    pub fn with_chrome_ai_max_user_chars(mut self, chars: usize) -> Self {
+        self.chrome_ai_max_user_chars = chars;
+        self
+    }
+
+    /// Whether Chrome AI should be used for inference in this configuration.
+    ///
+    /// Returns `true` when explicitly enabled OR when no API endpoint is
+    /// configured (last-resort fallback).
+    pub fn should_use_chrome_ai(&self) -> bool {
+        self.use_chrome_ai || (self.api_url.is_empty() && self.api_key.is_none())
     }
 
     /// Whether dual-model routing is active
@@ -2255,5 +2315,37 @@ mod tests {
             Some("https://other.api.com")
         );
         assert_eq!(deserialized.vision_route_mode, VisionRouteMode::TextFirst);
+    }
+
+    #[cfg(feature = "skills")]
+    #[test]
+    fn test_default_configs_auto_load_builtin_skills() {
+        let cfg = RemoteMultimodalConfigs::default();
+        let registry = cfg
+            .skill_registry
+            .as_ref()
+            .expect("default config should auto-load built-in skills");
+        assert!(
+            registry.get("image-grid-selection").is_some(),
+            "expected image-grid-selection built-in skill"
+        );
+        assert!(
+            registry.get("tic-tac-toe").is_some(),
+            "expected tic-tac-toe built-in skill"
+        );
+    }
+
+    #[cfg(feature = "skills")]
+    #[test]
+    fn test_new_configs_auto_load_builtin_skills() {
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "model");
+        let registry = cfg
+            .skill_registry
+            .as_ref()
+            .expect("new config should auto-load built-in skills");
+        assert!(
+            registry.get("word-search").is_some(),
+            "expected word-search built-in skill"
+        );
     }
 }

@@ -400,7 +400,20 @@ Title format: `ROT:{"n":9,"done":false,"clicks":"1:1,2:2,6:3,7:2,8:3"}`
 "##;
 
 /// JS executed by the engine before the LLM sees the TTT page.
-const TTT_PRE_EVALUATE_JS: &str = "try{const cells=[...document.querySelectorAll('.grid-item')].filter(el=>el.offsetWidth>20&&el.offsetHeight>20);const n=cells.length;const occ=new Set();cells.forEach((el,i)=>{const inner=el.querySelector('.tic-tac-toe-cell');if(inner&&(inner.className.includes('cell-selected')||inner.className.includes('cell-disabled')))occ.add(i);});let tr=document.getElementById('ttt-h');if(!tr){tr=document.createElement('div');tr.id='ttt-h';tr.style.display='none';tr.dataset.m='';document.body.appendChild(tr);}const my=new Set(tr.dataset.m?tr.dataset.m.split(',').map(Number):[]);if(occ.size===0)my.clear();for(const m of my)if(!occ.has(m))my.delete(m);const opp=new Set([...occ].filter(i=>!my.has(i)));const board=Array.from({length:9},(_,i)=>my.has(i)?'M':opp.has(i)?'T':'.');const W=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];let myWin=false,thWin=false;for(const w of W){if(w.every(i=>board[i]==='M'))myWin=true;if(w.every(i=>board[i]==='T'))thWin=true;}let best=-1;if(!myWin&&!thWin){for(const w of W){const mi=w.filter(i=>board[i]==='M'),e=w.filter(i=>board[i]==='.');if(mi.length===2&&e.length===1){best=e[0];break;}}if(best<0)for(const w of W){const ti=w.filter(i=>board[i]==='T'),e=w.filter(i=>board[i]==='.');if(ti.length===2&&e.length===1){best=e[0];break;}}if(best<0&&board[4]==='.')best=4;if(best<0)for(const c of[0,2,6,8])if(board[c]==='.'){best=c;break;}if(best<0)for(const c of[1,3,5,7])if(board[c]==='.'){best=c;break;}}let clicked=false;if(best>=0&&cells[best]){const el=cells[best];const r=el.getBoundingClientRect();const ev={bubbles:true,cancelable:true,clientX:r.x+r.width/2,clientY:r.y+r.height/2};el.dispatchEvent(new PointerEvent('pointerdown',ev));el.dispatchEvent(new MouseEvent('mousedown',ev));el.dispatchEvent(new PointerEvent('pointerup',ev));el.dispatchEvent(new MouseEvent('mouseup',ev));el.dispatchEvent(new MouseEvent('click',ev));clicked=true;my.add(best);board[best]='M';for(const w of W)if(w.every(i=>board[i]==='M'))myWin=true;}tr.dataset.m=[...my].join(',');const full=!board.includes('.');document.title='TTT:'+JSON.stringify({n,board:board.join(''),best,clicked,myWin,thWin,full});}catch(e){document.title='TTT_ERR:'+e.message;}";
+/// Strategy: win → block → fork (create 2+ threats) → block fork → center → opposite corner → corner → side.
+const TTT_PRE_EVALUATE_JS: &str = r##"try{const cells=[...document.querySelectorAll('.grid-item')].filter(el=>el.offsetWidth>20&&el.offsetHeight>20);const n=cells.length;const occ=new Set();cells.forEach((el,i)=>{const inner=el.querySelector('.tic-tac-toe-cell');if(inner&&(inner.className.includes('cell-selected')||inner.className.includes('cell-disabled')))occ.add(i);});let tr=document.getElementById('ttt-h');if(!tr){tr=document.createElement('div');tr.id='ttt-h';tr.style.display='none';tr.dataset.m='';document.body.appendChild(tr);}const my=new Set(tr.dataset.m?tr.dataset.m.split(',').map(Number):[]);if(occ.size===0)my.clear();for(const m of my)if(!occ.has(m))my.delete(m);const opp=new Set([...occ].filter(i=>!my.has(i)));const board=Array.from({length:9},(_,i)=>my.has(i)?'M':opp.has(i)?'T':'.');const W=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];let myWin=false,thWin=false;for(const w of W){if(w.every(i=>board[i]==='M'))myWin=true;if(w.every(i=>board[i]==='T'))thWin=true;}
+function countThreats(b,mark){let t=0;for(const w of W){const m=w.filter(i=>b[i]===mark),e=w.filter(i=>b[i]==='.');if(m.length===2&&e.length===1)t++;}return t;}
+let best=-1;if(!myWin&&!thWin){
+for(const w of W){const mi=w.filter(i=>board[i]==='M'),e=w.filter(i=>board[i]==='.');if(mi.length===2&&e.length===1){best=e[0];break;}}
+if(best<0)for(const w of W){const ti=w.filter(i=>board[i]==='T'),e=w.filter(i=>board[i]==='.');if(ti.length===2&&e.length===1){best=e[0];break;}}
+if(best<0){let bestFork=-1,bestScore=0;for(let i=0;i<9;i++){if(board[i]!=='.')continue;const b2=[...board];b2[i]='M';const threats=countThreats(b2,'M');if(threats>=2&&threats>bestScore){bestScore=threats;bestFork=i;}}best=bestFork;}
+if(best<0){for(let i=0;i<9;i++){if(board[i]!=='.')continue;const b2=[...board];b2[i]='T';if(countThreats(b2,'T')>=2){best=i;break;}}}
+if(best<0&&board[4]==='.')best=4;
+if(best<0){const opc=[[0,8],[2,6],[6,2],[8,0]];for(const[c,o]of opc)if(board[c]==='T'&&board[o]==='.')best=o;}
+if(best<0)for(const c of[0,2,6,8])if(board[c]==='.'){best=c;break;}
+if(best<0)for(const c of[1,3,5,7])if(board[c]==='.'){best=c;break;}
+}let clicked=false;if(best>=0&&cells[best]){const el=cells[best];const r=el.getBoundingClientRect();const ev={bubbles:true,cancelable:true,clientX:r.x+r.width/2,clientY:r.y+r.height/2};el.dispatchEvent(new PointerEvent('pointerdown',ev));el.dispatchEvent(new MouseEvent('mousedown',ev));el.dispatchEvent(new PointerEvent('pointerup',ev));el.dispatchEvent(new MouseEvent('mouseup',ev));el.dispatchEvent(new MouseEvent('click',ev));clicked=true;my.add(best);board[best]='M';for(const w of W)if(w.every(i=>board[i]==='M'))myWin=true;}tr.dataset.m=[...my].join(',');const full=!board.includes('.');document.title='TTT:'+JSON.stringify({n,board:board.join(''),best,clicked,myWin,thWin,full});}catch(e){document.title='TTT_ERR:'+e.message;}
+"##;
 
 /// Simplified TTT skill content — pre_evaluate handles clicking, model just checks outcome.
 const TTT_SKILL_SIMPLIFIED: &str = r##"
@@ -423,42 +436,82 @@ Title format: `TTT:{"n":9,"board":"M..T.M..T","best":4,"clicked":true,"myWin":fa
 "##;
 
 /// JS executed by the engine before the LLM sees the Word Search page.
-const WORD_SEARCH_PRE_EVALUATE_JS: &str = "try{let cells=[...document.querySelectorAll('.word-search-grid-item')];if(!cells.length)cells=[...document.querySelectorAll('.grid-item')].filter(el=>el.textContent.trim().length===1);if(!cells.length)cells=[...document.querySelectorAll('[class*=letter]')].filter(el=>el.textContent.trim().length===1);const n=cells.length;if(n<4){document.title='WS:'+JSON.stringify({n,err:'no_grid'});}else{const rects=cells.map(c=>{const r=c.getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};});const letters=cells.map(c=>c.textContent.trim().toUpperCase());const tops=[...new Set(rects.map(r=>r.y))].sort((a,b)=>a-b);const rows=tops.length||1,cols=Math.round(n/rows)||1;const grid=[];for(let r=0;r<rows;r++)grid.push(letters.slice(r*cols,(r+1)*cols));let wordEls=[...document.querySelectorAll('.word-search-words span,.word-search-word')];if(!wordEls.length)wordEls=[...document.querySelectorAll('[class*=word-item],[class*=clue]')];if(!wordEls.length)wordEls=[...document.querySelectorAll('.word-search-words li,.words li')];if(!wordEls.length)wordEls=[...document.querySelectorAll('.words span')];if(!wordEls.length){const all=[...document.querySelectorAll('span,div')].filter(el=>!el.querySelector('*')&&el.textContent.trim().match(/^[A-Z\\s]{3,20}$/i)&&!el.closest('.grid-item,.word-search-grid-item'));wordEls=all;}const words=wordEls.map(el=>el.textContent.trim().toUpperCase().replace(/\\s+/g,'')).filter(w=>w.length>1&&w.length<=20&&w.match(/^[A-Z]+$/));const dirs=[[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]];const found={};words.forEach(w=>{for(let r=0;r<rows;r++)for(let c=0;c<cols;c++)for(const[dr,dc]of dirs){let ok=true;for(let k=0;k<w.length;k++){const nr=r+dr*k,nc=c+dc*k;if(nr<0||nr>=rows||nc<0||nc>=cols||grid[nr][nc]!==w[k]){ok=false;break;}}if(ok){const si=r*cols+c,ei=(r+dr*(w.length-1))*cols+(c+dc*(w.length-1));found[w]={from:rects[si],to:rects[ei]};return;}}});if(Object.keys(found).length>0){document.title='WS:'+JSON.stringify({n,rows,cols,words,found});}else{const gt=grid.map(r=>r.join('')).join('/');document.title='WS:'+JSON.stringify({n,rows,cols,grid:gt,words:[],found:{}});}}}catch(e){document.title='WS_ERR:'+e.message;}";
+/// Extracts grid, finds words, outputs coordinates for engine-side CDP drag.
+const WORD_SEARCH_PRE_EVALUATE_JS: &str = r##"try{
+const doneEl=document.getElementById('ws-engine-done');
+if(doneEl){document.title=doneEl.dataset.t;throw'done';}
+let cells=[...document.querySelectorAll('.word-search-grid-item')];
+if(!cells.length)cells=[...document.querySelectorAll('.grid-item')].filter(el=>el.textContent.trim().length===1);
+if(!cells.length)cells=[...document.querySelectorAll('[class*=letter]')].filter(el=>el.textContent.trim().length===1);
+const n=cells.length;
+if(n<4){document.title='WS:'+JSON.stringify({n,err:'no_grid'});}
+else{
+const rects=cells.map(c=>{const r=c.getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};});
+const letters=cells.map(c=>c.textContent.trim().toUpperCase());
+const tops=[...new Set(rects.map(r=>r.y))].sort((a,b)=>a-b);
+const rows=tops.length||1,cols=Math.round(n/rows)||1;
+const grid=[];for(let r=0;r<rows;r++)grid.push(letters.slice(r*cols,(r+1)*cols));
+const dirs=[[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]];
+function findWord(w){for(let r=0;r<rows;r++)for(let c=0;c<cols;c++)for(const[dr,dc]of dirs){let ok=true;for(let k=0;k<w.length;k++){const nr=r+dr*k,nc=c+dc*k;if(nr<0||nr>=rows||nc<0||nc>=cols||grid[nr][nc]!==w[k]){ok=false;break;}}if(ok){const pts=[];for(let k=0;k<w.length;k++){const idx=(r+dr*k)*cols+(c+dc*k);pts.push(rects[idx]);}return pts;}}return null;}
+let words=[];
+let wordEls=[...document.querySelectorAll('.word-search-words span,.word-search-word')];
+if(!wordEls.length)wordEls=[...document.querySelectorAll('[class*=word-item],[class*=clue]')];
+if(!wordEls.length)wordEls=[...document.querySelectorAll('.word-search-words li,.words li')];
+if(!wordEls.length)wordEls=[...document.querySelectorAll('.words span')];
+words=wordEls.map(el=>el.textContent.trim().toUpperCase().replace(/\s+/g,'')).filter(w=>w.length>1&&w.length<=20&&w.match(/^[A-Z]+$/));
+if(!words.length){
+  const txts=[...document.querySelectorAll('h1,h2,h3,h4,p,span,div,label')];
+  for(const el of txts){
+    const t=el.textContent.trim();
+    if(t.length>200||t.length<8)continue;
+    const m=t.match(/(?:select|find|choose|highlight)\s+(?:all\s+)?(?:the\s+)?(?:squares?\s+)?(?:with|containing|that\s+have|showing|of)\s+(?:a\s+|an?\s+)?(.+)/i);
+    if(m){
+      const raw=m[1].replace(/[.!?]+$/,'').split(/\s+and\s+|,\s*/i).map(s=>s.trim());
+      words=raw.map(s=>s.toUpperCase().replace(/[^A-Z]/g,'')).filter(w=>w.length>=2);
+      if(words.length)break;
+    }
+  }
+}
+const found={};
+words.forEach(w=>{
+  const pts=findWord(w);
+  if(pts){found[w]=pts;return;}
+  for(let i=2;i<=w.length-2;i++){const p1=w.slice(0,i),p2=w.slice(i);const r1=findWord(p1),r2=findWord(p2);if(r1&&r2){found[p1]=r1;found[p2]=r2;return;}}
+});
+const fk=Object.keys(found);
+if(fk.length>0){document.title='WS_DRAG:'+JSON.stringify({n,words:fk,drags:fk.map(w=>found[w])});}
+else{const gt=grid.map(r=>r.join('')).join('/');document.title='WS:'+JSON.stringify({n,rows,cols,grid:gt,words,found:{}});}
+}}catch(e){if(e!=='done'){document.title='WS_ERR:'+(e&&e.message||String(e));}}
+"##;
 
-/// Simplified Word Search skill content — model reads pre-computed title and drags.
+/// Simplified Word Search skill content — engine handles CDP drag, model clicks verify.
 const WORD_SEARCH_SKILL_SIMPLIFIED: &str = r##"
-Word search puzzle: Grid is auto-analyzed. Read `document.title` for result.
+Word search puzzle: Words are auto-found and auto-dragged by the engine. Read `document.title`.
 
 **(Skip image-grid-selection skill — this is a word search, NOT an image grid.)**
 
 Title formats:
-- With found words: `WS:{"n":100,"rows":10,"cols":10,"words":["STOP"],"found":{"STOP":{"from":{"x":100,"y":200},"to":{"x":300,"y":200}}}}`
-- Grid only (words not auto-detected): `WS:{"n":100,"rows":10,"cols":10,"grid":"CRNW.../PBRB...","words":[],"found":{}}`
+- `WS_DONE:{"dragged":["STOPSIGN","BIKE"]}` — engine dragged all words. Click verify!
+- `WS:{"n":100,...,"words":[],"found":{}}` — grid found but words not detected.
+- `WS_ERR:...` or `WS:{"n":0,...}` — grid not loaded.
 
-**Rules:**
-1. If `found` has entries → drag each word using ClickDragPoint, then verify:
-```json
-"steps": [
-  {"ClickDragPoint":{"from_x":100,"from_y":200,"to_x":300,"to_y":200}},
-  {"Wait":300},
-  {"ClickDragPoint":{"from_x":150,"from_y":300,"to_x":150,"to_y":500}},
-  {"Wait":300},
-  {"Click":"#captcha-verify-button"}
-]
-```
-2. If `words:[]` (words not auto-detected) → use Evaluate to find words and solve:
-   - Read the words to find from the page (look for word list elements)
-   - Search the grid algorithmically for each word
-   - Get cell bounding rects and use ClickDragPoint
-3. If `n` is 0 or `WS_ERR` → wait: `[{"Wait":1000}]`
-4. After verify, if still on word search, refresh: `[{"Click":".captcha-refresh"},{"Wait":800}]`
+**Rules (check title EVERY round):**
+- **WS_DONE** → words selected by engine! Click verify: `[{"Click":"#captcha-verify-button"}]`
+- **WS: with found empty** → words not detected. Use Evaluate to read page instruction text.
+- **WS_ERR or n is 0** → grid not loaded: `[{"Wait":1000}]`
+- After verify, if still on word search, refresh: `[{"Click":".captcha-refresh"},{"Wait":800}]`
+
+**Do NOT write any drag/click JS. Word selection is automatic.**
 "##;
 
 const TEXT_CAPTCHA_SKILL: &str = r##"
 Distorted text CAPTCHA: Read the wiggling/wavy text from the SCREENSHOT and type it.
 
-**DO NOT analyze canvas pixels or write pixel-scanning JS. Just READ the text visually from the screenshot.**
-The answer is 4-8 uppercase letters shown in a wavy/distorted style. Do NOT type labels like "HUMAN".
+**CRITICAL RULES:**
+- DO NOT type the level/challenge name (e.g., "HUMAN", "WIGGLES", "CAPTCHA").
+- The answer is 4-8 random uppercase letters in a wavy/distorted style. They are RANDOM, not English words.
+- DO NOT analyze canvas pixels or write JS. Just READ the distorted text visually.
+- Never submit the same text twice. Check session memory for previous attempts.
 
 **Steps (solve in 1 round):**
 ```json
@@ -469,10 +522,11 @@ The answer is 4-8 uppercase letters shown in a wavy/distorted style. Do NOT type
 ]
 ```
 
-If wrong: swap most ambiguous char (O↔D↔0, S↔5, I↔1↔L, Z↔2, B↔8).
-**After 2 fails → refresh:** `[{"Click":"img.captcha-refresh"},{"Wait":1500}]`
-If `img.captcha-refresh` fails, use ClickPoint on the small refresh icon near the captcha.
-Never submit same text twice.
+If wrong after 1 try: swap ambiguous chars (O↔D↔0, S↔5, I↔1↔L, Z↔2, B↔8).
+**After 2 fails → refresh captcha using one of these (try in order):**
+1. `[{"Click":"img.captcha-refresh"},{"Wait":1500}]`
+2. `[{"Click":"[class*=refresh]"},{"Wait":1500}]`
+3. Use ClickPoint on the small refresh/reload icon visible in the screenshot.
 "##;
 
 const CHECKBOX_SKILL: &str = r##"
@@ -759,11 +813,11 @@ Use Evaluate to click found cells programmatically."#;
         assert!(ttt.content.contains("Do NOT write any Evaluate JS"));
         assert!(!ttt.content.contains("querySelectorAll"));
 
-        // Word search may allow Evaluate as fallback when words aren't auto-detected
+        // Word search is self-solving via pre_evaluate
         let ws = registry.get("word-search").unwrap();
         assert!(
-            ws.content.contains("ClickDragPoint"),
-            "WS skill should mention ClickDragPoint"
+            ws.content.contains("auto-dragged"),
+            "WS skill should mention auto-drag"
         );
         assert!(ws.pre_evaluate.is_some(), "WS should have pre_evaluate JS");
 
@@ -774,6 +828,11 @@ Use Evaluate to click found cells programmatically."#;
         assert!(
             rot.pre_evaluate.is_some(),
             "Rotation should have pre_evaluate JS"
+        );
+
+        assert!(
+            ws.content.contains("Do NOT write any drag"),
+            "WS skill should prohibit manual drag JS"
         );
     }
 

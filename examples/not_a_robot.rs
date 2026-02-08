@@ -13,7 +13,6 @@
 
 extern crate spider;
 
-use spider::features::automation::skills;
 use spider::features::automation::RemoteMultimodalConfigs;
 use spider::tokio;
 use spider::website::Website;
@@ -78,7 +77,8 @@ async fn main() {
 
     // Minimal task - the default system prompt handles challenge types
     mm_config.user_message_extra = Some(
-        "Complete ALL levels of this challenge. Track your progress using memory_ops and extracted fields. Report current_level number and level_name in extracted.".to_string(),
+        "Complete ALL levels of this challenge. Track progress using memory_ops and extracted fields. Report current_level number and level_name in extracted. Limit to at most 5 solve attempts per level; if still on same level after 5 attempts, change strategy (refresh/re-evaluate) before continuing."
+            .to_string(),
     );
 
     // Configure for interactive challenge completion
@@ -94,13 +94,16 @@ async fn main() {
     mm_config.cfg.max_tokens = 4096; // Enough for detailed responses with coordinates
     mm_config.cfg.temperature = 0.1;
 
-    // Load built-in web challenge skills (image grids, tic-tac-toe, word search, etc.)
-    // Skills are matched per-round against page state and injected into the system prompt.
-    mm_config.skill_registry = Some(skills::builtin_web_challenges());
+    // Built-in web challenge skills auto-load when the `agent_skills` feature is enabled.
+
+    let max_rounds = mm_config.cfg.max_rounds;
 
     // Create a viewport with 2x device scale factor - larger viewport for better grid/text visibility
     let mut viewport = spider::configuration::Viewport::new(1440, 1080);
     viewport.set_scale_factor(Some(2.0));
+
+    // Optional proxy (set PROXY env var, e.g. PROXY=http://localhost:8888)
+    let proxy = std::env::var("PROXY").ok();
 
     // Create website with Chrome in headed mode
     let mut website: Website = Website::new(url)
@@ -113,6 +116,7 @@ async fn main() {
         .with_wait_for_idle_network(Some(spider::configuration::WaitForIdleNetwork::new(Some(
             Duration::from_secs(30),
         ))))
+        .with_proxies(proxy.map(|p| vec![p]))
         .with_remote_multimodal(Some(mm_config))
         .build()
         .unwrap();
@@ -244,7 +248,7 @@ async fn main() {
     println!("==========================================");
     println!("URL: {}", url);
     println!("Model: {}", model);
-    println!("Max rounds: 50");
+    println!("Max rounds: {}", max_rounds);
     println!("Output dir: {}", output_dir.display());
     println!("==========================================\n");
 

@@ -68,6 +68,8 @@ pub struct AutomationMemory {
 }
 
 impl AutomationMemory {
+    const LEVEL_ATTEMPTS_KEY: &'static str = "_level_attempts";
+
     /// Create a new empty memory.
     pub fn new() -> Self {
         Self::default()
@@ -222,6 +224,48 @@ impl AutomationMemory {
             self.apply_operation(op);
         }
     }
+
+    /// Increment and return attempt count for a logical level key.
+    ///
+    /// Stored in `store["_level_attempts"][level_key]`.
+    pub fn increment_level_attempt(&mut self, level_key: &str) -> u32 {
+        let entry = self
+            .store
+            .entry(Self::LEVEL_ATTEMPTS_KEY.to_string())
+            .or_insert_with(|| serde_json::json!({}));
+
+        if !entry.is_object() {
+            *entry = serde_json::json!({});
+        }
+
+        let map = entry.as_object_mut().expect("level attempts map must be object");
+        let current = map
+            .get(level_key)
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+            .saturating_add(1) as u32;
+        map.insert(level_key.to_string(), serde_json::json!(current));
+        current
+    }
+
+    /// Reset attempt count for a logical level key (e.g., after forced refresh).
+    pub fn reset_level_attempt(&mut self, level_key: &str) {
+        if let Some(entry) = self.store.get_mut(Self::LEVEL_ATTEMPTS_KEY) {
+            if let Some(map) = entry.as_object_mut() {
+                map.insert(level_key.to_string(), serde_json::json!(0));
+            }
+        }
+    }
+
+    /// Return attempt count for a logical level key.
+    pub fn get_level_attempt(&self, level_key: &str) -> u32 {
+        self.store
+            .get(Self::LEVEL_ATTEMPTS_KEY)
+            .and_then(|v| v.as_object())
+            .and_then(|m| m.get(level_key))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32
+    }
 }
 
 #[cfg(test)]
@@ -290,5 +334,17 @@ mod tests {
         assert!(context.contains("alice"));
         assert!(context.contains("Recent URLs"));
         assert!(context.contains("example.com"));
+    }
+
+    #[test]
+    fn test_level_attempts_increment_and_get() {
+        let mut memory = AutomationMemory::new();
+
+        assert_eq!(memory.get_level_attempt("L7:word-search"), 0);
+        assert_eq!(memory.increment_level_attempt("L7:word-search"), 1);
+        assert_eq!(memory.increment_level_attempt("L7:word-search"), 2);
+        assert_eq!(memory.get_level_attempt("L7:word-search"), 2);
+        assert_eq!(memory.increment_level_attempt("L2:image-grid"), 1);
+        assert_eq!(memory.get_level_attempt("L2:image-grid"), 1);
     }
 }

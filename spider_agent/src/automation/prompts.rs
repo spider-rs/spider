@@ -93,7 +93,7 @@ Set `"done": true` when the task is fully complete. Set `"done": false` to conti
 - Return values are NOT sent back. To see results, inject into the page:
   - Title: `document.title = JSON.stringify(data)` → visible in PAGE TITLE next round
   - DOM: `document.body.insertAdjacentHTML('beforeend', '<div style="position:fixed;top:0;left:0;z-index:99999;background:#000;color:#0f0;padding:4px">' + info + '</div>')` → visible in screenshot
-- Evaluate can programmatically click elements via `element.click()` – useful for batch operations on DOM elements
+- **Do NOT use `element.click()` in Evaluate** — it does not trigger real browser events (mousedown/pointerdown). Always use real Click/ClickPoint actions for interactions.
 - **Always pair Evaluate with action steps** in the same round. Never submit a round with ONLY Evaluate.
 
 ## Memory
@@ -217,6 +217,74 @@ Rules:
 - `extracted` contains the structured data from the page.
 - Use `null` for missing values. Be precise — extract actual values, don't guess.
 - JSON only, no markdown or prose.
+"##;
+
+/// Compact system prompt for Chrome's built-in LanguageModel (Gemini Nano).
+///
+/// Same JSON output format as [`DEFAULT_SYSTEM_PROMPT`] but ~1500 chars:
+/// - Only essential actions (Click, ClickPoint, Fill, Evaluate, etc.)
+/// - Drops rarely-used variants (DoubleClick, RightClick, KeyDown/KeyUp, etc.)
+/// - Shorter descriptions, same core strategy
+pub const CHROME_AI_SYSTEM_PROMPT: &str = r##"
+You are a web automation agent. Interact with webpages to solve challenges and complete tasks.
+
+## Output
+Return JSON only (no prose):
+{"label":"brief description","done":true|false,"steps":[...],"extracted":{...},"memory_ops":[...]}
+
+Set "done":true when task is complete, false to continue.
+
+## Coordinates
+ClickPoint uses CSS pixels. Screenshot pixels = viewport × DPR. Divide by DPR for CSS coords.
+
+## Actions
+
+### Click
+- {"Click":"selector"} – CSS selector click
+- {"ClickPoint":{"x":100,"y":200}} – CSS pixel click
+- {"ClickAll":"selector"} – Click all matches
+
+### Drag
+- {"ClickDragPoint":{"from_x":0,"from_y":0,"to_x":100,"to_y":100}}
+
+### Input
+- {"Fill":{"selector":"input","value":"text"}} – Clear and type
+- {"Press":"Enter"} – Key press (Enter, Tab, Escape, ArrowDown, Space)
+
+### Scroll
+- {"ScrollY":300} – Scroll down (negative=up)
+- {"ScrollTo":{"selector":"element"}} – Scroll into view
+
+### Wait
+- {"Wait":1000} – Wait ms
+- {"WaitFor":"selector"} – Wait for element
+
+### Navigate
+- {"Navigate":"https://url"} – Go to URL
+
+### Viewport
+- {"SetViewport":{"width":1920,"height":1080,"device_scale_factor":2.0}} – Change viewport
+
+### JavaScript
+- {"Evaluate":"js code"} – Execute JS. Return value NOT sent back; use document.title to pass data.
+  Do NOT use el.click() in Evaluate – use real Click/ClickPoint actions.
+
+## Memory
+memory_ops: [{"op":"set","key":"name","value":data},{"op":"delete","key":"name"}]
+request_vision: {"op":"set","key":"request_vision","value":true}
+
+## Strategy
+1. Use CLICKABLE ELEMENTS indexes: {"Click":"[data-spider-idx='0']"}. Do NOT invent selectors.
+2. Be efficient: combine Evaluate (read) + actions in SAME round. Never spend a round only reading.
+3. Batch: multiple Click actions in one step list.
+4. Evaluate = READ ONLY: read DOM/styles, set document.title. Never el.click().
+5. Prefer selectors over coordinates when elements exist in DOM.
+6. Handle stagnation: if stagnated, try different approach.
+7. Never repeat failures: track in memory_ops, change strategy after 2 fails.
+8. Focus on main content elements. Ignore footer, navigation, and external links.
+
+## Skills
+Follow ACTIVATED SKILLS instructions when present – they override general strategies.
 "##;
 
 /// System prompt for configuring a web crawler from natural language.
@@ -345,5 +413,77 @@ mod tests {
             EXTRACTION_ONLY_SYSTEM_PROMPT.len(),
             DEFAULT_SYSTEM_PROMPT.len(),
         );
+    }
+
+    #[test]
+    fn test_chrome_ai_system_prompt_has_essential_actions() {
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("Click"));
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("ClickPoint"));
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("ClickAll"));
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("Fill"));
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("Press"));
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("ScrollY"));
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("Navigate"));
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("Evaluate"));
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("SetViewport"));
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("ClickDragPoint"));
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("WaitFor"));
+    }
+
+    #[test]
+    fn test_chrome_ai_system_prompt_drops_rare_actions() {
+        // Should NOT include rarely-used variants
+        assert!(!CHROME_AI_SYSTEM_PROMPT.contains("DoubleClick"));
+        assert!(!CHROME_AI_SYSTEM_PROMPT.contains("RightClick"));
+        assert!(!CHROME_AI_SYSTEM_PROMPT.contains("ClickHold"));
+        assert!(!CHROME_AI_SYSTEM_PROMPT.contains("KeyDown"));
+        assert!(!CHROME_AI_SYSTEM_PROMPT.contains("KeyUp"));
+        assert!(!CHROME_AI_SYSTEM_PROMPT.contains("InfiniteScroll"));
+        assert!(!CHROME_AI_SYSTEM_PROMPT.contains("OpenPage"));
+    }
+
+    #[test]
+    fn test_chrome_ai_system_prompt_has_json_format() {
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("\"label\""));
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("\"done\""));
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("\"steps\""));
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("JSON"));
+    }
+
+    #[test]
+    fn test_chrome_ai_system_prompt_has_strategy() {
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("stagnat"));
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("Batch"));
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("READ ONLY"));
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("efficient"));
+    }
+
+    #[test]
+    fn test_chrome_ai_prompt_much_smaller_than_default() {
+        assert!(
+            CHROME_AI_SYSTEM_PROMPT.len() < DEFAULT_SYSTEM_PROMPT.len(),
+            "chrome_ai prompt ({}) should be smaller than default ({})",
+            CHROME_AI_SYSTEM_PROMPT.len(),
+            DEFAULT_SYSTEM_PROMPT.len(),
+        );
+        // Should be roughly half or less of the default
+        assert!(
+            CHROME_AI_SYSTEM_PROMPT.len() < DEFAULT_SYSTEM_PROMPT.len() * 3 / 4,
+            "chrome_ai prompt ({}) should be under 75% of default ({})",
+            CHROME_AI_SYSTEM_PROMPT.len(),
+            DEFAULT_SYSTEM_PROMPT.len(),
+        );
+    }
+
+    #[test]
+    fn test_chrome_ai_prompt_has_memory_and_skills() {
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("memory_ops"));
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("ACTIVATED SKILLS"));
+    }
+
+    #[test]
+    fn test_chrome_ai_prompt_references_clickable_elements() {
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("CLICKABLE ELEMENTS"));
+        assert!(CHROME_AI_SYSTEM_PROMPT.contains("data-spider-idx"));
     }
 }

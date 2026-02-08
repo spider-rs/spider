@@ -308,6 +308,19 @@ pub fn best_effort_parse_json_object(s: &str) -> EngineResult<Value> {
         }
     }
 
+    // 5. Repair unquoted bare-word values (common with small models like Gemini Nano)
+    //    e.g. {"selector": a, "action": "click"} → {"selector": "a", "action": "click"}
+    let quoted = repair_unquoted_json_values(unfenced);
+    if let Ok(v) = serde_json::from_str::<Value>(&quoted) {
+        return Ok(v);
+    }
+    // Also try on extracted JSON objects
+    if let Some(obj) = extract_last_json_object(&quoted) {
+        if let Ok(v) = serde_json::from_str::<Value>(obj) {
+            return Ok(v);
+        }
+    }
+
     log::warn!(
         "best_effort_parse_json_object failed on content (first 300 chars): {}",
         &s[..s.len().min(300)]
@@ -316,6 +329,103 @@ pub fn best_effort_parse_json_object(s: &str) -> EngineResult<Value> {
     Err(EngineError::InvalidField(
         "assistant content was not a JSON object",
     ))
+}
+
+/// Repair unquoted bare-word values in JSON — common with small models.
+///
+/// Converts `"key": bare_value,` → `"key": "bare_value",`
+/// Only handles simple cases outside of nested structures.
+fn repair_unquoted_json_values(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    let mut result = Vec::with_capacity(len + 64);
+    let mut i = 0;
+    let mut in_string = false;
+    let mut escape_next = false;
+
+    while i < len {
+        let b = bytes[i];
+
+        if escape_next {
+            result.push(b);
+            escape_next = false;
+            i += 1;
+            continue;
+        }
+
+        if b == b'\\' && in_string {
+            result.push(b);
+            escape_next = true;
+            i += 1;
+            continue;
+        }
+
+        if b == b'"' {
+            in_string = !in_string;
+            result.push(b);
+            i += 1;
+            continue;
+        }
+
+        if in_string {
+            result.push(b);
+            i += 1;
+            continue;
+        }
+
+        // Outside a string — look for `:` followed by an unquoted bare word
+        if b == b':' {
+            result.push(b);
+            i += 1;
+            // Skip whitespace after colon
+            while i < len && bytes[i].is_ascii_whitespace() {
+                result.push(bytes[i]);
+                i += 1;
+            }
+            if i >= len {
+                break;
+            }
+            let c = bytes[i];
+            // Valid JSON value starts: " [ { digit - true false null
+            if c == b'"' || c == b'[' || c == b'{' || c.is_ascii_digit() || c == b'-' {
+                continue;
+            }
+            let remaining = &s[i..];
+            if remaining.starts_with("true")
+                || remaining.starts_with("false")
+                || remaining.starts_with("null")
+            {
+                continue;
+            }
+            // Bare word — collect until , } ] or newline
+            let word_start = i;
+            while i < len {
+                let ch = bytes[i];
+                if ch == b',' || ch == b'}' || ch == b']' || ch == b'\n' || ch == b'\r' {
+                    break;
+                }
+                i += 1;
+            }
+            let word = s[word_start..i].trim();
+            if !word.is_empty() {
+                result.push(b'"');
+                // Escape any quotes inside the bare word
+                for &wb in word.as_bytes() {
+                    if wb == b'"' {
+                        result.push(b'\\');
+                    }
+                    result.push(wb);
+                }
+                result.push(b'"');
+            }
+            continue;
+        }
+
+        result.push(b);
+        i += 1;
+    }
+
+    String::from_utf8(result).unwrap_or_else(|_| s.to_string())
 }
 
 /// Repair common JSON brace errors produced by LLMs.
@@ -507,5 +617,48 @@ mod tests {
 
         // Different input should produce different hash
         assert_ne!(fnv1a64(b"hello"), fnv1a64(b"world"));
+    }
+
+    #[test]
+    fn test_repair_unquoted_json_values_bare_word() {
+        // Common small model output: "selector": a instead of "selector": "a"
+        let input = r#"{"label": "Click the checkbox", "selector": a, "action": "click"}"#;
+        let repaired = repair_unquoted_json_values(input);
+        let parsed: serde_json::Value = serde_json::from_str(&repaired).unwrap();
+        assert_eq!(parsed["selector"], "a");
+        assert_eq!(parsed["action"], "click");
+        assert_eq!(parsed["label"], "Click the checkbox");
+    }
+
+    #[test]
+    fn test_repair_unquoted_json_values_multiple() {
+        let input = r#"{"a": hello, "b": world, "c": 42}"#;
+        let repaired = repair_unquoted_json_values(input);
+        let parsed: serde_json::Value = serde_json::from_str(&repaired).unwrap();
+        assert_eq!(parsed["a"], "hello");
+        assert_eq!(parsed["b"], "world");
+        assert_eq!(parsed["c"], 42);
+    }
+
+    #[test]
+    fn test_repair_unquoted_json_values_preserves_valid() {
+        let input = r#"{"a": "quoted", "b": 123, "c": true, "d": null, "e": [1]}"#;
+        let repaired = repair_unquoted_json_values(input);
+        let parsed: serde_json::Value = serde_json::from_str(&repaired).unwrap();
+        assert_eq!(parsed["a"], "quoted");
+        assert_eq!(parsed["b"], 123);
+        assert_eq!(parsed["c"], true);
+        assert!(parsed["d"].is_null());
+    }
+
+    #[test]
+    fn test_best_effort_parse_unquoted_values() {
+        // End-to-end: markdown-fenced response with unquoted bare word
+        let input = "```json\n{\"label\": \"Click the checkbox\", \"selector\": a, \"action\": \"click\"}\n```";
+        let result = best_effort_parse_json_object(input);
+        assert!(result.is_ok(), "Should parse unquoted bare word: {:?}", result.err());
+        let val = result.unwrap();
+        assert_eq!(val["selector"], "a");
+        assert_eq!(val["action"], "click");
     }
 }

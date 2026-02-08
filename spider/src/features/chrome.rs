@@ -195,6 +195,31 @@ pub async fn set_cookies(
     }
 }
 
+/// Patch Chrome args to enable the built-in AI (LanguageModel / Gemini Nano).
+///
+/// Removes `OptimizationHints` from `--disable-features` (which blocks the
+/// on-device model), and adds the required `--enable-features` flags.
+fn patch_chrome_ai_args(args: &mut Vec<String>) {
+    for arg in args.iter_mut() {
+        // Remove OptimizationHints from --disable-features
+        if arg.starts_with("--disable-features=") {
+            let features: Vec<&str> = arg["--disable-features=".len()..]
+                .split(',')
+                .filter(|f| *f != "OptimizationHints")
+                .collect();
+            *arg = format!("--disable-features={}", features.join(","));
+        }
+        // Append AI features to existing --enable-features
+        if arg.starts_with("--enable-features=") {
+            arg.push_str(",OptimizationGuideOnDeviceModel:BypassPerfRequirement/true,PromptAPIForGeminiNano,PromptAPIForGeminiNanoMultimodalInput");
+        }
+    }
+    // If no --enable-features existed, add one
+    if !args.iter().any(|a| a.starts_with("--enable-features=")) {
+        args.push("--enable-features=OptimizationGuideOnDeviceModel:BypassPerfRequirement/true,PromptAPIForGeminiNano,PromptAPIForGeminiNanoMultimodalInput".to_string());
+    }
+}
+
 /// get chrome configuration
 #[cfg(not(feature = "chrome_headed"))]
 pub fn get_browser_config(
@@ -203,6 +228,7 @@ pub fn get_browser_config(
     cache_enabled: bool,
     viewport: impl Into<Option<chromiumoxide::handler::viewport::Viewport>>,
     request_timeout: &Option<Box<core::time::Duration>>,
+    use_chrome_ai: bool,
 ) -> Option<BrowserConfig> {
     let builder = BrowserConfig::builder()
         .disable_default_args()
@@ -227,6 +253,9 @@ pub fn get_browser_config(
     let builder = match proxies {
         Some(proxies) => {
             let mut chrome_args = Vec::from(CHROME_ARGS.map(|e| e.replace("://", "=").to_string()));
+            if use_chrome_ai {
+                patch_chrome_ai_args(&mut chrome_args);
+            }
             let base_proxies = proxies
                 .iter()
                 .filter_map(|p| {
@@ -244,7 +273,15 @@ pub fn get_browser_config(
 
             builder.args(chrome_args)
         }
-        _ => builder.args(CHROME_ARGS),
+        _ => {
+            if use_chrome_ai {
+                let mut chrome_args: Vec<String> = CHROME_ARGS.iter().map(|e| e.to_string()).collect();
+                patch_chrome_ai_args(&mut chrome_args);
+                builder.args(chrome_args)
+            } else {
+                builder.args(CHROME_ARGS)
+            }
+        }
     };
     let builder = match get_detect_chrome_executable() {
         Some(v) => builder.chrome_executable(v),
@@ -268,6 +305,7 @@ pub fn get_browser_config(
     cache_enabled: bool,
     viewport: impl Into<Option<chromiumoxide::handler::viewport::Viewport>>,
     request_timeout: &Option<Box<core::time::Duration>>,
+    use_chrome_ai: bool,
 ) -> Option<BrowserConfig> {
     let builder = BrowserConfig::builder()
         .disable_default_args()
@@ -297,6 +335,10 @@ pub fn get_browser_config(
             e.replace("://", "=").to_string()
         }
     }));
+
+    if use_chrome_ai {
+        patch_chrome_ai_args(&mut chrome_args);
+    }
 
     let builder = match proxies {
         Some(proxies) => {
@@ -459,6 +501,11 @@ pub async fn setup_browser_configuration(
                 _ => default_viewport(),
             },
             &config.request_timeout,
+            config
+                .remote_multimodal
+                .as_ref()
+                .map(|m| m.should_use_chrome_ai())
+                .unwrap_or(false),
         ) {
             Some(mut browser_config) => {
                 browser_config.ignore_visuals = config.chrome_intercept.block_visuals;

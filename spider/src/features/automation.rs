@@ -111,6 +111,7 @@ pub use spider_agent::automation::{
     VisionRouteMode,
     // System prompts
     ACT_SYSTEM_PROMPT,
+    CHROME_AI_SYSTEM_PROMPT,
     CONFIGURATION_SYSTEM_PROMPT,
     DEFAULT_SYSTEM_PROMPT,
     EXTRACTION_ONLY_SYSTEM_PROMPT,

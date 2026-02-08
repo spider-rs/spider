@@ -96,6 +96,13 @@ impl RemoteMultimodalEngine {
         }
     }
 
+    /// Whether the resolved "vision route" model can actually process image input.
+    #[inline]
+    fn has_vision_capable_route(&self) -> bool {
+        let (_, model_name, _) = self.resolve_model_for_round(true);
+        super::config::supports_vision(model_name)
+    }
+
     /// Apply a text-only flavor to the system prompt for rounds where no image
     /// is provided. This keeps action bindings intact while removing screenshot
     /// expectations that can mislead text-only models.
@@ -271,6 +278,7 @@ impl RemoteMultimodalEngine {
         round_idx: usize,
         stagnated: bool,
         action_stuck_rounds: usize,
+        loop_blocklist: &[String],
         memory: Option<&AutomationMemory>,
         user_message_extra: Option<&str>,
     ) -> String {
@@ -346,6 +354,18 @@ impl RemoteMultimodalEngine {
             out.push_str("5. Do NOT repeat the same steps again. Your next response MUST contain different actions.\n\n");
         }
 
+        if !loop_blocklist.is_empty() {
+            out.push_str("LOOP BLOCKLIST (DO NOT REPEAT THESE EXACT ACTIONS):\n");
+            for blocked in loop_blocklist.iter().take(10) {
+                out.push_str("- ");
+                out.push_str(blocked);
+                out.push('\n');
+            }
+            out.push_str(
+                "Use different selectors/coordinates, or switch interaction method entirely.\n\n",
+            );
+        }
+
         if effective_cfg.is_extraction_only() {
             out.push_str(
                 "TASK:\nExtract structured data from the page above. Return JSON with label, done: true, steps: [], and extracted data.\n",
@@ -357,6 +377,99 @@ impl RemoteMultimodalEngine {
         }
 
         out
+    }
+
+    /// Build a compact blocklist summary for repeated action plans.
+    ///
+    /// This is fed back into the next prompt to discourage repeating exactly
+    /// the same actions after loop detection.
+    fn summarize_step_blocklist(steps: &[serde_json::Value], max_items: usize) -> Vec<String> {
+        use std::collections::HashSet;
+
+        let mut seen = HashSet::new();
+        let mut out = Vec::new();
+
+        for step in steps {
+            let Some(obj) = step.as_object() else {
+                continue;
+            };
+
+            for (action, value) in obj {
+                let mut summary = String::from(action);
+
+                if let Some(selector) = value.as_str() {
+                    summary.push_str(": selector=");
+                    summary.push_str(selector);
+                } else if let Some(selector) = value.get("selector").and_then(|v| v.as_str()) {
+                    summary.push_str(": selector=");
+                    summary.push_str(selector);
+                } else if let (Some(x), Some(y)) = (
+                    value.get("x").and_then(|v| v.as_f64()),
+                    value.get("y").and_then(|v| v.as_f64()),
+                ) {
+                    summary.push_str(": point=(");
+                    summary.push_str(&format!("{x:.1}, {y:.1}"));
+                    summary.push(')');
+                } else {
+                    let rendered = truncate_utf8_tail(&value.to_string(), 100);
+                    if !rendered.is_empty() {
+                        summary.push_str(": ");
+                        summary.push_str(&rendered);
+                    }
+                }
+
+                if seen.insert(summary.clone()) {
+                    out.push(summary);
+                    if out.len() >= max_items {
+                        return out;
+                    }
+                }
+            }
+        }
+
+        out
+    }
+
+    /// Extract a stable level key from model `extracted` payload.
+    ///
+    /// Expected fields (when present): `current_level` and `level_name`.
+    fn extracted_level_key(extracted: Option<&serde_json::Value>) -> Option<String> {
+        let extracted = extracted?.as_object()?;
+        let level_num = extracted.get("current_level").and_then(|v| v.as_u64());
+        let level_name = extracted
+            .get("level_name")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+
+        if level_num.is_none() && level_name.is_none() {
+            return None;
+        }
+
+        let mut key = String::new();
+        if let Some(n) = level_num {
+            key.push('L');
+            key.push_str(&n.to_string());
+        } else {
+            key.push_str("L?");
+        }
+
+        if let Some(name) = level_name {
+            let normalized = name
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() {
+                        c.to_ascii_lowercase()
+                    } else {
+                        '-'
+                    }
+                })
+                .collect::<String>();
+            key.push(':');
+            key.push_str(normalized.trim_matches('-'));
+        }
+
+        Some(key)
     }
 
     // -----------------------------------------------------------------
@@ -519,6 +632,8 @@ impl RemoteMultimodalEngine {
         let mut recent_step_hashes: std::collections::VecDeque<u64> =
             std::collections::VecDeque::new();
         let mut action_stuck_rounds: usize = 0;
+        // Compact summary of repeated actions to block in the next round.
+        let mut loop_blocklist: Vec<String> = Vec::new();
         // Dual-model routing: set by `request_vision` memory_op to force vision next round
         let mut force_vision_next_round: bool = false;
 
@@ -577,8 +692,18 @@ impl RemoteMultimodalEngine {
             }
         }
 
+        // Chrome AI warm-up (when enabled or as last-resort fallback)
+        let use_chrome_ai = self.should_use_chrome_ai();
+        if use_chrome_ai {
+            log::info!("Chrome AI mode: using in-page LanguageModel for inference");
+            if let Err(e) = Self::warm_chrome_ai(page).await {
+                log::warn!("Chrome AI warm-up failed: {e}");
+            }
+        }
+
         let rounds = effective_cfg.max_rounds.max(1);
         for round_idx in 0..rounds {
+            let mut current_level_attempts: Option<u32> = None;
             // pick capture profile by round (clamp to last)
             let cap = capture_profiles
                 .get(round_idx)
@@ -608,7 +733,19 @@ impl RemoteMultimodalEngine {
             #[allow(unused_mut)]
             let (screenshot, html, mut url_now, mut title_now) = if include_screenshot_this_round {
                 let screenshot_fut = self.screenshot_as_data_url_with_profile(page, cap);
-                let (s, h, u, t) = tokio::try_join!(screenshot_fut, html_fut, url_fut, title_fut)?;
+                // Screenshot failures are non-fatal — continue without an image.
+                let (s_res, h, u, t) =
+                    tokio::join!(screenshot_fut, html_fut, url_fut, title_fut);
+                let h = h?;
+                let u = u?;
+                let t = t?;
+                let s = match s_res {
+                    Ok(s) => s,
+                    Err(e) => {
+                        log::warn!("Screenshot failed (non-fatal), continuing text-only: {e}");
+                        String::new()
+                    }
+                };
                 (s, h, u, t)
             } else {
                 let (h, u, t) = tokio::try_join!(html_fut, url_fut, title_fut)?;
@@ -634,7 +771,7 @@ impl RemoteMultimodalEngine {
                     let pre_evals = registry.find_pre_evaluates(&url_now, &title_now, &html);
                     if !pre_evals.is_empty() {
                         for (skill_name, js) in &pre_evals {
-                            log::debug!(
+                            log::info!(
                                 "Running pre_evaluate for skill '{}' ({} bytes)",
                                 skill_name,
                                 js.len()
@@ -644,12 +781,179 @@ impl RemoteMultimodalEngine {
                         // Re-capture title after pre_evaluate (JS sets document.title)
                         let new_title = self.title_context(page, &effective_cfg).await;
                         if !new_title.is_empty() && new_title != title_now {
-                            log::debug!(
+                            log::info!(
                                 "Pre-evaluate updated title: '{}' -> '{}'",
                                 &title_now[..title_now.len().min(80)],
                                 &new_title[..new_title.len().min(80)]
                             );
-                            title_now = new_title;
+                            title_now = new_title.clone();
+
+                            // TTT game loop: play entire game(s) before the LLM sees
+                            // the page. Handles draws by waiting for auto-reset and
+                            // replaying. Up to 3 games within one LLM round.
+                            if new_title.starts_with("TTT:") {
+                                let ttt_js: Option<&str> = pre_evals.iter()
+                                    .find(|(name, _)| *name == "tic-tac-toe")
+                                    .map(|(_, js)| *js);
+                                if let Some(ttt_js) = ttt_js {
+                                    let mut games_played = 0u32;
+                                    for _ttt_step in 0..30 {
+                                        // Parse current game state
+                                        let (my_win, th_win, full) = if let Some(json_str) = title_now.strip_prefix("TTT:") {
+                                            if let Ok(data) = serde_json::from_str::<serde_json::Value>(json_str) {
+                                                (
+                                                    data.get("myWin").and_then(|v| v.as_bool()).unwrap_or(false),
+                                                    data.get("thWin").and_then(|v| v.as_bool()).unwrap_or(false),
+                                                    data.get("full").and_then(|v| v.as_bool()).unwrap_or(false),
+                                                )
+                                            } else { (false, false, false) }
+                                        } else { break; }; // title changed away from TTT
+
+                                        if my_win || th_win {
+                                            log::info!("TTT game over: myWin={}, thWin={}", my_win, th_win);
+                                            if my_win {
+                                                // Engine clicks verify immediately — don't rely
+                                                // on the model since the game auto-resets quickly.
+                                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                                let _ = page.click(chromiumoxide::layout::Point::new(0.0, 0.0)).await; // defocus
+                                                let verify_js = r#"(function(){
+                                                    var btn=document.querySelector('#captcha-verify-button,button.captcha-verify,.verify-button,[class*=verify]');
+                                                    if(btn){var r=btn.getBoundingClientRect();
+                                                    var ev={bubbles:true,cancelable:true,clientX:r.x+r.width/2,clientY:r.y+r.height/2};
+                                                    btn.dispatchEvent(new PointerEvent('pointerdown',ev));
+                                                    btn.dispatchEvent(new MouseEvent('mousedown',ev));
+                                                    btn.dispatchEvent(new PointerEvent('pointerup',ev));
+                                                    btn.dispatchEvent(new MouseEvent('mouseup',ev));
+                                                    btn.dispatchEvent(new MouseEvent('click',ev));
+                                                    return 'clicked';}return 'not_found';})()
+                                                "#;
+                                                let _ = page.evaluate(verify_js).await;
+                                                log::info!("TTT: engine clicked verify after win");
+                                                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                                                // Update title for model context
+                                                let post = self.title_context(page, &effective_cfg).await;
+                                                if !post.is_empty() { title_now = post; }
+                                            }
+                                            break;
+                                        }
+                                        if full {
+                                            // Draw — click refresh to reset, then play again
+                                            games_played += 1;
+                                            if games_played >= 3 { break; }
+                                            log::info!("TTT draw (game {}), clicking refresh...", games_played);
+                                            let refresh_js = r#"(function(){var btn=document.querySelector('.captcha-refresh,[class*=refresh],[class*=retry]');if(btn){btn.click();return 'clicked';}return 'not_found';})()"#;
+                                            let _ = page.evaluate(refresh_js).await;
+                                            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                                        } else {
+                                            // Wait for AI response
+                                            tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+                                        }
+                                        // Re-run pre_evaluate for next move
+                                        let _ = page.evaluate(ttt_js).await;
+                                        let updated = self.title_context(page, &effective_cfg).await;
+                                        if !updated.is_empty() {
+                                            log::info!(
+                                                "TTT loop (game {}): '{}'",
+                                                games_played + 1, &updated[..updated.len().min(80)]
+                                            );
+                                            title_now = updated;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // WS_DRAG: engine clicks each word-search cell individually via CDP.
+                            // Each cell gets a full click (move→press→release) for reliable
+                            // click-to-select behavior, then engine clicks verify.
+                            if new_title.starts_with("WS_DRAG:") {
+                                if let Some(json_str) = new_title.strip_prefix("WS_DRAG:") {
+                                    if let Ok(data) = serde_json::from_str::<serde_json::Value>(json_str) {
+                                        let words = data.get("words").and_then(|v| v.as_array());
+                                        let drags = data.get("drags").and_then(|v| v.as_array());
+                                        if let (Some(words), Some(drags)) = (words, drags) {
+                                            let mut dragged = Vec::new();
+                                            let mut all_coords: Vec<(f64, f64)> = Vec::new();
+                                            for (wi, drag_pts) in drags.iter().enumerate() {
+                                                if let Some(pts) = drag_pts.as_array() {
+                                                    let coords: Vec<(f64, f64)> = pts.iter().filter_map(|p| {
+                                                        let x = p.get("x").and_then(|v| v.as_f64())?;
+                                                        let y = p.get("y").and_then(|v| v.as_f64())?;
+                                                        Some((x, y))
+                                                    }).collect();
+                                                    if !coords.is_empty() {
+                                                        all_coords.extend_from_slice(&coords);
+                                                        if let Some(w) = words.get(wi).and_then(|v| v.as_str()) {
+                                                            dragged.push(w.to_string());
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            // Deduplicate cells by rounded coordinate
+                                            {
+                                                let mut seen = std::collections::HashSet::new();
+                                                all_coords.retain(|(x, y)| seen.insert((*x as i64, *y as i64)));
+                                            }
+                                            if !all_coords.is_empty() {
+                                                use chromiumoxide::cdp::browser_protocol::input::{
+                                                    DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
+                                                };
+                                                // Click each cell center individually (click-to-select)
+                                                for (x, y) in &all_coords {
+                                                    if let Ok(cmd) = DispatchMouseEventParams::builder()
+                                                        .x(*x).y(*y)
+                                                        .button(MouseButton::None).buttons(0)
+                                                        .r#type(DispatchMouseEventType::MouseMoved).build() {
+                                                        let _ = page.send_command(cmd).await;
+                                                    }
+                                                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                                                    if let Ok(cmd) = DispatchMouseEventParams::builder()
+                                                        .x(*x).y(*y)
+                                                        .button(MouseButton::Left).buttons(1).click_count(1)
+                                                        .r#type(DispatchMouseEventType::MousePressed).build() {
+                                                        let _ = page.send_command(cmd).await;
+                                                    }
+                                                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                                                    if let Ok(cmd) = DispatchMouseEventParams::builder()
+                                                        .x(*x).y(*y)
+                                                        .button(MouseButton::Left).buttons(0).click_count(1)
+                                                        .r#type(DispatchMouseEventType::MouseReleased).build() {
+                                                        let _ = page.send_command(cmd).await;
+                                                    }
+                                                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                                                }
+                                            }
+                                            if !dragged.is_empty() {
+                                                log::info!("WS engine clicked {} cells for {} words: {:?}", all_coords.len(), dragged.len(), dragged);
+                                                let done_title = format!("WS_DONE:{{\"dragged\":{}}}", serde_json::to_string(&dragged).unwrap_or_default());
+                                                // Set title + DOM marker to prevent re-clicking
+                                                let marker_js = format!(
+                                                    "document.title={t};if(!document.getElementById('ws-engine-done')){{var d=document.createElement('div');d.id='ws-engine-done';d.style.display='none';d.dataset.t={t};document.body.appendChild(d);}}",
+                                                    t = serde_json::to_string(&done_title).unwrap_or_default()
+                                                );
+                                                let _ = page.evaluate(marker_js).await;
+                                                // Engine clicks verify immediately after selecting cells
+                                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                                let verify_js = r#"(function(){
+                                                    var btn=document.querySelector('#captcha-verify-button,button.captcha-verify,.verify-button,[class*=verify]');
+                                                    if(btn){var r=btn.getBoundingClientRect();
+                                                    var ev={bubbles:true,cancelable:true,clientX:r.x+r.width/2,clientY:r.y+r.height/2};
+                                                    btn.dispatchEvent(new PointerEvent('pointerdown',ev));
+                                                    btn.dispatchEvent(new MouseEvent('mousedown',ev));
+                                                    btn.dispatchEvent(new PointerEvent('pointerup',ev));
+                                                    btn.dispatchEvent(new MouseEvent('mouseup',ev));
+                                                    btn.dispatchEvent(new MouseEvent('click',ev));
+                                                    return 'clicked';}return 'not_found';})()
+                                                "#;
+                                                let _ = page.evaluate(verify_js).await;
+                                                log::info!("WS: engine clicked verify after selecting cells");
+                                                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                                                let post = self.title_context(page, &effective_cfg).await;
+                                                title_now = if !post.is_empty() { post } else { done_title };
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -675,14 +979,21 @@ impl RemoteMultimodalEngine {
                 && !skip_screenshot_for_extraction
                 && self.should_include_screenshot_for_round(&effective_cfg, use_vision);
             let screenshot = if include_screenshot_this_round && screenshot.is_empty() {
-                self.screenshot_as_data_url_with_profile(page, cap).await?
+                match self.screenshot_as_data_url_with_profile(page, cap).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        log::warn!("Late screenshot failed (non-fatal): {e}");
+                        String::new()
+                    }
+                }
             } else {
                 screenshot
             };
 
             // Ask model (with retry policy) - pass memory as immutable ref for context
-            let plan = self
-                .infer_plan_with_retry(
+            let plan = if use_chrome_ai {
+                self.infer_plan_chrome_ai_with_retry(
+                    page,
                     &effective_cfg,
                     cap,
                     url_input,
@@ -693,13 +1004,34 @@ impl RemoteMultimodalEngine {
                     round_idx,
                     stagnated,
                     action_stuck_rounds,
+                    &loop_blocklist,
+                    memory.as_deref(),
+                    effective_system_prompt.as_deref(),
+                    effective_system_prompt_extra.as_deref(),
+                    effective_user_message_extra.as_deref(),
+                )
+                .await?
+            } else {
+                self.infer_plan_with_retry(
+                    &effective_cfg,
+                    cap,
+                    url_input,
+                    &url_now,
+                    &title_now,
+                    &html,
+                    &screenshot,
+                    round_idx,
+                    stagnated,
+                    action_stuck_rounds,
+                    &loop_blocklist,
                     memory.as_deref(),
                     use_vision,
                     effective_system_prompt.as_deref(),
                     effective_system_prompt_extra.as_deref(),
                     effective_user_message_extra.as_deref(),
                 )
-                .await?;
+                .await?
+            };
 
             // Accumulate token usage from this round
             total_usage.accumulate(&plan.usage);
@@ -735,10 +1067,17 @@ impl RemoteMultimodalEngine {
                     .count();
 
                 if action_stuck_rounds >= 3 {
+                    loop_blocklist = Self::summarize_step_blocklist(&plan.steps, 10);
+                    // Escalate only when a vision-capable route exists.
+                    if self.has_vision_capable_route() {
+                        force_vision_next_round = true;
+                    }
                     log::warn!(
                         "Action loop detected: {} consecutive identical step sequences",
                         action_stuck_rounds
                     );
+                } else if !stagnated {
+                    loop_blocklist.clear();
                 }
             }
 
@@ -749,8 +1088,10 @@ impl RemoteMultimodalEngine {
                         MemoryOperation::Set { key, value } => {
                             // Detect `request_vision` memory_op for dual-model routing
                             if key == "request_vision" {
-                                force_vision_next_round = true;
-                                log::debug!("Agent requested vision for next round");
+                                if self.has_vision_capable_route() {
+                                    force_vision_next_round = true;
+                                    log::debug!("Agent requested vision for next round");
+                                }
                                 continue; // don't persist this transient key
                             }
                             mem.set(key.clone(), value.clone());
@@ -801,21 +1142,110 @@ impl RemoteMultimodalEngine {
                 // Also store in memory if available
                 if let (Some(ref mut mem), Some(ref extracted)) = (&mut memory, &plan.extracted) {
                     mem.add_extraction(extracted.clone());
+                    if let Some(level_key) = Self::extracted_level_key(Some(extracted)) {
+                        let attempts = mem.increment_level_attempt(&level_key);
+                        mem.set("_current_level_key", serde_json::json!(level_key));
+                        mem.set("_current_level_attempts", serde_json::json!(attempts));
+                        current_level_attempts = Some(attempts);
+                    }
                 }
             }
 
             // Execute steps (even if done=true, we need to process OpenPage actions).
-            // When stuck in a loop for 5+ rounds, skip repeated steps and auto-inspect DOM.
-            if action_stuck_rounds >= 5 {
+            // When stuck in a loop for multiple rounds, skip repeated steps and auto-inspect DOM.
+            let has_structured_level_state = current_level_attempts.is_some();
+            let should_force_level_refresh = !plan.done
+                && has_structured_level_state
+                && current_level_attempts.unwrap_or(0) >= 12;
+
+            if should_force_level_refresh {
+                log::warn!(
+                    "Level attempts reached {} - forcing captcha refresh recovery",
+                    current_level_attempts.unwrap_or(0)
+                );
+                // Use dispatchEvent with full pointer/mouse events (not el.click()
+                // which doesn't trigger real browser events on most pages).
+                // Generic selectors cover refresh/retry/reset patterns dynamically.
+                let recovery_steps = vec![
+                    serde_json::json!({ "Evaluate": r#"
+(() => {
+  const sels = [
+    '[class*=refresh]', '[data-action=refresh]',
+    '[aria-label*=refresh i]', '[title*=refresh i]',
+    'button[id*=refresh i]', 'button[class*=refresh i]',
+    'button[id*=retry i]', 'button[class*=retry i]',
+    'button[id*=reset i]', 'button[class*=reset i]',
+    'button[id*=new i]', 'a[id*=refresh i]'
+  ];
+  for (const sel of sels) {
+    const el = document.querySelector(sel);
+    if (el && !el.disabled && el.offsetParent !== null) {
+      const r = el.getBoundingClientRect();
+      const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+      const opts = { bubbles: true, cancelable: true, clientX: cx, clientY: cy };
+      el.dispatchEvent(new PointerEvent('pointerdown', opts));
+      el.dispatchEvent(new MouseEvent('mousedown', opts));
+      el.dispatchEvent(new PointerEvent('pointerup', opts));
+      el.dispatchEvent(new MouseEvent('mouseup', opts));
+      el.dispatchEvent(new MouseEvent('click', opts));
+      document.title = 'RECOVERY:clicked=' + sel;
+      return;
+    }
+  }
+  document.title = 'RECOVERY:no_refresh_btn';
+})()
+"# }),
+                    serde_json::json!({ "Wait": 1000 }),
+                    // Clear stale RECOVERY title so it doesn't confuse next rounds
+                    serde_json::json!({ "Evaluate": "try{document.title=document.title.replace(/^RECOVERY:.*/,'')}catch(e){}" }),
+                ];
+                let (steps_executed, spawn_pages) = self
+                    .execute_steps(page, &recovery_steps, &effective_cfg)
+                    .await?;
+                total_steps_executed += steps_executed;
+                all_spawn_pages.extend(spawn_pages);
+                recent_step_hashes.clear();
+                action_stuck_rounds = 0;
+                loop_blocklist.clear();
+                if self.has_vision_capable_route() {
+                    force_vision_next_round = true;
+                }
+                if let Some(ref mut mem) = memory {
+                    // Reset level attempt counter so the agent gets fresh tries
+                    if let Some(ref key) = mem
+                        .get("_current_level_key")
+                        .and_then(|v| v.as_str().map(String::from))
+                    {
+                        mem.reset_level_attempt(key);
+                    }
+                    mem.add_action(format!(
+                        "SYSTEM: Forced refresh recovery after {} attempts on same level. Counter reset.",
+                        current_level_attempts.unwrap_or(0)
+                    ));
+                }
+            } else if action_stuck_rounds >= 5 {
+                let stuck_rounds = action_stuck_rounds;
                 log::warn!(
                     "Skipping {} repeated steps - auto-inspecting DOM (stuck {} rounds)",
                     plan.steps.len(),
-                    action_stuck_rounds
+                    stuck_rounds
                 );
+                if self.has_vision_capable_route() {
+                    force_vision_next_round = true;
+                }
                 // Inject DOM inspection so the model gets real state data next round
                 let _ = page
                     .evaluate(
                         r#"document.title = 'AUTO_DOM_INSPECT:' + JSON.stringify({
+                        level_text: (document.querySelector('h2,h3,.level-title,.challenge-title')?.textContent || '').trim().slice(0, 120),
+                        prompt_text: (document.querySelector('.prompt,.instruction,.challenge-prompt,.captcha-instructions')?.textContent || document.body?.innerText || '').trim().slice(0, 180),
+                        selected_count: [...document.querySelectorAll(
+                            '.selected,.active,[aria-checked="true"],[aria-pressed="true"],[class*="selected"],[class*="active"]'
+                        )].length,
+                        verify_buttons: [...document.querySelectorAll('button,input[type=button],input[type=submit]')].slice(0, 6).map(el => ({
+                            text: (el.textContent || el.value || '').trim().slice(0, 40),
+                            dis: !!el.disabled
+                        })),
                         els: [...document.querySelectorAll(
                             'button, [onclick], [class*=item], [class*=cell], [class*=grid] > *, input, select, [class*=square], [class*=piece], [class*=tile]'
                         )].slice(0, 30).map((el, i) => ({
@@ -829,11 +1259,15 @@ impl RemoteMultimodalEngine {
                     })"#,
                     )
                     .await;
+                // Reset loop streak after injecting explicit recovery context.
+                // This avoids burning rounds on repeated skip-only cycles.
+                recent_step_hashes.clear();
+                action_stuck_rounds = 0;
                 // Record in memory that DOM was auto-inspected
                 if let Some(ref mut mem) = memory {
                     mem.add_action(format!(
                         "SYSTEM: Skipped repeated steps (stuck {}x). DOM auto-inspected - check page title for element states.",
-                        action_stuck_rounds
+                        stuck_rounds
                     ));
                 }
             } else if !plan.steps.is_empty() {
@@ -968,6 +1402,7 @@ impl RemoteMultimodalEngine {
         round_idx: usize,
         stagnated: bool,
         action_stuck_rounds: usize,
+        loop_blocklist: &[String],
         memory: Option<&AutomationMemory>,
         use_vision: bool,
         base_system_prompt: Option<&str>,
@@ -990,6 +1425,7 @@ impl RemoteMultimodalEngine {
                     round_idx,
                     stagnated,
                     action_stuck_rounds,
+                    loop_blocklist,
                     memory,
                     use_vision,
                     base_system_prompt,
@@ -1028,6 +1464,7 @@ impl RemoteMultimodalEngine {
         round_idx: usize,
         stagnated: bool,
         action_stuck_rounds: usize,
+        loop_blocklist: &[String],
         memory: Option<&AutomationMemory>,
         use_vision: bool,
         base_system_prompt: Option<&str>,
@@ -1139,14 +1576,7 @@ impl RemoteMultimodalEngine {
                     title_now,
                     html.len()
                 );
-                // No skills matched, but skills are available. Show catalog.
-                let catalog: Vec<&str> = registry.skill_names().collect();
-                if !catalog.is_empty() {
-                    system_msg.push_str(
-                        "\n\nAvailable skills (request via memory_ops `request_skill`): ",
-                    );
-                    system_msg.push_str(&catalog.join(", "));
-                }
+                // Keep unmatched rounds lean: do not inject skill catalog text.
             }
         }
 
@@ -1205,6 +1635,7 @@ impl RemoteMultimodalEngine {
             round_idx,
             stagnated,
             action_stuck_rounds,
+            loop_blocklist,
             memory,
             user_message_extra,
         );
@@ -1495,6 +1926,958 @@ impl RemoteMultimodalEngine {
             relevant,
             reasoning,
         })
+    }
+
+    // ── Chrome built-in AI inference ──────────────────────────────────
+
+    /// Warm up Chrome's built-in LanguageModel (Gemini Nano).
+    ///
+    /// Creates a session and sends a trivial prompt to ensure the model
+    /// is loaded and ready. Mirrors `warm_gemini_model` from solvers.rs.
+    async fn warm_chrome_ai(page: &Page) -> EngineResult<()> {
+        use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
+
+        // No try/catch — errors propagate to Rust so we can detect missing API.
+        // First checks typeof to give a clear error before attempting .create().
+        let js = r#"(async()=>{if(typeof LanguageModel==="undefined")throw new ReferenceError("LanguageModel is not defined");const s=await LanguageModel.create({expectedInputs:[{type:"text",languages:["en"]}],expectedOutputs:[{type:"text",languages:["en"]}]});const r=await s.prompt([{role:"user",content:[{type:"text",value:"ping"}]}]);return "ok:"+r.slice(0,20)})()"#;
+
+        let params = EvaluateParams::builder()
+            .expression(js)
+            .await_promise(true)
+            .build()
+            .expect("valid evaluate params");
+
+        match tokio::time::timeout(std::time::Duration::from_secs(60), page.evaluate(params)).await
+        {
+            Ok(Ok(_)) => {
+                log::info!("Chrome AI (LanguageModel) warm-up successful");
+                Ok(())
+            }
+            Ok(Err(e)) => {
+                let msg = format!("{e}");
+                if Self::is_chrome_ai_missing(&msg) {
+                    log::warn!("Chrome AI not available: {msg}");
+                    Err(EngineError::Remote(
+                        "Chrome LanguageModel is not available. Enable chrome://flags/#optimization-guide-on-device-model and chrome://flags/#prompt-api-for-gemini-nano".to_string(),
+                    ))
+                } else {
+                    log::warn!("Chrome AI warm-up error (non-fatal): {msg}");
+                    Ok(())
+                }
+            }
+            Err(_) => {
+                log::warn!("Chrome AI warm-up timed out (60s) — continuing anyway");
+                Ok(())
+            }
+        }
+    }
+
+    /// Check if an error message indicates Chrome's LanguageModel is unavailable.
+    fn is_chrome_ai_missing(err: &str) -> bool {
+        err.contains("LanguageModel is not defined")
+            || err.contains("ReferenceError")
+            || err.contains("Uncaught ReferenceError")
+            || err.contains("cannot read property 'create' of undefined")
+    }
+
+    /// Invalidate the cached Chrome AI session on the page.
+    ///
+    /// Called after errors or timeouts so the next retry creates a fresh session
+    /// rather than reusing one that may be in a broken state (e.g. after navigation).
+    async fn invalidate_chrome_ai_session(page: &Page) {
+        use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
+        let _ = page
+            .evaluate(
+                EvaluateParams::builder()
+                    .expression(
+                        "try{if(window.__spiderSession){window.__spiderSession.destroy();}window.__spiderSession=null;window.__spiderSessionHash=0;}catch(e){}",
+                    )
+                    .build()
+                    .expect("valid params"),
+            )
+            .await;
+    }
+
+    /// Infer plan via Chrome AI with retry policy.
+    ///
+    /// Same retry/backoff logic as `infer_plan_with_retry`, but delegates
+    /// to `infer_plan_chrome_ai_once` for in-page inference.
+    #[allow(clippy::too_many_arguments)]
+    async fn infer_plan_chrome_ai_with_retry(
+        &self,
+        page: &Page,
+        effective_cfg: &RemoteMultimodalConfig,
+        cap: &CaptureProfile,
+        url_input: &str,
+        url_now: &str,
+        title_now: &str,
+        html: &str,
+        screenshot: &str,
+        round_idx: usize,
+        stagnated: bool,
+        action_stuck_rounds: usize,
+        loop_blocklist: &[String],
+        memory: Option<&AutomationMemory>,
+        base_system_prompt: Option<&str>,
+        system_prompt_extra: Option<&str>,
+        user_message_extra: Option<&str>,
+    ) -> EngineResult<AutomationPlan> {
+        let max_attempts = effective_cfg.retry.max_attempts.max(1);
+        let mut last_err = None;
+
+        for attempt in 0..max_attempts {
+            match self
+                .infer_plan_chrome_ai_once(
+                    page,
+                    effective_cfg,
+                    cap,
+                    url_input,
+                    url_now,
+                    title_now,
+                    html,
+                    screenshot,
+                    round_idx,
+                    stagnated,
+                    action_stuck_rounds,
+                    loop_blocklist,
+                    memory,
+                    base_system_prompt,
+                    system_prompt_extra,
+                    user_message_extra,
+                )
+                .await
+            {
+                Ok(plan) => return Ok(plan),
+                Err(e) => {
+                    last_err = Some(e);
+                    if attempt + 1 < max_attempts {
+                        let power = attempt.min(6);
+                        let delay = effective_cfg.retry.backoff_ms * (1 << power);
+                        tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                    }
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| {
+            EngineError::Remote("chrome_ai: max retries exceeded".to_string())
+        }))
+    }
+
+    /// Single plan inference via Chrome's built-in LanguageModel API.
+    ///
+    /// Uses a compact `CHROME_AI_SYSTEM_PROMPT`, passes it via the
+    /// `systemPrompt` parameter in `LanguageModel.create()` for proper role
+    /// separation, and reuses the session across rounds via a JS global.
+    #[allow(clippy::too_many_arguments)]
+    async fn infer_plan_chrome_ai_once(
+        &self,
+        page: &Page,
+        effective_cfg: &RemoteMultimodalConfig,
+        cap: &CaptureProfile,
+        url_input: &str,
+        url_now: &str,
+        title_now: &str,
+        html: &str,
+        screenshot: &str,
+        round_idx: usize,
+        stagnated: bool,
+        action_stuck_rounds: usize,
+        loop_blocklist: &[String],
+        memory: Option<&AutomationMemory>,
+        base_system_prompt: Option<&str>,
+        system_prompt_extra: Option<&str>,
+        user_message_extra: Option<&str>,
+    ) -> EngineResult<AutomationPlan> {
+        use super::{
+            best_effort_parse_json_object, fnv1a64, CHROME_AI_SYSTEM_PROMPT,
+            EXTRACTION_ONLY_SYSTEM_PROMPT,
+        };
+        use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
+
+        // ── Build system prompt (compact Chrome AI variant) ──
+        let mut system_msg = if effective_cfg.is_extraction_only() {
+            EXTRACTION_ONLY_SYSTEM_PROMPT.to_string()
+        } else {
+            CHROME_AI_SYSTEM_PROMPT.to_string()
+        };
+        if let Some(base) = base_system_prompt {
+            if !base.trim().is_empty() {
+                system_msg.push_str("\n\n---\nCONFIGURED SYSTEM INSTRUCTIONS:\n");
+                system_msg.push_str(base.trim());
+            }
+        }
+        if let Some(extra) = system_prompt_extra {
+            if !extra.trim().is_empty() {
+                system_msg.push_str("\n\n---\nADDITIONAL INSTRUCTIONS:\n");
+                system_msg.push_str(extra.trim());
+            }
+        }
+
+        // Skill injection
+        #[cfg(feature = "skills")]
+        if let Some(ref registry) = self.skill_registry {
+            let mut skill_ctx = registry.match_context_limited(
+                url_now,
+                title_now,
+                html,
+                effective_cfg.max_skills_per_round,
+                effective_cfg.max_skill_context_chars,
+            );
+            if let Some(mem) = memory {
+                if let Some(active) = mem.get("_active_skill") {
+                    if let Some(name) = active.as_str() {
+                        if let Some(skill) = registry.get(name) {
+                            if !skill_ctx.contains(&skill.name) {
+                                if !skill_ctx.is_empty() {
+                                    skill_ctx.push_str("\n\n");
+                                }
+                                skill_ctx.push_str("## Skill: ");
+                                skill_ctx.push_str(&skill.name);
+                                skill_ctx.push('\n');
+                                skill_ctx.push_str(&skill.content);
+                            }
+                        }
+                    }
+                }
+            }
+            if !skill_ctx.is_empty() {
+                system_msg.push_str("\n\n---\nACTIVATED SKILLS:\n");
+                system_msg.push_str(&skill_ctx);
+            }
+        }
+
+        // Text-only flavor when no screenshot
+        if screenshot.is_empty() {
+            Self::apply_text_only_prompt_flavor(&mut system_msg, false);
+        }
+
+        // ── Probe interactive elements for small-model guidance ──
+        // Annotates visible interactive elements with `data-spider-idx` attributes
+        // and returns a numbered list. The model clicks by index (e.g. [0], [1])
+        // instead of guessing CSS selectors — much more reliable for small models.
+        let interactive_hint = {
+            let probe_js = r#"(()=>{try{document.querySelectorAll('[data-spider-idx]').forEach(el=>el.removeAttribute('data-spider-idx'));const els=document.querySelectorAll('button,input,select,textarea,[role="button"],[role="checkbox"],[role="link"],[onclick],a');const items=[];let idx=0;for(let i=0;i<els.length&&idx<15;i++){const el=els[i];const r=el.getBoundingClientRect();if(r.width<1||r.height<1)continue;if(el.closest('footer,nav,.footer,.nav,.site-footer'))continue;const tag=el.tagName.toLowerCase();const ty=el.getAttribute('type')||'';const role=el.getAttribute('role')||'';const txt=(el.textContent||el.getAttribute('aria-label')||el.getAttribute('placeholder')||'').trim().replace(/\s+/g,' ').slice(0,40);el.setAttribute('data-spider-idx',String(idx));const desc=role||ty||(tag==='a'?'link':tag);items.push('['+idx+'] '+desc+(txt?' "'+txt.replace(/"/g,"'")+'"':''));idx++;}return items.join('\n');}catch(e){return'';}})();"#;
+            match page
+                .evaluate(
+                    EvaluateParams::builder()
+                        .expression(probe_js)
+                        .build()
+                        .expect("valid params"),
+                )
+                .await
+            {
+                Ok(eval) => eval
+                    .value()
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+                    .unwrap_or_default(),
+                Err(_) => String::new(),
+            }
+        };
+
+        // ── Build user prompt (reuse existing method) ──
+        let mut user_text = self.build_user_prompt(
+            effective_cfg,
+            cap,
+            url_input,
+            url_now,
+            title_now,
+            html,
+            round_idx,
+            stagnated,
+            action_stuck_rounds,
+            loop_blocklist,
+            memory,
+            user_message_extra,
+        );
+
+        // Strip framework data-* attributes from user prompt to prevent small
+        // models from hallucinating selectors like [data-v-abc123] from raw HTML.
+        // Preserves our own data-spider-idx references in the CLICKABLE ELEMENTS section.
+        user_text = Self::strip_framework_data_attrs(&user_text);
+
+        // Prepend indexed interactive elements list — model clicks by number
+        if !interactive_hint.is_empty() {
+            user_text = format!(
+                "CLICKABLE ELEMENTS (click by index, e.g. {{\"Click\":\"[data-spider-idx='0']\"}} ):\n{interactive_hint}\n\n{user_text}"
+            );
+        }
+
+        // Append a response primer to help smaller models produce valid JSON.
+        // This nudges the model to start its response with the expected format.
+        user_text.push_str("\nRespond with JSON only. Start with {\"label\":");
+
+        // ── Smart context budgeting ──
+        // System prompt goes to systemPrompt param (untruncated — it's compact).
+        // User prompt: truncate only the HTML section if over budget.
+        let max_user_chars = self.chrome_ai_max_user_chars;
+        let user_text = if user_text.len() > max_user_chars {
+            Self::truncate_chrome_ai_user_prompt(&user_text, max_user_chars)
+        } else {
+            user_text
+        };
+
+        // ── Hash system prompt for session reuse ──
+        let sys_hash = fnv1a64(system_msg.as_bytes());
+
+        // ── Build JavaScript for in-page inference with session reuse ──
+        let escaped_system = serde_json::to_string(&system_msg)
+            .unwrap_or_else(|_| format!("\"{}\"", system_msg.replace('\"', "\\\"")));
+        let escaped_user = serde_json::to_string(&user_text)
+            .unwrap_or_else(|_| format!("\"{}\"", user_text.replace('\"', "\\\"")));
+
+        let has_screenshot = !screenshot.is_empty();
+
+        // Pass model parameters from config.
+        // Chrome LanguageModel API requires BOTH topK and temperature, or neither.
+        let temperature = effective_cfg.temperature;
+        let top_k = if temperature < 0.01 { 1 } else { 40 };
+
+        // JS template: try/catch around session creation and prompting.
+        // On error, destroy stale session so next retry starts fresh.
+        let js = if has_screenshot {
+            let escaped_screenshot = serde_json::to_string(&screenshot).unwrap_or_default();
+            format!(
+                r#"(async()=>{{try{{
+const h={hash};
+if(!window.__spiderSession||window.__spiderSessionHash!==h){{
+window.__spiderSession=await LanguageModel.create({{
+systemPrompt:{system},
+temperature:{temperature},topK:{top_k},
+expectedInputs:[{{type:"text",languages:["en"]}},{{type:"image"}}],
+expectedOutputs:[{{type:"text",languages:["en"]}}]
+}});
+window.__spiderSessionHash=h;
+}}
+const s=window.__spiderSession;
+const resp=await fetch({screenshot});
+const blob=await resp.blob();
+const msg=[{{role:"user",content:[{{type:"text",value:{user}}},{{type:"image",value:blob}}]}}];
+return await s.prompt(msg);
+}}catch(e){{try{{window.__spiderSession?.destroy();}}catch(_){{}}window.__spiderSession=null;throw e;}}
+}})()"#,
+                hash = sys_hash,
+                system = escaped_system,
+                temperature = temperature,
+                top_k = top_k,
+                screenshot = escaped_screenshot,
+                user = escaped_user,
+            )
+        } else {
+            format!(
+                r#"(async()=>{{try{{
+const h={hash};
+if(!window.__spiderSession||window.__spiderSessionHash!==h){{
+window.__spiderSession=await LanguageModel.create({{
+systemPrompt:{system},
+temperature:{temperature},topK:{top_k},
+expectedInputs:[{{type:"text",languages:["en"]}}],
+expectedOutputs:[{{type:"text",languages:["en"]}}]
+}});
+window.__spiderSessionHash=h;
+}}
+const s=window.__spiderSession;
+const msg=[{{role:"user",content:[{{type:"text",value:{user}}}]}}];
+return await s.prompt(msg);
+}}catch(e){{try{{window.__spiderSession?.destroy();}}catch(_){{}}window.__spiderSession=null;throw e;}}
+}})()"#,
+                hash = sys_hash,
+                system = escaped_system,
+                temperature = temperature,
+                top_k = top_k,
+                user = escaped_user,
+            )
+        };
+
+        // ── Evaluate on page ──
+        let params = EvaluateParams::builder()
+            .expression(&js)
+            .await_promise(true)
+            .build()
+            .expect("valid evaluate params");
+
+        let eval_result =
+            tokio::time::timeout(std::time::Duration::from_secs(120), page.evaluate(params)).await;
+
+        let content = match eval_result {
+            Ok(Ok(eval)) => match eval.value() {
+                Some(serde_json::Value::String(s)) => s.to_string(),
+                Some(v) => v.to_string(),
+                None => {
+                    return Err(EngineError::Remote(
+                        "chrome_ai: empty response from LanguageModel".to_string(),
+                    ));
+                }
+            },
+            Ok(Err(e)) => {
+                let msg = format!("{e}");
+                if Self::is_chrome_ai_missing(&msg) {
+                    return Err(EngineError::Remote(format!(
+                        "Chrome LanguageModel not available: {msg}. Enable chrome://flags/#optimization-guide-on-device-model and chrome://flags/#prompt-api-for-gemini-nano"
+                    )));
+                }
+                // Session may have been invalidated (e.g. navigation); clear it
+                Self::invalidate_chrome_ai_session(page).await;
+                return Err(EngineError::Remote(format!("chrome_ai: eval error: {msg}")));
+            }
+            Err(_) => {
+                // Timeout — session likely stuck; clear for next attempt
+                Self::invalidate_chrome_ai_session(page).await;
+                return Err(EngineError::Remote(
+                    "chrome_ai: inference timed out (120s)".to_string(),
+                ));
+            }
+        };
+
+        log::debug!("Chrome AI response: {}", content);
+
+        // ── Parse response ──
+        let parsed = if effective_cfg.best_effort_json_extract {
+            best_effort_parse_json_object(&content)?
+        } else {
+            serde_json::from_str(&content)?
+        };
+
+        // Normalize: small models may return simplified formats without `steps` array.
+        // Convert {"action":"click","element":"sel"} → {"steps":[{"Click":"sel"}]}
+        let parsed = Self::normalize_chrome_ai_response(parsed);
+
+        let label = parsed
+            .get("label")
+            .and_then(|v| v.as_str())
+            .unwrap_or("automation")
+            .to_string();
+
+        let done = parsed
+            .get("done")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let steps = parsed
+            .get("steps")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let relevant = if effective_cfg.relevance_gate {
+            Some(
+                parsed
+                    .get("relevant")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+            )
+        } else {
+            None
+        };
+
+        let reasoning = parsed.get("reasoning").and_then(|v| {
+            if let Some(s) = v.as_str() {
+                let trimmed = s.trim();
+                return if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                };
+            }
+            if v.is_null() {
+                None
+            } else {
+                Some(v.to_string())
+            }
+        });
+
+        let raw_extracted = parsed.get("extracted").cloned().and_then(|v| {
+            if v.as_object().is_some_and(|o| o.is_empty()) {
+                None
+            } else {
+                Some(v)
+            }
+        });
+
+        let extracted = raw_extracted.or_else(|| {
+            if parsed.get("label").is_none()
+                && parsed.get("done").is_none()
+                && parsed.get("steps").is_none()
+            {
+                Some(parsed.clone())
+            } else if effective_cfg.extra_ai_data {
+                let mut data = serde_json::Map::new();
+                if let Some(obj) = parsed.as_object() {
+                    for (key, value) in obj {
+                        if !matches!(
+                            key.as_str(),
+                            "label"
+                                | "done"
+                                | "steps"
+                                | "memory_ops"
+                                | "extracted"
+                                | "relevant"
+                                | "reasoning"
+                        ) {
+                            data.insert(key.clone(), value.clone());
+                        }
+                    }
+                }
+                if !data.is_empty() {
+                    Some(serde_json::Value::Object(data))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        });
+
+        let memory_ops = parsed
+            .get("memory_ops")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|op| serde_json::from_value(op.clone()).ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(AutomationPlan {
+            label,
+            done,
+            steps,
+            extracted,
+            memory_ops,
+            usage: AutomationUsage {
+                llm_calls: 1,
+                ..AutomationUsage::default()
+            },
+            relevant,
+            reasoning,
+        })
+    }
+
+    /// Truncate a Chrome AI user prompt by shrinking the HTML context section.
+    ///
+    /// Finds the `HTML CONTEXT:\n` marker and truncates only the HTML portion,
+    /// preserving everything after it (task instructions, memory, etc.).
+    fn truncate_chrome_ai_user_prompt(user_text: &str, max_chars: usize) -> String {
+        const HTML_MARKER: &str = "HTML CONTEXT:\n";
+        if let Some(html_start) = user_text.find(HTML_MARKER) {
+            let html_content_start = html_start + HTML_MARKER.len();
+            // Find end of HTML section — look for next section marker
+            let after_html = &user_text[html_content_start..];
+            let html_end = after_html
+                .find("\n\nUSER INSTRUCTIONS:")
+                .or_else(|| after_html.find("\n\nTASK:"))
+                .or_else(|| after_html.find("\n\nMEMORY:"))
+                .map(|pos| html_content_start + pos)
+                .unwrap_or(user_text.len());
+
+            let before_html = &user_text[..html_content_start];
+            let html_section = &user_text[html_content_start..html_end];
+            let after_section = &user_text[html_end..];
+
+            let non_html_len = before_html.len() + after_section.len();
+            if non_html_len >= max_chars {
+                // Even without HTML we're over budget — truncate from tail
+                return truncate_utf8_tail(user_text, max_chars);
+            }
+            let html_budget = max_chars - non_html_len;
+            let truncated_html = truncate_utf8_tail(html_section, html_budget);
+            format!("{before_html}{truncated_html}{after_section}")
+        } else {
+            // No HTML section found — truncate from tail as fallback
+            truncate_utf8_tail(user_text, max_chars)
+        }
+    }
+
+    /// Strip framework data-* attributes from text to prevent small models from
+    /// hallucinating selectors like `[data-v-abc123]` from raw HTML content.
+    ///
+    /// Removes patterns like `data-v-XXXXX=""` and `data-reactid="N"` that
+    /// Vue.js, React, and Angular inject into the DOM. Preserves `data-spider-idx`.
+    fn strip_framework_data_attrs(text: &str) -> String {
+        let mut result = String::with_capacity(text.len());
+        let mut i = 0;
+        let bytes = text.as_bytes();
+        let len = bytes.len();
+
+        while i < len {
+            // Look for "data-" pattern
+            if i + 5 < len && &text[i..i + 5] == "data-" {
+                // Don't strip our own data-spider-idx
+                if i + 15 < len && &text[i..i + 15] == "data-spider-idx" {
+                    result.push_str("data-spider-idx");
+                    i += 15;
+                    continue;
+                }
+                // Check for framework patterns: data-v-, data-reactid, data-react-, data-ng-
+                let rest = &text[i + 5..];
+                let is_framework = rest.starts_with("v-")
+                    || rest.starts_with("react")
+                    || rest.starts_with("ng-")
+                    || rest.starts_with("testid");
+                if is_framework {
+                    // Skip the entire attribute: data-xxx="..." or data-xxx='' or data-xxx
+                    let attr_start = i;
+                    // Skip attribute name
+                    while i < len && bytes[i] != b'=' && bytes[i] != b' ' && bytes[i] != b'>' {
+                        i += 1;
+                    }
+                    // Skip ="value" if present
+                    if i < len && bytes[i] == b'=' {
+                        i += 1; // skip =
+                        if i < len && (bytes[i] == b'"' || bytes[i] == b'\'') {
+                            let quote = bytes[i];
+                            i += 1; // skip opening quote
+                            while i < len && bytes[i] != quote {
+                                i += 1;
+                            }
+                            if i < len {
+                                i += 1; // skip closing quote
+                            }
+                        }
+                    }
+                    // Skip trailing whitespace if the attr was preceded by a space
+                    if attr_start > 0
+                        && text.as_bytes()[attr_start - 1] == b' '
+                        && i < len
+                        && bytes[i] == b' '
+                    {
+                        i += 1;
+                    }
+                    continue;
+                }
+            }
+            result.push(text[i..].chars().next().unwrap_or(' '));
+            i += text[i..].chars().next().map_or(1, |c| c.len_utf8());
+        }
+
+        result
+    }
+
+    /// Normalize Chrome AI responses from small models that may not follow the
+    /// exact output schema.
+    ///
+    /// Handles common simplified formats:
+    /// - `{"action":"click","element":"sel"}` → `{"label":"click sel","done":false,"steps":[{"Click":"sel"}]}`
+    /// - `{"action":"fill","element":"sel","value":"text"}` → `{"steps":[{"Fill":{"selector":"sel","value":"text"}}]}`
+    /// - `{"action":"scroll","value":300}` → `{"steps":[{"ScrollY":300}]}`
+    /// - `{"action":"navigate","url":"..."}` → `{"steps":[{"Navigate":"..."}]}`
+    fn normalize_chrome_ai_response(parsed: serde_json::Value) -> serde_json::Value {
+        // If it already has a `steps` array, return as-is
+        if parsed.get("steps").and_then(|v| v.as_array()).is_some() {
+            return parsed;
+        }
+
+        let obj = match parsed.as_object() {
+            Some(o) => o,
+            None => return parsed,
+        };
+
+        // Check if any value is a step-like object: {"Click":"sel"}, {"Fill":{...}}, etc.
+        // Small models sometimes wrap steps like: {"action": {"Click":"[0]"}, "label":"..."}
+        static KNOWN_ACTIONS: &[&str] = &[
+            "Click",
+            "ClickPoint",
+            "ClickAll",
+            "Fill",
+            "Press",
+            "ScrollY",
+            "ScrollTo",
+            "Navigate",
+            "Wait",
+            "WaitFor",
+            "Evaluate",
+            "SetViewport",
+            "ClickDragPoint",
+        ];
+        for (_key, val) in obj {
+            if let Some(step_obj) = val.as_object() {
+                if step_obj.len() == 1 {
+                    if let Some(action_name) = step_obj.keys().next() {
+                        if KNOWN_ACTIONS.iter().any(|a| a == action_name) {
+                            // Found an embedded step — normalize index references in the value
+                            let mut step = val.clone();
+                            if let Some(inner) = step
+                                .as_object_mut()
+                                .and_then(|o| o.get_mut(action_name))
+                            {
+                                if let Some(s) = inner.as_str() {
+                                    let t = s
+                                        .trim()
+                                        .trim_start_matches('[')
+                                        .trim_end_matches(']');
+                                    if !t.is_empty()
+                                        && t.len() <= 2
+                                        && t.chars().all(|c| c.is_ascii_digit())
+                                    {
+                                        *inner = serde_json::json!(format!(
+                                            "[data-spider-idx='{t}']"
+                                        ));
+                                    }
+                                }
+                            }
+                            let label = obj
+                                .get("label")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("automation");
+                            let done = obj
+                                .get("done")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+                            log::debug!(
+                                "Normalized Chrome AI response: embedded step {:?}",
+                                step
+                            );
+                            return serde_json::json!({
+                                "label": label,
+                                "done": done,
+                                "steps": [step],
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Extract simplified fields — small models use various field names
+        let mut action = obj
+            .get("action")
+            .or_else(|| obj.get("action_type"))
+            .or_else(|| obj.get("type"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        // Infer action from "label" when no explicit action field is present.
+        // Small models often put the action name in "label": "Click", "Scroll", etc.
+        if action.is_empty() {
+            if let Some(label) = obj.get("label").and_then(|v| v.as_str()) {
+                let lower = label.to_lowercase();
+                if lower.starts_with("click") || lower.starts_with("tap") {
+                    action = "click".to_string();
+                } else if lower.starts_with("scroll") {
+                    action = "scroll".to_string();
+                } else if lower.starts_with("fill") || lower.starts_with("type") {
+                    action = "fill".to_string();
+                } else if lower.starts_with("press") || lower.starts_with("key") {
+                    action = "press".to_string();
+                } else if lower.starts_with("wait") {
+                    action = "wait".to_string();
+                } else if lower.starts_with("navigate") || lower.starts_with("go") {
+                    action = "navigate".to_string();
+                }
+            }
+        }
+
+        // Helper: check if a string looks like a CSS selector or index reference
+        fn looks_like_selector(s: &str) -> bool {
+            let t = s.trim();
+            t.starts_with('.')
+                || t.starts_with('#')
+                || t.starts_with('[')
+                || t.contains("data-spider-idx")
+        }
+        fn looks_like_index(s: &str) -> bool {
+            extract_index_from_str(s).is_some()
+        }
+        // Extract a numeric index from strings like "0", "[0]", "[0] link", etc.
+        fn extract_index_from_str(s: &str) -> Option<u64> {
+            let t = s.trim();
+            // Direct number: "0", "12"
+            if let Ok(n) = t.parse::<u64>() {
+                return Some(n);
+            }
+            // Bracketed: "[0]", "[0] link", "[12] button"
+            if t.starts_with('[') {
+                if let Some(end) = t.find(']') {
+                    let inner = &t[1..end];
+                    if let Ok(n) = inner.trim().parse::<u64>() {
+                        return Some(n);
+                    }
+                }
+            }
+            None
+        }
+
+        // Helper: extract a numeric index from any JSON value.
+        // Handles: 0, "0", "[0]", "[0] link", [0], ["0"]
+        fn extract_index(v: &serde_json::Value) -> Option<u64> {
+            if let Some(n) = v.as_u64() {
+                return Some(n);
+            }
+            if let Some(s) = v.as_str() {
+                return extract_index_from_str(s);
+            }
+            // Array with a single element: [0] → 0, ["0"] → 0
+            if let Some(arr) = v.as_array() {
+                if arr.len() == 1 {
+                    if let Some(n) = arr[0].as_u64() {
+                        return Some(n);
+                    }
+                    if let Some(s) = arr[0].as_str() {
+                        return extract_index_from_str(s);
+                    }
+                }
+            }
+            None
+        }
+
+        // Search for element/index across ALL values in the response.
+        // Small models use arbitrary field names — we scan everything.
+        let raw_element = {
+            let mut found = String::new();
+
+            // 1. Scan all values: prefer selectors, then indexes, then bare names
+            for (key, val) in obj {
+                // Skip metadata fields
+                if matches!(
+                    key.as_str(),
+                    "label" | "action" | "action_type" | "type" | "done"
+                        | "extracted" | "memory_ops" | "reasoning"
+                ) {
+                    continue;
+                }
+
+                // Check for selector-like strings
+                if let Some(s) = val.as_str() {
+                    if looks_like_selector(s) {
+                        found = s.to_string();
+                        break;
+                    }
+                }
+
+                // Check for index values (number, string, or array)
+                if let Some(idx) = extract_index(val) {
+                    if idx < 100 {
+                        found = format!("[data-spider-idx='{idx}']");
+                        break;
+                    }
+                }
+
+                // Check for bare element names (strings with hyphens)
+                if found.is_empty() {
+                    if let Some(s) = val.as_str() {
+                        if !s.is_empty() && s.contains('-') && !s.contains(' ') {
+                            found = s.to_string();
+                            // Don't break — keep looking for better matches
+                        }
+                    }
+                }
+            }
+
+            // Convert index-like string values to data-spider-idx selectors
+            if let Some(idx) = extract_index_from_str(&found) {
+                format!("[data-spider-idx='{idx}']")
+            } else {
+                found
+            }
+        };
+
+        let raw_element = raw_element.as_str();
+
+        // If the element looks like a bare name (no CSS prefix), try both class and ID.
+        // Small models often output "my-class" instead of ".my-class" or "#my-class".
+        // CSS comma selectors let querySelector match whichever exists.
+        let element = if !raw_element.is_empty()
+            && !raw_element.starts_with('.')
+            && !raw_element.starts_with('#')
+            && !raw_element.starts_with('[')
+            && !raw_element.contains(' ')
+            && !raw_element.contains('>')
+            && !raw_element.contains(':')
+            && !raw_element.contains('/')
+            && raw_element.contains('-')
+        {
+            format!(".{raw_element}, #{raw_element}")
+        } else {
+            raw_element.to_string()
+        };
+        let element = element.as_str();
+        let value = obj.get("value");
+        let url = obj
+            .get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        if action.is_empty() && element.is_empty() {
+            return parsed;
+        }
+
+        // Build the step
+        let step: serde_json::Value = match action.as_str() {
+            "click" | "tap" if !element.is_empty() => {
+                serde_json::json!({ "Click": element })
+            }
+            "fill" | "type" | "input" if !element.is_empty() => {
+                let val = value
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                serde_json::json!({ "Fill": { "selector": element, "value": val } })
+            }
+            "scroll" | "scrolldown" | "scrollup" => {
+                let amount = value
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(300);
+                serde_json::json!({ "ScrollY": amount })
+            }
+            "navigate" | "goto" if !url.is_empty() => {
+                serde_json::json!({ "Navigate": url })
+            }
+            "wait" => {
+                let ms = value.and_then(|v| v.as_u64()).unwrap_or(1000);
+                serde_json::json!({ "Wait": ms })
+            }
+            "press" => {
+                let key = value
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Enter");
+                serde_json::json!({ "Press": key })
+            }
+            // If action is unrecognized but element is a valid selector, try Click
+            _ if !element.is_empty() => {
+                serde_json::json!({ "Click": element })
+            }
+            _ => return parsed,
+        };
+
+        let label = obj
+            .get("label")
+            .or_else(|| obj.get("action_taken"))
+            .or_else(|| obj.get("description"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("automation");
+        let done = obj
+            .get("done")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        log::debug!(
+            "Normalized Chrome AI response: action={}, element={} → {:?}",
+            action,
+            element,
+            step
+        );
+
+        let mut result = serde_json::json!({
+            "label": label,
+            "done": done,
+            "steps": [step],
+        });
+
+        // Preserve any extracted data
+        if let Some(extracted) = obj.get("extracted") {
+            result
+                .as_object_mut()
+                .unwrap()
+                .insert("extracted".to_string(), extracted.clone());
+        }
+        if let Some(mem_ops) = obj.get("memory_ops") {
+            result
+                .as_object_mut()
+                .unwrap()
+                .insert("memory_ops".to_string(), mem_ops.clone());
+        }
+
+        result
     }
 
     /// Execute automation steps on the page.
@@ -2413,12 +3796,21 @@ pub async fn run_remote_multimodal_with_page(
     engine.with_vision_model(cfgs.vision_model.clone());
     engine.with_text_model(cfgs.text_model.clone());
     engine.with_vision_route_mode(cfgs.vision_route_mode);
+    engine.with_chrome_ai(cfgs.use_chrome_ai);
+    engine.with_chrome_ai_max_user_chars(cfgs.chrome_ai_max_user_chars);
     #[cfg(feature = "skills")]
     if let Some(ref registry) = cfgs.skill_registry {
         engine.with_skill_registry(Some(registry.clone()));
     }
 
-    engine.run(page, url).await
+    // Enable session memory for multi-round automation so memory_ops,
+    // level-attempt tracking, and force-refresh recovery all work.
+    if cfgs.cfg.max_rounds > 1 {
+        let mut mem = super::memory_ops::AutomationMemory::new();
+        engine.run_with_memory(page, url, Some(&mut mem)).await
+    } else {
+        engine.run(page, url).await
+    }
 }
 
 /// Result from processing a spawned page.
@@ -3181,5 +4573,69 @@ mod tests {
             ..Default::default()
         };
         assert!(!engine.should_include_screenshot_for_round(&cfg_false, true));
+    }
+
+    #[test]
+    fn test_summarize_step_blocklist_dedup_and_selector_priority() {
+        let steps = vec![
+            serde_json::json!({"Click":"button.verify"}),
+            serde_json::json!({"Click":"button.verify"}),
+            serde_json::json!({"Fill":{"selector":"input[name='email']","value":"a@b.c"}}),
+            serde_json::json!({"ClickPoint":{"x":120.0,"y":240.0}}),
+        ];
+
+        let blocklist = RemoteMultimodalEngine::summarize_step_blocklist(&steps, 10);
+        assert_eq!(blocklist.len(), 3);
+        assert!(blocklist
+            .iter()
+            .any(|s| s.contains("Click: selector=button.verify")));
+        assert!(blocklist
+            .iter()
+            .any(|s| s.contains("Fill: selector=input[name='email']")));
+        assert!(blocklist
+            .iter()
+            .any(|s| s.contains("ClickPoint: point=(120.0, 240.0)")));
+    }
+
+    #[test]
+    fn test_build_user_prompt_includes_loop_blocklist() {
+        let engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
+        let cfg = RemoteMultimodalConfig::default();
+        let cap = CaptureProfile::default();
+        let blocklist = vec![
+            "Click: selector=button.verify".to_string(),
+            "ClickPoint: point=(100.0, 200.0)".to_string(),
+        ];
+
+        let prompt = engine.build_user_prompt(
+            &cfg,
+            &cap,
+            "https://example.com",
+            "https://example.com",
+            "Example Title",
+            "<html></html>",
+            2,
+            true,
+            3,
+            &blocklist,
+            None,
+            None,
+        );
+
+        assert!(prompt.contains("LOOP BLOCKLIST"));
+        assert!(prompt.contains("Click: selector=button.verify"));
+        assert!(prompt.contains("ClickPoint: point=(100.0, 200.0)"));
+    }
+
+    #[test]
+    fn test_extracted_level_key() {
+        let val = serde_json::json!({
+            "current_level": 7,
+            "level_name": "Word Search"
+        });
+        assert_eq!(
+            RemoteMultimodalEngine::extracted_level_key(Some(&val)).as_deref(),
+            Some("L7:word-search")
+        );
     }
 }
