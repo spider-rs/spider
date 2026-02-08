@@ -10017,7 +10017,7 @@ mod tests {
     #[test]
     fn test_client_rotator_round_robin() {
         // Build 3 simple clients to verify round-robin cycling.
-        let clients: Vec<Client> = (0..3)
+        let clients: Vec<crate::Client> = (0..3)
             .map(|_| {
                 #[cfg(not(feature = "cache_request"))]
                 {
@@ -10033,7 +10033,7 @@ mod tests {
             })
             .collect();
 
-        let rotator = ClientRotator::new(clients);
+        let rotator = crate::website::ClientRotator::new(clients);
         assert_eq!(rotator.len(), 3);
         assert!(!rotator.is_empty());
 
@@ -10045,14 +10045,14 @@ mod tests {
         let _ = rotator.next(); // index 3 -> wraps to 0
 
         // After 4 calls, the atomic index should be 4.
-        let current_idx = rotator.index.load(Ordering::Relaxed);
+        let current_idx = rotator.index.load(crate::website::Ordering::Relaxed);
         assert_eq!(current_idx, 4);
     }
 
     #[cfg(not(feature = "decentralized"))]
     #[test]
     fn test_build_rotated_clients_with_multiple_proxies() {
-        let mut website = Website::new("http://example.com");
+        let mut website = crate::website::Website::new("http://example.com");
         website.configuration.with_proxies(Some(vec![
             "http://proxy1.example.com:8080".to_string(),
             "http://proxy2.example.com:8080".to_string(),
@@ -10068,7 +10068,7 @@ mod tests {
     #[cfg(not(feature = "decentralized"))]
     #[test]
     fn test_build_rotated_clients_single_proxy_returns_none() {
-        let mut website = Website::new("http://example.com");
+        let mut website = crate::website::Website::new("http://example.com");
         website
             .configuration
             .with_proxies(Some(vec!["http://proxy1.example.com:8080".to_string()]));
@@ -10083,7 +10083,7 @@ mod tests {
     #[cfg(not(feature = "decentralized"))]
     #[test]
     fn test_build_rotated_clients_no_proxies_returns_none() {
-        let website = Website::new("http://example.com");
+        let website = crate::website::Website::new("http://example.com");
         let rotator = website.build_rotated_clients();
         assert!(
             rotator.is_none(),
