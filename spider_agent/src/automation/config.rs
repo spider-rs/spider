@@ -1615,11 +1615,15 @@ impl RemoteMultimodalConfigs {
     }
 }
 
-/// Re-export from llm_models_spider for auto-updated vision model detection.
+/// Re-exports from llm_models_spider for auto-updated model intelligence.
 ///
 /// This uses the `llm_models_spider` crate which is automatically updated
-/// via GitHub Actions to fetch the latest model capabilities from OpenRouter.
-pub use llm_models_spider::supports_vision;
+/// via GitHub Actions to fetch the latest model capabilities from
+/// OpenRouter, LiteLLM, and Chatbot Arena.
+pub use llm_models_spider::{
+    arena_rank, model_profile, supports_pdf, supports_video, supports_vision, ModelCapabilities,
+    ModelInfoEntry, ModelPricing, ModelProfile, ModelRanks, MODEL_INFO,
+};
 
 /// Merge a base config with an override config.
 ///

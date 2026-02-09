@@ -54,10 +54,11 @@ pub use chain::{
 
 // Re-export config types
 pub use config::{
-    is_url_allowed, merged_config, reasoning_payload, supports_vision, AutomationConfig,
-    CaptureProfile, CleaningIntent, ClipViewport, CostTier, HtmlCleaningProfile, ModelEndpoint,
-    ModelPolicy, ReasoningEffort, RecoveryStrategy, RemoteMultimodalConfig,
-    RemoteMultimodalConfigs, RetryPolicy, VisionRouteMode,
+    arena_rank, is_url_allowed, merged_config, model_profile, reasoning_payload, supports_pdf,
+    supports_video, supports_vision, AutomationConfig, CaptureProfile, CleaningIntent,
+    ClipViewport, CostTier, HtmlCleaningProfile, ModelCapabilities, ModelEndpoint, ModelInfoEntry,
+    ModelPolicy, ModelPricing, ModelProfile, ModelRanks, ReasoningEffort, RecoveryStrategy,
+    RemoteMultimodalConfig, RemoteMultimodalConfigs, RetryPolicy, VisionRouteMode, MODEL_INFO,
 };
 
 // Re-export content analysis

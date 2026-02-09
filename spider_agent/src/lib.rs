@@ -120,10 +120,11 @@ pub use automation::{
     ActResult, ActionRecord, ActionResult, ActionType, AutomationConfig, AutomationResult,
     AutomationUsage, CaptureProfile, ChainBuilder, ChainCondition, ChainContext, ChainResult,
     ChainStep, ChainStepResult, CleaningIntent, ClipViewport, ContentAnalysis, CostTier,
-    ExtractionSchema, FormField, FormInfo, HtmlCleaningProfile, InteractiveElement, ModelEndpoint,
-    ModelPolicy, NavigationOption, PageObservation, PromptUrlGate, ReasoningEffort,
-    RecoveryStrategy, RetryPolicy, SelectorCache, SelectorCacheEntry, StructuredOutputConfig,
-    VisionRouteMode,
+    ExtractionSchema, FormField, FormInfo, HtmlCleaningProfile, InteractiveElement,
+    ModelCapabilities, ModelEndpoint, ModelInfoEntry, ModelPolicy, ModelPricing, ModelProfile,
+    ModelRanks, NavigationOption, PageObservation, PromptUrlGate, ReasoningEffort, RecoveryStrategy,
+    RetryPolicy, SelectorCache, SelectorCacheEntry, StructuredOutputConfig, VisionRouteMode,
+    MODEL_INFO,
 };
 
 // Automation re-exports - engine and configuration
@@ -213,7 +214,10 @@ pub use automation::execute_graph;
 // Performance re-exports
 pub use automation::cache::{CacheStats, CacheValue, SmartCache};
 pub use automation::executor::{BatchExecutor, ChainExecutor, PrefetchManager};
-pub use automation::router::{ModelRouter, RoutingDecision, TaskAnalysis, TaskCategory};
+pub use automation::router::{
+    auto_policy, estimate_tokens, ModelRequirements, ModelRouter, ModelSelector, RoutingDecision,
+    ScoredModel, SelectionStrategy, TaskAnalysis, TaskCategory,
+};
 
 #[cfg(feature = "search")]
 pub use agent::ResearchResult;
