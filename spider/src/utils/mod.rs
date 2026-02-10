@@ -5258,7 +5258,7 @@ pub async fn openai_request_base(
     match SEM.acquire().await {
         Ok(permit) => {
             let mut chat_completion_defaults =
-                async_openai::types::CreateChatCompletionRequestArgs::default();
+                async_openai::types::chat::CreateChatCompletionRequestArgs::default();
             let gpt_base = chat_completion_defaults
                 .max_tokens(gpt_configs.max_tokens)
                 .model(&gpt_configs.model);
@@ -5365,9 +5365,9 @@ pub async fn openai_request_base(
 
             let response_format = {
                 let mut mode = if json_mode {
-                    async_openai::types::ResponseFormat::JsonObject
+                    async_openai::types::chat::ResponseFormat::JsonObject
                 } else {
-                    async_openai::types::ResponseFormat::Text
+                    async_openai::types::chat::ResponseFormat::Text
                 };
 
                 if let Some(structure) = &gpt_configs.json_schema {
@@ -5389,8 +5389,8 @@ pub async fn openai_request_base(
                                 }
                             }
 
-                            mode = async_openai::types::ResponseFormat::JsonSchema {
-                                json_schema: async_openai::types::ResponseFormatJsonSchema {
+                            mode = async_openai::types::chat::ResponseFormat::JsonSchema {
+                                json_schema: async_openai::types::chat::ResponseFormatJsonSchema {
                                     description: structure.description.clone(),
                                     name: structure.name.clone(),
                                     schema: if schema.is_null() { None } else { Some(schema) },
@@ -5404,12 +5404,12 @@ pub async fn openai_request_base(
                 mode
             };
 
-            match async_openai::types::ChatCompletionRequestAssistantMessageArgs::default()
+            match async_openai::types::chat::ChatCompletionRequestAssistantMessageArgs::default()
                 .content(string_concat!("URL: ", url, "\n", "HTML: ", resource))
                 .build()
             {
                 Ok(resource_completion) => {
-                    let mut messages: Vec<async_openai::types::ChatCompletionRequestMessage> =
+                    let mut messages: Vec<async_openai::types::chat::ChatCompletionRequestMessage> =
                         vec![crate::features::openai::BROWSER_ACTIONS_SYSTEM_PROMPT.clone()];
 
                     if json_mode {
@@ -5422,7 +5422,7 @@ pub async fn openai_request_base(
 
                     if !prompt.is_empty() {
                         messages.push(
-                            match async_openai::types::ChatCompletionRequestUserMessageArgs::default()
+                            match async_openai::types::chat::ChatCompletionRequestUserMessageArgs::default()
                             .content(prompt)
                             .build()
                         {

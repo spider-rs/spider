@@ -1,6 +1,6 @@
 [package]
 name = "spider_agent"
-version = "2.44.41"
+version = "2.45.0"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A concurrent-safe multimodal agent for web automation and research."
 repository = "https://github.com/spider-rs/spider"
@@ -22,7 +22,7 @@ reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
-thiserror = "1"
+thiserror = "2"
 dashmap = "6"
 parking_lot = "0.12"
 base64 = "0.22"
@@ -35,8 +35,8 @@ aho-corasick = "1"
 llm_models_spider = "0.1.9"
 
 # LLM Providers (optional)
-async-openai = { version = "0.29", optional = true }
-tiktoken-rs = { version = "0.7", optional = true }
+async-openai = { version = "0.32", optional = true, features = ["chat-completion"] }
+tiktoken-rs = { version = "0.9", optional = true }
 
 # Browser (optional) - uses chromey (spider's chrome library)
 chromey = { version = "2", optional = true, default-features = false, features = [

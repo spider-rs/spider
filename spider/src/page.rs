@@ -2867,7 +2867,7 @@ impl Page {
             match reader.read_event_into_async(&mut buf).await {
                 Ok(e) => match e {
                     Event::Start(e) => {
-                        let (_, local) = reader.resolve_element(e.name());
+                        let (_, local) = reader.resolver().resolve_element(e.name());
 
                         if local.as_ref() == b"link" {
                             is_link_tag = true;
@@ -2894,7 +2894,7 @@ impl Page {
                         }
                     }
                     Event::End(ref e) => {
-                        let (_, local) = reader.resolve_element(e.name());
+                        let (_, local) = reader.resolver().resolve_element(e.name());
 
                         if local.as_ref() == b"link" {
                             is_link_tag = false;

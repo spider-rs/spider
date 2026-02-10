@@ -1,4 +1,4 @@
-use async_openai::types::ChatCompletionRequestSystemMessageArgs;
+use async_openai::types::chat::ChatCompletionRequestSystemMessageArgs;
 use tiktoken_rs::{get_chat_completion_max_tokens, ChatCompletionRequestMessage};
 
 const PROMPT: &str = r#"task-js-snippet-web-int.\n
@@ -11,7 +11,7 @@ const PROMPT_EXTRA: &str = r#"Provide a JSON response, e.g., {"content": ["Somet
 
 lazy_static! {
     /// The base system prompt for driving the browser.
-    pub static ref BROWSER_ACTIONS_SYSTEM_PROMPT: async_openai::types::ChatCompletionRequestMessage = {
+    pub static ref BROWSER_ACTIONS_SYSTEM_PROMPT: async_openai::types::chat::ChatCompletionRequestMessage = {
         ChatCompletionRequestSystemMessageArgs::default()
                 .content(PROMPT.trim())
                 .build()
@@ -19,7 +19,7 @@ lazy_static! {
                 .into()
     };
     /// The base system prompt for extra data.
-    pub static ref BROWSER_ACTIONS_SYSTEM_EXTRA_PROMPT: async_openai::types::ChatCompletionRequestMessage = {
+    pub static ref BROWSER_ACTIONS_SYSTEM_EXTRA_PROMPT: async_openai::types::chat::ChatCompletionRequestMessage = {
         ChatCompletionRequestSystemMessageArgs::default()
                 .content(PROMPT_EXTRA.trim())
                 .build()

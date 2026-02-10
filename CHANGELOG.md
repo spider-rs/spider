@@ -2,6 +2,154 @@
 
 ## Unreleased
 
+## v2.45.0
+
+1. chore(deps): bump hashbrown 0.15 → 0.16
+1. chore(deps): bump strum 0.26 → 0.27
+1. chore(deps): bump thiserror 1 → 2
+1. chore(deps): bump indexmap 1 → 2
+1. chore(deps): bump async-openai 0.29 → 0.32
+1. chore(deps): bump tiktoken-rs 0.7 → 0.9
+1. chore(deps): bump sysinfo 0.35 → 0.38
+1. chore(deps): bump quick-xml 0.38 → 0.39
+1. chore(deps): bump criterion 0.5 → 0.8
+1. fix(openai): update async-openai imports for v0.32 types::chat module
+1. fix(page): use resolver().resolve_element() for quick-xml 0.39
+
+## v2.44.42
+
+1. feat(agent): integrate llm_models_spider v0.1.9 with smart model selection
+1. perf(website): use `take()` instead of `clone()` for subdomain base URL
+
+## v2.44.41
+
+1. fix(website): use page's own URL for relative link resolution on subdomains (#351)
+
+## v2.44.40
+
+1. docs: add all missing feature flags (`spider_cloud`, `agent`, `search`, `webdriver`, `wreq`, `adblock`, `simd`, `tracing`, etc.)
+1. docs: add Spider Cloud and Chrome rendering integration examples
+
+## v2.44.39
+
+1. refactor(agent): move all skill content to `spider_skills` crate (110 skills via `include_str!`)
+
+## v2.44.38
+
+1. feat(agent): add L15-L48 not-a-robot skills (34 new levels)
+1. feat(agent): add NEST engine loop for recursive nested challenges
+1. feat(agent): add CIRCLE engine loop for drawing challenges
+1. feat(agent): add haiku benchmark for agent evaluation
+
+## v2.44.37
+
+1. fix: add `should_use_chrome_ai` and `use_chrome_ai` to stub `RemoteMultimodalConfigs` (chrome-only builds)
+
+## v2.44.36
+
+1. feat(agent): add L8-L14 not-a-robot skills (license plate, nested, whack-a-mole, waldo, chihuahuas, reverse, affirmations)
+1. feat(agent): add WAM engine loop for whack-a-mole challenges
+1. feat(agent): Chrome AI element probe improvements
+
+## v2.44.33
+
+1. feat(cache): optimize automation caching for skip-browser flows
+
+## v2.44.30
+
+1. feat: add spider cloud end-to-end examples
+
+## v2.44.29
+
+1. feat(agent): improve remote multimodal automation reliability
+
+## v2.44.28
+
+1. feat(agent): expose optional automation reasoning in metadata
+
+## v2.44.26
+
+1. feat(spider_cli): add runtime `--http` and `--headless` mode controls
+
+## v2.44.25
+
+1. feat(agent): dual-model routing with per-endpoint URL and API key configuration
+1. feat(agent): extraction-only mode optimization for single-round data extraction
+
+## v2.44.21
+
+1. fix: feature flag compilation across `wreq`, `agent_full`, and `cache` combos
+1. fix: `agent_full` memvid `!Send` compat via `spawn_blocking`
+1. fix: `cache_chrome_hybrid` GEMINI_CLIENT lazy_static cfg gate
+1. fix: `detect_cf_turnstyle` cfg gate (chrome, not real_browser)
+
+## v2.44.20
+
+1. fix: broken `chrome` feature — missing `relevant` field and cfg gate on `detect_cf_turnstyle` (#349)
+
+## v2.44.18
+
+1. feat(agent): add URL-level relevance pre-filter for crawling — classify URLs via text model before fetching, skip irrelevant ones
+1. feat(agent): add `url_prefilter` and `relevance_gate` configuration
+
+## v2.44.17
+
+1. perf: trie `entry_ref` optimization (-11% lookup time)
+1. perf: robot parser hoisted `to_lowercase` (-13% parse time)
+1. perf: `prepare_url` byte indexing optimization
+
+## v2.44.16
+
+1. feat(agent): add relevance gate for remote multimodal — LLM returns `relevant: true|false`, irrelevant pages get wildcard budget refunded
+
+## v2.44.15
+
+1. perf: trie 49-70% faster via optimized hot paths
+1. perf: robot parser 50% faster
+1. perf: HTML cleaner selector merging
+1. chore: add criterion benchmarks for trie, robot parser, and URL preparation
+
+## v2.44.13
+
+1. feat(spider): add `spider_cloud` integration and S3 skills loading
+
+## v2.44.12
+
+1. feat(spider_agent): add dual-model routing (vision + text model selection)
+1. feat(spider_agent): add long-term experience memory for automation sessions
+
+## v2.44.10
+
+1. feat(spider_agent): improve skill triggers and board reading for web challenges
+
+## v2.44.9
+
+1. feat(spider_agent): add Claude-optimized automation features
+1. feat(agent): add `pre_evaluate` field on skills — engine runs JS before LLM inference
+
+## v2.44.8
+
+1. feat(spider_agent): add concurrent page spawning with `OpenPage` action
+
+## v2.44.7
+
+1. feat(spider_agent): integrate `llm_models_spider` for auto-updated vision model detection
+
+## v2.44.6
+
+1. feat(spider): enable HTTP extraction without `agent_chrome` feature
+
+## v2.44.5
+
+1. feat(agent): enhance CAPTCHA handling and lock system prompt
+1. feat(agent): Chrome AI (Gemini Nano) integration — on-device LLM via `LanguageModel` API
+
+## v2.44.3
+
+1. feat(agent): consolidate automation into `spider_agent` with seamless feature integration
+1. feat: granular `AutomationUsage` tracking (tokens, api_calls, screenshots)
+1. feat(spider_agent): add usage limits, custom tools, and granular tracking
+
 ## v2.43.22
 
 1. feat(automation): add `api_calls` tracking to AutomationUsage

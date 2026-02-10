@@ -1,6 +1,6 @@
 [package]
 name = "spider_utils"
-version = "2.44.42"
+version = "2.45.0"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "Utilities to use for Spider Web Crawler."
 repository = "https://github.com/spider-rs/spider"
@@ -12,14 +12,14 @@ documentation = "https://docs.rs/spider_utils"
 edition = "2021"
 
 [dependencies]
-indexmap = { version = "1", optional = true }
+indexmap = { version = "2", optional = true }
 sxd-document = "0.3"
 sxd-xpath = "0.4"
 serde = { version = "1", optional = true, features = ["derive"] }
 spider_scraper = "0.1"
 lazy_static = "1"
 tokio-stream = "0.1"
-hashbrown = { version = "0.15", default-features = true }
+hashbrown = { version = "0.16", default-features = true }
 log = "0.4"
 
 [dev-dependencies]
