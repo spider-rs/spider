@@ -2321,8 +2321,8 @@ pub async fn fetch_page_html_chrome_base(
 
     let html_source_size = source.len();
 
-    // Listen for network events. todo: capture the last values endtime to track period.
-    // TODO: optional check if spawn required.
+    // Listen for network events to track data transfer.
+    // Spawning is always required here to collect network metrics in real-time.
     let bytes_collected_handle = tokio::spawn(async move {
         let finished_media: Option<OnceCell<RequestId>> =
             if asset { Some(OnceCell::new()) } else { None };
