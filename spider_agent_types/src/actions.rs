@@ -1,6 +1,6 @@
 //! Action types and results for automation.
 
-use super::AutomationUsage;
+use crate::AutomationUsage;
 
 /// Types of actions that can be performed.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

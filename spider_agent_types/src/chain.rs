@@ -1,6 +1,6 @@
 //! Action chain execution with conditional logic.
 
-use super::AutomationUsage;
+use crate::AutomationUsage;
 
 /// A single step in an action chain.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

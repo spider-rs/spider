@@ -123,8 +123,8 @@ impl GeneratedSchema {
     }
 
     /// Convert to ExtractionSchema for use in automation.
-    pub fn to_extraction_schema(&self) -> super::ExtractionSchema {
-        super::ExtractionSchema {
+    pub fn to_extraction_schema(&self) -> crate::ExtractionSchema {
+        crate::ExtractionSchema {
             name: self.name.clone(),
             description: self.field_descriptions.get("").cloned(),
             schema: self.schema.to_string(),

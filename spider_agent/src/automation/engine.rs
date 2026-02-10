@@ -67,11 +67,11 @@ pub struct RemoteMultimodalEngine {
     /// Optional semaphore used to limit concurrent in-flight LLM requests.
     pub semaphore: Option<Arc<Semaphore>>,
     /// Optional vision model endpoint for dual-model routing.
-    pub vision_model: Option<super::config::ModelEndpoint>,
+    pub vision_model: Option<super::ModelEndpoint>,
     /// Optional text-only model endpoint for dual-model routing.
-    pub text_model: Option<super::config::ModelEndpoint>,
+    pub text_model: Option<super::ModelEndpoint>,
     /// Routing mode controlling when vision vs text model is used.
-    pub vision_route_mode: super::config::VisionRouteMode,
+    pub vision_route_mode: super::VisionRouteMode,
     /// Optional skill registry for dynamic context injection.
     /// When set, matching skills are automatically injected into the system prompt
     /// based on current page state (URL, title, HTML) each round.
@@ -112,7 +112,7 @@ impl RemoteMultimodalEngine {
             semaphore: None,
             vision_model: None,
             text_model: None,
-            vision_route_mode: super::config::VisionRouteMode::default(),
+            vision_route_mode: super::VisionRouteMode::default(),
             #[cfg(feature = "skills")]
             skill_registry: None,
             #[cfg(feature = "memvid")]
@@ -472,20 +472,20 @@ impl RemoteMultimodalEngine {
     /// Set the vision model endpoint for dual-model routing.
     pub fn with_vision_model(
         &mut self,
-        endpoint: Option<super::config::ModelEndpoint>,
+        endpoint: Option<super::ModelEndpoint>,
     ) -> &mut Self {
         self.vision_model = endpoint;
         self
     }
 
     /// Set the text model endpoint for dual-model routing.
-    pub fn with_text_model(&mut self, endpoint: Option<super::config::ModelEndpoint>) -> &mut Self {
+    pub fn with_text_model(&mut self, endpoint: Option<super::ModelEndpoint>) -> &mut Self {
         self.text_model = endpoint;
         self
     }
 
     /// Set the vision routing mode.
-    pub fn with_vision_route_mode(&mut self, mode: super::config::VisionRouteMode) -> &mut Self {
+    pub fn with_vision_route_mode(&mut self, mode: super::VisionRouteMode) -> &mut Self {
         self.vision_route_mode = mode;
         self
     }
@@ -531,14 +531,14 @@ impl RemoteMultimodalEngine {
             return true;
         }
         match self.vision_route_mode {
-            super::config::VisionRouteMode::AlwaysPrimary => true,
-            super::config::VisionRouteMode::TextFirst => {
+            super::VisionRouteMode::AlwaysPrimary => true,
+            super::VisionRouteMode::TextFirst => {
                 round_idx == 0 || stagnated || action_stuck_rounds >= 3
             }
-            super::config::VisionRouteMode::VisionFirst => {
+            super::VisionRouteMode::VisionFirst => {
                 round_idx < 2 || stagnated || action_stuck_rounds >= 3
             }
-            super::config::VisionRouteMode::AgentDriven => false,
+            super::VisionRouteMode::AgentDriven => false,
         }
     }
 
@@ -1313,19 +1313,19 @@ impl RemoteMultimodalEngine {
         examples: &[serde_json::Value],
         name: Option<&str>,
         description: Option<&str>,
-    ) -> super::schema_gen::GeneratedSchema {
-        let request = super::schema_gen::SchemaGenerationRequest {
+    ) -> super::GeneratedSchema {
+        let request = super::SchemaGenerationRequest {
             examples: examples.to_vec(),
             description: description.map(|s| s.to_string()),
             strict: false,
             name: name.map(|s| s.to_string()),
         };
-        super::schema_gen::generate_schema(&request)
+        super::generate_schema(&request)
     }
 
     /// Infer a JSON schema from a single example value.
     pub fn infer_schema(&self, example: &serde_json::Value) -> serde_json::Value {
-        super::schema_gen::infer_schema(example)
+        super::infer_schema(example)
     }
 
     /// Build a schema generation prompt for LLM-assisted schema creation.
@@ -1334,13 +1334,13 @@ impl RemoteMultimodalEngine {
         examples: &[serde_json::Value],
         description: Option<&str>,
     ) -> String {
-        let request = super::schema_gen::SchemaGenerationRequest {
+        let request = super::SchemaGenerationRequest {
             examples: examples.to_vec(),
             description: description.map(|s| s.to_string()),
             strict: false,
             name: None,
         };
-        super::schema_gen::build_schema_generation_prompt(&request)
+        super::build_schema_generation_prompt(&request)
     }
 
     /// Parse tool calls from an LLM response.
@@ -1349,36 +1349,36 @@ impl RemoteMultimodalEngine {
     pub fn parse_tool_calls(
         &self,
         response: &serde_json::Value,
-    ) -> Vec<super::tool_calling::ToolCall> {
-        super::tool_calling::parse_tool_calls(response)
+    ) -> Vec<super::ToolCall> {
+        super::parse_tool_calls(response)
     }
 
     /// Convert tool calls to automation step actions.
     pub fn tool_calls_to_steps(
         &self,
-        calls: &[super::tool_calling::ToolCall],
+        calls: &[super::ToolCall],
     ) -> Vec<serde_json::Value> {
-        super::tool_calling::tool_calls_to_steps(calls)
+        super::tool_calls_to_steps(calls)
     }
 
     /// Get all available action tool schemas.
     ///
     /// Returns OpenAI-compatible tool definitions for all supported actions.
-    pub fn action_tool_schemas(&self) -> Vec<super::tool_calling::ToolDefinition> {
-        super::tool_calling::ActionToolSchemas::all()
+    pub fn action_tool_schemas(&self) -> Vec<super::ToolDefinition> {
+        super::ActionToolSchemas::all()
     }
 
     /// Extract HTML context around selectors for self-healing.
     pub fn extract_html_context(&self, html: &str, max_bytes: usize) -> String {
-        super::self_healing::extract_html_context(html, max_bytes)
+        super::extract_html_context(html, max_bytes)
     }
 
     /// Create a new dependency graph for concurrent execution.
     pub fn create_dependency_graph(
         &self,
-        steps: Vec<super::concurrent_chain::DependentStep>,
-    ) -> Result<super::concurrent_chain::DependencyGraph, String> {
-        super::concurrent_chain::DependencyGraph::new(steps)
+        steps: Vec<super::DependentStep>,
+    ) -> Result<super::DependencyGraph, String> {
+        super::DependencyGraph::new(steps)
     }
 
     /// Execute a dependency graph with the provided executor.
@@ -1386,15 +1386,15 @@ impl RemoteMultimodalEngine {
     /// This enables parallel execution of independent steps using `tokio::JoinSet`.
     pub async fn execute_dependency_graph<F, Fut>(
         &self,
-        graph: &mut super::concurrent_chain::DependencyGraph,
-        config: &super::concurrent_chain::ConcurrentChainConfig,
+        graph: &mut super::DependencyGraph,
+        config: &super::ConcurrentChainConfig,
         executor: F,
-    ) -> super::concurrent_chain::ConcurrentChainResult
+    ) -> super::ConcurrentChainResult
     where
-        F: Fn(super::concurrent_chain::DependentStep) -> Fut + Clone + Send + Sync + 'static,
-        Fut: std::future::Future<Output = super::concurrent_chain::StepResult> + Send + 'static,
+        F: Fn(super::DependentStep) -> Fut + Clone + Send + Sync + 'static,
+        Fut: std::future::Future<Output = super::StepResult> + Send + 'static,
     {
-        super::concurrent_chain::execute_graph(graph, config, executor).await
+        super::execute_graph(graph, config, executor).await
     }
 }
 
@@ -1623,10 +1623,10 @@ mod tests {
         let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
         assert!(!engine.has_dual_model_routing());
 
-        engine.with_vision_model(Some(crate::automation::config::ModelEndpoint::new(
+        engine.with_vision_model(Some(crate::automation::ModelEndpoint::new(
             "gpt-4o",
         )));
-        engine.with_text_model(Some(crate::automation::config::ModelEndpoint::new(
+        engine.with_text_model(Some(crate::automation::ModelEndpoint::new(
             "gpt-4o-mini",
         )));
         assert!(engine.has_dual_model_routing());
@@ -1636,11 +1636,11 @@ mod tests {
     fn test_engine_resolve_model_for_round() {
         let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "primary", None);
         engine.api_key = Some("sk-parent".to_string());
-        engine.with_vision_model(Some(crate::automation::config::ModelEndpoint::new(
+        engine.with_vision_model(Some(crate::automation::ModelEndpoint::new(
             "vision-model",
         )));
         engine.with_text_model(Some(
-            crate::automation::config::ModelEndpoint::new("text-model")
+            crate::automation::ModelEndpoint::new("text-model")
                 .with_api_url("https://text.api.com")
                 .with_api_key("sk-text"),
         ));
@@ -1661,13 +1661,13 @@ mod tests {
     #[test]
     fn test_engine_should_use_vision_this_round() {
         let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
-        engine.with_vision_model(Some(crate::automation::config::ModelEndpoint::new(
+        engine.with_vision_model(Some(crate::automation::ModelEndpoint::new(
             "gpt-4o",
         )));
-        engine.with_text_model(Some(crate::automation::config::ModelEndpoint::new(
+        engine.with_text_model(Some(crate::automation::ModelEndpoint::new(
             "gpt-4o-mini",
         )));
-        engine.with_vision_route_mode(crate::automation::config::VisionRouteMode::TextFirst);
+        engine.with_vision_route_mode(crate::automation::VisionRouteMode::TextFirst);
 
         // Round 0 → vision
         assert!(engine.should_use_vision_this_round(0, false, 0, false));

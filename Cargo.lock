@@ -7765,6 +7765,7 @@ dependencies = [
  "smallvec",
  "sonic-rs",
  "spider_agent",
+ "spider_agent_types",
  "spider_fingerprint",
  "spider_firewall",
  "sqlx",
@@ -7810,12 +7811,35 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "spider_agent_html",
+ "spider_agent_types",
  "spider_skills",
  "tempfile",
  "thirtyfour",
  "thiserror 2.0.18",
  "tiktoken-rs",
  "tokio",
+]
+
+[[package]]
+name = "spider_agent_html"
+version = "0.1.0"
+dependencies = [
+ "aho-corasick",
+ "lol_html",
+ "serde",
+ "serde_json",
+ "spider_agent_types",
+]
+
+[[package]]
+name = "spider_agent_types"
+version = "0.1.0"
+dependencies = [
+ "aho-corasick",
+ "llm_models_spider",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

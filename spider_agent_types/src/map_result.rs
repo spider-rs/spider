@@ -2,7 +2,7 @@
 //!
 //! Contains types for representing discovered URLs and page mapping results.
 
-use super::AutomationUsage;
+use crate::AutomationUsage;
 
 /// Result of the `map()` API call for page discovery.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]

@@ -3,8 +3,8 @@
 //! Provides multiple cleaning levels for preparing HTML content
 //! before sending to LLM models.
 
-use super::{CleaningIntent, ContentAnalysis, HtmlCleaningProfile};
 use lol_html::{doc_comments, element, rewrite_str, RewriteStrSettings};
+use spider_agent_types::{CleaningIntent, ContentAnalysis, HtmlCleaningProfile};
 
 /// Raw passthrough - no cleaning.
 pub fn clean_html_raw(html: &str) -> String {

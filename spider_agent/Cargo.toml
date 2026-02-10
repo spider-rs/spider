@@ -27,7 +27,11 @@ dashmap = "6"
 parking_lot = "0.12"
 base64 = "0.22"
 
-# HTML processing
+# Extracted types and HTML processing
+spider_agent_types = { version = "2.45.0", path = "../spider_agent_types" }
+spider_agent_html = { version = "2.45.0", path = "../spider_agent_html" }
+
+# HTML processing (still needed for engine internals)
 lol_html = "2"
 aho-corasick = "1"
 

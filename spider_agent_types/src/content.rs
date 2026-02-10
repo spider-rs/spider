@@ -238,8 +238,8 @@ impl ContentAnalysis {
     }
 
     /// Get recommended cleaning profile based on analysis.
-    pub fn recommended_cleaning(&self) -> super::HtmlCleaningProfile {
-        use super::HtmlCleaningProfile;
+    pub fn recommended_cleaning(&self) -> crate::HtmlCleaningProfile {
+        use crate::HtmlCleaningProfile;
 
         if self.cleanable_ratio > 0.5 {
             // More than half is cleanable - aggressive

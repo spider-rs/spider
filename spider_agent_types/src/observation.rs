@@ -1,6 +1,6 @@
 //! Page observation types for understanding page state.
 
-use super::AutomationUsage;
+use crate::AutomationUsage;
 
 /// Observation of a page's current state.
 ///

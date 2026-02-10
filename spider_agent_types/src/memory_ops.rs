@@ -42,7 +42,7 @@ pub enum MemoryOperation {
 ///
 /// # Example
 /// ```rust
-/// use spider_agent::automation::AutomationMemory;
+/// use spider_agent_types::AutomationMemory;
 ///
 /// let mut memory = AutomationMemory::default();
 /// memory.set("user_logged_in", serde_json::json!(true));

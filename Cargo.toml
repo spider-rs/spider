@@ -5,6 +5,8 @@ members = [
     "spider_cli",
     "spider_utils",
     "spider_agent",
+    "spider_agent_types",
+    "spider_agent_html",
     # internal
     "examples",
     "benches"]

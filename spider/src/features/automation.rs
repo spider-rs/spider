@@ -150,49 +150,14 @@ pub use spider_agent::automation::{
 use chromiumoxide::Page;
 
 // =============================================================================
-// Stub types for backward compatibility (when agent feature is not enabled)
+// Types from spider_agent_types (always available, no heavy deps)
 // =============================================================================
 
-/// Token usage tracking (stub when agent feature not enabled).
+/// Token usage tracking — re-exported from [`spider_agent_types`] when agent
+/// feature is not enabled. When `agent` is enabled, the type comes from
+/// `spider_agent::automation` instead.
 #[cfg(not(feature = "agent"))]
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct AutomationUsage {
-    /// Prompt tokens used.
-    pub prompt_tokens: u32,
-    /// Completion tokens used.
-    pub completion_tokens: u32,
-    /// Total tokens used.
-    pub total_tokens: u32,
-}
-
-/// Result of automation (stub when agent feature not enabled).
-#[cfg(not(feature = "agent"))]
-#[derive(Debug, Clone, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct AutomationResult {
-    /// Label for this automation.
-    pub label: String,
-    /// Number of steps executed.
-    pub steps_executed: usize,
-    /// Whether automation succeeded.
-    pub success: bool,
-    /// Error message if failed.
-    pub error: Option<String>,
-    /// Token usage.
-    pub usage: AutomationUsage,
-    /// Extracted data.
-    #[cfg(feature = "serde")]
-    pub extracted: Option<serde_json::Value>,
-    /// Screenshot (base64).
-    pub screenshot: Option<String>,
-    /// URLs to open in new pages concurrently.
-    pub spawn_pages: Vec<String>,
-    /// Whether the page is relevant to crawl goals.
-    pub relevant: Option<bool>,
-    /// Optional reasoning text if returned by the model.
-    pub reasoning: Option<String>,
-}
+pub use spider_agent_types::{AutomationResult, AutomationUsage};
 
 /// Engine error type (stub when agent feature not enabled).
 #[cfg(not(feature = "agent"))]

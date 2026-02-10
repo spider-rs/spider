@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::fnv1a64;
+use crate::fnv1a64;
 
 /// Mode for HTML diffing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

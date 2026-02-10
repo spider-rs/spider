@@ -91,7 +91,7 @@ impl RemoteMultimodalEngine {
             Some(explicit) => explicit,
             None => {
                 let (_, model_name, _) = self.resolve_model_for_round(use_vision);
-                super::config::supports_vision(model_name)
+                super::supports_vision(model_name)
             }
         }
     }
@@ -100,7 +100,7 @@ impl RemoteMultimodalEngine {
     #[inline]
     fn has_vision_capable_route(&self) -> bool {
         let (_, model_name, _) = self.resolve_model_for_round(true);
-        super::config::supports_vision(model_name)
+        super::supports_vision(model_name)
     }
 
     /// Apply a text-only flavor to the system prompt for rounds where no image
@@ -4063,7 +4063,7 @@ pub async fn run_remote_multimodal_with_page(
     // Enable session memory for multi-round automation so memory_ops,
     // level-attempt tracking, and force-refresh recovery all work.
     if cfgs.cfg.max_rounds > 1 {
-        let mut mem = super::memory_ops::AutomationMemory::new();
+        let mut mem = super::AutomationMemory::new();
         engine.run_with_memory(page, url, Some(&mut mem)).await
     } else {
         engine.run(page, url).await

@@ -1,0 +1,26 @@
+[package]
+name = "spider_agent_types"
+version = "2.45.0"
+authors = ["j-mendez <jeff@spider.cloud>"]
+description = "Pure data types and constants for spider_agent automation. Zero heavy dependencies."
+repository = "https://github.com/spider-rs/spider"
+readme = "README.md"
+keywords = ["agent", "llm", "automation", "web", "types"]
+categories = ["web-programming", "data-structures"]
+license = "MIT"
+documentation = "https://docs.rs/spider_agent_types"
+edition = "2021"
+
+[badges]
+maintenance = { status = "actively-developed" }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+aho-corasick = "1"
+
+# Model capabilities detection (lightweight)
+llm_models_spider = "0.1.9"
+
+[dev-dependencies]
+serde_json = "1"
