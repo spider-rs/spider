@@ -5875,3 +5875,199 @@ fn test_parent_host_match_tld() {
         &sub_matcher,
     ));
 }
+
+/// Test that validate_link resolves relative URLs against the subdomain host,
+/// not the original crawl domain. This is the core fix for subdomain crawling.
+#[test]
+fn test_validate_link_subdomain_relative_resolution() {
+
+    // Simulate: crawling www.example.com with subdomains=true,
+    // currently on a page at sub.example.com
+    let selectors = get_page_selectors("https://www.example.com/", true, false);
+
+    let external_domains: Box<HashSet<CaseInsensitiveString>> =
+        Box::new(HashSet::new());
+
+    // With the fix: base is the page's own URL (sub.example.com)
+    let subdomain_base = url::Url::parse("https://sub.example.com/page").unwrap();
+    let mut no_page_links: Option<HashSet<CaseInsensitiveString>> = None;
+
+    let result = validate_link(
+        &Some(&subdomain_base),
+        "/about",
+        &selectors.0,
+        &selectors.1[0],
+        &selectors.2,
+        &selectors.0,
+        &external_domains,
+        &mut no_page_links,
+    );
+
+    assert!(
+        result.is_some(),
+        "Relative link on subdomain page should be accepted"
+    );
+    assert_eq!(
+        result.unwrap().as_str(),
+        "https://sub.example.com/about",
+        "Relative link should resolve against subdomain host, not crawl origin"
+    );
+
+    // Before the fix: base was the crawl origin (www.example.com)
+    // This would incorrectly resolve /about to www.example.com/about
+    let crawl_origin_base = url::Url::parse("https://www.example.com/").unwrap();
+    let mut no_page_links2: Option<HashSet<CaseInsensitiveString>> = None;
+
+    let result_old = validate_link(
+        &Some(&crawl_origin_base),
+        "/about",
+        &selectors.0,
+        &selectors.1[0],
+        &selectors.2,
+        &selectors.0,
+        &external_domains,
+        &mut no_page_links2,
+    );
+
+    assert!(result_old.is_some());
+    assert_eq!(
+        result_old.unwrap().as_str(),
+        "https://www.example.com/about",
+        "With crawl origin as base, link resolves against wrong host"
+    );
+}
+
+/// Test that validate_link still works correctly for same-domain pages
+/// (no regression from the subdomain fix).
+#[test]
+fn test_validate_link_same_domain_resolution() {
+    let selectors = get_page_selectors("https://www.example.com/", false, false);
+
+    let external_domains: Box<HashSet<CaseInsensitiveString>> =
+        Box::new(HashSet::new());
+
+    let page_base = url::Url::parse("https://www.example.com/some-page").unwrap();
+    let mut no_page_links: Option<HashSet<CaseInsensitiveString>> = None;
+
+    let result = validate_link(
+        &Some(&page_base),
+        "/about",
+        &selectors.0,
+        &selectors.1[0],
+        &selectors.2,
+        &selectors.0,
+        &external_domains,
+        &mut no_page_links,
+    );
+
+    assert!(result.is_some());
+    assert_eq!(
+        result.unwrap().as_str(),
+        "https://www.example.com/about",
+        "Same-domain relative link should resolve correctly"
+    );
+}
+
+/// Integration test: build a page at a subdomain URL with relative links,
+/// verify links() resolves them against the subdomain.
+#[tokio::test]
+#[cfg(all(
+    not(feature = "decentralized"),
+    not(feature = "chrome"),
+    not(feature = "cache_request")
+))]
+async fn test_subdomain_page_links_resolution() {
+    use crate::utils::PageResponse;
+
+    let html = br#"<html><body>
+        <a href="/about">About</a>
+        <a href="/contact">Contact</a>
+        <a href="https://sub.example.com/absolute">Absolute</a>
+    </body></html>"#;
+
+    let mut page = build_with_parse(
+        "https://sub.example.com/page",
+        PageResponse {
+            content: Some(Box::new(html.to_vec())),
+            status_code: reqwest::StatusCode::OK,
+            ..Default::default()
+        },
+    );
+
+    // Selectors for crawl origin www.example.com with subdomains=true
+    let selectors = get_page_selectors("https://www.example.com/", true, false);
+
+    // Simulate the fix: base is derived from the page's own URL
+    let page_base = url::Url::parse("https://sub.example.com/page")
+        .ok()
+        .map(Box::new);
+
+    let links = page.links(&selectors, &page_base).await;
+
+    let expected_about: CaseInsensitiveString =
+        "https://sub.example.com/about".into();
+    let expected_contact: CaseInsensitiveString =
+        "https://sub.example.com/contact".into();
+    let expected_absolute: CaseInsensitiveString =
+        "https://sub.example.com/absolute".into();
+    let wrong_about: CaseInsensitiveString =
+        "https://www.example.com/about".into();
+
+    assert!(
+        links.contains(&expected_about),
+        "Relative /about should resolve to sub.example.com/about, got: {:?}",
+        &links
+    );
+    assert!(
+        links.contains(&expected_contact),
+        "Relative /contact should resolve to sub.example.com/contact, got: {:?}",
+        &links
+    );
+    assert!(
+        links.contains(&expected_absolute),
+        "Absolute link should be preserved, got: {:?}",
+        &links
+    );
+    assert!(
+        !links.contains(&wrong_about),
+        "Links should NOT resolve against crawl origin www.example.com"
+    );
+}
+
+/// Test that same-domain page links still resolve correctly after the fix.
+#[tokio::test]
+#[cfg(all(
+    not(feature = "decentralized"),
+    not(feature = "chrome"),
+    not(feature = "cache_request")
+))]
+async fn test_same_domain_page_links_resolution() {
+    use crate::utils::PageResponse;
+
+    let html = br#"<html><body><a href="/about">About</a></body></html>"#;
+
+    let mut page = build_with_parse(
+        "https://www.example.com/page",
+        PageResponse {
+            content: Some(Box::new(html.to_vec())),
+            status_code: reqwest::StatusCode::OK,
+            ..Default::default()
+        },
+    );
+
+    let selectors = get_page_selectors("https://www.example.com/", false, false);
+
+    // Base is the page's own URL (same domain as crawl origin)
+    let page_base = url::Url::parse("https://www.example.com/page")
+        .ok()
+        .map(Box::new);
+
+    let links = page.links(&selectors, &page_base).await;
+
+    let expected: CaseInsensitiveString = "https://www.example.com/about".into();
+    assert!(
+        links.contains(&expected),
+        "Same-domain relative link should resolve correctly, got: {:?}",
+        &links
+    );
+}
