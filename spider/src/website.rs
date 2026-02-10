@@ -5387,18 +5387,21 @@ impl Website {
                                                                 page.set_external(shared.3.clone());
                                                             }
 
-                                                            let prev_domain = page.base;
+                                                            let prev_domain = page.base.take();
 
-                                                            page.base = shared.9.as_deref().cloned();
+                                                            // Use page's own URL for relative link resolution (not original crawl domain).
+                                                            // Fixes subdomain pages resolving e.g. href="/path" against wrong host.
+                                                            page.set_url_parsed_direct();
+                                                            let page_base = page.base.clone().map(Box::new);
 
                                                             if return_page_links {
                                                                 page.page_links = Some(Default::default());
                                                             }
 
                                                             let links = if full_resources {
-                                                                page.links_full(&shared.1, &shared.9).await
+                                                                page.links_full(&shared.1, &page_base).await
                                                             } else {
-                                                                page.links(&shared.1, &shared.9).await
+                                                                page.links(&shared.1, &page_base).await
                                                             };
 
                                                             page.base = prev_domain;
@@ -6094,18 +6097,21 @@ impl Website {
                                                                 page.set_external(shared.3.clone());
                                                             }
 
-                                                            let prev_domain = page.base;
+                                                            let prev_domain = page.base.take();
 
-                                                            page.base = shared.9.as_deref().cloned();
+                                                            // Use page's own URL for relative link resolution (not original crawl domain).
+                                                            // Fixes subdomain pages resolving e.g. href="/path" against wrong host.
+                                                            page.set_url_parsed_direct();
+                                                            let page_base = page.base.clone().map(Box::new);
 
                                                             if return_page_links {
                                                                 page.page_links = Some(Default::default());
                                                             }
 
                                                             let links = if full_resources {
-                                                                page.links_full(&shared.1, &shared.9).await
+                                                                page.links_full(&shared.1, &page_base).await
                                                             } else {
-                                                                page.links(&shared.1, &shared.9).await
+                                                                page.links(&shared.1, &page_base).await
                                                             };
 
                                                             page.base = prev_domain;
@@ -6456,17 +6462,21 @@ impl Website {
                                                 page.set_external(shared.3.clone());
                                             }
 
-                                            let prev_domain = page.base;
-                                            page.base = shared.8.as_deref().cloned();
+                                            let prev_domain = page.base.take();
+
+                                            // Use page's own URL for relative link resolution (not original crawl domain).
+                                            // Fixes subdomain pages resolving e.g. href="/path" against wrong host.
+                                            page.set_url_parsed_direct();
+                                            let page_base = page.base.clone().map(Box::new);
 
                                             if return_page_links {
                                                 page.page_links = Some(Default::default());
                                             }
 
                                             let links = if full_resources {
-                                                page.links_full(&shared.1, &shared.8).await
+                                                page.links_full(&shared.1, &page_base).await
                                             } else {
-                                                page.links(&shared.1, &shared.8).await
+                                                page.links(&shared.1, &page_base).await
                                             };
 
                                             page.base = prev_domain;
@@ -6919,9 +6929,12 @@ impl Website {
                                         );
                                     }
 
-                                    let prev_domain = page.base;
+                                    let prev_domain = page.base.take();
 
-                                    page.base = shared.5.as_deref().cloned();
+                                    // Use page's own URL for relative link resolution (not original crawl domain).
+                                    // Fixes subdomain pages resolving e.g. href="/path" against wrong host.
+                                    page.set_url_parsed_direct();
+                                    let page_base = page.base.clone().map(Box::new);
 
                                     if return_page_links {
                                         page.page_links = Some(Default::default());
@@ -6929,7 +6942,7 @@ impl Website {
 
                                     let (links, bytes_transferred ) = page
                                         .smart_links(
-                                            &shared.1, &shared.4, &shared.5, &shared.6, Some(&shared.8)
+                                            &shared.1, &shared.4, &page_base, &shared.6, Some(&shared.8)
                                         )
                                         .await;
 
