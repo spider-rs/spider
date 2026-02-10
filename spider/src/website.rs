@@ -5392,7 +5392,7 @@ impl Website {
                                                             // Use page's own URL for relative link resolution (not original crawl domain).
                                                             // Fixes subdomain pages resolving e.g. href="/path" against wrong host.
                                                             page.set_url_parsed_direct();
-                                                            let page_base = page.base.clone().map(Box::new);
+                                                            let page_base = page.base.take().map(Box::new);
 
                                                             if return_page_links {
                                                                 page.page_links = Some(Default::default());
@@ -6102,7 +6102,7 @@ impl Website {
                                                             // Use page's own URL for relative link resolution (not original crawl domain).
                                                             // Fixes subdomain pages resolving e.g. href="/path" against wrong host.
                                                             page.set_url_parsed_direct();
-                                                            let page_base = page.base.clone().map(Box::new);
+                                                            let page_base = page.base.take().map(Box::new);
 
                                                             if return_page_links {
                                                                 page.page_links = Some(Default::default());
@@ -6467,7 +6467,7 @@ impl Website {
                                             // Use page's own URL for relative link resolution (not original crawl domain).
                                             // Fixes subdomain pages resolving e.g. href="/path" against wrong host.
                                             page.set_url_parsed_direct();
-                                            let page_base = page.base.clone().map(Box::new);
+                                            let page_base = page.base.take().map(Box::new);
 
                                             if return_page_links {
                                                 page.page_links = Some(Default::default());
@@ -6934,7 +6934,7 @@ impl Website {
                                     // Use page's own URL for relative link resolution (not original crawl domain).
                                     // Fixes subdomain pages resolving e.g. href="/path" against wrong host.
                                     page.set_url_parsed_direct();
-                                    let page_base = page.base.clone().map(Box::new);
+                                    let page_base = page.base.take().map(Box::new);
 
                                     if return_page_links {
                                         page.page_links = Some(Default::default());
