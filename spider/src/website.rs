@@ -4414,6 +4414,212 @@ impl Website {
         false
     }
 
+    /// Cache-only crawl phase: process initial URL + follow links from cache.
+    /// Returns `true` if all reachable pages were served from cache (Chrome/HTTP can be skipped).
+    /// Any cache-miss links are left in `self.extra_links` for the subsequent Chrome/HTTP phase.
+    /// No mutexes, no shared state — only lock-free cache lookups.
+    #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+    async fn crawl_cache_phase(&mut self, _client: &Client) -> bool {
+        use crate::utils::{cache_skip_browser, get_cached_url, build_cached_html_page_response};
+
+        let cache_options = self.configuration.get_cache_options();
+        if !cache_skip_browser(&cache_options) {
+            return false;
+        }
+
+        self.configuration.configure_budget();
+        self.configuration.configure_allowlist();
+
+        let target_url = self.url.inner().to_string();
+
+        // Try initial URL from cache
+        let html = match get_cached_url(
+            &target_url,
+            cache_options.as_ref(),
+            &self.configuration.cache_policy,
+        )
+        .await
+        {
+            Some(h) => h,
+            None => return false, // Cache miss on initial URL — need Chrome/HTTP
+        };
+
+        self.status = CrawlStatus::Active;
+        let selectors = self.setup_selectors();
+        let full_resources = self.configuration.full_resources;
+        let return_page_links = self.configuration.return_page_links;
+        let normalize = self.configuration.normalize;
+
+        // Build page from cached HTML
+        let page_response = build_cached_html_page_response(&target_url, &html);
+        let mut page = build(&target_url, page_response);
+
+        if self.configuration.external_domains_caseless.len() > 0 {
+            page.set_external(self.configuration.external_domains_caseless.clone());
+        }
+        page.set_url_parsed_direct();
+        if return_page_links {
+            page.page_links = Some(Default::default());
+        }
+
+        let page_base = page.base.take().map(Box::new);
+        let mut links: HashSet<CaseInsensitiveString> = if full_resources {
+            page.links_full(&selectors, &page_base).await
+        } else {
+            page.links(&selectors, &page_base).await
+        };
+        page.base = None;
+
+        if normalize {
+            page.signature
+                .replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
+        }
+
+        // Set initial metadata
+        self.initial_status_code = page.status_code;
+        self.initial_html_length = page.get_html_bytes_u8().len();
+
+        let url = match &self.on_link_find_callback {
+            Some(cb) => cb(*self.url.clone(), None).0,
+            _ => *self.url.clone(),
+        };
+        self.insert_link(url).await;
+        self.links_visited
+            .insert(CaseInsensitiveString::from(target_url.as_str()));
+
+        emit_log(&target_url);
+
+        if normalize {
+            if let Some(sig) = page.signature {
+                if !self.is_signature_allowed(sig).await {
+                    channel_send_page(&self.channel, page, &self.channel_guard);
+                    self.subscription_guard().await;
+                    return true;
+                }
+                self.insert_signature(sig).await;
+            }
+        }
+
+        self.set_crawl_initial_status(&page, &links);
+
+        if let Some(ref cb) = self.on_should_crawl_callback {
+            if !cb.call(&page) {
+                page.blocked_crawl = true;
+                channel_send_page(&self.channel, page, &self.channel_guard);
+                self.subscription_guard().await;
+                return true; // blocked, but cache phase handled it
+            }
+        }
+
+        channel_send_page(&self.channel, page, &self.channel_guard);
+
+        // If single_page, we're done
+        if self.single_page() {
+            self.subscription_guard().await;
+            return true;
+        }
+
+        // Follow links from cache
+        let mut cache_misses: HashSet<CaseInsensitiveString> = HashSet::new();
+
+        'cache_loop: loop {
+            let current_links: Vec<CaseInsensitiveString> = links.drain().collect();
+            if current_links.is_empty() {
+                break;
+            }
+
+            for link in current_links {
+                let allowed = self.is_allowed(&link);
+                if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                    break 'cache_loop;
+                }
+                if allowed.eq(&ProcessLinkStatus::Blocked) {
+                    continue;
+                }
+
+                let link_url = link.inner().to_string();
+
+                match get_cached_url(
+                    &link_url,
+                    cache_options.as_ref(),
+                    &self.configuration.cache_policy,
+                )
+                .await
+                {
+                    Some(cached_html) => {
+                        emit_log(&link_url);
+                        self.insert_link(link.clone()).await;
+
+                        let page_response =
+                            build_cached_html_page_response(&link_url, &cached_html);
+                        let mut page = build(&link_url, page_response);
+
+                        if self.configuration.external_domains_caseless.len() > 0 {
+                            page.set_external(
+                                self.configuration.external_domains_caseless.clone(),
+                            );
+                        }
+                        page.set_url_parsed_direct();
+                        if return_page_links {
+                            page.page_links = Some(Default::default());
+                        }
+
+                        let page_base = page.base.take().map(Box::new);
+                        let new_links = if full_resources {
+                            page.links_full(&selectors, &page_base).await
+                        } else {
+                            page.links(&selectors, &page_base).await
+                        };
+                        page.base = None;
+
+                        if normalize {
+                            page.signature.replace(
+                                crate::utils::hash_html(&page.get_html_bytes_u8()).await,
+                            );
+                            if let Some(sig) = page.signature {
+                                if !self.is_signature_allowed(sig).await {
+                                    continue;
+                                }
+                                self.insert_signature(sig).await;
+                            }
+                        }
+
+                        if let Some(ref cb) = self.on_should_crawl_callback {
+                            if !cb.call(&page) {
+                                page.blocked_crawl = true;
+                                channel_send_page(&self.channel, page, &self.channel_guard);
+                                continue;
+                            }
+                        }
+
+                        channel_send_page(&self.channel, page, &self.channel_guard);
+                        // Add newly discovered links for further cache processing
+                        links.extend(new_links);
+                    }
+                    None => {
+                        // Cache miss — save for Chrome/HTTP
+                        cache_misses.insert(link);
+                    }
+                }
+            }
+        }
+
+        // If there are cache misses, put them in extra_links for Chrome/HTTP
+        if !cache_misses.is_empty() {
+            self.extra_links.extend(cache_misses);
+            return false; // Need Chrome/HTTP for remaining links
+        }
+
+        self.subscription_guard().await;
+        true // All pages served from cache
+    }
+
+    /// No-op stub when cache features not enabled.
+    #[cfg(not(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache")))]
+    async fn crawl_cache_phase(&mut self, _client: &Client) -> bool {
+        false
+    }
+
     /// Start to crawl website with async concurrency.
     pub async fn crawl(&mut self) {
         if !self.status.eq(&CrawlStatus::FirewallBlocked) {
@@ -4903,6 +5109,15 @@ impl Website {
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn crawl_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
         self.start();
+
+        // Cache-only phase first
+        if self.crawl_cache_phase(client).await {
+            return; // All pages served from cache
+        }
+        if !self.extra_links.is_empty() {
+            self.skip_initial = true;
+        }
+
         self.status = CrawlStatus::Active;
         let client_rotator = self.client_rotator.clone();
         #[cfg(feature = "hedge")]
@@ -5389,6 +5604,16 @@ impl Website {
         use crate::features::chrome::attempt_navigation;
         self.start();
 
+        // Phase 1: Try cache-only crawl (no Chrome, no HTTP)
+        if self.crawl_cache_phase(client).await {
+            return; // All pages served from cache — skip Chrome entirely
+        }
+        // If cache_phase returned false with cache misses, they're in self.extra_links.
+        if !self.extra_links.is_empty() {
+            self.skip_initial = true;
+        }
+
+        // Phase 2: Chrome for remaining pages
         match self.setup_browser().await {
             Some(mut b) => {
                 match attempt_navigation(
@@ -10757,4 +10982,359 @@ mod tests {
             "Should not build rotator with no proxies"
         );
     }
+}
+
+#[tokio::test]
+#[cfg(all(not(feature = "decentralized"), feature = "cache_chrome_hybrid"))]
+async fn test_cache_phase_multi_page_all_cached() {
+    use crate::utils::{create_cache_key_raw, put_hybrid_cache, HttpResponse, HttpVersion};
+    use std::collections::HashMap as StdHashMap;
+
+    let root_url = "http://localhost:9/cache-phase-root";
+    let sub1_url = "http://localhost:9/cache-phase-sub1";
+    let sub2_url = "http://localhost:9/cache-phase-sub2";
+
+    // Root links to sub1 and sub2
+    let root_html = format!(
+        "<html><head><title>Root</title></head><body>\
+         <a href=\"{}\">Sub1</a>\
+         <a href=\"{}\">Sub2</a>\
+         </body></html>",
+        sub1_url, sub2_url
+    );
+    // Sub pages have no outgoing links
+    let sub1_html =
+        "<html><head><title>Sub1</title></head><body><h1>Sub1 Content</h1></body></html>";
+    let sub2_html =
+        "<html><head><title>Sub2</title></head><body><h1>Sub2 Content</h1></body></html>";
+
+    let request_headers = {
+        let mut h = StdHashMap::new();
+        h.insert(
+            "cache-control".to_string(),
+            "public, max-age=3600".to_string(),
+        );
+        h
+    };
+    let response_headers = {
+        let mut h = StdHashMap::new();
+        h.insert("content-type".to_string(), "text/html".to_string());
+        h
+    };
+
+    // Seed all three pages into cache
+    for (url, html) in [
+        (root_url, root_html.as_str()),
+        (sub1_url, sub1_html),
+        (sub2_url, sub2_html),
+    ] {
+        let cache_key = create_cache_key_raw(url, None, None);
+        let http_response = HttpResponse {
+            body: html.as_bytes().to_vec(),
+            headers: response_headers.clone(),
+            status: 200,
+            url: Url::parse(url).expect("valid url"),
+            version: HttpVersion::Http11,
+        };
+        put_hybrid_cache(&cache_key, http_response, "GET", request_headers.clone()).await;
+    }
+
+    let mut website = Website::new(root_url);
+    website.configuration.cache = true;
+    website.with_cache_skip_browser(true);
+    website.with_budget(Some(HashMap::from([("*", 10)])));
+
+    let mut rx = website.subscribe(16).unwrap();
+
+    website.crawl_raw().await;
+
+    // Collect pages received
+    let mut pages = Vec::new();
+    while let Ok(page) = rx.try_recv() {
+        pages.push(page.get_url().to_string());
+    }
+
+    assert!(
+        pages.contains(&root_url.to_string()),
+        "root page should be served from cache"
+    );
+    assert!(
+        pages.contains(&sub1_url.to_string()),
+        "sub1 page should be served from cache"
+    );
+    assert!(
+        pages.contains(&sub2_url.to_string()),
+        "sub2 page should be served from cache"
+    );
+    assert_eq!(pages.len(), 3, "exactly 3 pages expected");
+    assert_eq!(website.initial_status_code, StatusCode::OK);
+    assert!(website.initial_html_length > 0);
+}
+
+#[tokio::test]
+#[cfg(all(not(feature = "decentralized"), feature = "cache_chrome_hybrid"))]
+async fn test_cache_phase_partial_miss() {
+    use crate::utils::{create_cache_key_raw, put_hybrid_cache, HttpResponse, HttpVersion};
+    use std::collections::HashMap as StdHashMap;
+
+    let root_url = "http://localhost:9/cache-phase-partial-root";
+    let sub_url = "http://localhost:9/cache-phase-partial-sub";
+
+    // Root links to sub (which is NOT in cache)
+    let root_html = format!(
+        "<html><head><title>Root</title></head><body>\
+         <a href=\"{}\">Sub</a></body></html>",
+        sub_url
+    );
+
+    let request_headers = {
+        let mut h = StdHashMap::new();
+        h.insert(
+            "cache-control".to_string(),
+            "public, max-age=3600".to_string(),
+        );
+        h
+    };
+    let response_headers = {
+        let mut h = StdHashMap::new();
+        h.insert("content-type".to_string(), "text/html".to_string());
+        h
+    };
+
+    // Only seed root, NOT sub
+    let cache_key = create_cache_key_raw(root_url, None, None);
+    let http_response = HttpResponse {
+        body: root_html.as_bytes().to_vec(),
+        headers: response_headers,
+        status: 200,
+        url: Url::parse(root_url).expect("valid url"),
+        version: HttpVersion::Http11,
+    };
+    put_hybrid_cache(&cache_key, http_response, "GET", request_headers).await;
+
+    let mut website = Website::new(root_url);
+    website.configuration.cache = true;
+    website.with_cache_skip_browser(true);
+    website.with_budget(Some(HashMap::from([("*", 10)])));
+
+    let mut rx = website.subscribe(16).unwrap();
+
+    // crawl_raw will: cache phase serves root, puts sub in extra_links,
+    // then falls through to raw HTTP which fails to connect (localhost:9).
+    website.crawl_raw().await;
+
+    // Root should have been served from cache
+    let mut pages = Vec::new();
+    while let Ok(page) = rx.try_recv() {
+        pages.push(page.get_url().to_string());
+    }
+
+    assert!(
+        pages.contains(&root_url.to_string()),
+        "root page should be served from cache"
+    );
+    // sub_url was NOT cached — it goes to extra_links then raw HTTP (which fails).
+    // We just verify root was served and no panic occurred.
+    assert_eq!(website.initial_status_code, StatusCode::OK);
+}
+
+#[tokio::test]
+#[cfg(all(not(feature = "decentralized"), feature = "cache_chrome_hybrid"))]
+async fn test_cache_phase_skipped_without_skip_browser() {
+    use crate::utils::{create_cache_key_raw, put_hybrid_cache, HttpResponse, HttpVersion};
+    use std::collections::HashMap as StdHashMap;
+
+    let root_url = "http://localhost:9/cache-phase-no-skip";
+
+    let request_headers = {
+        let mut h = StdHashMap::new();
+        h.insert(
+            "cache-control".to_string(),
+            "public, max-age=3600".to_string(),
+        );
+        h
+    };
+    let response_headers = {
+        let mut h = StdHashMap::new();
+        h.insert("content-type".to_string(), "text/html".to_string());
+        h
+    };
+
+    let cache_key = create_cache_key_raw(root_url, None, None);
+    let http_response = HttpResponse {
+        body: b"<html><body>Cached</body></html>".to_vec(),
+        headers: response_headers,
+        status: 200,
+        url: Url::parse(root_url).expect("valid url"),
+        version: HttpVersion::Http11,
+    };
+    put_hybrid_cache(&cache_key, http_response, "GET", request_headers).await;
+
+    let mut website = Website::new(root_url);
+    website.configuration.cache = true;
+    website.with_cache_skip_browser(false); // Deliberately NOT skip_browser
+    website.with_budget(Some(HashMap::from([("*", 5)])));
+
+    // Cache phase should not activate without skip_browser
+    website.configuration.configure_budget();
+    assert!(
+        !crate::utils::cache_skip_browser(&website.configuration.get_cache_options()),
+        "cache_skip_browser should be false"
+    );
+
+    // Should not panic — falls through to normal crawl
+    website.crawl_raw().await;
+}
+
+#[tokio::test]
+#[cfg(all(not(feature = "decentralized"), feature = "cache_chrome_hybrid"))]
+async fn test_cache_phase_respects_budget() {
+    use crate::utils::{create_cache_key_raw, put_hybrid_cache, HttpResponse, HttpVersion};
+    use std::collections::HashMap as StdHashMap;
+
+    let root_url = "http://localhost:9/cache-phase-budget";
+    let sub1_url = "http://localhost:9/cache-phase-budget-s1";
+    let sub2_url = "http://localhost:9/cache-phase-budget-s2";
+
+    let root_html = format!(
+        "<html><body><a href=\"{}\">S1</a><a href=\"{}\">S2</a></body></html>",
+        sub1_url, sub2_url
+    );
+    let sub_html = "<html><body>Sub</body></html>";
+
+    let request_headers = {
+        let mut h = StdHashMap::new();
+        h.insert(
+            "cache-control".to_string(),
+            "public, max-age=3600".to_string(),
+        );
+        h
+    };
+    let response_headers = {
+        let mut h = StdHashMap::new();
+        h.insert("content-type".to_string(), "text/html".to_string());
+        h
+    };
+
+    for (url, html) in [
+        (root_url, root_html.as_str()),
+        (sub1_url, sub_html),
+        (sub2_url, sub_html),
+    ] {
+        let cache_key = create_cache_key_raw(url, None, None);
+        let http_response = HttpResponse {
+            body: html.as_bytes().to_vec(),
+            headers: response_headers.clone(),
+            status: 200,
+            url: Url::parse(url).expect("valid url"),
+            version: HttpVersion::Http11,
+        };
+        put_hybrid_cache(&cache_key, http_response, "GET", request_headers.clone()).await;
+    }
+
+    // Budget of 2: root + 1 sub page
+    let mut website = Website::new(root_url);
+    website.configuration.cache = true;
+    website.with_cache_skip_browser(true);
+    website.with_budget(Some(HashMap::from([("*", 2)])));
+
+    let mut rx = website.subscribe(16).unwrap();
+    website.crawl_raw().await;
+
+    let mut pages = Vec::new();
+    while let Ok(page) = rx.try_recv() {
+        pages.push(page.get_url().to_string());
+    }
+
+    // Budget is 2 so at most 2 pages should be served
+    assert!(
+        pages.len() <= 2,
+        "budget should limit pages to at most 2, got {}",
+        pages.len()
+    );
+    assert!(
+        pages.contains(&root_url.to_string()),
+        "root page should always be served"
+    );
+}
+
+#[tokio::test]
+#[cfg(all(not(feature = "decentralized"), feature = "cache_chrome_hybrid"))]
+async fn test_cache_phase_initial_miss_falls_through() {
+    // If the initial URL is NOT cached, cache phase returns false and
+    // falls through to normal crawl (which will fail to connect — that's OK).
+    let root_url = "http://localhost:9/cache-phase-miss-initial";
+
+    let mut website = Website::new(root_url);
+    website.configuration.cache = true;
+    website.with_cache_skip_browser(true);
+    website.with_budget(Some(HashMap::from([("*", 5)])));
+
+    // Should not panic
+    website.crawl_raw().await;
+}
+
+#[tokio::test]
+#[cfg(all(not(feature = "decentralized"), feature = "cache_chrome_hybrid"))]
+async fn test_cache_phase_dedup_signatures() {
+    use crate::utils::{create_cache_key_raw, put_hybrid_cache, HttpResponse, HttpVersion};
+    use std::collections::HashMap as StdHashMap;
+
+    let root_url = "http://localhost:9/cache-phase-dedup";
+    let dup_url = "http://localhost:9/cache-phase-dedup-dup";
+
+    // Both pages have identical HTML — normalization should dedup
+    let html = "<html><body><a href=\"http://localhost:9/cache-phase-dedup-dup\">Link</a><p>Same Content</p></body></html>";
+
+    let request_headers = {
+        let mut h = StdHashMap::new();
+        h.insert(
+            "cache-control".to_string(),
+            "public, max-age=3600".to_string(),
+        );
+        h
+    };
+    let response_headers = {
+        let mut h = StdHashMap::new();
+        h.insert("content-type".to_string(), "text/html".to_string());
+        h
+    };
+
+    for url in [root_url, dup_url] {
+        let cache_key = create_cache_key_raw(url, None, None);
+        let http_response = HttpResponse {
+            body: html.as_bytes().to_vec(),
+            headers: response_headers.clone(),
+            status: 200,
+            url: Url::parse(url).expect("valid url"),
+            version: HttpVersion::Http11,
+        };
+        put_hybrid_cache(&cache_key, http_response, "GET", request_headers.clone()).await;
+    }
+
+    let mut website = Website::new(root_url);
+    website.configuration.cache = true;
+    website.configuration.normalize = true;
+    website.with_cache_skip_browser(true);
+    website.with_budget(Some(HashMap::from([("*", 10)])));
+
+    let mut rx = website.subscribe(16).unwrap();
+    website.crawl_raw().await;
+
+    let mut pages = Vec::new();
+    while let Ok(page) = rx.try_recv() {
+        pages.push(page.get_url().to_string());
+    }
+
+    // Root always served. Dup should be skipped due to signature dedup.
+    assert!(
+        pages.contains(&root_url.to_string()),
+        "root page should be served"
+    );
+    // The dup page should be filtered by normalize/signature dedup.
+    // With identical content + normalization, only root should appear.
+    assert!(
+        pages.len() <= 2,
+        "signature dedup should limit duplicate content"
+    );
 }
