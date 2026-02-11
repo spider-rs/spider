@@ -68,19 +68,17 @@ mod inner {
 
             if builder
                 .spawn(move || {
-                    if let Err(e) = tokio_uring::builder().start(async move {
+                    tokio_uring::builder().start(async move {
                         while let Some(task) = rx.recv().await {
                             tokio_uring::spawn(dispatch_task(task));
                         }
-                    }) {
-                        log::error!("io_uring FS worker failed to start: {}", e);
-                    }
+                    });
                 })
                 .is_err()
             {
                 log::warn!("Failed to spawn io_uring FS worker thread");
                 let _ = tx.downgrade();
-                return;
+                return false;
             }
 
             URING_FS_ENABLED.store(true, Ordering::Release);
