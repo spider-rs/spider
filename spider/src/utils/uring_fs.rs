@@ -1,0 +1,307 @@
+//! Async file I/O with optional io_uring acceleration.
+//!
+//! On Linux with the `io_uring` feature, file operations are dispatched to a
+//! dedicated io_uring worker thread for true kernel-async I/O. On all other
+//! platforms (or when io_uring initialization fails), operations transparently
+//! fall back to `tokio::fs`.
+
+// ── io_uring implementation ──────────────────────────────────────────────────
+
+#[cfg(all(target_os = "linux", feature = "io_uring"))]
+mod inner {
+    use std::io;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::sync::{mpsc, oneshot, OnceCell};
+
+    /// Whether the io_uring FS worker is running.
+    static URING_FS_ENABLED: AtomicBool = AtomicBool::new(false);
+
+    /// Channel to the io_uring worker thread.
+    static URING_FS_POOL: OnceCell<mpsc::UnboundedSender<FileIoTask>> = OnceCell::const_new();
+
+    /// A self-contained file I/O task that can be sent across threads.
+    enum FileIoTask {
+        WriteFile {
+            path: String,
+            data: Vec<u8>,
+            tx: oneshot::Sender<io::Result<()>>,
+        },
+        ReadFile {
+            path: String,
+            tx: oneshot::Sender<io::Result<Vec<u8>>>,
+        },
+        RemoveFile {
+            path: String,
+            tx: oneshot::Sender<io::Result<()>>,
+        },
+        CreateDirAll {
+            path: String,
+            tx: oneshot::Sender<io::Result<()>>,
+        },
+    }
+
+    /// Initialize the io_uring FS background worker. Returns `true` if
+    /// io_uring file I/O is now active.
+    pub fn init_uring_fs() -> bool {
+        let _ = URING_FS_POOL.set({
+            let (tx, mut rx) = mpsc::unbounded_channel::<FileIoTask>();
+            let builder = std::thread::Builder::new().name("uring-fs-worker".into());
+
+            if builder
+                .spawn(move || {
+                    if let Err(e) = tokio_uring::builder().start(async move {
+                        while let Some(task) = rx.recv().await {
+                            tokio_uring::spawn(dispatch_task(task));
+                        }
+                    }) {
+                        log::error!("io_uring FS worker failed to start: {}", e);
+                    }
+                })
+                .is_err()
+            {
+                log::warn!("Failed to spawn io_uring FS worker thread");
+                let _ = tx.downgrade();
+                return;
+            }
+
+            URING_FS_ENABLED.store(true, Ordering::Release);
+            tx
+        });
+
+        URING_FS_ENABLED.load(Ordering::Acquire)
+    }
+
+    /// Process a single file I/O task on the io_uring thread.
+    async fn dispatch_task(task: FileIoTask) {
+        match task {
+            FileIoTask::WriteFile { path, data, tx } => {
+                let result = async {
+                    let file = tokio_uring::fs::File::create(&path).await?;
+                    let (res, _) = file.write_all_at(data, 0).await;
+                    res?;
+                    file.close().await?;
+                    Ok(())
+                }
+                .await;
+                let _ = tx.send(result);
+            }
+            FileIoTask::ReadFile { path, tx } => {
+                let result = async {
+                    let meta = std::fs::metadata(&path)?;
+                    let len = meta.len() as usize;
+                    let buf = vec![0u8; len];
+                    let file = tokio_uring::fs::File::open(&path).await?;
+                    let (res, buf) = file.read_exact_at(buf, 0).await;
+                    res?;
+                    file.close().await?;
+                    Ok(buf)
+                }
+                .await;
+                let _ = tx.send(result);
+            }
+            FileIoTask::RemoveFile { path, tx } => {
+                // No io_uring unlink in v0.5 — use std::fs
+                let result = std::fs::remove_file(&path);
+                let _ = tx.send(result);
+            }
+            FileIoTask::CreateDirAll { path, tx } => {
+                // mkdir doesn't benefit from io_uring
+                let result = std::fs::create_dir_all(&path);
+                let _ = tx.send(result);
+            }
+        }
+    }
+
+    /// Check if io_uring FS is enabled, and if so, send the task and await the result.
+    /// Returns `None` if io_uring is not available (caller should fall back to tokio::fs).
+    async fn try_uring<T>(
+        make_task: impl FnOnce(oneshot::Sender<io::Result<T>>) -> FileIoTask,
+    ) -> Option<io::Result<T>> {
+        if !URING_FS_ENABLED.load(Ordering::Acquire) {
+            return None;
+        }
+        let sender = URING_FS_POOL.get()?;
+        let (tx, rx) = oneshot::channel();
+        if sender.send(make_task(tx)).is_err() {
+            return Some(Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "io_uring FS worker channel closed",
+            )));
+        }
+        match rx.await {
+            Ok(result) => Some(result),
+            Err(_) => Some(Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "io_uring FS worker dropped the response",
+            ))),
+        }
+    }
+
+    /// Write `data` to `path`, creating or truncating the file.
+    pub async fn write_file(path: String, data: Vec<u8>) -> io::Result<()> {
+        if let Some(result) = try_uring(|tx| FileIoTask::WriteFile {
+            path: path.clone(),
+            data: data.clone(),
+            tx,
+        })
+        .await
+        {
+            return result;
+        }
+        tokio::fs::write(&path, &data).await
+    }
+
+    /// Read the entire contents of `path` into a `Vec<u8>`.
+    pub async fn read_file(path: String) -> io::Result<Vec<u8>> {
+        if let Some(result) = try_uring(|tx| FileIoTask::ReadFile {
+            path: path.clone(),
+            tx,
+        })
+        .await
+        {
+            return result;
+        }
+        tokio::fs::read(&path).await
+    }
+
+    /// Remove a file at `path`.
+    pub async fn remove_file(path: String) -> io::Result<()> {
+        if let Some(result) = try_uring(|tx| FileIoTask::RemoveFile {
+            path: path.clone(),
+            tx,
+        })
+        .await
+        {
+            return result;
+        }
+        tokio::fs::remove_file(&path).await
+    }
+
+    /// Recursively create directories at `path`.
+    pub async fn create_dir_all(path: String) -> io::Result<()> {
+        if let Some(result) = try_uring(|tx| FileIoTask::CreateDirAll {
+            path: path.clone(),
+            tx,
+        })
+        .await
+        {
+            return result;
+        }
+        tokio::fs::create_dir_all(&path).await
+    }
+}
+
+// ── Fallback implementation (non-Linux or no io_uring feature) ───────────────
+
+#[cfg(not(all(target_os = "linux", feature = "io_uring")))]
+mod inner {
+    use std::io;
+
+    /// No-op on platforms without io_uring. Always returns `false`.
+    pub fn init_uring_fs() -> bool {
+        false
+    }
+
+    /// Write `data` to `path`, creating or truncating the file.
+    pub async fn write_file(path: String, data: Vec<u8>) -> io::Result<()> {
+        tokio::fs::write(&path, &data).await
+    }
+
+    /// Read the entire contents of `path` into a `Vec<u8>`.
+    pub async fn read_file(path: String) -> io::Result<Vec<u8>> {
+        tokio::fs::read(&path).await
+    }
+
+    /// Remove a file at `path`.
+    pub async fn remove_file(path: String) -> io::Result<()> {
+        tokio::fs::remove_file(&path).await
+    }
+
+    /// Recursively create directories at `path`.
+    pub async fn create_dir_all(path: String) -> io::Result<()> {
+        tokio::fs::create_dir_all(&path).await
+    }
+}
+
+// ── Re-exports ───────────────────────────────────────────────────────────────
+
+pub use inner::create_dir_all;
+pub use inner::init_uring_fs;
+pub use inner::read_file;
+pub use inner::remove_file;
+pub use inner::write_file;
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_path(name: &str) -> String {
+        let dir = std::env::temp_dir();
+        dir.join(format!("spider_uring_fs_test_{}", name))
+            .display()
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn test_write_read_remove_fallback() {
+        let path = temp_path("fallback");
+        let payload = b"hello uring_fs fallback".to_vec();
+
+        write_file(path.clone(), payload.clone()).await.unwrap();
+
+        let read_back = read_file(path.clone()).await.unwrap();
+        assert_eq!(read_back, payload);
+
+        remove_file(path.clone()).await.unwrap();
+        assert!(read_file(path).await.is_err());
+    }
+
+    #[cfg(all(target_os = "linux", feature = "io_uring"))]
+    #[tokio::test]
+    async fn test_write_read_remove_uring() {
+        let _ = init_uring_fs();
+        let path = temp_path("uring");
+        let payload = vec![0xABu8; 4096]; // 4 KB
+
+        write_file(path.clone(), payload.clone()).await.unwrap();
+
+        let read_back = read_file(path.clone()).await.unwrap();
+        assert_eq!(read_back, payload);
+
+        remove_file(path.clone()).await.unwrap();
+        assert!(read_file(path).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_fallback_when_not_initialized() {
+        // Without calling init_uring_fs(), should still work via tokio::fs
+        let path = temp_path("no_init");
+        let payload = b"no init test".to_vec();
+
+        write_file(path.clone(), payload.clone()).await.unwrap();
+        let read_back = read_file(path.clone()).await.unwrap();
+        assert_eq!(read_back, payload);
+        let _ = remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn test_write_empty_file() {
+        let path = temp_path("empty");
+
+        write_file(path.clone(), Vec::new()).await.unwrap();
+
+        let read_back = read_file(path.clone()).await.unwrap();
+        assert!(read_back.is_empty());
+
+        let _ = remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn test_read_nonexistent() {
+        let path = temp_path("nonexistent_surely");
+        let result = read_file(path).await;
+        assert!(result.is_err());
+    }
+}

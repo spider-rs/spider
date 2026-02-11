@@ -383,13 +383,11 @@ async fn create_file_and_directory(file_path: &str) {
     let path = std::path::Path::new(file_path);
 
     if let Some(parent) = path.parent() {
-        let _ = tokio::fs::create_dir_all(parent).await;
+        let _ = crate::utils::uring_fs::create_dir_all(parent.display().to_string()).await;
     }
 
-    if let Ok(exist) = tokio::fs::try_exists(path).await {
-        if !exist {
-            let _ = tokio::fs::File::create(path).await;
-        }
+    if !path.exists() {
+        let _ = crate::utils::uring_fs::write_file(path.display().to_string(), Vec::new()).await;
     }
 }
 

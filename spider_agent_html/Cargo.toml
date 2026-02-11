@@ -1,6 +1,6 @@
 [package]
 name = "spider_agent_html"
-version = "2.45.0"
+version = "2.45.1"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "HTML processing utilities for spider_agent — cleaning, content analysis, and diffing."
 repository = "https://github.com/spider-rs/spider"
@@ -24,7 +24,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Types from our types crate
-spider_agent_types = { version = "2.45.0", path = "../spider_agent_types" }
+spider_agent_types = { version = "2.45.1", path = "../spider_agent_types" }
 
 [dev-dependencies]
 serde_json = "1"

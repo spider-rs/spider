@@ -28,6 +28,7 @@ pub(crate) fn background_connect_threading() -> bool {
 /// Init a background thread for request connect handling.
 #[cfg(all(target_os = "linux", feature = "io_uring"))]
 pub fn init_background_runtime() {
+    super::uring_fs::init_uring_fs();
     let _ = CONNECT_THREAD_POOL.set({
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let builder = std::thread::Builder::new();
@@ -50,6 +51,7 @@ pub fn init_background_runtime() {
 /// Init a background thread for request connect handling.
 #[cfg(any(not(target_os = "linux"), not(feature = "io_uring")))]
 pub fn init_background_runtime() {
+    super::uring_fs::init_uring_fs();
     let _ = CONNECT_THREAD_POOL.set({
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let builder = std::thread::Builder::new();

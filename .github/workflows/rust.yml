@@ -37,3 +37,23 @@ jobs:
       - name: Cargo test spider_agent live smoke
         if: env.RUN_LIVE_TESTS == '1' || env.RUN_LIVE_TESTS == 'true' || env.RUN_LIVE_TESTS == 'TRUE'
         run: cargo test -p spider_agent --features "openai search_serper" --test live_env_smoke -- --nocapture
+
+  io_uring:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-uring-${{ hashFiles('**/Cargo.lock') }}
+      - name: Cargo check spider with io_uring
+        run: cargo check -p spider --features io_uring
+      - name: Cargo test spider uring_fs
+        run: cargo test -p spider --features io_uring uring_fs
+      - name: Cargo test spider (no io_uring fallback)
+        run: cargo test -p spider --no-default-features --features basic uring_fs

@@ -18,6 +18,8 @@ pub mod header_utils;
 pub mod interner;
 /// A trie struct.
 pub mod trie;
+/// Async file I/O with optional io_uring acceleration.
+pub mod uring_fs;
 /// Validate html false positives.
 pub mod validation;
 
@@ -429,7 +431,7 @@ pub async fn create_output_path(
     let b = base.join(&out);
 
     if let Some(p) = b.parent() {
-        let _ = tokio::fs::create_dir_all(&p).await;
+        let _ = uring_fs::create_dir_all(p.display().to_string()).await;
     }
 
     b.display().to_string()
@@ -3484,7 +3486,7 @@ pub async fn perform_screenshot(
                                 &output_format,
                             )
                             .await;
-                            let _ = tokio::fs::write(output_path, &b).await;
+                            let _ = uring_fs::write_file(output_path, b.to_vec()).await;
                         }
                         if ss.bytes {
                             page_response.screenshot_bytes = Some(b);
@@ -4227,13 +4229,12 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
                 #[cfg(feature = "cookies")]
                 cookies,
                 content: Some(if file.is_some() {
-                    let mut buffer = vec![];
-
-                    if let Ok(mut b) = tokio::fs::File::open(&file_path).await {
-                        if let Ok(_) = b.read_to_end(&mut buffer).await {
-                            let _ = tokio::fs::remove_file(file_path).await;
-                        }
-                    }
+                    let buffer = if let Ok(b) = uring_fs::read_file(file_path.clone()).await {
+                        let _ = uring_fs::remove_file(file_path).await;
+                        b
+                    } else {
+                        vec![]
+                    };
 
                     Box::new(buffer.into())
                 } else {
@@ -4429,13 +4430,12 @@ pub async fn fetch_page_html(
                                 #[cfg(feature = "cookies")]
                                 cookies,
                                 content: Some(if file.is_some() {
-                                    let mut buffer = vec![];
-
-                                    if let Ok(mut b) = tokio::fs::File::open(&file_path).await {
-                                        if (b.read_to_end(&mut buffer).await).is_ok() {
-                                            let _ = tokio::fs::remove_file(file_path).await;
-                                        }
-                                    }
+                                    let buffer = if let Ok(b) = uring_fs::read_file(file_path.clone()).await {
+                                        let _ = uring_fs::remove_file(file_path).await;
+                                        b
+                                    } else {
+                                        vec![]
+                                    };
 
                                     Box::new(buffer)
                                 } else {
