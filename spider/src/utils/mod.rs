@@ -224,16 +224,27 @@ pub fn detect_hard_forbidden_content(b: &[u8]) -> bool {
 }
 
 /// Returns true if the body should NOT be cached (empty, near-empty, or known-bad HTML).
+///
+/// HTML-specific heuristics (empty `<body>`, skeleton pages) are only applied
+/// when the content looks like HTML (starts with `<`).  Non-HTML assets such as
+/// JSON, images, CSS, JS, fonts, etc. short-circuit after the basic
+/// empty / whitespace check.
 #[inline]
 pub fn is_cacheable_body_empty(body: &[u8]) -> bool {
     if body.is_empty() {
         return true;
     }
     let trimmed = body.trim_ascii();
-    if trimmed.is_empty()
-        || trimmed == *crate::utils::templates::EMPTY_HTML
-        || trimmed == *EMPTY_HTML_BASIC
-    {
+    if trimmed.is_empty() {
+        return true;
+    }
+    // Non-HTML content: if it doesn't start with '<' it's not markup —
+    // skip the HTML-specific heuristics entirely.
+    if trimmed[0] != b'<' {
+        return false;
+    }
+    // --- HTML-specific checks ---
+    if trimmed == *crate::utils::templates::EMPTY_HTML || trimmed == *EMPTY_HTML_BASIC {
         return true;
     }
     // Detect pages with HTML structure but empty <body> (< 2KB only for speed)
@@ -6812,5 +6823,57 @@ mod tests {
             cached_duration.as_millis(),
             speedup
         );
+    }
+
+    #[test]
+    fn test_is_cacheable_body_empty_truly_empty() {
+        assert!(is_cacheable_body_empty(b""));
+        assert!(is_cacheable_body_empty(b"   "));
+        assert!(is_cacheable_body_empty(b"\n\t  \r\n"));
+    }
+
+    #[test]
+    fn test_is_cacheable_body_empty_skeleton_html() {
+        assert!(is_cacheable_body_empty(b"<html><head></head><body></body></html>"));
+        assert!(is_cacheable_body_empty(b"<html></html>"));
+    }
+
+    #[test]
+    fn test_is_cacheable_body_empty_html_empty_body() {
+        assert!(is_cacheable_body_empty(
+            b"<html><head><title>x</title></head><body>   </body></html>"
+        ));
+    }
+
+    #[test]
+    fn test_is_cacheable_body_empty_html_with_content() {
+        assert!(!is_cacheable_body_empty(
+            b"<html><body><p>Hello</p></body></html>"
+        ));
+    }
+
+    #[test]
+    fn test_is_cacheable_body_empty_json_skips_html_checks() {
+        assert!(!is_cacheable_body_empty(b"{}"));
+        assert!(!is_cacheable_body_empty(b"{\"key\": \"value\"}"));
+        assert!(!is_cacheable_body_empty(b"[1,2,3]"));
+        assert!(!is_cacheable_body_empty(b"null"));
+    }
+
+    #[test]
+    fn test_is_cacheable_body_empty_css_js_skip_html_checks() {
+        assert!(!is_cacheable_body_empty(b"body { color: red; }"));
+        assert!(!is_cacheable_body_empty(b"function foo() { return 1; }"));
+        assert!(!is_cacheable_body_empty(b"export default {}"));
+    }
+
+    #[test]
+    fn test_is_cacheable_body_empty_binary_skip_html_checks() {
+        // PNG header
+        assert!(!is_cacheable_body_empty(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A]));
+        // JPEG header
+        assert!(!is_cacheable_body_empty(&[0xFF, 0xD8, 0xFF, 0xE0]));
+        // Arbitrary binary
+        assert!(!is_cacheable_body_empty(&[0x00, 0x01, 0x02, 0x03]));
     }
 }
