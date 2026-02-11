@@ -4147,7 +4147,6 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
 /// Perform a network request to a resource extracting all content as text streaming.
 #[cfg(all(feature = "fs", not(feature = "chrome")))]
 pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse {
-    use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
     use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
     let duration = if cfg!(feature = "time") {
@@ -4174,13 +4173,13 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
             let remote_addr = res.remote_addr();
             let mut stream = res.bytes_stream();
             let mut data = Vec::new();
-            let mut file: Option<tokio::fs::File> = None;
+            let mut writer: Option<uring_fs::StreamingWriter> = None;
             let mut file_path = String::new();
 
             while let Some(item) = stream.next().await {
                 match item {
                     Ok(text) => {
-                        let wrote_disk = file.is_some();
+                        let wrote_disk = writer.is_some();
 
                         // perform operations entire in memory to build resource
                         if !wrote_disk && data.capacity() < 8192 {
@@ -4191,21 +4190,20 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
                                     TMP_DIR,
                                     &utf8_percent_encode(target_url, NON_ALPHANUMERIC).to_string()
                                 );
-                                match tokio::fs::File::create(&file_path).await {
-                                    Ok(f) => {
-                                        let file = file.insert(f);
-
+                                match uring_fs::StreamingWriter::create(file_path.clone()).await {
+                                    Ok(w) => {
                                         data.extend_from_slice(&text);
 
-                                        if let Ok(_) = file.write_all(&data.as_ref()).await {
+                                        if w.write(data.as_ref()).await.is_ok() {
                                             data.clear();
                                         }
+                                        writer = Some(w);
                                     }
                                     _ => data.extend_from_slice(&text),
                                 };
                             } else {
-                                if let Some(f) = file.as_mut() {
-                                    if let Err(_) = f.write_all(&text).await {
+                                if let Some(w) = writer.as_ref() {
+                                    if let Err(_) = w.write(&text).await {
                                         data.extend_from_slice(&text)
                                     }
                                 }
@@ -4219,6 +4217,10 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
                 }
             }
 
+            if let Some(w) = writer.take() {
+                let _ = w.close().await;
+            }
+
             PageResponse {
                 #[cfg(feature = "time")]
                 duration,
@@ -4228,7 +4230,7 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
                 remote_addr,
                 #[cfg(feature = "cookies")]
                 cookies,
-                content: Some(if file.is_some() {
+                content: Some(if !file_path.is_empty() {
                     let buffer = if let Ok(b) = uring_fs::read_file(file_path.clone()).await {
                         let _ = uring_fs::remove_file(file_path).await;
                         b
@@ -4306,7 +4308,6 @@ pub async fn fetch_page_html(
     cache_policy: &Option<BasicCachePolicy>,
     #[cfg(feature = "cookies")] jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
 ) -> PageResponse {
-    use crate::tokio::io::{AsyncReadExt, AsyncWriteExt};
     use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
     #[cfg(feature = "time")]
@@ -4379,13 +4380,13 @@ pub async fn fetch_page_html(
                             let mut stream = res.bytes_stream();
                             let mut data = Vec::new();
 
-                            let mut file: Option<tokio::fs::File> = None;
+                            let mut writer: Option<uring_fs::StreamingWriter> = None;
                             let mut file_path = String::new();
 
                             while let Some(item) = stream.next().await {
                                 match item {
                                     Ok(text) => {
-                                        let wrote_disk = file.is_some();
+                                        let wrote_disk = writer.is_some();
 
                                         // perform operations entire in memory to build resource
                                         if !wrote_disk && data.capacity() < 8192 {
@@ -4396,21 +4397,20 @@ pub async fn fetch_page_html(
                                                 &utf8_percent_encode(target_url, NON_ALPHANUMERIC)
                                                     .to_string()
                                             );
-                                            match tokio::fs::File::create(&file_path).await {
-                                                Ok(f) => {
-                                                    let file = file.insert(f);
-
+                                            match uring_fs::StreamingWriter::create(file_path.clone()).await {
+                                                Ok(w) => {
                                                     data.extend_from_slice(&text);
 
-                                                    if (file.write_all(data.as_ref()).await).is_ok()
+                                                    if w.write(data.as_ref()).await.is_ok()
                                                     {
                                                         data.clear();
                                                     }
+                                                    writer = Some(w);
                                                 }
                                                 _ => data.extend_from_slice(&text),
                                             };
-                                        } else if let Some(f) = file.as_mut() {
-                                            if (f.write_all(&text).await).is_ok() {
+                                        } else if let Some(w) = writer.as_ref() {
+                                            if w.write(&text).await.is_ok() {
                                                 data.extend_from_slice(&text)
                                             }
                                         }
@@ -4422,6 +4422,10 @@ pub async fn fetch_page_html(
                                 }
                             }
 
+                            if let Some(w) = writer.take() {
+                                let _ = w.close().await;
+                            }
+
                             PageResponse {
                                 #[cfg(feature = "headers")]
                                 headers: Some(headers),
@@ -4429,7 +4433,7 @@ pub async fn fetch_page_html(
                                 remote_addr,
                                 #[cfg(feature = "cookies")]
                                 cookies,
-                                content: Some(if file.is_some() {
+                                content: Some(if !file_path.is_empty() {
                                     let buffer = if let Ok(b) = uring_fs::read_file(file_path.clone()).await {
                                         let _ = uring_fs::remove_file(file_path).await;
                                         b

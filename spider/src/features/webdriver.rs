@@ -703,7 +703,7 @@ pub async fn run_automation(driver: &WebDriver, action: &WebAutomation) -> bool 
             #[cfg(feature = "webdriver_screenshot")]
             {
                 if let Ok(png_data) = driver.screenshot_as_png().await {
-                    valid = tokio::fs::write(output, png_data).await.is_ok();
+                    valid = crate::utils::uring_fs::write_file(output.clone(), png_data).await.is_ok();
                 }
             }
             #[cfg(not(feature = "webdriver_screenshot"))]
