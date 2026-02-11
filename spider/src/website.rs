@@ -4368,10 +4368,60 @@ impl Website {
         }
     }
 
+    /// Fast path: serve single-page crawl from cache, bypassing ALL heavy setup.
+    /// No browser, no HTTP client, no robots.txt. Returns true on cache hit.
+    #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+    async fn try_cache_shortcircuit(&mut self) -> bool {
+        use crate::utils::{cache_skip_browser, get_cached_url};
+
+        // Ensure budget is configured so single_page() works before setup()
+        self.configuration.configure_budget();
+
+        if !self.single_page() {
+            return false;
+        }
+
+        let cache_options = self.configuration.get_cache_options();
+        if !cache_skip_browser(&cache_options) {
+            return false;
+        }
+
+        let target_url = self.url.inner().to_string();
+
+        if let Some(html) =
+            get_cached_url(&target_url, cache_options.as_ref(), &self.configuration.cache_policy)
+                .await
+        {
+            self.status = CrawlStatus::Active;
+            let page_response =
+                crate::utils::build_cached_html_page_response(&target_url, &html);
+            let page = build(&target_url, page_response);
+            self.initial_status_code = page.status_code;
+            self.initial_html_length = page.get_html_bytes_u8().len();
+            self.links_visited
+                .insert(CaseInsensitiveString::from(target_url.as_str()));
+            channel_send_page(&self.channel, page, &self.channel_guard);
+            self.subscription_guard().await;
+            return true;
+        }
+
+        false
+    }
+
+    /// No-op stub when cache features not enabled.
+    #[cfg(not(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache")))]
+    async fn try_cache_shortcircuit(&mut self) -> bool {
+        false
+    }
+
     /// Start to crawl website with async concurrency.
     pub async fn crawl(&mut self) {
         if !self.status.eq(&CrawlStatus::FirewallBlocked) {
             self.start();
+            if self.try_cache_shortcircuit().await {
+                self.set_crawl_status();
+                return;
+            }
             let (client, handle) = self.setup().await;
             let (handle, join_handle) = match handle {
                 Some(h) => (Some(h.0), Some(h.1)),
@@ -4391,6 +4441,10 @@ impl Website {
     pub async fn crawl_sitemap(&mut self) {
         if !self.status.eq(&CrawlStatus::FirewallBlocked) {
             self.start();
+            if self.try_cache_shortcircuit().await {
+                self.set_crawl_status();
+                return;
+            }
             let (client, handle) = self.setup().await;
             let (handle, join_handle) = match handle {
                 Some(h) => (Some(h.0), Some(h.1)),
@@ -4565,6 +4619,10 @@ impl Website {
     pub async fn crawl_smart(&mut self) {
         if !self.status.eq(&CrawlStatus::FirewallBlocked) {
             self.start();
+            if self.try_cache_shortcircuit().await {
+                self.set_crawl_status();
+                return;
+            }
             let (client, handle) = self.setup().await;
             let (handle, join_handle) = match handle {
                 Some(h) => (Some(h.0), Some(h.1)),
@@ -4589,6 +4647,10 @@ impl Website {
     pub async fn crawl_raw(&mut self) {
         if !self.status.eq(&CrawlStatus::FirewallBlocked) {
             self.start();
+            if self.try_cache_shortcircuit().await {
+                self.set_crawl_status();
+                return;
+            }
             let (client, handle) = self.setup().await;
             let (handle, join_handle) = match handle {
                 Some(h) => (Some(h.0), Some(h.1)),
@@ -4857,6 +4919,12 @@ impl Website {
             let full_resources = self.configuration.full_resources;
             let return_page_links = self.configuration.return_page_links;
             let only_html = self.configuration.only_html && !full_resources;
+            #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+            let cache_options_raw = self.configuration.get_cache_options();
+            #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+            let cache_policy_raw = self.configuration.cache_policy.clone();
+            #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+            let normalize_raw = self.configuration.normalize;
             let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
 
             let (mut interval, throttle) = self.setup_crawl();
@@ -4957,6 +5025,12 @@ impl Website {
                                 let rotator = client_rotator.clone();
                                 #[cfg(feature = "hedge")]
                                 let hedge_cfg = hedge_config.clone();
+                                #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+                                let cache_opts = cache_options_raw.clone();
+                                #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+                                let cache_pol = cache_policy_raw.clone();
+                                #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+                                let normalize = normalize_raw;
                                 spawn_set("page_fetch", &mut set, async move {
                                     let link_result = match &shared.9 {
                                         Some(cb) => cb(link, None),
@@ -4964,6 +5038,49 @@ impl Website {
                                     };
 
                                     let target_url = link_result.0.as_ref();
+
+                                    // Cache-first: skip HTTP fetch entirely for cached pages
+                                    #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+                                    {
+                                        use crate::utils::{cache_skip_browser, get_cached_url, build_cached_html_page_response};
+                                        if cache_skip_browser(&cache_opts) {
+                                            if let Some(html) = get_cached_url(target_url, cache_opts.as_ref(), &cache_pol).await {
+                                                let page_response = build_cached_html_page_response(target_url, &html);
+                                                let mut page = build(target_url, page_response);
+
+                                                if shared.3.len() > 0 {
+                                                    page.set_external(shared.3.clone());
+                                                }
+                                                page.set_url_parsed_direct();
+                                                if return_page_links {
+                                                    page.page_links = Some(Default::default());
+                                                }
+                                                let page_base = page.base.take().map(Box::new);
+                                                let links = if full_resources {
+                                                    page.links_full(&shared.1, &page_base).await
+                                                } else {
+                                                    page.links(&shared.1, &page_base).await
+                                                };
+                                                page.base = None;
+                                                if normalize {
+                                                    page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
+                                                }
+                                                if let Some(ref cb) = on_should_crawl_callback {
+                                                    if !cb.call(&page) {
+                                                        page.blocked_crawl = true;
+                                                        channel_send_page(&shared.2, page, &shared.4);
+                                                        drop(permit);
+                                                        return Default::default();
+                                                    }
+                                                }
+                                                let signature = page.signature;
+                                                channel_send_page(&shared.2, page, &shared.4);
+                                                drop(permit);
+                                                return (links, signature);
+                                            }
+                                        }
+                                    }
+
                                     let external_domains_caseless = &shared.3;
 
                                     // Hedge-enabled path: race primary vs delayed hedge on different proxy
@@ -5404,6 +5521,57 @@ impl Website {
                                                 let shared = shared.clone();
                                                 let on_should_crawl_callback = on_should_crawl_callback.clone();
                                                 spawn_set("page_fetch", &mut set, async move {
+                                                    let link_result =
+                                                        match &shared.10 {
+                                                            Some(cb) => cb(link, None),
+                                                            _ => (link, None),
+                                                        };
+
+                                                    let target_url_string = link_result.0.as_ref().to_string();
+
+                                                    // Cache-first: skip tab creation entirely for cached pages
+                                                    #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+                                                    {
+                                                        use crate::utils::{cache_skip_browser, get_cached_url, build_cached_html_page_response};
+                                                        let cache_options = shared.6.get_cache_options();
+                                                        if cache_skip_browser(&cache_options) {
+                                                            if let Some(html) = get_cached_url(&target_url_string, cache_options.as_ref(), &shared.6.cache_policy).await {
+                                                                let page_response = build_cached_html_page_response(&target_url_string, &html);
+                                                                let mut page = build(&target_url_string, page_response);
+
+                                                                if add_external {
+                                                                    page.set_external(shared.3.clone());
+                                                                }
+                                                                page.set_url_parsed_direct();
+                                                                let page_base = page.base.take().map(Box::new);
+                                                                if return_page_links {
+                                                                    page.page_links = Some(Default::default());
+                                                                }
+                                                                let links = if full_resources {
+                                                                    page.links_full(&shared.1, &page_base).await
+                                                                } else {
+                                                                    page.links(&shared.1, &page_base).await
+                                                                };
+                                                                page.base = None;
+                                                                if shared.6.normalize {
+                                                                    page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
+                                                                }
+                                                                if let Some(ref cb) = on_should_crawl_callback {
+                                                                    if !cb.call(&page) {
+                                                                        page.blocked_crawl = true;
+                                                                        channel_send_page(&shared.2, page, &shared.4);
+                                                                        drop(permit);
+                                                                        return Default::default();
+                                                                    }
+                                                                }
+                                                                let signature = page.signature;
+                                                                channel_send_page(&shared.2, page, &shared.4);
+                                                                drop(permit);
+                                                                return (links, signature);
+                                                            }
+                                                        }
+                                                    }
+
                                                     let results = match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
                                                         Ok(new_page) => {
                                                             let (_, intercept_handle) = tokio::join!(
@@ -5417,13 +5585,7 @@ impl Website {
                                                                 )
                                                             );
 
-                                                            let link_result =
-                                                                match  &shared.10 {
-                                                                    Some(cb) => cb(link, None),
-                                                                    _ => (link, None),
-                                                                };
-
-                                                            let target_url = link_result.0.as_ref();
+                                                            let target_url = target_url_string.as_str();
 
                                                             let mut page = Page::new(
                                                                 &target_url,
@@ -10283,6 +10445,236 @@ async fn test_crawl_smart_uses_seeded_cache_with_skip_browser() {
     );
 
     eprintln!("crawl_smart cached latency: {}ms", elapsed.as_millis());
+}
+
+#[tokio::test]
+#[cfg(all(
+    not(feature = "decentralized"),
+    feature = "cache_chrome_hybrid"
+))]
+async fn test_cache_shortcircuit_single_page() {
+    use crate::utils::{create_cache_key_raw, put_hybrid_cache, HttpResponse, HttpVersion};
+    use std::collections::HashMap as StdHashMap;
+
+    let target_url = "http://localhost:9/shortcircuit-test";
+    let cache_key = create_cache_key_raw(target_url, None, None);
+
+    let mut response_headers = StdHashMap::new();
+    response_headers.insert("content-type".to_string(), "text/html".to_string());
+
+    let body = b"<html><head><title>Shortcircuit</title></head><body><h1>Cached!</h1></body></html>"
+        .to_vec();
+    let http_response = HttpResponse {
+        body,
+        headers: response_headers,
+        status: 200,
+        url: Url::parse(target_url).expect("valid url"),
+        version: HttpVersion::Http11,
+    };
+
+    let mut request_headers = StdHashMap::new();
+    request_headers.insert(
+        "cache-control".to_string(),
+        "public, max-age=3600".to_string(),
+    );
+
+    put_hybrid_cache(&cache_key, http_response, "GET", request_headers).await;
+
+    let mut website = Website::new(target_url);
+    website.configuration.cache = true;
+    website.with_cache_skip_browser(true);
+    website.with_budget(Some(HashMap::from([("*", 1)])));
+
+    let mut rx = website.subscribe(4).unwrap();
+    let handle = tokio::spawn(async move { rx.recv().await.ok() });
+
+    let start = tokio::time::Instant::now();
+    website.crawl().await;
+    let elapsed = start.elapsed();
+
+    let page = handle.await.unwrap().expect("page received via channel");
+    assert!(
+        page.get_html().contains("Cached!"),
+        "expected cached HTML content"
+    );
+    assert_eq!(page.status_code, StatusCode::OK);
+    assert_eq!(website.initial_status_code, StatusCode::OK);
+    assert!(website.initial_html_length > 0);
+    // Must be fast (no browser launch — typically <100ms)
+    assert!(
+        elapsed.as_millis() < 2000,
+        "shortcircuit too slow: {elapsed:?}"
+    );
+    eprintln!("shortcircuit single_page latency: {}ms", elapsed.as_millis());
+}
+
+#[tokio::test]
+#[cfg(all(
+    not(feature = "decentralized"),
+    feature = "cache_chrome_hybrid"
+))]
+async fn test_cache_shortcircuit_miss_falls_through() {
+    let mut website = Website::new("http://localhost:9/uncached-shortcircuit");
+    website.configuration.cache = true;
+    website.with_cache_skip_browser(true);
+    website.with_budget(Some(HashMap::from([("*", 1)])));
+
+    // Should not panic, just fall through to normal crawl (will fail to connect, that's OK)
+    website.crawl_raw().await;
+}
+
+#[tokio::test]
+#[cfg(all(
+    not(feature = "decentralized"),
+    feature = "cache_chrome_hybrid"
+))]
+async fn test_cache_shortcircuit_not_without_skip_browser() {
+    use crate::utils::{create_cache_key_raw, put_hybrid_cache, HttpResponse, HttpVersion};
+    use std::collections::HashMap as StdHashMap;
+
+    let target_url = "http://localhost:9/no-skip-shortcircuit";
+    let cache_key = create_cache_key_raw(target_url, None, None);
+
+    let mut response_headers = StdHashMap::new();
+    response_headers.insert("content-type".to_string(), "text/html".to_string());
+
+    let body = b"<html><body>No Skip</body></html>".to_vec();
+    let http_response = HttpResponse {
+        body,
+        headers: response_headers,
+        status: 200,
+        url: Url::parse(target_url).expect("valid url"),
+        version: HttpVersion::Http11,
+    };
+
+    let mut request_headers = StdHashMap::new();
+    request_headers.insert(
+        "cache-control".to_string(),
+        "public, max-age=3600".to_string(),
+    );
+
+    put_hybrid_cache(&cache_key, http_response, "GET", request_headers).await;
+
+    let mut website = Website::new(target_url);
+    website.configuration.cache = true;
+    website.with_cache_skip_browser(false); // NOT skip_browser
+    website.with_budget(Some(HashMap::from([("*", 1)])));
+
+    // Verify the shortcircuit guard rejects when skip_browser=false
+    website.configuration.configure_budget();
+    assert!(
+        !crate::utils::cache_skip_browser(&website.configuration.get_cache_options()),
+        "cache_skip_browser should be false when skip_browser is disabled"
+    );
+
+    // Should still work via normal path (cache hit in Page::new)
+    website.crawl_raw().await;
+}
+
+#[tokio::test]
+#[cfg(all(
+    not(feature = "decentralized"),
+    feature = "cache_chrome_hybrid"
+))]
+async fn test_cache_shortcircuit_not_for_multi_page() {
+    use crate::utils::{create_cache_key_raw, put_hybrid_cache, HttpResponse, HttpVersion};
+    use std::collections::HashMap as StdHashMap;
+
+    let target_url = "http://localhost:9/multi-page-shortcircuit";
+    let cache_key = create_cache_key_raw(target_url, None, None);
+
+    let mut response_headers = StdHashMap::new();
+    response_headers.insert("content-type".to_string(), "text/html".to_string());
+
+    let body = b"<html><body>Multi Page</body></html>".to_vec();
+    let http_response = HttpResponse {
+        body,
+        headers: response_headers,
+        status: 200,
+        url: Url::parse(target_url).expect("valid url"),
+        version: HttpVersion::Http11,
+    };
+
+    let mut request_headers = StdHashMap::new();
+    request_headers.insert(
+        "cache-control".to_string(),
+        "public, max-age=3600".to_string(),
+    );
+
+    put_hybrid_cache(&cache_key, http_response, "GET", request_headers).await;
+
+    let mut website = Website::new(target_url);
+    website.configuration.cache = true;
+    website.with_cache_skip_browser(true);
+    website.with_budget(Some(HashMap::from([("*", 5)]))); // NOT single_page
+
+    // Shortcircuit should NOT activate for limit > 1
+    // (per-task cache check handles multi-page instead)
+    website.crawl_raw().await;
+}
+
+#[tokio::test]
+#[cfg(all(
+    not(feature = "decentralized"),
+    feature = "smart",
+    feature = "cache_chrome_hybrid"
+))]
+async fn test_cache_shortcircuit_crawl_smart() {
+    use crate::utils::{create_cache_key_raw, put_hybrid_cache, HttpResponse, HttpVersion};
+    use std::collections::HashMap as StdHashMap;
+
+    let target_url = "http://localhost:9/smart-shortcircuit-test";
+    let cache_key = create_cache_key_raw(target_url, None, None);
+
+    let mut response_headers = StdHashMap::new();
+    response_headers.insert("content-type".to_string(), "text/html".to_string());
+
+    let body =
+        b"<html><head><title>Smart Shortcircuit</title></head><body>Smart Cached</body></html>"
+            .to_vec();
+    let http_response = HttpResponse {
+        body,
+        headers: response_headers,
+        status: 200,
+        url: Url::parse(target_url).expect("valid url"),
+        version: HttpVersion::Http11,
+    };
+
+    let mut request_headers = StdHashMap::new();
+    request_headers.insert(
+        "cache-control".to_string(),
+        "public, max-age=3600".to_string(),
+    );
+
+    put_hybrid_cache(&cache_key, http_response, "GET", request_headers).await;
+
+    let mut website = Website::new(target_url);
+    website.configuration.cache = true;
+    website.with_cache_skip_browser(true);
+    website.with_budget(Some(HashMap::from([("*", 1)])));
+
+    let mut rx = website.subscribe(4).unwrap();
+    let handle = tokio::spawn(async move { rx.recv().await.ok() });
+
+    let start = tokio::time::Instant::now();
+    website.crawl_smart().await;
+    let elapsed = start.elapsed();
+
+    let page = handle.await.unwrap().expect("page received");
+    assert!(
+        page.get_html().contains("Smart Cached"),
+        "expected cached HTML in crawl_smart"
+    );
+    assert_eq!(website.initial_status_code, StatusCode::OK);
+    assert!(website.initial_html_length > 0);
+    assert!(
+        elapsed.as_millis() < 2000,
+        "crawl_smart shortcircuit too slow: {elapsed:?}"
+    );
+    eprintln!(
+        "crawl_smart shortcircuit latency: {}ms",
+        elapsed.as_millis()
+    );
 }
 
 #[cfg(test)]

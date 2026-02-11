@@ -3903,7 +3903,7 @@ fn build_error_page_response(target_url: &str, err: RequestError) -> PageRespons
 
 #[inline]
 /// Build a cached page response from HTML.
-fn build_cached_html_page_response(target_url: &str, html: &str) -> PageResponse {
+pub(crate) fn build_cached_html_page_response(target_url: &str, html: &str) -> PageResponse {
     PageResponse {
         content: Some(Box::new(html.as_bytes().to_vec())),
         status_code: StatusCode::OK,
