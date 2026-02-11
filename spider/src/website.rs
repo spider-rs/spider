@@ -336,6 +336,20 @@ impl ClientRotator {
     pub fn is_empty(&self) -> bool {
         self.clients.is_empty()
     }
+
+    /// Get two different clients for hedging. Returns (primary, hedge) where
+    /// hedge is guaranteed to be a different client if more than one exists.
+    #[cfg(feature = "hedge")]
+    pub fn next_pair(&self) -> (&Client, Option<&Client>) {
+        let len = self.clients.len();
+        if len <= 1 {
+            return (&self.clients[0], None);
+        }
+        let idx = self.index.fetch_add(2, Ordering::Relaxed);
+        let primary_idx = idx % len;
+        let hedge_idx = (idx + 1) % len;
+        (&self.clients[primary_idx], Some(&self.clients[hedge_idx]))
+    }
 }
 
 /// Represents a website to crawl and gather all links or page content.
@@ -4829,6 +4843,8 @@ impl Website {
         self.start();
         self.status = CrawlStatus::Active;
         let client_rotator = self.client_rotator.clone();
+        #[cfg(feature = "hedge")]
+        let hedge_config = self.configuration.hedge.clone();
         let mut selector: (
             CompactString,
             smallvec::SmallVec<[CompactString; 2]>,
@@ -4939,41 +4955,150 @@ impl Website {
                                 let shared = shared.clone();
                                 let on_should_crawl_callback = on_should_crawl_callback.clone();
                                 let rotator = client_rotator.clone();
+                                #[cfg(feature = "hedge")]
+                                let hedge_cfg = hedge_config.clone();
                                 spawn_set("page_fetch", &mut set, async move {
                                     let link_result = match &shared.9 {
                                         Some(cb) => cb(link, None),
                                         _ => (link, None),
                                     };
 
-                                    let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
-                                    let mut links_pages = if return_page_links {
-                                        Some(links.clone())
-                                    } else {
-                                        None
-                                    };
-                                    let mut relative_selectors = shared.1.clone();
-                                    let mut r_settings = shared.7;
-                                    r_settings.ssg_build = true;
                                     let target_url = link_result.0.as_ref();
                                     let external_domains_caseless = &shared.3;
-                                    let client = match &rotator {
-                                        Some(r) => r.next(),
-                                        None => &shared.0,
+
+                                    // Hedge-enabled path: race primary vs delayed hedge on different proxy
+                                    #[cfg(feature = "hedge")]
+                                    let (mut page, mut links, mut links_pages) = {
+                                        let should_hedge = if let Some(ref hcfg) = hedge_cfg {
+                                            hcfg.enabled && rotator.as_ref().map_or(false, |r| r.len() > 1)
+                                        } else {
+                                            false
+                                        };
+
+                                        if should_hedge {
+                                            let hcfg = hedge_cfg.as_ref().unwrap();
+                                            let rot = rotator.as_ref().unwrap();
+                                            let (primary_client, hedge_client_opt) = rot.next_pair();
+
+                                            if let Some(hedge_client) = hedge_client_opt {
+                                                let delay = hcfg.delay;
+
+                                                let primary_fut = async {
+                                                    let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                                    let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
+                                                    let mut selectors = shared.1.clone();
+                                                    let mut r_settings = shared.7;
+                                                    r_settings.ssg_build = true;
+                                                    let mut domain_parsed = None;
+                                                    let page = Page::new_page_streaming(
+                                                        target_url, primary_client, only_html,
+                                                        &mut selectors, external_domains_caseless,
+                                                        &r_settings, &mut links, None, &shared.8,
+                                                        &mut domain_parsed, &mut links_pages).await;
+                                                    (page, links, links_pages)
+                                                };
+
+                                                tokio::pin!(primary_fut);
+
+                                                tokio::select! {
+                                                    biased;
+                                                    result = &mut primary_fut => result,
+                                                    _ = tokio::time::sleep(delay) => {
+                                                        log::info!("[hedge] fired after {}ms url={}", delay.as_millis(), target_url);
+
+                                                        let hedge_fut = async {
+                                                            let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                                            let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
+                                                            let mut selectors = shared.1.clone();
+                                                            let mut r_settings = shared.7;
+                                                            r_settings.ssg_build = true;
+                                                            let mut domain_parsed = None;
+                                                            let page = Page::new_page_streaming(
+                                                                target_url, hedge_client, only_html,
+                                                                &mut selectors, external_domains_caseless,
+                                                                &r_settings, &mut links, None, &shared.8,
+                                                                &mut domain_parsed, &mut links_pages).await;
+                                                            (page, links, links_pages)
+                                                        };
+
+                                                        tokio::pin!(hedge_fut);
+
+                                                        tokio::select! {
+                                                            biased;
+                                                            result = &mut primary_fut => {
+                                                                log::info!("[hedge] winner: primary url={}", target_url);
+                                                                result
+                                                            }
+                                                            result = &mut hedge_fut => {
+                                                                log::info!("[hedge] winner: hedge url={}", target_url);
+                                                                result
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                                let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
+                                                let mut selectors = shared.1.clone();
+                                                let mut r_settings = shared.7;
+                                                r_settings.ssg_build = true;
+                                                let mut domain_parsed = None;
+                                                let page = Page::new_page_streaming(
+                                                    target_url, primary_client, only_html,
+                                                    &mut selectors, external_domains_caseless,
+                                                    &r_settings, &mut links, None, &shared.8,
+                                                    &mut domain_parsed, &mut links_pages).await;
+                                                (page, links, links_pages)
+                                            }
+                                        } else {
+                                            let client = match &rotator {
+                                                Some(r) => r.next(),
+                                                None => &shared.0,
+                                            };
+                                            let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                            let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
+                                            let mut selectors = shared.1.clone();
+                                            let mut r_settings = shared.7;
+                                            r_settings.ssg_build = true;
+                                            let mut domain_parsed = None;
+                                            let page = Page::new_page_streaming(
+                                                target_url, client, only_html,
+                                                &mut selectors, external_domains_caseless,
+                                                &r_settings, &mut links, None, &shared.8,
+                                                &mut domain_parsed, &mut links_pages).await;
+                                            (page, links, links_pages)
+                                        }
                                     };
 
-                                    let mut domain_parsed = None;
-
-                                    let mut page = Page::new_page_streaming(
-                                        target_url,
-                                        client, only_html,
-                                        &mut relative_selectors,
-                                        external_domains_caseless,
-                                        &r_settings,
-                                        &mut links,
-                                        None,
-                                        &shared.8,
-                                        &mut domain_parsed,
-                                        &mut links_pages).await;
+                                    #[cfg(not(feature = "hedge"))]
+                                    let (mut page, mut links, mut links_pages) = {
+                                        let client = match &rotator {
+                                            Some(r) => r.next(),
+                                            None => &shared.0,
+                                        };
+                                        let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                        let mut links_pages = if return_page_links {
+                                            Some(links.clone())
+                                        } else {
+                                            None
+                                        };
+                                        let mut relative_selectors = shared.1.clone();
+                                        let mut r_settings = shared.7;
+                                        r_settings.ssg_build = true;
+                                        let mut domain_parsed = None;
+                                        let page = Page::new_page_streaming(
+                                            target_url,
+                                            client, only_html,
+                                            &mut relative_selectors,
+                                            external_domains_caseless,
+                                            &r_settings,
+                                            &mut links,
+                                            None,
+                                            &shared.8,
+                                            &mut domain_parsed,
+                                            &mut links_pages).await;
+                                        (page, links, links_pages)
+                                    };
 
                                     let mut retry_count = shared.5;
 
@@ -4992,12 +5117,14 @@ impl Website {
                                         if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                                             if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                                                 let mut domain_parsed = None;
+                                                let mut retry_r_settings = shared.7;
+                                                retry_r_settings.ssg_build = true;
                                                 let next_page = Page::new_page_streaming(
                                                     target_url,
                                                     retry_client, only_html,
-                                                    &mut relative_selectors.clone(),
+                                                    &mut shared.1.clone(),
                                                     external_domains_caseless,
-                                                    &r_settings,
+                                                    &retry_r_settings,
                                                     &mut links,
                                                     None,
                                                     &shared.8,
@@ -5012,13 +5139,16 @@ impl Website {
                                         }
 
                                         } else {
+                                            let mut domain_parsed = None;
+                                            let mut retry_r_settings = shared.7;
+                                            retry_r_settings.ssg_build = true;
                                             page.clone_from(&Page::new_page_streaming(
                                                 target_url,
                                                 retry_client,
                                                 only_html,
-                                                &mut relative_selectors.clone(),
+                                                &mut shared.1.clone(),
                                                 external_domains_caseless,
-                                                &r_settings,
+                                                &retry_r_settings,
                                                 &mut links,
                                                 None,
                                                 &shared.8,
@@ -5536,6 +5666,8 @@ impl Website {
             website
         } else {
             let client_rotator = self.client_rotator.clone();
+            #[cfg(feature = "hedge")]
+            let hedge_config = self.configuration.hedge.clone();
             let on_should_crawl_callback = self.on_should_crawl_callback.clone();
             let full_resources = self.configuration.full_resources;
             let return_page_links = self.configuration.return_page_links;
@@ -5635,41 +5767,150 @@ impl Website {
                                 let shared = shared.clone();
                                 let on_should_crawl_callback = on_should_crawl_callback.clone();
                                 let rotator = client_rotator.clone();
+                                #[cfg(feature = "hedge")]
+                                let hedge_cfg = hedge_config.clone();
                                 spawn_set("page_fetch", &mut set, async move {
                                     let link_result = match &shared.9 {
                                         Some(cb) => cb(link, None),
                                         _ => (link, None),
                                     };
 
-                                    let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
-                                    let mut links_pages = if return_page_links {
-                                        Some(links.clone())
-                                    } else {
-                                        None
-                                    };
-                                    let mut relative_selectors = shared.1.clone();
-                                    let mut r_settings = shared.7;
-                                    r_settings.ssg_build = true;
                                     let target_url = link_result.0.as_ref();
                                     let external_domains_caseless = &shared.3;
-                                    let client = match &rotator {
-                                        Some(r) => r.next(),
-                                        None => &shared.0,
+
+                                    // Hedge-enabled path
+                                    #[cfg(feature = "hedge")]
+                                    let (mut page, mut links, mut links_pages) = {
+                                        let should_hedge = if let Some(ref hcfg) = hedge_cfg {
+                                            hcfg.enabled && rotator.as_ref().map_or(false, |r| r.len() > 1)
+                                        } else {
+                                            false
+                                        };
+
+                                        if should_hedge {
+                                            let hcfg = hedge_cfg.as_ref().unwrap();
+                                            let rot = rotator.as_ref().unwrap();
+                                            let (primary_client, hedge_client_opt) = rot.next_pair();
+
+                                            if let Some(hedge_client) = hedge_client_opt {
+                                                let delay = hcfg.delay;
+
+                                                let primary_fut = async {
+                                                    let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                                    let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
+                                                    let mut selectors = shared.1.clone();
+                                                    let mut r_settings = shared.7;
+                                                    r_settings.ssg_build = true;
+                                                    let mut domain_parsed = None;
+                                                    let page = Page::new_page_streaming(
+                                                        target_url, primary_client, only_html,
+                                                        &mut selectors, external_domains_caseless,
+                                                        &r_settings, &mut links, None, &shared.8,
+                                                        &mut domain_parsed, &mut links_pages).await;
+                                                    (page, links, links_pages)
+                                                };
+
+                                                tokio::pin!(primary_fut);
+
+                                                tokio::select! {
+                                                    biased;
+                                                    result = &mut primary_fut => result,
+                                                    _ = tokio::time::sleep(delay) => {
+                                                        log::info!("[hedge] fired after {}ms url={}", delay.as_millis(), target_url);
+
+                                                        let hedge_fut = async {
+                                                            let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                                            let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
+                                                            let mut selectors = shared.1.clone();
+                                                            let mut r_settings = shared.7;
+                                                            r_settings.ssg_build = true;
+                                                            let mut domain_parsed = None;
+                                                            let page = Page::new_page_streaming(
+                                                                target_url, hedge_client, only_html,
+                                                                &mut selectors, external_domains_caseless,
+                                                                &r_settings, &mut links, None, &shared.8,
+                                                                &mut domain_parsed, &mut links_pages).await;
+                                                            (page, links, links_pages)
+                                                        };
+
+                                                        tokio::pin!(hedge_fut);
+
+                                                        tokio::select! {
+                                                            biased;
+                                                            result = &mut primary_fut => {
+                                                                log::info!("[hedge] winner: primary url={}", target_url);
+                                                                result
+                                                            }
+                                                            result = &mut hedge_fut => {
+                                                                log::info!("[hedge] winner: hedge url={}", target_url);
+                                                                result
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                                let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
+                                                let mut selectors = shared.1.clone();
+                                                let mut r_settings = shared.7;
+                                                r_settings.ssg_build = true;
+                                                let mut domain_parsed = None;
+                                                let page = Page::new_page_streaming(
+                                                    target_url, primary_client, only_html,
+                                                    &mut selectors, external_domains_caseless,
+                                                    &r_settings, &mut links, None, &shared.8,
+                                                    &mut domain_parsed, &mut links_pages).await;
+                                                (page, links, links_pages)
+                                            }
+                                        } else {
+                                            let client = match &rotator {
+                                                Some(r) => r.next(),
+                                                None => &shared.0,
+                                            };
+                                            let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                            let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
+                                            let mut selectors = shared.1.clone();
+                                            let mut r_settings = shared.7;
+                                            r_settings.ssg_build = true;
+                                            let mut domain_parsed = None;
+                                            let page = Page::new_page_streaming(
+                                                target_url, client, only_html,
+                                                &mut selectors, external_domains_caseless,
+                                                &r_settings, &mut links, None, &shared.8,
+                                                &mut domain_parsed, &mut links_pages).await;
+                                            (page, links, links_pages)
+                                        }
                                     };
 
-                                    let mut domain_parsed = None;
-
-                                    let mut page = Page::new_page_streaming(
-                                        target_url,
-                                        client, only_html,
-                                        &mut relative_selectors,
-                                        external_domains_caseless,
-                                        &r_settings,
-                                        &mut links,
-                                        None,
-                                        &shared.8,
-                                        &mut domain_parsed,
-                                        &mut links_pages).await;
+                                    #[cfg(not(feature = "hedge"))]
+                                    let (mut page, mut links, mut links_pages) = {
+                                        let client = match &rotator {
+                                            Some(r) => r.next(),
+                                            None => &shared.0,
+                                        };
+                                        let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                        let mut links_pages = if return_page_links {
+                                            Some(links.clone())
+                                        } else {
+                                            None
+                                        };
+                                        let mut relative_selectors = shared.1.clone();
+                                        let mut r_settings = shared.7;
+                                        r_settings.ssg_build = true;
+                                        let mut domain_parsed = None;
+                                        let page = Page::new_page_streaming(
+                                            target_url,
+                                            client, only_html,
+                                            &mut relative_selectors,
+                                            external_domains_caseless,
+                                            &r_settings,
+                                            &mut links,
+                                            None,
+                                            &shared.8,
+                                            &mut domain_parsed,
+                                            &mut links_pages).await;
+                                        (page, links, links_pages)
+                                    };
 
                                     let mut retry_count = shared.5;
 
@@ -5688,12 +5929,14 @@ impl Website {
                                         if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                                             if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                                                 let mut domain_parsed = None;
+                                                let mut retry_r_settings = shared.7;
+                                                retry_r_settings.ssg_build = true;
                                                 let next_page = Page::new_page_streaming(
                                                     target_url,
                                                     retry_client, only_html,
-                                                    &mut relative_selectors.clone(),
+                                                    &mut shared.1.clone(),
                                                     external_domains_caseless,
-                                                    &r_settings,
+                                                    &retry_r_settings,
                                                     &mut links,
                                                     None,
                                                     &shared.8,
@@ -5708,13 +5951,16 @@ impl Website {
                                         }
 
                                         } else {
+                                            let mut domain_parsed = None;
+                                            let mut retry_r_settings = shared.7;
+                                            retry_r_settings.ssg_build = true;
                                             page.clone_from(&Page::new_page_streaming(
                                                 target_url,
                                                 retry_client,
                                                 only_html,
-                                                &mut relative_selectors.clone(),
+                                                &mut shared.1.clone(),
                                                 external_domains_caseless,
-                                                &r_settings,
+                                                &retry_r_settings,
                                                 &mut links,
                                                 None,
                                                 &shared.8,

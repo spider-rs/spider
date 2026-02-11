@@ -342,6 +342,10 @@ pub struct Configuration {
     #[cfg(feature = "spider_cloud")]
     /// Spider Cloud config. See <https://spider.cloud>.
     pub spider_cloud: Option<Box<SpiderCloudConfig>>,
+    #[cfg(feature = "hedge")]
+    /// Hedged request configuration for work-stealing on slow requests.
+    /// When enabled, fires a duplicate request on a different proxy after a delay.
+    pub hedge: Option<crate::utils::hedge::HedgeConfig>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -1742,6 +1746,19 @@ impl Configuration {
     /// Set a [spider.cloud](https://spider.cloud) config (no-op without `spider_cloud` feature).
     #[cfg(not(feature = "spider_cloud"))]
     pub fn with_spider_cloud_config(&mut self, _config: ()) -> &mut Self {
+        self
+    }
+
+    /// Set the hedged request (work-stealing) configuration.
+    #[cfg(feature = "hedge")]
+    pub fn with_hedge(&mut self, config: crate::utils::hedge::HedgeConfig) -> &mut Self {
+        self.hedge = Some(config);
+        self
+    }
+
+    /// Set the hedged request configuration (no-op without `hedge` feature).
+    #[cfg(not(feature = "hedge"))]
+    pub fn with_hedge(&mut self, _config: ()) -> &mut Self {
         self
     }
 }

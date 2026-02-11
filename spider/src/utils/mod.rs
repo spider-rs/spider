@@ -22,6 +22,9 @@ pub mod trie;
 pub mod uring_fs;
 /// Validate html false positives.
 pub mod validation;
+#[cfg(feature = "hedge")]
+/// Work-stealing (hedged requests) for slow crawl requests.
+pub mod hedge;
 
 #[cfg(feature = "chrome")]
 use crate::features::automation::RemoteMultimodalConfigs;
