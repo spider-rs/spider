@@ -9155,6 +9155,22 @@ impl Website {
         self
     }
 
+    /// Set the hedged request (work-stealing) configuration.
+    #[cfg(feature = "hedge")]
+    pub fn with_hedge(
+        &mut self,
+        config: crate::utils::hedge::HedgeConfig,
+    ) -> &mut Self {
+        self.configuration.with_hedge(config);
+        self
+    }
+
+    /// Set the hedged request configuration (no-op without `hedge` feature).
+    #[cfg(not(feature = "hedge"))]
+    pub fn with_hedge(&mut self, _config: ()) -> &mut Self {
+        self
+    }
+
     /// Build the website configuration when using with_builder.
     pub fn build(&self) -> Result<Self, Self> {
         if self.domain_parsed.is_none() {
