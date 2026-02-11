@@ -223,6 +223,43 @@ pub fn detect_hard_forbidden_content(b: &[u8]) -> bool {
     b == *APACHE_FORBIDDEN || detect_open_resty_forbidden(b)
 }
 
+/// Returns true if the body should NOT be cached (empty, near-empty, or known-bad HTML).
+#[inline]
+pub fn is_cacheable_body_empty(body: &[u8]) -> bool {
+    if body.is_empty() {
+        return true;
+    }
+    let trimmed = body.trim_ascii();
+    if trimmed.is_empty()
+        || trimmed == *crate::utils::templates::EMPTY_HTML
+        || trimmed == *EMPTY_HTML_BASIC
+    {
+        return true;
+    }
+    // Detect pages with HTML structure but empty <body> (< 2KB only for speed)
+    if trimmed.len() <= 2048 {
+        let lower: Vec<u8> = trimmed.iter().map(|c| c.to_ascii_lowercase()).collect();
+        if let Some(body_open) = lower.windows(5).position(|w| w == b"<body") {
+            if let Some(gt) = lower[body_open..].iter().position(|&c| c == b'>') {
+                let content_start = body_open + gt + 1;
+                if let Some(close) = lower[content_start..]
+                    .windows(7)
+                    .position(|w| w == b"</body>")
+                {
+                    let content_end = content_start + close;
+                    if trimmed[content_start..content_end]
+                        .iter()
+                        .all(|c| c.is_ascii_whitespace())
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 lazy_static! {
     /// Prevent fetching resources beyond the bytes limit.
     pub(crate) static ref MAX_SIZE_BYTES: usize = {
@@ -1345,6 +1382,11 @@ pub async fn put_hybrid_cache(
     use crate::http_cache_reqwest::CacheManager;
     use http_cache_semantics::CachePolicy;
 
+    // Never cache empty or near-empty HTML responses.
+    if is_cacheable_body_empty(&http_response.body) {
+        return;
+    }
+
     if let Ok(u) = http_response.url.as_str().parse::<http::uri::Uri>() {
         let req = HttpRequestLike {
             uri: u,
@@ -1481,13 +1523,16 @@ pub async fn cache_chrome_response(
     chrome_http_req_res: ChromeHTTPReqRes,
     cache_options: &Option<CacheOptions>,
 ) {
+    // Skip caching empty content.
+    let body = match page_response.content.as_ref() {
+        Some(b) if !is_cacheable_body_empty(b) => b.to_vec(),
+        _ => return,
+    };
+
     if let Ok(u) = url::Url::parse(target_url) {
         let http_response = HttpResponse {
             url: u,
-            body: match page_response.content.as_ref() {
-                Some(b) => b.to_vec(),
-                _ => Default::default(),
-            },
+            body,
             status: chrome_http_req_res.status_code.into(),
             version: match chrome_http_req_res.protocol.as_str() {
                 "http/0.9" => HttpVersion::Http09,
@@ -1533,13 +1578,16 @@ pub async fn cache_chrome_response(
     chrome_http_req_res: ChromeHTTPReqRes,
     cache_options: &Option<CacheOptions>,
 ) {
+    // Skip caching empty content.
+    let body = match page_response.content.as_ref() {
+        Some(b) if !is_cacheable_body_empty(b) => b.to_vec(),
+        _ => return,
+    };
+
     if let Ok(u) = url::Url::parse(target_url) {
         let http_response = HttpResponse {
             url: u,
-            body: match page_response.content.as_ref() {
-                Some(b) => b.to_vec(),
-                _ => Default::default(),
-            },
+            body,
             status: chrome_http_req_res.status_code.into(),
             version: match chrome_http_req_res.protocol.as_str() {
                 "http/0.9" => HttpVersion::Http09,
@@ -1630,6 +1678,11 @@ async fn cache_chrome_response_from_cdp_body(
     cache_options: &Option<CacheOptions>,
 ) {
     use crate::utils::create_cache_key_raw;
+
+    // Skip caching empty content.
+    if is_cacheable_body_empty(body) {
+        return;
+    }
 
     if let Ok(u) = url::Url::parse(target_url) {
         let http_response = HttpResponse {
