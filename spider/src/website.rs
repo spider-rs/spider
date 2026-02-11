@@ -3205,6 +3205,9 @@ impl Website {
     #[allow(dead_code)]
     fn build_seed_page(&self) -> Option<Page> {
         if let Some(seeded_html) = self.get_seeded_html() {
+            if crate::utils::is_cacheable_body_empty(seeded_html.as_bytes()) {
+                return None;
+            }
             let mut page_response = PageResponse::default();
             page_response.content = Some(Box::new(seeded_html.as_bytes().to_vec()));
             Some(build(self.url.inner(), page_response))

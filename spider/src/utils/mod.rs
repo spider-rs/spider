@@ -4878,8 +4878,13 @@ pub async fn fetch_page_html_base(
     remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
 ) -> PageResponse {
     let skip_browser = cache_skip_browser(&cache_options);
-    let cached_html = if seeded_resource.is_some() {
-        seeded_resource
+    let cached_html = if let Some(seeded) = seeded_resource {
+        // Reject empty HTML shells from seeded resources too.
+        if is_cacheable_body_empty(seeded.as_bytes()) {
+            None
+        } else {
+            Some(seeded)
+        }
     } else {
         get_cached_url(&target_url, cache_options.as_ref(), cache_policy).await
     };
