@@ -4653,7 +4653,7 @@ impl BasicCachePolicy {
 ))]
 #[inline]
 fn decode_cached_html_bytes(body: &[u8], accept_lang: Option<&str>) -> Option<String> {
-    if is_binary_file(body) {
+    if is_binary_file(body) || is_cacheable_body_empty(body) {
         return None;
     }
 
@@ -6878,5 +6878,17 @@ mod tests {
         assert!(!is_cacheable_body_empty(&[0xFF, 0xD8, 0xFF, 0xE0]));
         // Arbitrary binary
         assert!(!is_cacheable_body_empty(&[0x00, 0x01, 0x02, 0x03]));
+    }
+
+    #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+    #[test]
+    fn test_decode_cached_html_bytes_rejects_empty_html() {
+        // Empty shell HTML must be treated as a cache miss (returns None)
+        assert!(decode_cached_html_bytes(b"<html><head></head><body></body></html>", None).is_none());
+        assert!(decode_cached_html_bytes(b"<html></html>", None).is_none());
+        assert!(decode_cached_html_bytes(b"", None).is_none());
+        assert!(decode_cached_html_bytes(b"   ", None).is_none());
+        // Real content must still be returned
+        assert!(decode_cached_html_bytes(b"<html><body><p>Hello</p></body></html>", None).is_some());
     }
 }
