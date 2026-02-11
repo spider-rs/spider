@@ -120,11 +120,11 @@ features = ["serde", "headers", "dynamic-versions"]
 
 [dependencies.spider_agent_types]
 path = "../spider_agent_types"
-version = "2.45.2"
+version = "2.45.3"
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.45.2"
+version = "2.45.3"
 optional = true
 default-features = false
 
