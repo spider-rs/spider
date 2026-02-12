@@ -3116,6 +3116,20 @@ pub async fn fetch_page_html_chrome_base(
 
             page_response
         } else {
+            // Apply wait_for config (e.g. idle_network0) before HTML extraction.
+            // The run_events branch already calls page_wait; this ensures the
+            // non-content / empty-response path also honors the config, matching
+            // smart mode behavior.
+            if wait_for.is_some() && !block_bytes && !base_timeout.is_zero() {
+                let idle_timeout = base_timeout.min(Duration::from_secs(15));
+                if let Err(elapsed) =
+                    tokio::time::timeout(idle_timeout, page_wait(page, wait_for)).await
+                {
+                    log::warn!("chrome wait_for timeout {elapsed}");
+                }
+                base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
+            }
+
             let res = if !block_bytes {
                 let results = tokio::time::timeout(
                     base_timeout.max(HALF_MAX_PAGE_TIMEOUT),
