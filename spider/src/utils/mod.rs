@@ -1846,13 +1846,16 @@ async fn goto_with_html_once(
 
     let mut paused = page.event_listener::<EventRequestPaused>().await?;
 
-    let url_prefix = target_url.to_string();
     let fulfill_headers =
         chrome_fulfill_headers_from_reqwest(resp_headers.as_ref(), "text/html; charset=utf-8");
 
-    let interception_required = chrome_intercept.map(|c| !c.enabled).unwrap_or(false);
+    // If interception is already active, temporarily move to manual paused-request handling
+    // for this one-shot document fulfill. Otherwise enable a narrow one-shot Fetch pattern.
+    let had_interception = chrome_intercept.map(|c| c.enabled).unwrap_or(false);
 
-    if interception_required {
+    if had_interception {
+        page.set_request_interception(false).await?;
+    } else {
         page.execute(EnableParams {
             patterns: Some(vec![RequestPattern {
                 url_pattern: Some("*".into()),
@@ -1875,10 +1878,10 @@ async fn goto_with_html_once(
                     if matches!(e, chromiumoxide::error::CdpError::Timeout) {
                         *block_bytes = true;
                     }
-                    if interception_required {
-                        let _ = page.execute(DisableParams {}).await;
-                    } else {
+                    if had_interception {
                         let _ = page.set_request_interception(true).await;
+                    } else {
+                        let _ = page.execute(DisableParams {}).await;
                     }
                     return Err(e);
                 }
@@ -1889,9 +1892,6 @@ async fn goto_with_html_once(
                 };
 
                 if ev.resource_type != ResourceType::Document {
-                    continue;
-                }
-                if !ev.request.url.starts_with(&url_prefix) {
                     continue;
                 }
 
@@ -1906,14 +1906,29 @@ async fn goto_with_html_once(
                     binary_response_headers: None,
                 }).await;
 
-                if interception_required {
-                    let _ = page.execute(DisableParams {}).await;
-                } else {
+                if had_interception {
                     let _ = page.set_request_interception(true).await;
+                } else {
+                    let _ = page.execute(DisableParams {}).await;
                 }
 
                 match res {
-                    Ok(_) => return Ok(()),
+                    Ok(_) => {
+                        // Wait for the full load lifecycle (matching
+                        // http_future's behavior in the normal Chrome path),
+                        // then network idle so sub-resources and JS execute.
+                        let _ = tokio::time::timeout(
+                            tokio::time::Duration::from_secs(30),
+                            page.wait_for_navigation(),
+                        )
+                        .await;
+                        let _ = tokio::time::timeout(
+                            tokio::time::Duration::from_secs(15),
+                            page.wait_for_network_idle(),
+                        )
+                        .await;
+                        return Ok(());
+                    }
                     Err(e) => {
                         if matches!(e, chromiumoxide::error::CdpError::Timeout) {
                             *block_bytes = true;
@@ -1925,10 +1940,10 @@ async fn goto_with_html_once(
         }
     }
 
-    if interception_required {
-        let _ = page.execute(DisableParams {}).await;
-    } else {
+    if had_interception {
         let _ = page.set_request_interception(true).await;
+    } else {
+        let _ = page.execute(DisableParams {}).await;
     }
 
     Ok(())
@@ -2726,7 +2741,9 @@ pub async fn fetch_page_html_chrome_base(
 
     base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
 
-    // we do not need to wait for navigation if content is assigned. The method set_content already handles this.
+    // Content path: goto_with_html_once already waits for the `load` lifecycle
+    // event, matching http_future()'s behavior. get_final_redirect resolves
+    // instantly here (load already fired).
     let final_url = if wait_for_navigation && !request_cancelled && !block_bytes {
         let last_redirect = get_final_redirect(page, source, base_timeout).await;
         base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());

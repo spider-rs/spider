@@ -1,6 +1,6 @@
 [package]
 name = "spider_agent_types"
-version = "2.45.12"
+version = "2.45.13"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "Pure data types and constants for spider_agent automation. Zero heavy dependencies."
 repository = "https://github.com/spider-rs/spider"

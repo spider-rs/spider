@@ -3600,9 +3600,9 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                if rerender.load(Ordering::Relaxed)
-                    || map.is_empty() && script_src.load(Ordering::Relaxed)
-                {
+                let should_upgrade =
+                    rerender.load(Ordering::Relaxed) || script_src.load(Ordering::Relaxed);
+                if should_upgrade {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {
                             crate::website::Website::setup_browser_base(&configuration, &base, jar)
@@ -4011,9 +4011,9 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                if rerender.load(Ordering::Relaxed)
-                    || map.is_empty() && script_src.load(Ordering::Relaxed)
-                {
+                let should_upgrade =
+                    rerender.load(Ordering::Relaxed) || script_src.load(Ordering::Relaxed);
+                if should_upgrade {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {
                             crate::website::Website::setup_browser_base(&configuration, &base, jar)
