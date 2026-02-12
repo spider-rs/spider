@@ -835,6 +835,45 @@ fn is_cipher_mismatch(err: &chromiumoxide::error::CdpError) -> bool {
 }
 
 #[cfg(feature = "chrome")]
+/// Is an SSL protocol error (e.g. multi-subdomain www. cert issues).
+fn is_ssl_protocol_error(err: &chromiumoxide::error::CdpError) -> bool {
+    match err {
+        chromiumoxide::error::CdpError::ChromeMessage(msg) => {
+            msg.contains("net::ERR_SSL_PROTOCOL_ERROR")
+                || msg.contains("net::ERR_CERT_COMMON_NAME_INVALID")
+                || msg.contains("net::ERR_CERT_AUTHORITY_INVALID")
+        }
+        other => {
+            let s = other.to_string();
+            s.contains("net::ERR_SSL_PROTOCOL_ERROR")
+                || s.contains("net::ERR_CERT_COMMON_NAME_INVALID")
+                || s.contains("net::ERR_CERT_AUTHORITY_INVALID")
+        }
+    }
+}
+
+/// Strip the `www.` prefix from a URL's host, if present.
+/// Returns `None` if the URL has no `www.` prefix.
+/// Example: `https://www.docs.github.com/foo` → `https://docs.github.com/foo`
+pub fn strip_www(url: &str) -> Option<String> {
+    // Find the scheme separator
+    let after_scheme = if let Some(pos) = url.find("://") {
+        pos + 3
+    } else {
+        return None;
+    };
+    let rest = &url[after_scheme..];
+    if let Some(stripped) = rest.strip_prefix("www.") {
+        let mut s = String::with_capacity(url.len() - 4);
+        s.push_str(&url[..after_scheme]);
+        s.push_str(stripped);
+        Some(s)
+    } else {
+        None
+    }
+}
+
+#[cfg(feature = "chrome")]
 /// Perform a chrome http request.
 pub async fn perform_chrome_http_request(
     page: &chromiumoxide::Page,
@@ -972,6 +1011,11 @@ pub async fn perform_chrome_http_request(
             if is_cipher_mismatch(&e) {
                 if let Some(flipped) = flip_http_https(source) {
                     return attempt_once(page, &flipped, referrer).await;
+                }
+            }
+            if is_ssl_protocol_error(&e) {
+                if let Some(no_www) = strip_www(source) {
+                    return attempt_once(page, &no_www, referrer).await;
                 }
             }
             Err(e)
@@ -1128,7 +1172,13 @@ pub async fn perform_chrome_http_request_cache(
         Err(e) => {
             if is_cipher_mismatch(&e) {
                 if let Some(flipped) = flip_http_https(source) {
-                    return attempt_once(page, &flipped, referrer, cache_options, cache_policy)
+                    return attempt_once(page, &flipped, referrer.clone(), cache_options, cache_policy)
+                        .await;
+                }
+            }
+            if is_ssl_protocol_error(&e) {
+                if let Some(no_www) = strip_www(source) {
+                    return attempt_once(page, &no_www, referrer, cache_options, cache_policy)
                         .await;
                 }
             }
@@ -3966,6 +4016,16 @@ async fn fetch_page_html_raw_base(
                         Ok(pr2) => pr2,
                         Err(err2) => build_error_page_response(&flipped, err2),
                     }
+                } else if let Some(no_www) = strip_www(target_url) {
+                    log::info!(
+                        "TLS handshake failure for {}; retrying without www: {}",
+                        target_url,
+                        no_www
+                    );
+                    match attempt_once(&no_www, client, only_html).await {
+                        Ok(pr2) => pr2,
+                        Err(err2) => build_error_page_response(&no_www, err2),
+                    }
                 } else {
                     build_error_page_response(target_url, err)
                 }
@@ -6499,6 +6559,27 @@ mod tests {
             Some("http://example.com".to_string())
         );
         assert_eq!(flip_http_https("ftp://example.com"), None);
+    }
+
+    #[test]
+    fn test_strip_www() {
+        assert_eq!(
+            strip_www("https://www.docs.github.com/foo"),
+            Some("https://docs.github.com/foo".to_string())
+        );
+        assert_eq!(
+            strip_www("https://www.example.com"),
+            Some("https://example.com".to_string())
+        );
+        assert_eq!(
+            strip_www("http://www.example.com/path?q=1"),
+            Some("http://example.com/path?q=1".to_string())
+        );
+        // No www prefix → None
+        assert_eq!(strip_www("https://example.com"), None);
+        assert_eq!(strip_www("https://docs.github.com"), None);
+        // No scheme → None
+        assert_eq!(strip_www("www.example.com"), None);
     }
 
     #[test]
