@@ -22,7 +22,9 @@ use tokio::io::AsyncWriteExt;
 use serde_json::{json, Value};
 
 use spider::client::header::{HeaderMap, HeaderValue};
-use spider::features::chrome_common::RequestInterceptConfiguration;
+use spider::features::chrome_common::{
+    RequestInterceptConfiguration, WaitForDelay, WaitForIdleNetwork, WaitForSelector,
+};
 use spider::hashbrown::HashMap;
 use spider::page::Page;
 use spider::string_concat::{string_concat, string_concat_impl};
@@ -31,6 +33,7 @@ use spider::utils::header_utils::header_map_to_hash_map;
 use spider::utils::log;
 use spider::website::{CrawlStatus, Website};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::build_folders::build_local_path;
 
@@ -196,6 +199,39 @@ async fn main() {
 
     if let Some(domains) = cli.external_domains {
         website.with_external_domains(Some(domains.into_iter()));
+    }
+
+    if let Some(wait_for_idle_network) = cli.wait_for_idle_network {
+        website.with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(
+            Duration::from_millis(wait_for_idle_network),
+        ))));
+    }
+    if let Some(wait_for_idle_network0) = cli.wait_for_idle_network0 {
+        website.with_wait_for_idle_network0(Some(WaitForIdleNetwork::new(Some(
+            Duration::from_millis(wait_for_idle_network0),
+        ))));
+    }
+    if let Some(wait_for_almost_idle_network0) = cli.wait_for_almost_idle_network0 {
+        website.with_wait_for_almost_idle_network0(Some(WaitForIdleNetwork::new(Some(
+            Duration::from_millis(wait_for_almost_idle_network0),
+        ))));
+    }
+    if let Some(selector) = cli.wait_for_idle_dom {
+        website.with_wait_for_idle_dom(Some(WaitForSelector::new(
+            Some(Duration::from_secs(30)),
+            selector,
+        )));
+    }
+    if let Some(selector) = cli.wait_for_selector {
+        website.with_wait_for_selector(Some(WaitForSelector::new(
+            Some(Duration::from_secs(60)),
+            selector,
+        )));
+    }
+    if let Some(wait_for_delay) = cli.wait_for_delay {
+        website.with_wait_for_delay(Some(WaitForDelay::new(Some(Duration::from_millis(
+            wait_for_delay,
+        )))));
     }
 
     let return_headers = cli.return_headers;

@@ -89,29 +89,64 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-  -u, --url <URL>                      The website URL to crawl
-  -r, --respect-robots-txt             Respect robots.txt file
-  -s, --subdomains                     Allow sub-domain crawling
-  -t, --tld                            Allow all tlds for domain
-  -H, --return-headers                 Return page headers (requires `headers` feature)
-  -v, --verbose                        Print page visited on standard output
-  -D, --delay <DELAY>                  Polite crawling delay in milli seconds
-      --limit <LIMIT>                  The max pages allowed to crawl
-      --blacklist-url <BLACKLIST_URL>  Comma-separated deny list for URLs
-  -a, --agent <AGENT>                  User-Agent
-  -B, --budget <BUDGET>                Crawl budget rules
-  -E, --external-domains <EXTERNAL_DOMAINS>  External domains to include
-  -b, --block-images                   Block image rendering when using Chrome
-  -d, --depth <DEPTH>                  Crawl depth limit
-      --accept-invalid-certs           Dangerously accept invalid certficates
-      --full-resources                 Gather css/js and other page resources
-      --headless                       Use browser rendering mode (headless)
-      --http                           Force HTTP-only mode (no browser rendering)
-  -p, --proxy-url <PROXY_URL>          The proxy url to use
-      --spider-cloud-key <SPIDER_CLOUD_KEY>    Spider Cloud API key
-      --spider-cloud-mode <SPIDER_CLOUD_MODE>  proxy|api|unblocker|fallback|smart
-  -h, --help                           Print help
-  -V, --version                        Print version
+  -u, --url <URL>
+          The website URL to crawl
+  -r, --respect-robots-txt
+          Respect robots.txt file
+  -s, --subdomains
+          Allow sub-domain crawling
+  -t, --tld
+          Allow all tlds for domain
+  -H, --return-headers
+          Return the headers of the page.  Requires the `headers` flag enabled
+  -v, --verbose
+          Print page visited on standard output
+  -D, --delay <DELAY>
+          Polite crawling delay in milli seconds
+      --limit <LIMIT>
+          The max pages allowed to crawl
+      --blacklist-url <BLACKLIST_URL>
+          Comma seperated string list of pages to not crawl or regex with feature enabled
+  -a, --agent <AGENT>
+          User-Agent
+  -B, --budget <BUDGET>
+          Crawl Budget preventing extra paths from being crawled. Use commas to split the path followed by the limit ex: "*,1" - to only allow one page
+  -E, --external-domains <EXTERNAL_DOMAINS>
+          Set external domains to group with crawl
+  -b, --block-images
+          Block Images from rendering when using Chrome. Requires the `chrome_intercept` flag enabled
+  -d, --depth <DEPTH>
+          The crawl depth limits
+      --accept-invalid-certs
+          Dangerously accept invalid certficates
+      --full-resources
+          Gather all content that relates to the domain like css,jss, and etc
+      --headless
+          Use browser rendering mode (headless) for crawl/scrape/download. Requires the `chrome` feature
+      --http
+          Force HTTP-only mode (no browser rendering), even when built with `chrome`
+  -p, --proxy-url <PROXY_URL>
+          The proxy url to use
+      --spider-cloud-key <SPIDER_CLOUD_KEY>
+          Spider Cloud API key. Sign up at https://spider.cloud for an API key
+      --spider-cloud-mode <SPIDER_CLOUD_MODE>
+          Spider Cloud mode: proxy (default), api, unblocker, fallback, or smart [default: proxy]
+      --wait-for-idle-network <WAIT_FOR_IDLE_NETWORK>
+          Wait for network request to be idle within a time frame period (500ms no network connections) with an optional timeout in milliseconds
+      --wait-for-idle-network0 <WAIT_FOR_IDLE_NETWORK0>
+          Wait for network request with a max timeout (0 connections) with an optional timeout in milliseconds
+      --wait-for-almost-idle-network0 <WAIT_FOR_ALMOST_IDLE_NETWORK0>
+          Wait for network to be almost idle with a max timeout (max 2 connections) with an optional timeout in milliseconds
+      --wait-for-idle-dom <WAIT_FOR_IDLE_DOM>
+          Wait for idle dom mutations for target element (defaults to "body") with a 30s timeout
+      --wait-for-selector <WAIT_FOR_SELECTOR>
+          Wait for a specific CSS selector to appear with a 60s timeout
+      --wait-for-delay <WAIT_FOR_DELAY>
+          Wait for a fixed delay in milliseconds
+  -h, --help
+          Print help
+  -V, --version
+          Print version
 ```
 
 All features are available except the Website struct `on_link_find_callback` configuration option.
