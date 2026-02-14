@@ -72,4 +72,22 @@ pub struct Cli {
     /// Spider Cloud mode: proxy (default), api, unblocker, fallback, or smart.
     #[clap(long, default_value = "proxy")]
     pub spider_cloud_mode: Option<String>,
+    /// Wait for network request to be idle within a time frame period (500ms no network connections) with an optional timeout in milliseconds.
+    #[clap(long)]
+    pub wait_for_idle_network: Option<u64>,
+    /// Wait for network request with a max timeout (0 connections) with an optional timeout in milliseconds.
+    #[clap(long)]
+    pub wait_for_idle_network0: Option<u64>,
+    /// Wait for network to be almost idle with a max timeout (max 2 connections) with an optional timeout in milliseconds.
+    #[clap(long)]
+    pub wait_for_almost_idle_network0: Option<u64>,
+    /// Wait for idle dom mutations for target element (defaults to "body") with a 30s timeout.
+    #[clap(long)]
+    pub wait_for_idle_dom: Option<String>,
+    /// Wait for a specific CSS selector to appear with a 60s timeout.
+    #[clap(long)]
+    pub wait_for_selector: Option<String>,
+    /// Wait for a fixed delay in milliseconds.
+    #[clap(long)]
+    pub wait_for_delay: Option<u64>,
 }
