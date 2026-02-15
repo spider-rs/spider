@@ -64,6 +64,11 @@ impl ModelRouter {
         self
     }
 
+    /// Get a reference to the underlying policy.
+    pub fn policy(&self) -> &ModelPolicy {
+        &self.policy
+    }
+
     /// Enable or disable smart routing.
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
@@ -787,6 +792,36 @@ pub fn estimate_message_tokens(messages: &[crate::Message]) -> usize {
         .iter()
         .map(|m| estimate_tokens(m.content.as_text()) + 4) // +4 for message overhead
         .sum()
+}
+
+/// Classify the complexity of an automation round using signals already
+/// available in the engine loop — no additional LLM call required.
+///
+/// Returns a [`TaskAnalysis`] suitable for passing to [`ModelRouter::route`].
+pub fn classify_round_complexity(
+    user_prompt: &str,
+    html_len: usize,
+    round_idx: usize,
+    stagnated: bool,
+) -> TaskAnalysis {
+    let mut analysis = TaskAnalysis::from_prompt(user_prompt);
+    analysis.estimated_tokens = user_prompt.len() / 4 + 1;
+    // Initial round requires more reasoning (first page analysis)
+    if round_idx == 0 {
+        analysis.requires_reasoning = true;
+    }
+    // Stagnated rounds need a stronger model to break out
+    if stagnated {
+        analysis.requires_reasoning = true;
+        analysis.multi_step = true;
+    }
+    // Large pages need more capability
+    if html_len > 50_000 {
+        analysis.requires_reasoning = true;
+    }
+    // Automation always requires structured JSON output
+    analysis.requires_structured_output = true;
+    analysis
 }
 
 #[cfg(test)]
@@ -1643,5 +1678,51 @@ mod tests {
         assert!(!policy.large.is_empty());
         assert!(policy.allow_large);
         assert_eq!(policy.max_cost_tier, CostTier::High);
+    }
+
+    // ── classify_round_complexity tests ────────────────────────────────
+
+    #[test]
+    fn test_classify_round_complexity_round_0() {
+        let analysis = classify_round_complexity("click button", 1000, 0, false);
+        assert!(analysis.requires_reasoning, "round 0 always requires reasoning");
+        assert!(analysis.requires_structured_output);
+    }
+
+    #[test]
+    fn test_classify_round_complexity_stagnated() {
+        let analysis = classify_round_complexity("click button", 1000, 5, true);
+        assert!(analysis.requires_reasoning, "stagnated rounds need reasoning");
+        assert!(analysis.multi_step, "stagnated rounds are multi-step");
+    }
+
+    #[test]
+    fn test_classify_round_complexity_large_html() {
+        let analysis = classify_round_complexity("click button", 60_000, 3, false);
+        assert!(analysis.requires_reasoning, "large HTML needs reasoning");
+    }
+
+    #[test]
+    fn test_classify_round_complexity_simple() {
+        let analysis = classify_round_complexity("click button", 1000, 3, false);
+        // Simple round: not round 0, not stagnated, small HTML, no reasoning keywords
+        assert!(!analysis.requires_reasoning);
+        assert!(!analysis.multi_step);
+        assert!(analysis.requires_structured_output);
+    }
+
+    #[test]
+    fn test_policy_getter() {
+        let policy = ModelPolicy {
+            small: "small-model".to_string(),
+            medium: "medium-model".to_string(),
+            large: "large-model".to_string(),
+            allow_large: true,
+            max_latency_ms: None,
+            max_cost_tier: CostTier::High,
+        };
+        let router = ModelRouter::with_policy(policy.clone());
+        assert_eq!(router.policy().small, "small-model");
+        assert_eq!(router.policy().large, "large-model");
     }
 }

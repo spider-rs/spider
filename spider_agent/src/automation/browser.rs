@@ -1891,9 +1891,15 @@ impl RemoteMultimodalEngine {
             ])
         };
 
-        // Resolve model endpoint for this round (dual-model routing)
+        // Resolve model endpoint for this round (pool routing with complexity, or dual-model fallback)
         let (resolved_api_url, resolved_model, resolved_api_key) =
-            self.resolve_model_for_round(use_vision);
+            self.resolve_model_for_round_with_complexity(
+                use_vision,
+                &user_text,
+                html.len(),
+                round_idx,
+                stagnated,
+            );
 
         let messages = vec![
             Message {

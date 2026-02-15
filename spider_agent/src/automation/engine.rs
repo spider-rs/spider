@@ -90,6 +90,17 @@ pub struct RemoteMultimodalEngine {
     pub use_chrome_ai: bool,
     /// Maximum user-prompt characters for Chrome AI inference.
     pub chrome_ai_max_user_chars: usize,
+    /// Optional model router for per-round complexity-based routing.
+    ///
+    /// When set (pool has 3+ models), each round classifies its complexity
+    /// and routes to the appropriate cost tier (cheap for simple, expensive
+    /// for complex). `None` delegates to existing `resolve_model_for_round`.
+    pub model_router: Option<super::router::ModelRouter>,
+    /// Pool of model endpoints for complexity-based routing.
+    ///
+    /// Each entry can have its own API URL and key. The router selects
+    /// which model to use and this pool resolves the connection details.
+    pub model_pool: Vec<super::ModelEndpoint>,
 }
 
 impl RemoteMultimodalEngine {
@@ -119,6 +130,8 @@ impl RemoteMultimodalEngine {
             experience_memory: None,
             use_chrome_ai: false,
             chrome_ai_max_user_chars: 6000,
+            model_router: None,
+            model_pool: Vec::new(),
         }
     }
 
@@ -277,6 +290,8 @@ impl RemoteMultimodalEngine {
             experience_memory: self.experience_memory.clone(),
             use_chrome_ai: self.use_chrome_ai,
             chrome_ai_max_user_chars: self.chrome_ai_max_user_chars,
+            model_router: self.model_router.clone(),
+            model_pool: self.model_pool.clone(),
         }
     }
 
@@ -514,6 +529,89 @@ impl RemoteMultimodalEngine {
             }
             None => (&self.api_url, &self.model_name, self.api_key.as_deref()),
         }
+    }
+
+    /// Resolve (api_url, model_name, api_key) using complexity-based pool routing.
+    ///
+    /// When `model_router` is set (3+ models in pool), classifies the round's
+    /// complexity and routes to the appropriate cost tier. Falls back to the
+    /// existing `resolve_model_for_round` when no pool routing is active.
+    ///
+    /// If the routed model doesn't support vision but `use_vision` is true,
+    /// walks up cost tiers to find a vision-capable model in the pool.
+    pub fn resolve_model_for_round_with_complexity(
+        &self,
+        use_vision: bool,
+        user_prompt: &str,
+        html_len: usize,
+        round_idx: usize,
+        stagnated: bool,
+    ) -> (&str, &str, Option<&str>) {
+        let router = match &self.model_router {
+            Some(r) => r,
+            None => return self.resolve_model_for_round(use_vision),
+        };
+
+        // Classify complexity and route to a tier
+        let analysis =
+            super::router::classify_round_complexity(user_prompt, html_len, round_idx, stagnated);
+        let decision = router.route(&analysis);
+        let chosen_model = &decision.model;
+
+        // Try to find the chosen model in the pool
+        if let Some(ep) = self.model_pool.iter().find(|ep| ep.model_name == *chosen_model) {
+            // If vision is needed but this model doesn't support it, find a fallback
+            if use_vision && !super::supports_vision(&ep.model_name) {
+                if let Some(fallback) = self.find_vision_fallback_in_pool(&decision.tier) {
+                    let url = fallback.api_url.as_deref().unwrap_or(&self.api_url);
+                    let key = fallback.api_key.as_deref().or(self.api_key.as_deref());
+                    return (url, &fallback.model_name, key);
+                }
+            }
+            let url = ep.api_url.as_deref().unwrap_or(&self.api_url);
+            let key = ep.api_key.as_deref().or(self.api_key.as_deref());
+            return (url, &ep.model_name, key);
+        }
+
+        // Model name from router not found in pool — fall back to primary
+        self.resolve_model_for_round(use_vision)
+    }
+
+    /// Walk up cost tiers to find a vision-capable model in the pool.
+    fn find_vision_fallback_in_pool(
+        &self,
+        starting_tier: &super::CostTier,
+    ) -> Option<&super::ModelEndpoint> {
+        let router = self.model_router.as_ref()?;
+        let policy = router.policy();
+
+        // Walk tiers from current up to High, looking for a vision-capable model
+        let tiers_to_try: &[super::CostTier] = match starting_tier {
+            super::CostTier::Low => &[
+                super::CostTier::Medium,
+                super::CostTier::High,
+            ],
+            super::CostTier::Medium => &[super::CostTier::High],
+            super::CostTier::High => &[],
+        };
+
+        for &tier in tiers_to_try {
+            let model_name = policy.model_for_tier(tier);
+            if let Some(ep) = self
+                .model_pool
+                .iter()
+                .find(|ep| ep.model_name == model_name)
+            {
+                if super::supports_vision(&ep.model_name) {
+                    return Some(ep);
+                }
+            }
+        }
+
+        // Last resort: any vision-capable model in the pool
+        self.model_pool
+            .iter()
+            .find(|ep| super::supports_vision(&ep.model_name))
     }
 
     /// Decide whether to use vision this round.
@@ -1771,5 +1869,151 @@ mod tests {
         assert!(engine
             .resolve_runtime_for_url("https://blocked.com")
             .is_none());
+    }
+
+    // ── Pool routing tests ───────────────────────────────────────────
+
+    #[test]
+    fn test_pool_routing_no_router_delegates() {
+        // No model_router → delegates to resolve_model_for_round
+        let engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None)
+            .with_api_key(Some("sk-test"));
+        assert!(engine.model_router.is_none());
+
+        let (url, model, key) =
+            engine.resolve_model_for_round_with_complexity(true, "click button", 500, 3, false);
+        assert_eq!(url, "https://api.example.com");
+        assert_eq!(model, "gpt-4o");
+        assert_eq!(key, Some("sk-test"));
+    }
+
+    #[test]
+    fn test_pool_routing_picks_cheap_for_simple() {
+        use crate::automation::router::auto_policy;
+
+        let policy = auto_policy(&["gpt-4o", "gpt-4o-mini", "deepseek-chat"]);
+        let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
+        engine.model_router = Some(crate::automation::router::ModelRouter::with_policy(policy.clone()));
+        engine.model_pool = vec![
+            crate::automation::ModelEndpoint::new("gpt-4o"),
+            crate::automation::ModelEndpoint::new("gpt-4o-mini"),
+            crate::automation::ModelEndpoint::new("deepseek-chat"),
+        ];
+
+        // Simple round (round 3, no stagnation, small HTML, no reasoning keywords)
+        let (_, model, _) =
+            engine.resolve_model_for_round_with_complexity(false, "click button", 500, 3, false);
+        // Should pick the small/cheap model
+        assert_eq!(model, policy.small, "simple round should use cheap model");
+    }
+
+    #[test]
+    fn test_pool_routing_picks_expensive_for_complex() {
+        use crate::automation::router::auto_policy;
+
+        let policy = auto_policy(&["gpt-4o", "gpt-4o-mini", "deepseek-chat"]);
+        let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
+        engine.model_router = Some(crate::automation::router::ModelRouter::with_policy(policy.clone()));
+        engine.model_pool = vec![
+            crate::automation::ModelEndpoint::new("gpt-4o"),
+            crate::automation::ModelEndpoint::new("gpt-4o-mini"),
+            crate::automation::ModelEndpoint::new("deepseek-chat"),
+        ];
+
+        // Complex round: round 0, stagnated, large HTML, reasoning+code keywords
+        // In production user_text includes HTML so it's very long — simulate with a
+        // large prompt that also triggers multiple complexity indicators.
+        let long_prompt = "a]".repeat(9000); // ~18k chars → ~4500 tokens → above large_model_threshold
+        let (_, model, _) = engine.resolve_model_for_round_with_complexity(
+            false,
+            &format!("analyze and implement code to fix: {long_prompt}"),
+            60_000,
+            0,
+            true, // stagnated
+        );
+        // Should pick the large/expensive model
+        assert_eq!(model, policy.large, "complex round should use powerful model");
+    }
+
+    #[test]
+    fn test_pool_routing_stagnated_upgrades() {
+        use crate::automation::router::auto_policy;
+
+        let policy = auto_policy(&["gpt-4o", "gpt-4o-mini", "deepseek-chat"]);
+        let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
+        engine.model_router = Some(crate::automation::router::ModelRouter::with_policy(policy.clone()));
+        engine.model_pool = vec![
+            crate::automation::ModelEndpoint::new("gpt-4o"),
+            crate::automation::ModelEndpoint::new("gpt-4o-mini"),
+            crate::automation::ModelEndpoint::new("deepseek-chat"),
+        ];
+
+        // Stagnated round with simple prompt should still upgrade
+        let (_, model, _) =
+            engine.resolve_model_for_round_with_complexity(false, "click button", 500, 5, true);
+        // Stagnation forces requires_reasoning + multi_step → should not use cheapest
+        assert_ne!(
+            model, policy.small,
+            "stagnated round should not use cheapest model"
+        );
+    }
+
+    #[test]
+    fn test_pool_routing_vision_fallback() {
+        use crate::automation::router::auto_policy;
+
+        // deepseek-chat does NOT support vision, gpt-4o does
+        let policy = auto_policy(&["gpt-4o", "gpt-4o-mini", "deepseek-chat"]);
+        let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
+        engine.model_router = Some(crate::automation::router::ModelRouter::with_policy(policy));
+        engine.model_pool = vec![
+            crate::automation::ModelEndpoint::new("gpt-4o"),
+            crate::automation::ModelEndpoint::new("gpt-4o-mini"),
+            crate::automation::ModelEndpoint::new("deepseek-chat"),
+        ];
+
+        // Simple round would pick cheap model (deepseek-chat) but vision is needed
+        let (_, model, _) =
+            engine.resolve_model_for_round_with_complexity(true, "click button", 500, 3, false);
+        // deepseek-chat doesn't support vision → should fall back to a vision-capable model
+        assert!(
+            llm_models_spider::supports_vision(model),
+            "vision round should resolve to a vision-capable model, got {model}"
+        );
+    }
+
+    #[test]
+    fn test_pool_routing_inherits_endpoint_keys() {
+        use crate::automation::router::auto_policy;
+
+        let policy = auto_policy(&["gpt-4o", "gpt-4o-mini", "deepseek-chat"]);
+        let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
+        engine.api_key = Some("sk-parent".to_string());
+        engine.model_router = Some(crate::automation::router::ModelRouter::with_policy(policy));
+        engine.model_pool = vec![
+            crate::automation::ModelEndpoint::new("gpt-4o"),
+            crate::automation::ModelEndpoint::new("gpt-4o-mini"),
+            crate::automation::ModelEndpoint::new("deepseek-chat")
+                .with_api_url("https://api.deepseek.com/v1/chat/completions")
+                .with_api_key("sk-ds"),
+        ];
+
+        // If routed to deepseek-chat, should use its endpoint-specific URL/key
+        // If routed to gpt-4o, should inherit parent URL/key
+        let (url, model, key) = engine.resolve_model_for_round_with_complexity(
+            false,
+            "analyze complex page with code",
+            60_000,
+            0,
+            false,
+        );
+        if model == "deepseek-chat" {
+            assert_eq!(url, "https://api.deepseek.com/v1/chat/completions");
+            assert_eq!(key, Some("sk-ds"));
+        } else {
+            // Inherited from parent
+            assert_eq!(url, "https://api.example.com");
+            assert_eq!(key, Some("sk-parent"));
+        }
     }
 }

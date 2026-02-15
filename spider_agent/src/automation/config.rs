@@ -83,6 +83,15 @@ pub struct RemoteMultimodalConfigs {
     /// Routing mode controlling when vision vs text model is used.
     #[serde(default)]
     pub vision_route_mode: VisionRouteMode,
+    /// Optional pool of model endpoints for per-round complexity routing.
+    ///
+    /// When 3+ models are provided, the engine automatically routes simple
+    /// rounds to cheap/fast models and complex rounds to powerful/expensive
+    /// models — with zero extra LLM calls for the routing decision.
+    ///
+    /// Pools with 0-2 models are ignored (existing single/dual routing applies).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub model_pool: Vec<ModelEndpoint>,
     /// Use Chrome's built-in LanguageModel API (Gemini Nano) for inference.
     ///
     /// When `true`, the automation loop evaluates JavaScript on the page via
@@ -145,6 +154,7 @@ impl PartialEq for RemoteMultimodalConfigs {
             && self.vision_model == other.vision_model
             && self.text_model == other.text_model
             && self.vision_route_mode == other.vision_route_mode
+            && self.model_pool == other.model_pool
             && self.use_chrome_ai == other.use_chrome_ai
             && self.chrome_ai_max_user_chars == other.chrome_ai_max_user_chars
         // NOTE: intentionally ignoring `semaphore` and `skill_registry`
@@ -168,6 +178,7 @@ impl Default for RemoteMultimodalConfigs {
             vision_model: None,
             text_model: None,
             vision_route_mode: VisionRouteMode::default(),
+            model_pool: Vec::new(),
             use_chrome_ai: false,
             chrome_ai_max_user_chars: default_chrome_ai_max_user_chars(),
             #[cfg(feature = "skills")]
@@ -359,6 +370,16 @@ impl RemoteMultimodalConfigs {
     pub fn with_dual_models(mut self, vision: ModelEndpoint, text: ModelEndpoint) -> Self {
         self.vision_model = Some(vision);
         self.text_model = Some(text);
+        self
+    }
+
+    /// Set a pool of model endpoints for per-round complexity routing.
+    ///
+    /// When 3+ models are provided, the engine uses [`auto_policy`] to
+    /// assign models to cost tiers, then picks cheap models for simple
+    /// rounds and expensive models for complex rounds.
+    pub fn with_model_pool(mut self, pool: Vec<ModelEndpoint>) -> Self {
+        self.model_pool = pool;
         self
     }
 
@@ -944,5 +965,71 @@ mod tests {
             assert_eq!(model, "gpt-4o-mini");
             assert_eq!(key, Some("sk-other"));
         }
+    }
+
+    // ── model_pool tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_model_pool_default_empty() {
+        let cfg = RemoteMultimodalConfigs::default();
+        assert!(cfg.model_pool.is_empty());
+    }
+
+    #[test]
+    fn test_model_pool_builder() {
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o")
+            .with_model_pool(vec![
+                ModelEndpoint::new("gpt-4o"),
+                ModelEndpoint::new("gpt-4o-mini"),
+                ModelEndpoint::new("deepseek-chat")
+                    .with_api_url("https://api.deepseek.com/v1/chat/completions")
+                    .with_api_key("sk-ds"),
+            ]);
+        assert_eq!(cfg.model_pool.len(), 3);
+        assert_eq!(cfg.model_pool[2].model_name, "deepseek-chat");
+        assert_eq!(
+            cfg.model_pool[2].api_url.as_deref(),
+            Some("https://api.deepseek.com/v1/chat/completions")
+        );
+    }
+
+    #[test]
+    fn test_model_pool_serde_round_trip() {
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o")
+            .with_model_pool(vec![
+                ModelEndpoint::new("gpt-4o"),
+                ModelEndpoint::new("gpt-4o-mini"),
+                ModelEndpoint::new("deepseek-chat"),
+            ]);
+
+        let json = serde_json::to_string(&cfg).unwrap();
+        assert!(json.contains("model_pool"));
+        let deserialized: RemoteMultimodalConfigs = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.model_pool.len(), 3);
+        assert_eq!(deserialized.model_pool[0].model_name, "gpt-4o");
+        assert_eq!(deserialized.model_pool[1].model_name, "gpt-4o-mini");
+        assert_eq!(deserialized.model_pool[2].model_name, "deepseek-chat");
+    }
+
+    #[test]
+    fn test_model_pool_empty_omitted_from_json() {
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o");
+        let json = serde_json::to_string(&cfg).unwrap();
+        assert!(
+            !json.contains("model_pool"),
+            "empty model_pool should be omitted from JSON"
+        );
+    }
+
+    #[test]
+    fn test_model_pool_equality() {
+        let a = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o")
+            .with_model_pool(vec![ModelEndpoint::new("gpt-4o")]);
+        let b = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o")
+            .with_model_pool(vec![ModelEndpoint::new("gpt-4o")]);
+        let c = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o")
+            .with_model_pool(vec![ModelEndpoint::new("gpt-4o-mini")]);
+        assert_eq!(a, b);
+        assert_ne!(a, c);
     }
 }

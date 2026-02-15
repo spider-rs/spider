@@ -576,6 +576,19 @@ impl Configuration {
             engine.with_skill_registry(Some(registry.clone()));
         }
 
+        // Build per-round complexity router from model pool (3+ models required)
+        let model_pool = cfgs.model_pool.clone();
+        if model_pool.len() >= 3 {
+            let model_names: Vec<&str> = model_pool
+                .iter()
+                .map(|ep| ep.model_name.as_str())
+                .collect();
+            let policy = crate::features::automation::router::auto_policy(&model_names);
+            engine.model_router =
+                Some(crate::features::automation::router::ModelRouter::with_policy(policy));
+        }
+        engine.model_pool = model_pool;
+
         Some(engine)
     }
 
