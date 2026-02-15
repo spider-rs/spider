@@ -364,11 +364,27 @@ impl ModelSelector {
     /// Select the best model matching the given requirements.
     ///
     /// Returns `None` if no model in the pool satisfies the requirements.
+    ///
+    /// For pools with ≤ 2 models, skips scoring/sorting and returns the first
+    /// model that satisfies the requirements. Use the full ranking pipeline
+    /// only when there are 3+ models to meaningfully choose between.
     pub fn select(&self, reqs: &ModelRequirements) -> Option<ScoredModel> {
+        if self.models.len() <= 2 {
+            // Fast path: no meaningful selection with 0-2 models.
+            // Just check requirements and return the first match.
+            return self
+                .models
+                .iter()
+                .filter_map(|(name, custom_prio)| self.score_model(name, *custom_prio, reqs))
+                .next();
+        }
         self.ranked(reqs).into_iter().next()
     }
 
     /// Return all models that satisfy the requirements, ranked best-to-worst.
+    ///
+    /// For pools with ≤ 2 models, skips the sorting step since the ordering
+    /// is trivial. Scoring/sorting is only worthwhile with 3+ candidates.
     pub fn ranked(&self, reqs: &ModelRequirements) -> Vec<ScoredModel> {
         let mut candidates: Vec<ScoredModel> = self
             .models
@@ -378,8 +394,10 @@ impl ModelSelector {
             })
             .collect();
 
-        // Sort descending by score
-        candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        // Only worth sorting when there are 3+ candidates
+        if candidates.len() > 2 {
+            candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        }
         candidates
     }
 
@@ -538,6 +556,12 @@ impl ModelSelector {
 /// Inspects arena rankings and pricing to assign models to tiers.
 /// The best-ranked model becomes `large`, cheapest becomes `small`,
 /// and something in-between becomes `medium`.
+///
+/// For pools with ≤ 2 models, skips the full scoring pipeline:
+/// - 0 models → default policy
+/// - 1 model → all tiers use that model
+/// - 2 models → first=large/medium, second=small (no scoring needed,
+///   dual-model routing via [`VisionRouteMode`] handles the rest)
 pub fn auto_policy(available_models: &[&str]) -> ModelPolicy {
     if available_models.is_empty() {
         return ModelPolicy::default();
@@ -553,7 +577,23 @@ pub fn auto_policy(available_models: &[&str]) -> ModelPolicy {
             max_cost_tier: CostTier::High,
         };
     }
+    if available_models.len() == 2 {
+        // With only 2 models, skip arena/pricing lookups.
+        // Assign first as large/medium, second as small — the caller
+        // already knows which is vision vs text via VisionRouteMode.
+        let a = available_models[0].to_string();
+        let b = available_models[1].to_string();
+        return ModelPolicy {
+            large: a.clone(),
+            medium: a,
+            small: b,
+            allow_large: true,
+            max_latency_ms: None,
+            max_cost_tier: CostTier::High,
+        };
+    }
 
+    // 3+ models: full scoring pipeline
     // Collect (name, arena_score, input_cost)
     let mut models: Vec<(&str, f32, f32)> = available_models
         .iter()
@@ -847,7 +887,7 @@ mod tests {
 
     #[test]
     fn test_model_selector_custom_priority() {
-        let mut selector = ModelSelector::new(&["gpt-4o", "gpt-4o-mini"]);
+        let mut selector = ModelSelector::new(&["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"]);
         // Override gpt-4o-mini to be top priority
         selector.set_priority("gpt-4o-mini", 999.0);
 
@@ -1257,7 +1297,7 @@ mod tests {
 
     #[test]
     fn test_selector_priority_override_beats_arena() {
-        let mut selector = ModelSelector::new(&["gpt-4o", "gpt-3.5-turbo"]);
+        let mut selector = ModelSelector::new(&["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"]);
         // gpt-3.5-turbo has low arena score; override it to beat gpt-4o
         selector.set_priority("gpt-3.5-turbo", 999.0);
         let reqs = ModelRequirements::default();
@@ -1290,7 +1330,10 @@ mod tests {
     #[test]
     fn test_auto_policy_2_models() {
         let policy = auto_policy(&["gpt-4o", "gpt-4o-mini"]);
-        // With 2 models, medium clones large (len < 3 → medium = large)
+        // With 2 models, skip scoring: first=large/medium, second=small
+        assert_eq!(policy.large, "gpt-4o");
+        assert_eq!(policy.medium, "gpt-4o");
+        assert_eq!(policy.small, "gpt-4o-mini");
         assert_eq!(
             policy.medium, policy.large,
             "2-model policy should have medium == large"

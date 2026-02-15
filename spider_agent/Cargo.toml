@@ -1,6 +1,6 @@
 [package]
 name = "spider_agent"
-version = "2.45.16"
+version = "2.45.17"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A concurrent-safe multimodal agent for web automation and research."
 repository = "https://github.com/spider-rs/spider"
@@ -28,8 +28,8 @@ parking_lot = "0.12"
 base64 = "0.22"
 
 # Extracted types and HTML processing
-spider_agent_types = { version = "2.45.16", path = "../spider_agent_types" }
-spider_agent_html = { version = "2.45.16", path = "../spider_agent_html" }
+spider_agent_types = { version = "2.45.17", path = "../spider_agent_types" }
+spider_agent_html = { version = "2.45.17", path = "../spider_agent_html" }
 
 # HTML processing (still needed for engine internals)
 lol_html = "2"
