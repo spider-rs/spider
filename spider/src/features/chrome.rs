@@ -96,6 +96,7 @@ pub fn get_browser_config(
 ) -> Option<BrowserConfig> {
     let builder = BrowserConfig::builder()
         .disable_default_args()
+        .no_sandbox()
         .request_timeout(match request_timeout.as_ref() {
             Some(timeout) => **timeout,
             _ => Duration::from_millis(REQUEST_TIMEOUT),
@@ -367,7 +368,10 @@ pub async fn setup_browser_configuration(
 
                 match Browser::launch(browser_config).await {
                     Ok(browser) => Some(browser),
-                    _ => None,
+                    Err(e) => {
+                        log::error!("Browser::launch() failed: {:?}", e);
+                        None
+                    }
                 }
             }
             _ => None,
