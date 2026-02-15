@@ -2552,12 +2552,15 @@ impl Page {
                 }
 
                 if rerender {
-                    if let Some(browser_controller) = browser
+                    let chrome_available = browser
                         .get_or_init(|| {
                             crate::website::Website::setup_browser_base(&configuration, &base)
                         })
                         .await
-                    {
+                        .is_some();
+
+                    if chrome_available {
+                        let browser_controller = browser.get().unwrap().as_ref().unwrap();
                         let browser = browser_controller.browser.0.clone();
                         let browser_id = browser_controller.browser.2.clone();
                         let configuration = configuration.clone();
@@ -2656,6 +2659,10 @@ impl Page {
                                 }
                             }
                         });
+                    } else {
+                        // Chrome not available — drop tx so rx.await resolves immediately
+                        // without this, rx.await deadlocks waiting for a tx that never sends
+                        drop(tx);
                     }
 
                     match rx.await {
@@ -2902,12 +2909,15 @@ impl Page {
                 }
 
                 if rerender {
-                    if let Some(browser_controller) = browser
+                    let chrome_available = browser
                         .get_or_init(|| {
                             crate::website::Website::setup_browser_base(&configuration, &base)
                         })
                         .await
-                    {
+                        .is_some();
+
+                    if chrome_available {
+                        let browser_controller = browser.get().unwrap().as_ref().unwrap();
                         let browser = browser_controller.browser.0.clone();
                         let browser_id = browser_controller.browser.2.clone();
                         let configuration = configuration.clone();
@@ -3007,6 +3017,10 @@ impl Page {
                                 }
                             }
                         });
+                    } else {
+                        // Chrome not available — drop tx so rx.await resolves immediately
+                        // without this, rx.await deadlocks waiting for a tx that never sends
+                        drop(tx);
                     }
 
                     match rx.await {
