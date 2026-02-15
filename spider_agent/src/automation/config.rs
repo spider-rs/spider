@@ -802,4 +802,147 @@ mod tests {
             "expected word-search built-in skill"
         );
     }
+
+    // ── Phase 4: Config integration with router ─────────────────────────
+
+    #[test]
+    fn test_selector_to_dual_model_config() {
+        use super::super::router::{ModelRequirements, ModelSelector, SelectionStrategy};
+
+        let mut selector = ModelSelector::new(&["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"]);
+
+        // Pick best vision model
+        let vision_reqs = ModelRequirements::default().with_vision();
+        let vision_pick = selector.select(&vision_reqs).expect("should find a vision model");
+
+        // Pick cheapest text model
+        selector.set_strategy(SelectionStrategy::CheapestFirst);
+        let text_reqs = ModelRequirements::default();
+        let text_pick = selector.select(&text_reqs).expect("should find a text model");
+
+        // Build config with dual models from selector picks
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", &vision_pick.name)
+            .with_dual_models(
+                ModelEndpoint::new(&vision_pick.name),
+                ModelEndpoint::new(&text_pick.name),
+            )
+            .with_vision_route_mode(VisionRouteMode::TextFirst);
+
+        // Verify resolve_model_for_round returns selector's picks
+        let (_, model, _) = cfg.resolve_model_for_round(true);
+        assert_eq!(model, vision_pick.name, "vision round should use vision pick");
+
+        let (_, model, _) = cfg.resolve_model_for_round(false);
+        assert_eq!(model, text_pick.name, "text round should use text pick");
+    }
+
+    #[test]
+    fn test_auto_policy_to_configs_round_trip() {
+        use super::super::router::auto_policy;
+
+        let policy = auto_policy(&["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"]);
+
+        // Build config using policy's tier assignments
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", &policy.large)
+            .with_dual_models(
+                ModelEndpoint::new(&policy.large),
+                ModelEndpoint::new(&policy.small),
+            );
+
+        // Serde round-trip
+        let json = serde_json::to_string(&cfg).unwrap();
+        let deserialized: RemoteMultimodalConfigs = serde_json::from_str(&json).unwrap();
+
+        // Verify resolution survives round-trip
+        let (_, vision_model, _) = deserialized.resolve_model_for_round(true);
+        let (_, text_model, _) = deserialized.resolve_model_for_round(false);
+        assert_eq!(vision_model, policy.large);
+        assert_eq!(text_model, policy.small);
+    }
+
+    #[test]
+    fn test_vision_routing_with_real_capabilities() {
+        // Use real model names with known vision capabilities
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o")
+            .with_dual_models(
+                ModelEndpoint::new("gpt-4o"),        // vision-capable
+                ModelEndpoint::new("gpt-3.5-turbo"), // text-only
+            )
+            .with_vision_route_mode(VisionRouteMode::TextFirst);
+
+        // Round 0 (TextFirst) → vision
+        assert!(cfg.should_use_vision_this_round(0, false, 0, false));
+        let (_, model, _) = cfg.resolve_model_for_round(true);
+        assert_eq!(model, "gpt-4o");
+        assert!(
+            llm_models_spider::supports_vision(model),
+            "vision-round model should support vision"
+        );
+
+        // Round 3 (no stagnation) → text
+        assert!(!cfg.should_use_vision_this_round(3, false, 0, false));
+        let (_, model, _) = cfg.resolve_model_for_round(false);
+        assert_eq!(model, "gpt-3.5-turbo");
+        assert!(
+            !llm_models_spider::supports_vision(model),
+            "text-round model should NOT support vision"
+        );
+    }
+
+    #[test]
+    fn test_single_model_config_e2e() {
+        use super::super::router::auto_policy;
+
+        // User has exactly one model — the most common real-world case
+        let policy = auto_policy(&["gpt-4o"]);
+
+        // Build config from single-model policy (no dual routing)
+        let cfg = RemoteMultimodalConfigs::new("https://api.openai.com/v1/chat/completions", &policy.large)
+            .with_api_key("sk-test");
+
+        // No dual routing active
+        assert!(!cfg.has_dual_model_routing());
+
+        // Both vision and text rounds resolve to the same single model
+        let (url, model, key) = cfg.resolve_model_for_round(true);
+        assert_eq!(model, "gpt-4o");
+        assert_eq!(key, Some("sk-test"));
+
+        let (url2, model2, key2) = cfg.resolve_model_for_round(false);
+        assert_eq!(url, url2, "single model: same URL for both modes");
+        assert_eq!(model, model2, "single model: same model for both modes");
+        assert_eq!(key, key2, "single model: same key for both modes");
+
+        // Serde round-trip preserves single-model config
+        let json = serde_json::to_string(&cfg).unwrap();
+        let deserialized: RemoteMultimodalConfigs = serde_json::from_str(&json).unwrap();
+        assert!(!deserialized.has_dual_model_routing());
+        let (_, m, _) = deserialized.resolve_model_for_round(true);
+        assert_eq!(m, "gpt-4o");
+    }
+
+    #[test]
+    fn test_model_resolution_consistency() {
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o")
+            .with_api_key("sk-test")
+            .with_dual_models(
+                ModelEndpoint::new("gpt-4o"),
+                ModelEndpoint::new("gpt-4o-mini")
+                    .with_api_url("https://other.api.com")
+                    .with_api_key("sk-other"),
+            );
+
+        // Call many times — must always return the same result
+        for _ in 0..100 {
+            let (url, model, key) = cfg.resolve_model_for_round(true);
+            assert_eq!(url, "https://api.example.com");
+            assert_eq!(model, "gpt-4o");
+            assert_eq!(key, Some("sk-test"));
+
+            let (url, model, key) = cfg.resolve_model_for_round(false);
+            assert_eq!(url, "https://other.api.com");
+            assert_eq!(model, "gpt-4o-mini");
+            assert_eq!(key, Some("sk-other"));
+        }
+    }
 }
