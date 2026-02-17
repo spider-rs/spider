@@ -131,7 +131,7 @@ pub use spider_agent::automation::cache::{CacheStats, CacheValue, SmartCache};
 pub use spider_agent::automation::executor::{BatchExecutor, ChainExecutor, PrefetchManager};
 #[cfg(feature = "agent")]
 pub use spider_agent::automation::router::{
-    ModelRouter, RoutingDecision, TaskAnalysis, TaskCategory,
+    auto_policy, ModelRouter, RoutingDecision, TaskAnalysis, TaskCategory,
 };
 
 // Browser-specific exports (requires agent + chrome)

@@ -583,9 +583,9 @@ impl Configuration {
                 .iter()
                 .map(|ep| ep.model_name.as_str())
                 .collect();
-            let policy = crate::features::automation::router::auto_policy(&model_names);
+            let policy = crate::features::automation::auto_policy(&model_names);
             engine.model_router =
-                Some(crate::features::automation::router::ModelRouter::with_policy(policy));
+                Some(crate::features::automation::ModelRouter::with_policy(policy));
         }
         engine.model_pool = model_pool;
 
