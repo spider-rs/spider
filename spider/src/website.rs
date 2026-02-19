@@ -10636,6 +10636,7 @@ async fn test_crawl_smart_uses_seeded_cache_with_skip_browser() {
 
     let mut response_headers = StdHashMap::new();
     response_headers.insert("content-type".to_string(), "text/html".to_string());
+    response_headers.insert("cache-control".to_string(), "public, max-age=3600".to_string());
 
     let body =
         b"<html><head><title>Cached Smart Test</title></head><body>cached</body></html>".to_vec();
@@ -10647,11 +10648,7 @@ async fn test_crawl_smart_uses_seeded_cache_with_skip_browser() {
         version: HttpVersion::Http11,
     };
 
-    let mut request_headers = StdHashMap::new();
-    request_headers.insert(
-        "cache-control".to_string(),
-        "public, max-age=3600".to_string(),
-    );
+    let request_headers = StdHashMap::new();
 
     put_hybrid_cache(&cache_key, http_response, "GET", request_headers).await;
 
@@ -10689,6 +10686,7 @@ async fn test_cache_shortcircuit_single_page() {
 
     let mut response_headers = StdHashMap::new();
     response_headers.insert("content-type".to_string(), "text/html".to_string());
+    response_headers.insert("cache-control".to_string(), "public, max-age=3600".to_string());
 
     let body = b"<html><head><title>Shortcircuit</title></head><body><h1>Cached!</h1></body></html>"
         .to_vec();
@@ -10700,11 +10698,7 @@ async fn test_cache_shortcircuit_single_page() {
         version: HttpVersion::Http11,
     };
 
-    let mut request_headers = StdHashMap::new();
-    request_headers.insert(
-        "cache-control".to_string(),
-        "public, max-age=3600".to_string(),
-    );
+    let request_headers = StdHashMap::new();
 
     put_hybrid_cache(&cache_key, http_response, "GET", request_headers).await;
 
@@ -10765,6 +10759,7 @@ async fn test_cache_shortcircuit_not_without_skip_browser() {
 
     let mut response_headers = StdHashMap::new();
     response_headers.insert("content-type".to_string(), "text/html".to_string());
+    response_headers.insert("cache-control".to_string(), "public, max-age=3600".to_string());
 
     let body = b"<html><body>No Skip</body></html>".to_vec();
     let http_response = HttpResponse {
@@ -10775,11 +10770,7 @@ async fn test_cache_shortcircuit_not_without_skip_browser() {
         version: HttpVersion::Http11,
     };
 
-    let mut request_headers = StdHashMap::new();
-    request_headers.insert(
-        "cache-control".to_string(),
-        "public, max-age=3600".to_string(),
-    );
+    let request_headers = StdHashMap::new();
 
     put_hybrid_cache(&cache_key, http_response, "GET", request_headers).await;
 
@@ -10813,6 +10804,7 @@ async fn test_cache_shortcircuit_not_for_multi_page() {
 
     let mut response_headers = StdHashMap::new();
     response_headers.insert("content-type".to_string(), "text/html".to_string());
+    response_headers.insert("cache-control".to_string(), "public, max-age=3600".to_string());
 
     let body = b"<html><body>Multi Page</body></html>".to_vec();
     let http_response = HttpResponse {
@@ -10823,11 +10815,7 @@ async fn test_cache_shortcircuit_not_for_multi_page() {
         version: HttpVersion::Http11,
     };
 
-    let mut request_headers = StdHashMap::new();
-    request_headers.insert(
-        "cache-control".to_string(),
-        "public, max-age=3600".to_string(),
-    );
+    let request_headers = StdHashMap::new();
 
     put_hybrid_cache(&cache_key, http_response, "GET", request_headers).await;
 
@@ -10856,6 +10844,7 @@ async fn test_cache_shortcircuit_crawl_smart() {
 
     let mut response_headers = StdHashMap::new();
     response_headers.insert("content-type".to_string(), "text/html".to_string());
+    response_headers.insert("cache-control".to_string(), "public, max-age=3600".to_string());
 
     let body =
         b"<html><head><title>Smart Shortcircuit</title></head><body>Smart Cached</body></html>"
@@ -10868,11 +10857,7 @@ async fn test_cache_shortcircuit_crawl_smart() {
         version: HttpVersion::Http11,
     };
 
-    let mut request_headers = StdHashMap::new();
-    request_headers.insert(
-        "cache-control".to_string(),
-        "public, max-age=3600".to_string(),
-    );
+    let request_headers = StdHashMap::new();
 
     put_hybrid_cache(&cache_key, http_response, "GET", request_headers).await;
 
@@ -11011,17 +10996,11 @@ async fn test_cache_phase_multi_page_all_cached() {
     let sub2_html =
         "<html><head><title>Sub2</title></head><body><h1>Sub2 Content</h1></body></html>";
 
-    let request_headers = {
-        let mut h = StdHashMap::new();
-        h.insert(
-            "cache-control".to_string(),
-            "public, max-age=3600".to_string(),
-        );
-        h
-    };
+    let request_headers = StdHashMap::new();
     let response_headers = {
         let mut h = StdHashMap::new();
         h.insert("content-type".to_string(), "text/html".to_string());
+        h.insert("cache-control".to_string(), "public, max-age=3600".to_string());
         h
     };
 
@@ -11090,17 +11069,11 @@ async fn test_cache_phase_partial_miss() {
         sub_url
     );
 
-    let request_headers = {
-        let mut h = StdHashMap::new();
-        h.insert(
-            "cache-control".to_string(),
-            "public, max-age=3600".to_string(),
-        );
-        h
-    };
+    let request_headers = StdHashMap::new();
     let response_headers = {
         let mut h = StdHashMap::new();
         h.insert("content-type".to_string(), "text/html".to_string());
+        h.insert("cache-control".to_string(), "public, max-age=3600".to_string());
         h
     };
 
@@ -11149,17 +11122,11 @@ async fn test_cache_phase_skipped_without_skip_browser() {
 
     let root_url = "http://localhost:9/cache-phase-no-skip";
 
-    let request_headers = {
-        let mut h = StdHashMap::new();
-        h.insert(
-            "cache-control".to_string(),
-            "public, max-age=3600".to_string(),
-        );
-        h
-    };
+    let request_headers = StdHashMap::new();
     let response_headers = {
         let mut h = StdHashMap::new();
         h.insert("content-type".to_string(), "text/html".to_string());
+        h.insert("cache-control".to_string(), "public, max-age=3600".to_string());
         h
     };
 
@@ -11205,17 +11172,11 @@ async fn test_cache_phase_respects_budget() {
     );
     let sub_html = "<html><body>Sub</body></html>";
 
-    let request_headers = {
-        let mut h = StdHashMap::new();
-        h.insert(
-            "cache-control".to_string(),
-            "public, max-age=3600".to_string(),
-        );
-        h
-    };
+    let request_headers = StdHashMap::new();
     let response_headers = {
         let mut h = StdHashMap::new();
         h.insert("content-type".to_string(), "text/html".to_string());
+        h.insert("cache-control".to_string(), "public, max-age=3600".to_string());
         h
     };
 
@@ -11289,17 +11250,11 @@ async fn test_cache_phase_dedup_signatures() {
     // Both pages have identical HTML — normalization should dedup
     let html = "<html><body><a href=\"http://localhost:9/cache-phase-dedup-dup\">Link</a><p>Same Content</p></body></html>";
 
-    let request_headers = {
-        let mut h = StdHashMap::new();
-        h.insert(
-            "cache-control".to_string(),
-            "public, max-age=3600".to_string(),
-        );
-        h
-    };
+    let request_headers = StdHashMap::new();
     let response_headers = {
         let mut h = StdHashMap::new();
         h.insert("content-type".to_string(), "text/html".to_string());
+        h.insert("cache-control".to_string(), "public, max-age=3600".to_string());
         h
     };
 
@@ -11340,4 +11295,143 @@ async fn test_cache_phase_dedup_signatures() {
         pages.len() <= 2,
         "signature dedup should limit duplicate content"
     );
+}
+
+/// Verify that cache_chrome_hybrid_mem properly writes and reads cached entries
+/// (regression: `put_hybrid_cache` was no-op without `cache_chrome_hybrid` feature).
+#[tokio::test]
+#[cfg(all(
+    not(feature = "decentralized"),
+    any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem")
+))]
+async fn test_cache_shortcircuit_single_page_mem() {
+    use crate::utils::{create_cache_key_raw, put_hybrid_cache, HttpResponse, HttpVersion};
+    use std::collections::HashMap as StdHashMap;
+
+    let target_url = "http://localhost:9/shortcircuit-mem-test";
+    let cache_key = create_cache_key_raw(target_url, None, None);
+
+    let mut response_headers = StdHashMap::new();
+    response_headers.insert("content-type".to_string(), "text/html".to_string());
+    response_headers.insert(
+        "cache-control".to_string(),
+        "public, max-age=3600".to_string(),
+    );
+
+    let body = b"<html><head><title>MemCached</title></head><body><h1>In-Memory Cached!</h1></body></html>"
+        .to_vec();
+    let http_response = HttpResponse {
+        body,
+        headers: response_headers,
+        status: 200,
+        url: Url::parse(target_url).expect("valid url"),
+        version: HttpVersion::Http11,
+    };
+
+    let request_headers = StdHashMap::new();
+
+    put_hybrid_cache(&cache_key, http_response, "GET", request_headers).await;
+
+    let mut website = Website::new(target_url);
+    website.configuration.cache = true;
+    website.with_cache_skip_browser(true);
+    website.with_budget(Some(HashMap::from([("*", 1)])));
+
+    let mut rx = website.subscribe(4).unwrap();
+    let handle = tokio::spawn(async move { rx.recv().await.ok() });
+
+    let start = tokio::time::Instant::now();
+    website.crawl().await;
+    let elapsed = start.elapsed();
+
+    let page = handle.await.unwrap().expect("page received via channel");
+    assert!(
+        page.get_html().contains("In-Memory Cached!"),
+        "expected cached HTML content from mem cache"
+    );
+    assert_eq!(page.status_code, StatusCode::OK);
+    assert_eq!(website.initial_status_code, StatusCode::OK);
+    assert!(website.initial_html_length > 0);
+    // Must be fast (no browser launch — typically <100ms)
+    assert!(
+        elapsed.as_millis() < 2000,
+        "shortcircuit too slow: {elapsed:?}"
+    );
+    eprintln!(
+        "shortcircuit single_page (mem) latency: {}ms",
+        elapsed.as_millis()
+    );
+}
+
+/// Verify multi-page cache phase works with cache_chrome_hybrid_mem.
+#[tokio::test]
+#[cfg(all(
+    not(feature = "decentralized"),
+    any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem")
+))]
+async fn test_cache_phase_multi_page_all_cached_mem() {
+    use crate::utils::{create_cache_key_raw, put_hybrid_cache, HttpResponse, HttpVersion};
+    use std::collections::HashMap as StdHashMap;
+
+    let root_url = "http://localhost:9/cache-phase-mem-root";
+    let sub1_url = "http://localhost:9/cache-phase-mem-sub1";
+    let sub2_url = "http://localhost:9/cache-phase-mem-sub2";
+
+    let root_html = format!(
+        "<html><head><title>Root</title></head><body>\
+         <a href=\"{}\">Sub1</a><a href=\"{}\">Sub2</a></body></html>",
+        sub1_url, sub2_url
+    );
+    let sub1_html =
+        "<html><head><title>Sub1</title></head><body><h1>Sub1 Mem Content</h1></body></html>";
+    let sub2_html =
+        "<html><head><title>Sub2</title></head><body><h1>Sub2 Mem Content</h1></body></html>";
+
+    let request_headers = StdHashMap::new();
+    let response_headers = {
+        let mut h = StdHashMap::new();
+        h.insert("content-type".to_string(), "text/html".to_string());
+        h.insert(
+            "cache-control".to_string(),
+            "public, max-age=3600".to_string(),
+        );
+        h
+    };
+
+    for (url, html) in [
+        (root_url, root_html.as_str()),
+        (sub1_url, sub1_html),
+        (sub2_url, sub2_html),
+    ] {
+        let cache_key = create_cache_key_raw(url, None, None);
+        let http_response = HttpResponse {
+            body: html.as_bytes().to_vec(),
+            headers: response_headers.clone(),
+            status: 200,
+            url: Url::parse(url).expect("valid url"),
+            version: HttpVersion::Http11,
+        };
+        put_hybrid_cache(&cache_key, http_response, "GET", request_headers.clone()).await;
+    }
+
+    let mut website = Website::new(root_url);
+    website.configuration.cache = true;
+    website.with_cache_skip_browser(true);
+    website.with_budget(Some(HashMap::from([("*", 10)])));
+
+    let mut rx = website.subscribe(16).unwrap();
+    website.crawl_raw().await;
+
+    let mut pages = Vec::new();
+    while let Ok(page) = rx.try_recv() {
+        pages.push(page.get_url().to_string());
+    }
+
+    assert!(
+        pages.contains(&root_url.to_string()),
+        "root page should be served from mem cache"
+    );
+    assert_eq!(pages.len(), 3, "exactly 3 pages expected from mem cache");
+    assert_eq!(website.initial_status_code, StatusCode::OK);
+    assert!(website.initial_html_length > 0);
 }

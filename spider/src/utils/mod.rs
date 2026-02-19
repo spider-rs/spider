@@ -61,7 +61,7 @@ use crate::page::{MAX_PRE_ALLOCATED_HTML_PAGE_SIZE, MAX_PRE_ALLOCATED_HTML_PAGE_
 use crate::tokio_stream::StreamExt;
 use crate::Client;
 
-#[cfg(feature = "cache_chrome_hybrid")]
+#[cfg(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem"))]
 use http_cache_semantics::{RequestLike, ResponseLike};
 
 use log::{info, log_enabled, Level};
@@ -1363,7 +1363,7 @@ pub struct HttpResponse {
 }
 
 /// A HTTP request type for caching.
-#[cfg(feature = "cache_chrome_hybrid")]
+#[cfg(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem"))]
 pub struct HttpRequestLike {
     ///  The URI component of a request.
     pub uri: http::uri::Uri,
@@ -1373,7 +1373,7 @@ pub struct HttpRequestLike {
     pub headers: http::HeaderMap,
 }
 
-#[cfg(feature = "cache_chrome_hybrid")]
+#[cfg(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem"))]
 /// A HTTP response type for caching.
 pub struct HttpResponseLike {
     /// The http status code.
@@ -1382,7 +1382,7 @@ pub struct HttpResponseLike {
     pub headers: http::HeaderMap,
 }
 
-#[cfg(feature = "cache_chrome_hybrid")]
+#[cfg(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem"))]
 impl RequestLike for HttpRequestLike {
     fn uri(&self) -> http::uri::Uri {
         self.uri.clone()
@@ -1398,7 +1398,7 @@ impl RequestLike for HttpRequestLike {
     }
 }
 
-#[cfg(feature = "cache_chrome_hybrid")]
+#[cfg(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem"))]
 impl ResponseLike for HttpResponseLike {
     fn status(&self) -> StatusCode {
         self.status
@@ -1435,7 +1435,7 @@ pub fn convert_headers(
     header_map
 }
 
-#[cfg(feature = "cache_chrome_hybrid")]
+#[cfg(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem"))]
 /// Store the page to cache to be re-used across HTTP request.
 pub async fn put_hybrid_cache(
     cache_key: &str,
@@ -1455,13 +1455,13 @@ pub async fn put_hybrid_cache(
         let req = HttpRequestLike {
             uri: u,
             method: reqwest::Method::from_bytes(method.as_bytes()).unwrap_or(reqwest::Method::GET),
-            headers: convert_headers(&http_response.headers),
+            headers: convert_headers(&http_request_headers),
         };
 
         let res = HttpResponseLike {
             status: StatusCode::from_u16(http_response.status)
                 .unwrap_or(StatusCode::EXPECTATION_FAILED),
-            headers: convert_headers(&http_request_headers),
+            headers: convert_headers(&http_response.headers),
         };
 
         let policy = CachePolicy::new(&req, &res);
@@ -1488,7 +1488,7 @@ pub async fn put_hybrid_cache(
     }
 }
 
-#[cfg(not(feature = "cache_chrome_hybrid"))]
+#[cfg(not(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem")))]
 /// Store the page to cache to be re-used across HTTP request.
 pub async fn put_hybrid_cache(
     _cache_key: &str,
@@ -1578,8 +1578,7 @@ async fn perform_smart_mouse_movement(
 /// Cache the chrome response
 #[cfg(all(
     feature = "chrome",
-    feature = "cache_chrome_hybrid",
-    feature = "cache_chrome_hybrid_mem"
+    any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem")
 ))]
 pub async fn cache_chrome_response(
     target_url: &str,
@@ -1633,60 +1632,8 @@ pub async fn cache_chrome_response(
 /// Cache the chrome response
 #[cfg(all(
     feature = "chrome",
-    feature = "cache_chrome_hybrid",
-    not(feature = "cache_chrome_hybrid_mem")
+    not(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem"))
 ))]
-pub async fn cache_chrome_response(
-    target_url: &str,
-    page_response: &PageResponse,
-    chrome_http_req_res: ChromeHTTPReqRes,
-    cache_options: &Option<CacheOptions>,
-) {
-    // Skip caching empty content.
-    let body = match page_response.content.as_ref() {
-        Some(b) if !is_cacheable_body_empty(b) => b.to_vec(),
-        _ => return,
-    };
-
-    if let Ok(u) = url::Url::parse(target_url) {
-        let http_response = HttpResponse {
-            url: u,
-            body,
-            status: chrome_http_req_res.status_code.into(),
-            version: match chrome_http_req_res.protocol.as_str() {
-                "http/0.9" => HttpVersion::Http09,
-                "http/1" | "http/1.0" => HttpVersion::Http10,
-                "http/1.1" => HttpVersion::Http11,
-                "http/2.0" | "http/2" => HttpVersion::H2,
-                "http/3.0" | "http/3" => HttpVersion::H3,
-                _ => HttpVersion::Http11,
-            },
-            headers: chrome_http_req_res.response_headers,
-        };
-
-        let auth_opt = match cache_options {
-            Some(CacheOptions::Yes) | Some(CacheOptions::SkipBrowser) => None,
-            Some(CacheOptions::Authorized(token))
-            | Some(CacheOptions::SkipBrowserAuthorized(token)) => Some(token),
-            Some(CacheOptions::No) | None => None,
-        };
-        let cache_key = create_cache_key_raw(
-            target_url,
-            Some(&chrome_http_req_res.method),
-            auth_opt.map(|token| token.as_ref()),
-        );
-        put_hybrid_cache(
-            &cache_key,
-            http_response,
-            &chrome_http_req_res.method,
-            chrome_http_req_res.request_headers,
-        )
-        .await;
-    }
-}
-
-/// Cache the chrome response
-#[cfg(all(feature = "chrome", not(feature = "cache_chrome_hybrid")))]
 pub async fn cache_chrome_response(
     _target_url: &str,
     _page_response: &PageResponse,
@@ -6806,6 +6753,10 @@ mod tests {
         let mut response_headers = HashMap::new();
         response_headers.insert("accept-language".to_string(), "en-US".to_string());
         response_headers.insert("content-type".to_string(), "text/html".to_string());
+        response_headers.insert(
+            "cache-control".to_string(),
+            "public, max-age=3600".to_string(),
+        );
 
         let body = b"<html><body>cached-response</body></html>".to_vec();
         let http_response = HttpResponse {
@@ -6816,11 +6767,7 @@ mod tests {
             version: HttpVersion::Http11,
         };
 
-        let mut request_headers = HashMap::new();
-        request_headers.insert(
-            "cache-control".to_string(),
-            "public, max-age=3600".to_string(),
-        );
+        let request_headers = HashMap::new();
 
         put_hybrid_cache(&cache_key, http_response, "GET", request_headers).await;
 
@@ -6901,6 +6848,10 @@ mod tests {
         let cache_key = create_cache_key_raw(&target_url, None, None);
         let mut response_headers = HashMap::new();
         response_headers.insert("content-type".to_string(), "text/html".to_string());
+        response_headers.insert(
+            "cache-control".to_string(),
+            "public, max-age=3600".to_string(),
+        );
 
         let http_response = HttpResponse {
             body: response_body.into_bytes(),
@@ -6910,11 +6861,7 @@ mod tests {
             version: HttpVersion::Http11,
         };
 
-        let mut request_headers = HashMap::new();
-        request_headers.insert(
-            "cache-control".to_string(),
-            "public, max-age=3600".to_string(),
-        );
+        let request_headers = HashMap::new();
 
         put_hybrid_cache(&cache_key, http_response, "GET", request_headers).await;
 
