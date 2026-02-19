@@ -4719,9 +4719,13 @@ pub async fn get_cached_url_base(
 
     // Override behavior:
     // - AllowStale: accept even stale entries
-    // - Period(t): use t as "now" for staleness checks
-    // - Normal/None: use SystemTime::now()
-    let allow_stale = matches!(cache_policy, Some(BasicCachePolicy::AllowStale));
+    // - Period(t): entry is fresh if it was stored after time t (bypasses HTTP cache-control
+    //   headers which almost always mark Chrome-rendered pages as stale via no-cache/no-store)
+    // - Normal/None: use SystemTime::now() with HTTP cache-semantics staleness
+    let allow_stale = matches!(
+        cache_policy,
+        Some(BasicCachePolicy::AllowStale) | Some(BasicCachePolicy::Period(_))
+    );
     let now = match cache_policy {
         Some(BasicCachePolicy::Period(t)) => *t,
         _ => std::time::SystemTime::now(),
@@ -4771,7 +4775,10 @@ pub async fn get_cached_url_base(
         Some(CacheOptions::No) | None => return None,
     };
 
-    let allow_stale = matches!(cache_policy, Some(BasicCachePolicy::AllowStale));
+    let allow_stale = matches!(
+        cache_policy,
+        Some(BasicCachePolicy::AllowStale) | Some(BasicCachePolicy::Period(_))
+    );
     let now = match cache_policy {
         Some(BasicCachePolicy::Period(t)) => *t,
         _ => std::time::SystemTime::now(),
@@ -6890,6 +6897,89 @@ mod tests {
             cached_duration.as_millis(),
             speedup
         );
+    }
+
+    /// Verify that `Period` policy bypasses `is_stale` even when the response has
+    /// `Cache-Control: no-cache` (the common case for Chrome-rendered pages).
+    #[cfg(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem"))]
+    #[tokio::test]
+    async fn test_period_policy_bypasses_stale_no_cache_headers() {
+        use std::collections::HashMap;
+
+        let target_url = "https://no-cache-period-bypass.test/page";
+        let cache_key = create_cache_key_raw(target_url, None, None);
+
+        let mut response_headers = HashMap::new();
+        response_headers.insert("content-type".to_string(), "text/html".to_string());
+        // Simulate real Chrome response: no-cache would normally make is_stale() return true
+        response_headers.insert("cache-control".to_string(), "no-cache".to_string());
+
+        let body = b"<html><body>no-cache-but-period-fresh</body></html>".to_vec();
+        let http_response = HttpResponse {
+            body,
+            headers: response_headers,
+            status: 200,
+            url: Url::parse(target_url).expect("valid url"),
+            version: HttpVersion::Http11,
+        };
+
+        put_hybrid_cache(&cache_key, http_response, "GET", HashMap::new()).await;
+
+        // With Period policy, the cache should return the entry even though no-cache is set
+        let two_days_ago = std::time::SystemTime::now()
+            .checked_sub(std::time::Duration::from_secs(2 * 24 * 3600))
+            .unwrap();
+        let cache_policy_period = Some(super::BasicCachePolicy::Period(two_days_ago));
+        let result = get_cached_url_base(target_url, Some(CacheOptions::SkipBrowser), &cache_policy_period).await;
+        assert!(
+            result.is_some(),
+            "Period policy should bypass is_stale for no-cache responses"
+        );
+        assert!(result.unwrap().contains("no-cache-but-period-fresh"));
+
+        // Without Period (Normal), the no-cache response should be stale and NOT returned
+        let cache_policy_normal = Some(super::BasicCachePolicy::Normal);
+        let result_normal = get_cached_url_base(target_url, Some(CacheOptions::SkipBrowser), &cache_policy_normal).await;
+        assert!(
+            result_normal.is_none(),
+            "Normal policy should respect no-cache and return None"
+        );
+    }
+
+    /// Same as above but with no-store header.
+    #[cfg(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem"))]
+    #[tokio::test]
+    async fn test_period_policy_bypasses_stale_no_store_headers() {
+        use std::collections::HashMap;
+
+        let target_url = "https://no-store-period-bypass.test/page";
+        let cache_key = create_cache_key_raw(target_url, None, None);
+
+        let mut response_headers = HashMap::new();
+        response_headers.insert("content-type".to_string(), "text/html".to_string());
+        response_headers.insert("cache-control".to_string(), "no-store".to_string());
+
+        let body = b"<html><body>no-store-but-period-fresh</body></html>".to_vec();
+        let http_response = HttpResponse {
+            body,
+            headers: response_headers,
+            status: 200,
+            url: Url::parse(target_url).expect("valid url"),
+            version: HttpVersion::Http11,
+        };
+
+        put_hybrid_cache(&cache_key, http_response, "GET", HashMap::new()).await;
+
+        let two_days_ago = std::time::SystemTime::now()
+            .checked_sub(std::time::Duration::from_secs(2 * 24 * 3600))
+            .unwrap();
+        let cache_policy_period = Some(super::BasicCachePolicy::Period(two_days_ago));
+        let result = get_cached_url_base(target_url, Some(CacheOptions::SkipBrowser), &cache_policy_period).await;
+        assert!(
+            result.is_some(),
+            "Period policy should bypass is_stale for no-store responses"
+        );
+        assert!(result.unwrap().contains("no-store-but-period-fresh"));
     }
 
     #[test]
