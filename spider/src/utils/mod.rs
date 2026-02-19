@@ -1458,13 +1458,61 @@ pub async fn put_hybrid_cache(
             headers: convert_headers(&http_request_headers),
         };
 
+        // Build policy headers: start from the real response headers but ensure
+        // the CachePolicy has a usable max-age for Period-based staleness.
+        //
+        // Chrome-crawled pages commonly return no-cache / no-store / Set-Cookie
+        // which makes CachePolicy.max_age()=0 → is_stale() always true.
+        // We only override the headers used for the *policy* (not the stored response).
+        //
+        // Strategy:
+        //   1. If the server provides last-modified, etag, expires, or a positive
+        //      max-age → respect it (HTTP semantics work via the heuristic).
+        //   2. If the server says no-cache, no-store, or provides no caching
+        //      signals at all → inject a 2-day max-age so Period(now-2d) works.
+        let mut policy_headers = http_response.headers.clone();
+        let cc_lower = policy_headers
+            .get("cache-control")
+            .map(|v| v.to_lowercase());
+
+        let has_no_cache = cc_lower
+            .as_ref()
+            .map_or(false, |v| v.contains("no-cache") || v.contains("no-store"));
+
+        let has_positive_max_age = cc_lower.as_ref().map_or(false, |v| {
+            v.split(',')
+                .filter_map(|d| {
+                    let d = d.trim();
+                    d.strip_prefix("max-age=")
+                        .or_else(|| d.strip_prefix("s-maxage="))
+                })
+                .any(|val| val.trim().parse::<u64>().unwrap_or(0) > 0)
+        });
+
+        let has_heuristic_signal = policy_headers.contains_key("last-modified")
+            || policy_headers.contains_key("expires");
+
+        // Override when: explicit no-cache/no-store, OR no caching signal at all
+        if has_no_cache || (!has_positive_max_age && !has_heuristic_signal) {
+            policy_headers
+                .insert("cache-control".to_string(), "public, max-age=172800".to_string());
+            // Remove conflicting headers that would override max-age
+            policy_headers.remove("pragma");
+        }
+
         let res = HttpResponseLike {
             status: StatusCode::from_u16(http_response.status)
                 .unwrap_or(StatusCode::EXPECTATION_FAILED),
-            headers: convert_headers(&http_response.headers),
+            headers: convert_headers(&policy_headers),
         };
 
-        let policy = CachePolicy::new(&req, &res);
+        // Use shared=false: this is a per-crawl cache, not a shared proxy.
+        // Prevents Set-Cookie from forcing max_age=0 in shared-cache mode.
+        let opts = http_cache_semantics::CacheOptions {
+            shared: false,
+            ..Default::default()
+        };
+        let policy = CachePolicy::new_options(&req, &res, std::time::SystemTime::now(), opts);
 
         let _ = crate::website::CACACHE_MANAGER
             .put(
@@ -4719,13 +4767,9 @@ pub async fn get_cached_url_base(
 
     // Override behavior:
     // - AllowStale: accept even stale entries
-    // - Period(t): entry is fresh if it was stored after time t (bypasses HTTP cache-control
-    //   headers which almost always mark Chrome-rendered pages as stale via no-cache/no-store)
-    // - Normal/None: use SystemTime::now() with HTTP cache-semantics staleness
-    let allow_stale = matches!(
-        cache_policy,
-        Some(BasicCachePolicy::AllowStale) | Some(BasicCachePolicy::Period(_))
-    );
+    // - Period(t): use t as "now" for staleness checks (entries stored after t appear fresh)
+    // - Normal/None: use SystemTime::now()
+    let allow_stale = matches!(cache_policy, Some(BasicCachePolicy::AllowStale));
     let now = match cache_policy {
         Some(BasicCachePolicy::Period(t)) => *t,
         _ => std::time::SystemTime::now(),
@@ -4775,10 +4819,7 @@ pub async fn get_cached_url_base(
         Some(CacheOptions::No) | None => return None,
     };
 
-    let allow_stale = matches!(
-        cache_policy,
-        Some(BasicCachePolicy::AllowStale) | Some(BasicCachePolicy::Period(_))
-    );
+    let allow_stale = matches!(cache_policy, Some(BasicCachePolicy::AllowStale));
     let now = match cache_policy {
         Some(BasicCachePolicy::Period(t)) => *t,
         _ => std::time::SystemTime::now(),
@@ -6899,22 +6940,22 @@ mod tests {
         );
     }
 
-    /// Verify that `Period` policy bypasses `is_stale` even when the response has
-    /// `Cache-Control: no-cache` (the common case for Chrome-rendered pages).
+    /// Verify that Chrome-rendered pages with no-cache are still cacheable.
+    /// put_hybrid_cache overrides no-cache → max-age=172800 for the policy,
+    /// so Period(now - 2d) correctly treats recently-stored entries as fresh.
     #[cfg(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem"))]
     #[tokio::test]
-    async fn test_period_policy_bypasses_stale_no_cache_headers() {
+    async fn test_put_hybrid_cache_overrides_no_cache_for_policy() {
         use std::collections::HashMap;
 
-        let target_url = "https://no-cache-period-bypass.test/page";
+        let target_url = "https://no-cache-override.test/page";
         let cache_key = create_cache_key_raw(target_url, None, None);
 
         let mut response_headers = HashMap::new();
         response_headers.insert("content-type".to_string(), "text/html".to_string());
-        // Simulate real Chrome response: no-cache would normally make is_stale() return true
         response_headers.insert("cache-control".to_string(), "no-cache".to_string());
 
-        let body = b"<html><body>no-cache-but-period-fresh</body></html>".to_vec();
+        let body = b"<html><body>no-cache-but-cacheable</body></html>".to_vec();
         let http_response = HttpResponse {
             body,
             headers: response_headers,
@@ -6925,41 +6966,35 @@ mod tests {
 
         put_hybrid_cache(&cache_key, http_response, "GET", HashMap::new()).await;
 
-        // With Period policy, the cache should return the entry even though no-cache is set
+        // Period(now - 2d): entry was just stored → age ≈ 0 < max_age(172800) → fresh
         let two_days_ago = std::time::SystemTime::now()
             .checked_sub(std::time::Duration::from_secs(2 * 24 * 3600))
             .unwrap();
         let cache_policy_period = Some(super::BasicCachePolicy::Period(two_days_ago));
         let result = get_cached_url_base(target_url, Some(CacheOptions::SkipBrowser), &cache_policy_period).await;
-        assert!(
-            result.is_some(),
-            "Period policy should bypass is_stale for no-cache responses"
-        );
-        assert!(result.unwrap().contains("no-cache-but-period-fresh"));
+        assert!(result.is_some(), "no-cache response should be cached via policy override");
+        assert!(result.unwrap().contains("no-cache-but-cacheable"));
 
-        // Without Period (Normal), the no-cache response should be stale and NOT returned
+        // Normal policy also returns it (freshly stored, max-age=172800 > age≈0)
         let cache_policy_normal = Some(super::BasicCachePolicy::Normal);
         let result_normal = get_cached_url_base(target_url, Some(CacheOptions::SkipBrowser), &cache_policy_normal).await;
-        assert!(
-            result_normal.is_none(),
-            "Normal policy should respect no-cache and return None"
-        );
+        assert!(result_normal.is_some(), "freshly stored entry should be fresh under Normal policy");
     }
 
-    /// Same as above but with no-store header.
+    /// Verify no-store is also overridden on write.
     #[cfg(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem"))]
     #[tokio::test]
-    async fn test_period_policy_bypasses_stale_no_store_headers() {
+    async fn test_put_hybrid_cache_overrides_no_store_for_policy() {
         use std::collections::HashMap;
 
-        let target_url = "https://no-store-period-bypass.test/page";
+        let target_url = "https://no-store-override.test/page";
         let cache_key = create_cache_key_raw(target_url, None, None);
 
         let mut response_headers = HashMap::new();
         response_headers.insert("content-type".to_string(), "text/html".to_string());
         response_headers.insert("cache-control".to_string(), "no-store".to_string());
 
-        let body = b"<html><body>no-store-but-period-fresh</body></html>".to_vec();
+        let body = b"<html><body>no-store-but-cacheable</body></html>".to_vec();
         let http_response = HttpResponse {
             body,
             headers: response_headers,
@@ -6975,11 +7010,86 @@ mod tests {
             .unwrap();
         let cache_policy_period = Some(super::BasicCachePolicy::Period(two_days_ago));
         let result = get_cached_url_base(target_url, Some(CacheOptions::SkipBrowser), &cache_policy_period).await;
-        assert!(
-            result.is_some(),
-            "Period policy should bypass is_stale for no-store responses"
+        assert!(result.is_some(), "no-store response should be cached via policy override");
+        assert!(result.unwrap().contains("no-store-but-cacheable"));
+    }
+
+    /// Verify that last-modified heuristic is respected (no override needed).
+    #[cfg(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem"))]
+    #[tokio::test]
+    async fn test_put_hybrid_cache_respects_last_modified_heuristic() {
+        use std::collections::HashMap;
+
+        let target_url = "https://last-modified-heuristic.test/page";
+        let cache_key = create_cache_key_raw(target_url, None, None);
+
+        let mut response_headers = HashMap::new();
+        response_headers.insert("content-type".to_string(), "text/html".to_string());
+        // No cache-control, but has last-modified → heuristic gives max_age
+        response_headers.insert(
+            "last-modified".to_string(),
+            "Wed, 08 Feb 2023 21:02:33 GMT".to_string(),
         );
-        assert!(result.unwrap().contains("no-store-but-period-fresh"));
+
+        let body = b"<html><body>heuristic-cached</body></html>".to_vec();
+        let http_response = HttpResponse {
+            body,
+            headers: response_headers,
+            status: 200,
+            url: Url::parse(target_url).expect("valid url"),
+            version: HttpVersion::Http11,
+        };
+
+        put_hybrid_cache(&cache_key, http_response, "GET", HashMap::new()).await;
+
+        // last-modified from 2023 → heuristic max-age ≈ 109 days → fresh
+        let two_days_ago = std::time::SystemTime::now()
+            .checked_sub(std::time::Duration::from_secs(2 * 24 * 3600))
+            .unwrap();
+        let cache_policy_period = Some(super::BasicCachePolicy::Period(two_days_ago));
+        let result = get_cached_url_base(target_url, Some(CacheOptions::SkipBrowser), &cache_policy_period).await;
+        assert!(result.is_some(), "last-modified heuristic should make entry fresh");
+        assert!(result.unwrap().contains("heuristic-cached"));
+    }
+
+    /// Verify that Set-Cookie doesn't prevent caching (shared=false).
+    #[cfg(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem"))]
+    #[tokio::test]
+    async fn test_put_hybrid_cache_set_cookie_does_not_block() {
+        use std::collections::HashMap;
+
+        let target_url = "https://set-cookie-cache.test/page";
+        let cache_key = create_cache_key_raw(target_url, None, None);
+
+        let mut response_headers = HashMap::new();
+        response_headers.insert("content-type".to_string(), "text/html".to_string());
+        response_headers.insert(
+            "cache-control".to_string(),
+            "public, max-age=3600".to_string(),
+        );
+        response_headers.insert(
+            "set-cookie".to_string(),
+            "session=abc123; Path=/".to_string(),
+        );
+
+        let body = b"<html><body>set-cookie-cached</body></html>".to_vec();
+        let http_response = HttpResponse {
+            body,
+            headers: response_headers,
+            status: 200,
+            url: Url::parse(target_url).expect("valid url"),
+            version: HttpVersion::Http11,
+        };
+
+        put_hybrid_cache(&cache_key, http_response, "GET", HashMap::new()).await;
+
+        let two_days_ago = std::time::SystemTime::now()
+            .checked_sub(std::time::Duration::from_secs(2 * 24 * 3600))
+            .unwrap();
+        let cache_policy_period = Some(super::BasicCachePolicy::Period(two_days_ago));
+        let result = get_cached_url_base(target_url, Some(CacheOptions::SkipBrowser), &cache_policy_period).await;
+        assert!(result.is_some(), "Set-Cookie should not block caching with shared=false");
+        assert!(result.unwrap().contains("set-cookie-cached"));
     }
 
     #[test]
