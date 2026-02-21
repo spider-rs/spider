@@ -52,16 +52,28 @@ A web crawler and scraper written in Rust.
 
 ## Quick Start
 
-Add spider to your project:
-
 ```toml
 [dependencies]
 spider = "2"
 ```
 
+Crawl a website in three lines:
+
+```rust
+use spider::tokio;
+use spider::website::Website;
+
+#[tokio::main]
+async fn main() {
+    let mut website = Website::new("https://spider.cloud");
+    website.crawl().await;
+    println!("Pages found: {}", website.get_links().len());
+}
+```
+
 ### Streaming Pages
 
-Process pages as they're crawled with real-time subscriptions:
+Process pages as they're crawled in real time:
 
 ```rust
 use spider::tokio;

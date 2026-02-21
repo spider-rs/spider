@@ -1,34 +1,124 @@
 # Contributing to Spider
 
-:+1::tada: Thanks for taking the time to contribute! :tada::+1:
+Thanks for taking the time to contribute! Spider is an open-source web crawler and scraper built in Rust, and contributions of all kinds are welcome — bug fixes, new features, documentation improvements, and performance optimizations.
 
-The following is a set of guidelines for contributing to Spider project. These are mostly guidelines, not rules. Use your best judgment, and feel free to propose changes to this document in a pull request.
+## Getting Started
 
-Contributions are welcome and will be fully credited!
+### Prerequisites
 
-We accept contributions via Pull Requests on [Github](https://github.com/{{ githubAccount }}/{{ name }}).
+- [**Rust**](https://rustup.rs/) (edition 2021, stable toolchain)
+- **Git**
+- For Chrome/CDP features: a local Chrome or Chromium installation
 
-## Pull Requests
+### Setup
 
-Here are some guidelines to make the process smoother:
+```bash
+git clone https://github.com/spider-rs/spider.git
+cd spider
+cargo build
+```
 
-- **Add a test** - New features and bugfixes need tests. If you find it difficult to test, please tell us in the pull request and we will try to help you!
-- **Document any change in behaviour** - Make sure the `README.md` and any other relevant documentation are kept up-to-date.
-- **Run `cargo test` locally** - This will allow you to go faster
-- **One pull request per feature** - If you want to do more than one thing, send multiple pull requests.
-- **Send coherent history** - Make sure your commits message means something
-- **Consider our release cycle** - We try to follow [SemVer v2.0.0](http://semver.org/).
+Run the test suite:
 
-## Creating issues
+```bash
+cargo test
+```
 
-### Bug reports
+For Chrome-specific tests:
 
-Always try to provide as much information as possible. If you are reporting a bug, try to provide a repro on jsfiddle.net (or anything else) or a stacktrace at the very least. This will help us check the problem quicker.
+```bash
+cargo test --features chrome
+```
 
-### Feature requests
+### Project Structure
 
-Lay out the reasoning behind it and propose an API for it. Ideally, you should have a practical example to prove the utility of the feature you're requesting.
+```
+spider/              Core crawling library (Website, Page, Configuration)
+spider_agent/        AI-powered web automation agent (LLM integration, skills)
+spider_cli/          Command-line interface
+spider_worker/       Distributed crawling worker
+spider_utils/        CSS/XPath scraping utilities
+spider_agent_html/   HTML extraction for agent pipelines
+spider_agent_types/  Shared types for the agent crate
+examples/            64 runnable examples covering most features
+benches/             Criterion benchmarks
+```
 
-## Code of Conduct
+## How to Contribute
 
-This project and everyone participating in it is governed by github code of conduct guidelines.
+### Reporting Bugs
+
+Open an issue at [github.com/spider-rs/spider/issues](https://github.com/spider-rs/spider/issues) with:
+
+- Steps to reproduce
+- Expected vs. actual behavior
+- Spider version, Rust version, and OS
+- A minimal code example or URL that triggers the bug
+
+### Suggesting Features
+
+Open an issue describing:
+
+- The use case and why it matters
+- A proposed API or behavior
+- A practical example showing how it would be used
+
+### Pull Requests
+
+1. Fork the repo and create a branch from `master`
+2. Make your changes
+3. Add or update tests for your changes
+4. Run `cargo test` and ensure everything passes
+5. Run `cargo fmt` to format your code
+6. Open a pull request against `master`
+
+#### PR Guidelines
+
+- **One PR per feature or fix** — keep changes focused
+- **Add tests** — new features and bug fixes need test coverage. If testing is difficult, mention it in the PR and we'll help
+- **Update docs** — if your change affects public API or behavior, update the relevant README or doc comments
+- **Write clear commit messages** — describe what changed and why
+- **Keep PRs small** — smaller PRs are easier to review and merge faster
+
+### Feature Flags
+
+Spider uses feature flags extensively. When adding new functionality:
+
+- Gate optional dependencies behind a feature flag
+- Add the flag to `spider/Cargo.toml` with a descriptive comment
+- Document the flag in the crate's README if it's user-facing
+- Make sure the default feature set still compiles: `cargo check --no-default-features`
+
+### Testing
+
+```bash
+# Run all tests
+cargo test
+
+# Run tests for a specific crate
+cargo test -p spider
+cargo test -p spider_cli
+
+# Run tests with a specific feature
+cargo test --features chrome
+cargo test --features cache
+
+# Run benchmarks
+cargo bench
+```
+
+## Code Style
+
+- Follow standard Rust conventions (`cargo fmt`, `cargo clippy`)
+- Use descriptive variable and function names
+- Keep functions focused — prefer small functions over large ones
+- Add doc comments (`///`) to public APIs
+
+## Questions?
+
+- Open a [GitHub Discussion](https://github.com/spider-rs/spider/discussions) for questions or ideas
+- Join [Discord](https://discord.spider.cloud) for real-time help
+
+## License
+
+By contributing, you agree that your contributions will be licensed under the [MIT License](LICENSE).
