@@ -171,8 +171,7 @@ async fn desktop_with_self_canonical_mobile_and_amp() {
         return;
     }
 
-    let page =
-        fetch_page_http("/mobile/desktop_with_self_canonical_mobile_and_amp").await;
+    let page = fetch_page_http("/mobile/desktop_with_self_canonical_mobile_and_amp").await;
     assert_eq!(page.status_code, StatusCode::OK);
 }
 
@@ -182,8 +181,7 @@ async fn other_desktop_that_links_to_same_mobile_pages() {
         return;
     }
 
-    let page =
-        fetch_page_http("/mobile/other_desktop_that_links_to_the_same_mobile_pages").await;
+    let page = fetch_page_http("/mobile/other_desktop_that_links_to_the_same_mobile_pages").await;
     assert_eq!(page.status_code, StatusCode::OK);
 }
 

@@ -834,12 +834,16 @@ mod tests {
 
         // Pick best vision model
         let vision_reqs = ModelRequirements::default().with_vision();
-        let vision_pick = selector.select(&vision_reqs).expect("should find a vision model");
+        let vision_pick = selector
+            .select(&vision_reqs)
+            .expect("should find a vision model");
 
         // Pick cheapest text model
         selector.set_strategy(SelectionStrategy::CheapestFirst);
         let text_reqs = ModelRequirements::default();
-        let text_pick = selector.select(&text_reqs).expect("should find a text model");
+        let text_pick = selector
+            .select(&text_reqs)
+            .expect("should find a text model");
 
         // Build config with dual models from selector picks
         let cfg = RemoteMultimodalConfigs::new("https://api.example.com", &vision_pick.name)
@@ -851,7 +855,10 @@ mod tests {
 
         // Verify resolve_model_for_round returns selector's picks
         let (_, model, _) = cfg.resolve_model_for_round(true);
-        assert_eq!(model, vision_pick.name, "vision round should use vision pick");
+        assert_eq!(
+            model, vision_pick.name,
+            "vision round should use vision pick"
+        );
 
         let (_, model, _) = cfg.resolve_model_for_round(false);
         assert_eq!(model, text_pick.name, "text round should use text pick");
@@ -918,8 +925,11 @@ mod tests {
         let policy = auto_policy(&["gpt-4o"]);
 
         // Build config from single-model policy (no dual routing)
-        let cfg = RemoteMultimodalConfigs::new("https://api.openai.com/v1/chat/completions", &policy.large)
-            .with_api_key("sk-test");
+        let cfg = RemoteMultimodalConfigs::new(
+            "https://api.openai.com/v1/chat/completions",
+            &policy.large,
+        )
+        .with_api_key("sk-test");
 
         // No dual routing active
         assert!(!cfg.has_dual_model_routing());

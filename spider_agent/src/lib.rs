@@ -122,9 +122,9 @@ pub use automation::{
     ChainStep, ChainStepResult, CleaningIntent, ClipViewport, ContentAnalysis, CostTier,
     ExtractionSchema, FormField, FormInfo, HtmlCleaningProfile, InteractiveElement,
     ModelCapabilities, ModelEndpoint, ModelInfoEntry, ModelPolicy, ModelPricing, ModelProfile,
-    ModelRanks, NavigationOption, PageObservation, PromptUrlGate, ReasoningEffort, RecoveryStrategy,
-    RetryPolicy, SelectorCache, SelectorCacheEntry, StructuredOutputConfig, VisionRouteMode,
-    MODEL_INFO,
+    ModelRanks, NavigationOption, PageObservation, PromptUrlGate, ReasoningEffort,
+    RecoveryStrategy, RetryPolicy, SelectorCache, SelectorCacheEntry, StructuredOutputConfig,
+    VisionRouteMode, MODEL_INFO,
 };
 
 // Automation re-exports - engine and configuration

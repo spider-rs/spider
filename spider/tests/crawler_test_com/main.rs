@@ -10,17 +10,17 @@
 
 mod helpers;
 
-mod status_codes;
-mod redirects;
-mod links;
-mod urls;
 mod canonical_tags;
-mod robots_protocol;
 mod content;
-mod javascript;
-mod encoding;
-mod titles;
 mod description_tags;
-mod social_tags;
+mod encoding;
+mod javascript;
+mod links;
 mod mobile;
 mod other;
+mod redirects;
+mod robots_protocol;
+mod social_tags;
+mod status_codes;
+mod titles;
+mod urls;

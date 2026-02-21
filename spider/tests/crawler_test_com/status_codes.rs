@@ -3,10 +3,10 @@ use spider::reqwest::StatusCode;
 
 /// All 67 status code endpoints on crawler-test.com.
 const ALL_STATUS_CODES: &[u16] = &[
-    100, 101, 102, 200, 201, 202, 203, 204, 205, 206, 207, 226, 400, 401, 402, 403, 404,
-    405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 419, 420, 421,
-    422, 423, 424, 426, 428, 429, 431, 440, 444, 449, 450, 451, 494, 495, 496, 497, 498,
-    499, 500, 501, 502, 503, 504, 505, 506, 507, 508, 509, 510, 511, 520, 598, 599,
+    100, 101, 102, 200, 201, 202, 203, 204, 205, 206, 207, 226, 400, 401, 402, 403, 404, 405, 406,
+    407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 419, 420, 421, 422, 423, 424, 426,
+    428, 429, 431, 440, 444, 449, 450, 451, 494, 495, 496, 497, 498, 499, 500, 501, 502, 503, 504,
+    505, 506, 507, 508, 509, 510, 511, 520, 598, 599,
 ];
 
 /// Verify every status code endpoint is reachable and returns the expected code.
@@ -30,7 +30,10 @@ async fn all_status_codes_no_redirect() {
     if !mismatches.is_empty() {
         eprintln!("Status code mismatches (expected vs actual):");
         for (expected, actual) in &mismatches {
-            eprintln!("  status_{}: expected {} got {}", expected, expected, actual);
+            eprintln!(
+                "  status_{}: expected {} got {}",
+                expected, expected, actual
+            );
         }
     }
 
@@ -75,7 +78,10 @@ async fn status_200_has_html_body() {
 
     let page = fetch_page_http("/status_codes/status_200").await;
     assert_eq!(page.status_code, StatusCode::OK);
-    assert!(!page.get_html().is_empty(), "200 response should have a body");
+    assert!(
+        !page.get_html().is_empty(),
+        "200 response should have a body"
+    );
 }
 
 #[tokio::test]
@@ -120,9 +126,9 @@ async fn status_4xx_range() {
     }
 
     let codes_4xx: &[u16] = &[
-        400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415,
-        416, 417, 418, 419, 420, 421, 422, 423, 424, 426, 428, 429, 431, 440, 444, 449,
-        450, 451, 494, 495, 496, 497, 498, 499,
+        400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417,
+        418, 419, 420, 421, 422, 423, 424, 426, 428, 429, 431, 440, 444, 449, 450, 451, 494, 495,
+        496, 497, 498, 499,
     ];
     for &code in codes_4xx {
         let path = format!("/status_codes/status_{}", code);
@@ -145,7 +151,9 @@ async fn status_5xx_range() {
         return;
     }
 
-    let codes_5xx: &[u16] = &[500, 501, 502, 503, 504, 505, 506, 507, 508, 509, 510, 511, 520, 598, 599];
+    let codes_5xx: &[u16] = &[
+        500, 501, 502, 503, 504, 505, 506, 507, 508, 509, 510, 511, 520, 598, 599,
+    ];
     for &code in codes_5xx {
         let path = format!("/status_codes/status_{}", code);
         let page = fetch_page_http_no_redirect(&path).await;

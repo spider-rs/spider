@@ -199,11 +199,10 @@ mod tests {
             Ok::<&str, &str>("primary")
         };
 
-        let hedge: Pin<Box<dyn Future<Output = Result<&str, &str>> + Send>> =
-            Box::pin(async {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-                Ok("hedge")
-            });
+        let hedge: Pin<Box<dyn Future<Output = Result<&str, &str>> + Send>> = Box::pin(async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            Ok("hedge")
+        });
 
         let config = HedgeConfig {
             delay: Duration::from_millis(100),
@@ -222,11 +221,10 @@ mod tests {
             Ok::<&str, &str>("primary")
         };
 
-        let hedge: Pin<Box<dyn Future<Output = Result<&str, &str>> + Send>> =
-            Box::pin(async {
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                Ok("hedge")
-            });
+        let hedge: Pin<Box<dyn Future<Output = Result<&str, &str>> + Send>> = Box::pin(async {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            Ok("hedge")
+        });
 
         let config = HedgeConfig {
             delay: Duration::from_millis(100),
@@ -245,11 +243,10 @@ mod tests {
             Err::<&str, &str>("primary_err")
         };
 
-        let hedge: Pin<Box<dyn Future<Output = Result<&str, &str>> + Send>> =
-            Box::pin(async {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-                Err("hedge_err")
-            });
+        let hedge: Pin<Box<dyn Future<Output = Result<&str, &str>> + Send>> = Box::pin(async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            Err("hedge_err")
+        });
 
         let config = HedgeConfig {
             delay: Duration::from_millis(100),
@@ -269,11 +266,10 @@ mod tests {
             Err::<&str, &str>("primary_err")
         };
 
-        let hedge: Pin<Box<dyn Future<Output = Result<&str, &str>> + Send>> =
-            Box::pin(async {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-                Ok("hedge_ok")
-            });
+        let hedge: Pin<Box<dyn Future<Output = Result<&str, &str>> + Send>> = Box::pin(async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            Ok("hedge_ok")
+        });
 
         let config = HedgeConfig {
             delay: Duration::from_millis(100),
@@ -292,11 +288,10 @@ mod tests {
             Ok::<&str, &str>("primary_ok")
         };
 
-        let hedge: Pin<Box<dyn Future<Output = Result<&str, &str>> + Send>> =
-            Box::pin(async {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-                Err("hedge_err")
-            });
+        let hedge: Pin<Box<dyn Future<Output = Result<&str, &str>> + Send>> = Box::pin(async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            Err("hedge_err")
+        });
 
         let config = HedgeConfig {
             delay: Duration::from_millis(100),
@@ -415,18 +410,14 @@ mod tests {
             enabled: true,
         };
 
-        let result = hedge_race_with_cleanup(
-            primary,
-            vec![hedge],
-            &config,
-            move |_resource: String| {
+        let result =
+            hedge_race_with_cleanup(primary, vec![hedge], &config, move |_resource: String| {
                 let cc = cc.clone();
                 async move {
                     cc.fetch_add(1, Ordering::SeqCst);
                 }
-            },
-        )
-        .await;
+            })
+            .await;
 
         assert_eq!(result.unwrap(), "hedge");
         // Cleanup should not be called for the winner

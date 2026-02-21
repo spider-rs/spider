@@ -485,10 +485,7 @@ impl RemoteMultimodalEngine {
     // ── dual-model routing ──────────────────────────────────────────
 
     /// Set the vision model endpoint for dual-model routing.
-    pub fn with_vision_model(
-        &mut self,
-        endpoint: Option<super::ModelEndpoint>,
-    ) -> &mut Self {
+    pub fn with_vision_model(&mut self, endpoint: Option<super::ModelEndpoint>) -> &mut Self {
         self.vision_model = endpoint;
         self
     }
@@ -559,7 +556,11 @@ impl RemoteMultimodalEngine {
         let chosen_model = &decision.model;
 
         // Try to find the chosen model in the pool
-        if let Some(ep) = self.model_pool.iter().find(|ep| ep.model_name == *chosen_model) {
+        if let Some(ep) = self
+            .model_pool
+            .iter()
+            .find(|ep| ep.model_name == *chosen_model)
+        {
             // If vision is needed but this model doesn't support it, find a fallback
             if use_vision && !super::supports_vision(&ep.model_name) {
                 if let Some(fallback) = self.find_vision_fallback_in_pool(&decision.tier) {
@@ -587,10 +588,7 @@ impl RemoteMultimodalEngine {
 
         // Walk tiers from current up to High, looking for a vision-capable model
         let tiers_to_try: &[super::CostTier] = match starting_tier {
-            super::CostTier::Low => &[
-                super::CostTier::Medium,
-                super::CostTier::High,
-            ],
+            super::CostTier::Low => &[super::CostTier::Medium, super::CostTier::High],
             super::CostTier::Medium => &[super::CostTier::High],
             super::CostTier::High => &[],
         };
@@ -1444,18 +1442,12 @@ impl RemoteMultimodalEngine {
     /// Parse tool calls from an LLM response.
     ///
     /// Extracts OpenAI-compatible tool calls from a response JSON.
-    pub fn parse_tool_calls(
-        &self,
-        response: &serde_json::Value,
-    ) -> Vec<super::ToolCall> {
+    pub fn parse_tool_calls(&self, response: &serde_json::Value) -> Vec<super::ToolCall> {
         super::parse_tool_calls(response)
     }
 
     /// Convert tool calls to automation step actions.
-    pub fn tool_calls_to_steps(
-        &self,
-        calls: &[super::ToolCall],
-    ) -> Vec<serde_json::Value> {
+    pub fn tool_calls_to_steps(&self, calls: &[super::ToolCall]) -> Vec<serde_json::Value> {
         super::tool_calls_to_steps(calls)
     }
 
@@ -1721,12 +1713,8 @@ mod tests {
         let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
         assert!(!engine.has_dual_model_routing());
 
-        engine.with_vision_model(Some(crate::automation::ModelEndpoint::new(
-            "gpt-4o",
-        )));
-        engine.with_text_model(Some(crate::automation::ModelEndpoint::new(
-            "gpt-4o-mini",
-        )));
+        engine.with_vision_model(Some(crate::automation::ModelEndpoint::new("gpt-4o")));
+        engine.with_text_model(Some(crate::automation::ModelEndpoint::new("gpt-4o-mini")));
         assert!(engine.has_dual_model_routing());
     }
 
@@ -1734,9 +1722,7 @@ mod tests {
     fn test_engine_resolve_model_for_round() {
         let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "primary", None);
         engine.api_key = Some("sk-parent".to_string());
-        engine.with_vision_model(Some(crate::automation::ModelEndpoint::new(
-            "vision-model",
-        )));
+        engine.with_vision_model(Some(crate::automation::ModelEndpoint::new("vision-model")));
         engine.with_text_model(Some(
             crate::automation::ModelEndpoint::new("text-model")
                 .with_api_url("https://text.api.com")
@@ -1759,12 +1745,8 @@ mod tests {
     #[test]
     fn test_engine_should_use_vision_this_round() {
         let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
-        engine.with_vision_model(Some(crate::automation::ModelEndpoint::new(
-            "gpt-4o",
-        )));
-        engine.with_text_model(Some(crate::automation::ModelEndpoint::new(
-            "gpt-4o-mini",
-        )));
+        engine.with_vision_model(Some(crate::automation::ModelEndpoint::new("gpt-4o")));
+        engine.with_text_model(Some(crate::automation::ModelEndpoint::new("gpt-4o-mini")));
         engine.with_vision_route_mode(crate::automation::VisionRouteMode::TextFirst);
 
         // Round 0 → vision
@@ -1893,7 +1875,9 @@ mod tests {
 
         let policy = auto_policy(&["gpt-4o", "gpt-4o-mini", "deepseek-chat"]);
         let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
-        engine.model_router = Some(crate::automation::router::ModelRouter::with_policy(policy.clone()));
+        engine.model_router = Some(crate::automation::router::ModelRouter::with_policy(
+            policy.clone(),
+        ));
         engine.model_pool = vec![
             crate::automation::ModelEndpoint::new("gpt-4o"),
             crate::automation::ModelEndpoint::new("gpt-4o-mini"),
@@ -1913,7 +1897,9 @@ mod tests {
 
         let policy = auto_policy(&["gpt-4o", "gpt-4o-mini", "deepseek-chat"]);
         let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
-        engine.model_router = Some(crate::automation::router::ModelRouter::with_policy(policy.clone()));
+        engine.model_router = Some(crate::automation::router::ModelRouter::with_policy(
+            policy.clone(),
+        ));
         engine.model_pool = vec![
             crate::automation::ModelEndpoint::new("gpt-4o"),
             crate::automation::ModelEndpoint::new("gpt-4o-mini"),
@@ -1932,7 +1918,10 @@ mod tests {
             true, // stagnated
         );
         // Should pick the large/expensive model
-        assert_eq!(model, policy.large, "complex round should use powerful model");
+        assert_eq!(
+            model, policy.large,
+            "complex round should use powerful model"
+        );
     }
 
     #[test]
@@ -1941,7 +1930,9 @@ mod tests {
 
         let policy = auto_policy(&["gpt-4o", "gpt-4o-mini", "deepseek-chat"]);
         let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
-        engine.model_router = Some(crate::automation::router::ModelRouter::with_policy(policy.clone()));
+        engine.model_router = Some(crate::automation::router::ModelRouter::with_policy(
+            policy.clone(),
+        ));
         engine.model_pool = vec![
             crate::automation::ModelEndpoint::new("gpt-4o"),
             crate::automation::ModelEndpoint::new("gpt-4o-mini"),

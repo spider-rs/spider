@@ -2189,9 +2189,9 @@ impl Page {
     ) -> Self {
         let page_resource = if seeded_resource.is_some() {
             crate::utils::fetch_page_html_seeded(
-                &url,
-                &client,
-                &page,
+                url,
+                client,
+                page,
                 wait_for,
                 screenshot,
                 page_set,
@@ -2199,7 +2199,7 @@ impl Page {
                 execution_scripts,
                 automation_scripts,
                 viewport,
-                &request_timeout,
+                request_timeout,
                 track_events,
                 referrer,
                 max_page_bytes,
@@ -2212,9 +2212,9 @@ impl Page {
             .await
         } else {
             crate::utils::fetch_page_html(
-                &url,
-                &client,
-                &page,
+                url,
+                client,
+                page,
                 wait_for,
                 screenshot,
                 page_set,
@@ -2222,7 +2222,7 @@ impl Page {
                 execution_scripts,
                 automation_scripts,
                 viewport,
-                &request_timeout,
+                request_timeout,
                 track_events,
                 referrer,
                 max_page_bytes,
@@ -2505,7 +2505,7 @@ impl Page {
         let screenshot_result = tokio::time::timeout(
             tokio::time::Duration::from_secs(30),
             Page::take_screenshot(
-                &self,
+                self,
                 full_page,
                 omit_background,
                 format,
@@ -2989,7 +2989,7 @@ impl Page {
                             let base = if relative_directory_url(&href) || base.is_none() {
                                 original_page
                             } else {
-                                base.as_deref()
+                                base
                             };
                             let base = if base_input_url.initialized() {
                                 base_input_url.get()
@@ -3149,7 +3149,7 @@ impl Page {
                             let base = if relative_directory_url(&href) || base.is_none() {
                                 original_page
                             } else {
-                                base.as_deref()
+                                base
                             };
                             let base = if base_input_url.initialized() {
                                 base_input_url.get()
@@ -3179,7 +3179,7 @@ impl Page {
                         if source.starts_with("/_next/static/")
                             && source.ends_with("/_ssgManifest.js")
                         {
-                            if let Some(build_path) = base.map(|b| convert_abs_path(&b, &source)) {
+                            if let Some(build_path) = base.map(|b| convert_abs_path(b, &source)) {
                                 let _ = cell.set(build_path.to_string());
                             }
                         }
@@ -3231,7 +3231,7 @@ impl Page {
                                     let base = if relative_directory_url(&href) || base.is_none() {
                                         original_page
                                     } else {
-                                        base.as_deref()
+                                        base
                                     };
                                     let base = if base_input_url.initialized() {
                                         base_input_url.get()
@@ -4233,7 +4233,7 @@ impl Page {
                             let base = if relative_directory_url(&href) || base.is_none() {
                                 original_page.as_ref()
                             } else {
-                                base.as_deref()
+                                base
                             };
                             let base = if base_input_url.initialized() {
                                 base_input_url.get()
@@ -5880,13 +5880,11 @@ fn test_parent_host_match_tld() {
 /// not the original crawl domain. This is the core fix for subdomain crawling.
 #[test]
 fn test_validate_link_subdomain_relative_resolution() {
-
     // Simulate: crawling www.example.com with subdomains=true,
     // currently on a page at sub.example.com
     let selectors = get_page_selectors("https://www.example.com/", true, false);
 
-    let external_domains: Box<HashSet<CaseInsensitiveString>> =
-        Box::new(HashSet::new());
+    let external_domains: Box<HashSet<CaseInsensitiveString>> = Box::new(HashSet::new());
 
     // With the fix: base is the page's own URL (sub.example.com)
     let subdomain_base = url::Url::parse("https://sub.example.com/page").unwrap();
@@ -5943,8 +5941,7 @@ fn test_validate_link_subdomain_relative_resolution() {
 fn test_validate_link_same_domain_resolution() {
     let selectors = get_page_selectors("https://www.example.com/", false, false);
 
-    let external_domains: Box<HashSet<CaseInsensitiveString>> =
-        Box::new(HashSet::new());
+    let external_domains: Box<HashSet<CaseInsensitiveString>> = Box::new(HashSet::new());
 
     let page_base = url::Url::parse("https://www.example.com/some-page").unwrap();
     let mut no_page_links: Option<HashSet<CaseInsensitiveString>> = None;
@@ -6004,14 +6001,10 @@ async fn test_subdomain_page_links_resolution() {
 
     let links = page.links(&selectors, &page_base).await;
 
-    let expected_about: CaseInsensitiveString =
-        "https://sub.example.com/about".into();
-    let expected_contact: CaseInsensitiveString =
-        "https://sub.example.com/contact".into();
-    let expected_absolute: CaseInsensitiveString =
-        "https://sub.example.com/absolute".into();
-    let wrong_about: CaseInsensitiveString =
-        "https://www.example.com/about".into();
+    let expected_about: CaseInsensitiveString = "https://sub.example.com/about".into();
+    let expected_contact: CaseInsensitiveString = "https://sub.example.com/contact".into();
+    let expected_absolute: CaseInsensitiveString = "https://sub.example.com/absolute".into();
+    let wrong_about: CaseInsensitiveString = "https://www.example.com/about".into();
 
     assert!(
         links.contains(&expected_about),

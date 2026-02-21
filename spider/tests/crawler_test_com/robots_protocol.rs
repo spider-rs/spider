@@ -193,8 +193,7 @@ async fn robots_noindexed_and_robots_disallowed() {
         return;
     }
 
-    let page =
-        fetch_page_http("/robots_protocol/robots_noindexed_and_robots_disallowed").await;
+    let page = fetch_page_http("/robots_protocol/robots_noindexed_and_robots_disallowed").await;
     assert_eq!(page.status_code, StatusCode::OK);
 }
 
@@ -207,10 +206,7 @@ async fn robots_meta_none() {
     let page = fetch_page_http("/robots_protocol/robots_meta_none").await;
     assert_eq!(page.status_code, StatusCode::OK);
     let html = page.get_html().to_lowercase();
-    assert!(
-        html.contains("none"),
-        "robots meta none should be present"
-    );
+    assert!(html.contains("none"), "robots meta none should be present");
 }
 
 #[tokio::test]
@@ -219,8 +215,7 @@ async fn robots_meta_noodp_noydir_none_noindex() {
         return;
     }
 
-    let page =
-        fetch_page_http("/robots_protocol/robots_meta_noodp_noydir_none_noindex").await;
+    let page = fetch_page_http("/robots_protocol/robots_meta_noodp_noydir_none_noindex").await;
     assert_eq!(page.status_code, StatusCode::OK);
 }
 
@@ -230,8 +225,7 @@ async fn robots_meta_multiple_tags() {
         return;
     }
 
-    let page =
-        fetch_page_http("/robots_protocol/robots_meta_multiple_tags_noindex_nofollow").await;
+    let page = fetch_page_http("/robots_protocol/robots_meta_multiple_tags_noindex_nofollow").await;
     assert_eq!(page.status_code, StatusCode::OK);
     let html = page.get_html().to_lowercase();
     assert!(
@@ -246,8 +240,7 @@ async fn meta_robots_and_x_robots_conflict() {
         return;
     }
 
-    let page =
-        fetch_page_http("/robots_protocol/meta_robots_and_x_robots_conflict").await;
+    let page = fetch_page_http("/robots_protocol/meta_robots_and_x_robots_conflict").await;
     assert_eq!(page.status_code, StatusCode::OK);
 }
 
@@ -267,8 +260,7 @@ async fn multiple_robots_directive_meta_tag() {
         return;
     }
 
-    let page =
-        fetch_page_http("/robots_protocol/multiple_robots_directive_meta_tag").await;
+    let page = fetch_page_http("/robots_protocol/multiple_robots_directive_meta_tag").await;
     assert_eq!(page.status_code, StatusCode::OK);
 }
 
@@ -278,8 +270,7 @@ async fn multiple_googlebot_directive_meta_tag() {
         return;
     }
 
-    let page =
-        fetch_page_http("/robots_protocol/multiple_googlebot_directive_meta_tag").await;
+    let page = fetch_page_http("/robots_protocol/multiple_googlebot_directive_meta_tag").await;
     assert_eq!(page.status_code, StatusCode::OK);
 }
 
@@ -385,9 +376,6 @@ async fn robots_crawl_with_respect_robots() {
     let _ = collector.await;
 
     if !urls.is_empty() {
-        eprintln!(
-            "Crawled {} pages with respect_robots_txt=true",
-            urls.len()
-        );
+        eprintln!("Crawled {} pages with respect_robots_txt=true", urls.len());
     }
 }

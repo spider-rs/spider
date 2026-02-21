@@ -7,8 +7,15 @@ async fn redirect_1_301() {
         return;
     }
     let page = fetch_page_http("/redirects/redirect_1").await;
-    assert_eq!(page.status_code, StatusCode::OK, "301 should resolve to 200");
-    assert!(page.final_redirect_destination.is_some(), "should track redirect destination");
+    assert_eq!(
+        page.status_code,
+        StatusCode::OK,
+        "301 should resolve to 200"
+    );
+    assert!(
+        page.final_redirect_destination.is_some(),
+        "should track redirect destination"
+    );
 }
 
 #[tokio::test]
@@ -17,7 +24,11 @@ async fn redirect_2() {
         return;
     }
     let page = fetch_page_http("/redirects/redirect_2").await;
-    assert!(page.status_code.is_success(), "redirect_2 should resolve, got {}", page.status_code);
+    assert!(
+        page.status_code.is_success(),
+        "redirect_2 should resolve, got {}",
+        page.status_code
+    );
 }
 
 #[tokio::test]
@@ -26,7 +37,11 @@ async fn redirect_3_302() {
         return;
     }
     let page = fetch_page_http("/redirects/redirect_3_302").await;
-    assert_eq!(page.status_code, StatusCode::OK, "302 should resolve to 200");
+    assert_eq!(
+        page.status_code,
+        StatusCode::OK,
+        "302 should resolve to 200"
+    );
 }
 
 #[tokio::test]
@@ -35,7 +50,11 @@ async fn redirect_4_307() {
         return;
     }
     let page = fetch_page_http("/redirects/redirect_4_307").await;
-    assert_eq!(page.status_code, StatusCode::OK, "307 should resolve to 200");
+    assert_eq!(
+        page.status_code,
+        StatusCode::OK,
+        "307 should resolve to 200"
+    );
 }
 
 #[tokio::test]
@@ -54,7 +73,11 @@ async fn redirect_303() {
         return;
     }
     let page = fetch_page_http("/redirects/redirect_303").await;
-    assert!(page.status_code.is_success() || page.status_code.is_redirection(), "303: got {}", page.status_code);
+    assert!(
+        page.status_code.is_success() || page.status_code.is_redirection(),
+        "303: got {}",
+        page.status_code
+    );
 }
 
 #[tokio::test]
@@ -93,7 +116,11 @@ async fn redirect_308() {
         return;
     }
     let page = fetch_page_http("/redirects/redirect_308").await;
-    assert_eq!(page.status_code, StatusCode::OK, "308 should resolve to 200");
+    assert_eq!(
+        page.status_code,
+        StatusCode::OK,
+        "308 should resolve to 200"
+    );
 }
 
 #[tokio::test]
@@ -152,7 +179,10 @@ async fn redirect_content() {
     }
     let page = fetch_page_http("/redirects/redirect_content").await;
     assert!(page.status_code.is_success());
-    assert!(!page.get_html().is_empty(), "redirect target should have content");
+    assert!(
+        !page.get_html().is_empty(),
+        "redirect target should have content"
+    );
 }
 
 #[tokio::test]
@@ -212,7 +242,11 @@ async fn infinite_redirect_does_not_hang() {
     .await;
     assert!(result.is_ok(), "infinite redirect should not hang");
     let page = result.unwrap();
-    assert!(!page.status_code.is_success(), "infinite redirect should not resolve to success, got {}", page.status_code);
+    assert!(
+        !page.status_code.is_success(),
+        "infinite redirect should not resolve to success, got {}",
+        page.status_code
+    );
 }
 
 #[tokio::test]
@@ -247,7 +281,10 @@ async fn meta_redirect_1_http() {
     let page = fetch_page_http("/redirects/meta_redirect_1").await;
     assert_eq!(page.status_code, StatusCode::OK);
     let html = page.get_html().to_lowercase();
-    assert!(html.contains("refresh") || html.contains("redirect"), "meta_redirect_1 should have refresh/redirect");
+    assert!(
+        html.contains("refresh") || html.contains("redirect"),
+        "meta_redirect_1 should have refresh/redirect"
+    );
 }
 
 #[tokio::test]
@@ -320,7 +357,10 @@ async fn meta_redirect_chrome() {
         return;
     }
     if let Some(page) = fetch_page_chrome("/redirects/meta_redirect_1").await {
-        assert!(!page.get_html().is_empty(), "meta redirect should produce content in chrome");
+        assert!(
+            !page.get_html().is_empty(),
+            "meta redirect should produce content in chrome"
+        );
     } else {
         eprintln!("SKIP: chrome not available");
     }

@@ -276,7 +276,8 @@ pub fn get_browser_config(
         }
         _ => {
             if use_chrome_ai {
-                let mut chrome_args: Vec<String> = CHROME_ARGS.iter().map(|e| e.to_string()).collect();
+                let mut chrome_args: Vec<String> =
+                    CHROME_ARGS.iter().map(|e| e.to_string()).collect();
                 patch_chrome_ai_args(&mut chrome_args);
                 builder.args(chrome_args)
             } else {

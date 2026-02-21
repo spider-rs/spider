@@ -332,7 +332,10 @@ impl ModelSelector {
     /// Create from owned strings.
     pub fn from_owned(models: Vec<String>) -> Self {
         Self {
-            models: models.into_iter().map(|m| (m.to_lowercase(), None)).collect(),
+            models: models
+                .into_iter()
+                .map(|m| (m.to_lowercase(), None))
+                .collect(),
             strategy: SelectionStrategy::default(),
         }
     }
@@ -394,14 +397,16 @@ impl ModelSelector {
         let mut candidates: Vec<ScoredModel> = self
             .models
             .iter()
-            .filter_map(|(name, custom_prio)| {
-                self.score_model(name, *custom_prio, reqs)
-            })
+            .filter_map(|(name, custom_prio)| self.score_model(name, *custom_prio, reqs))
             .collect();
 
         // Only worth sorting when there are 3+ candidates
         if candidates.len() > 2 {
-            candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            candidates.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
         }
         candidates
     }
@@ -492,9 +497,7 @@ impl ModelSelector {
             return None;
         }
 
-        let arena = profile
-            .as_ref()
-            .and_then(|p| p.ranks.overall);
+        let arena = profile.as_ref().and_then(|p| p.ranks.overall);
         let input_cost = profile
             .as_ref()
             .and_then(|p| p.pricing.input_cost_per_m_tokens);
@@ -916,7 +919,11 @@ mod tests {
         // gpt-4o supports vision, gpt-3.5-turbo does not
         assert!(!ranked.is_empty());
         for m in &ranked {
-            assert!(m.supports_vision, "non-vision model {} passed filter", m.name);
+            assert!(
+                m.supports_vision,
+                "non-vision model {} passed filter",
+                m.name
+            );
         }
     }
 
@@ -1226,8 +1233,16 @@ mod tests {
         ]);
         let reqs = ModelRequirements::default();
 
-        let first_run: Vec<String> = selector.ranked(&reqs).iter().map(|m| m.name.clone()).collect();
-        let second_run: Vec<String> = selector.ranked(&reqs).iter().map(|m| m.name.clone()).collect();
+        let first_run: Vec<String> = selector
+            .ranked(&reqs)
+            .iter()
+            .map(|m| m.name.clone())
+            .collect();
+        let second_run: Vec<String> = selector
+            .ranked(&reqs)
+            .iter()
+            .map(|m| m.name.clone())
+            .collect();
         assert_eq!(
             first_run, second_run,
             "repeated calls must produce identical ordering"
@@ -1268,8 +1283,8 @@ mod tests {
     #[test]
     fn test_selector_value_optimal_balances() {
         let mut selector = ModelSelector::new(&[
-            "gpt-4o",       // high quality, moderate cost
-            "gpt-4o-mini",  // lower quality, cheap
+            "gpt-4o",        // high quality, moderate cost
+            "gpt-4o-mini",   // lower quality, cheap
             "gpt-3.5-turbo", // lowest quality, cheapest
         ]);
         selector.set_strategy(SelectionStrategy::ValueOptimal);
@@ -1322,8 +1337,14 @@ mod tests {
         assert_eq!(results.len(), 3);
         // First gets the model, rest fall back to reuse
         assert!(results[0].is_some());
-        assert!(results[1].is_some(), "fallback should reuse the single model");
-        assert!(results[2].is_some(), "fallback should reuse the single model");
+        assert!(
+            results[1].is_some(),
+            "fallback should reuse the single model"
+        );
+        assert!(
+            results[2].is_some(),
+            "fallback should reuse the single model"
+        );
         // All should be the same model
         assert_eq!(results[0].as_ref().unwrap().name, "gpt-4o");
         assert_eq!(results[1].as_ref().unwrap().name, "gpt-4o");
@@ -1373,10 +1394,7 @@ mod tests {
             policy.medium, policy.large,
             "2-model policy should have medium == large"
         );
-        assert_ne!(
-            policy.large, policy.small,
-            "large and small should differ"
-        );
+        assert_ne!(policy.large, policy.small, "large and small should differ");
     }
 
     #[test]
@@ -1475,7 +1493,10 @@ mod tests {
         // User has one vision model and needs vision → works
         let selector = ModelSelector::new(&["gpt-4o"]);
         let result = selector.select(&reqs);
-        assert!(result.is_some(), "single vision model should satisfy vision");
+        assert!(
+            result.is_some(),
+            "single vision model should satisfy vision"
+        );
         assert_eq!(result.unwrap().name, "gpt-4o");
     }
 
@@ -1518,8 +1539,14 @@ mod tests {
         let scored = result.unwrap();
         assert_eq!(scored.name, "my-local-llama");
         assert_eq!(scored.score, 50.0, "unknown model gets default score");
-        assert_eq!(scored.max_input_tokens, 0, "unknown model has no context data");
-        assert!(scored.arena_rank.is_none(), "unknown model has no arena data");
+        assert_eq!(
+            scored.max_input_tokens, 0,
+            "unknown model has no context data"
+        );
+        assert!(
+            scored.arena_rank.is_none(),
+            "unknown model has no arena data"
+        );
     }
 
     #[test]
@@ -1685,14 +1712,20 @@ mod tests {
     #[test]
     fn test_classify_round_complexity_round_0() {
         let analysis = classify_round_complexity("click button", 1000, 0, false);
-        assert!(analysis.requires_reasoning, "round 0 always requires reasoning");
+        assert!(
+            analysis.requires_reasoning,
+            "round 0 always requires reasoning"
+        );
         assert!(analysis.requires_structured_output);
     }
 
     #[test]
     fn test_classify_round_complexity_stagnated() {
         let analysis = classify_round_complexity("click button", 1000, 5, true);
-        assert!(analysis.requires_reasoning, "stagnated rounds need reasoning");
+        assert!(
+            analysis.requires_reasoning,
+            "stagnated rounds need reasoning"
+        );
         assert!(analysis.multi_step, "stagnated rounds are multi-step");
     }
 

@@ -10,10 +10,7 @@ async fn crawler_user_agent() {
     let page = fetch_page_http("/other/crawler_user_agent").await;
     assert_eq!(page.status_code, StatusCode::OK);
     let html = page.get_html();
-    assert!(
-        !html.is_empty(),
-        "user_agent page should echo back the UA"
-    );
+    assert!(!html.is_empty(), "user_agent page should echo back the UA");
 }
 
 #[tokio::test]
@@ -126,10 +123,7 @@ async fn script_tag_contents() {
     let page = fetch_page_http("/other/script_tag_contents").await;
     assert_eq!(page.status_code, StatusCode::OK);
     let html = page.get_html().to_lowercase();
-    assert!(
-        html.contains("<script"),
-        "should contain script tags"
-    );
+    assert!(html.contains("<script"), "should contain script tags");
 }
 
 #[tokio::test]

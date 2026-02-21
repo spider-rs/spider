@@ -139,7 +139,7 @@ impl RuleLine {
         } else {
             self.path
                 .strip_suffix('*')
-                .map_or(false, |prefix| pathname.starts_with(prefix))
+                .is_some_and(|prefix| pathname.starts_with(prefix))
                 || pathname == self.path
         }
     }

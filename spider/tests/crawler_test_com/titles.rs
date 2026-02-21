@@ -111,7 +111,12 @@ async fn duplicate_title() {
     let mut titles = Vec::new();
     for path in &paths {
         let page = fetch_page_http(path).await;
-        assert_eq!(page.status_code, StatusCode::OK, "{} should return 200", path);
+        assert_eq!(
+            page.status_code,
+            StatusCode::OK,
+            "{} should return 200",
+            path
+        );
         titles.push(extract_title(&page.get_html()));
     }
 
@@ -139,7 +144,12 @@ async fn duplicate_title_and_noindex() {
 
     for path in &paths {
         let page = fetch_page_http(path).await;
-        assert_eq!(page.status_code, StatusCode::OK, "{} should return 200", path);
+        assert_eq!(
+            page.status_code,
+            StatusCode::OK,
+            "{} should return 200",
+            path
+        );
     }
 }
 

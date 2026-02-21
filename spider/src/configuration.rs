@@ -469,7 +469,7 @@ impl<'de> serde::Deserialize<'de> for AllowListSet {
         #[cfg(not(feature = "regex"))]
         {
             let vec = Vec::<CompactString>::deserialize(deserializer)?;
-            Ok(AllowListSet(vec.into()))
+            Ok(AllowListSet(vec))
         }
 
         #[cfg(feature = "regex")]
@@ -579,13 +579,12 @@ impl Configuration {
         // Build per-round complexity router from model pool (3+ models required)
         let model_pool = cfgs.model_pool.clone();
         if model_pool.len() >= 3 {
-            let model_names: Vec<&str> = model_pool
-                .iter()
-                .map(|ep| ep.model_name.as_str())
-                .collect();
+            let model_names: Vec<&str> =
+                model_pool.iter().map(|ep| ep.model_name.as_str()).collect();
             let policy = crate::features::automation::auto_policy(&model_names);
-            engine.model_router =
-                Some(crate::features::automation::ModelRouter::with_policy(policy));
+            engine.model_router = Some(crate::features::automation::ModelRouter::with_policy(
+                policy,
+            ));
         }
         engine.model_pool = model_pool;
 

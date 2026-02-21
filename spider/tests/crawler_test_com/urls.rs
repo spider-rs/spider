@@ -311,8 +311,7 @@ async fn url_with_session_id() {
         return;
     }
 
-    let page =
-        fetch_page_http("/urls/with_session_id?sessionID=5vSrxOoHw90aGk81xRa6").await;
+    let page = fetch_page_http("/urls/with_session_id?sessionID=5vSrxOoHw90aGk81xRa6").await;
     assert!(
         page.status_code.is_success(),
         "URL with session ID should resolve"
@@ -544,10 +543,7 @@ async fn path_segments() {
         return;
     }
 
-    let paths = [
-        "/path/1/path/2",
-        "/path/1/path/2/path/3",
-    ];
+    let paths = ["/path/1/path/2", "/path/1/path/2/path/3"];
 
     for path in &paths {
         let page = fetch_page_http(path).await;
@@ -584,8 +580,7 @@ async fn parameter_on_hostname_root() {
         return;
     }
 
-    let page =
-        fetch_page_http("/?parameter-on-hostname-root=parameter-value").await;
+    let page = fetch_page_http("/?parameter-on-hostname-root=parameter-value").await;
     assert!(
         page.status_code.is_success(),
         "parameter on root: got {}",
@@ -651,10 +646,9 @@ async fn infinite_urls_budget_caps_crawl() {
         }
     };
 
-    let crawl_result = spider::tokio::time::timeout(
-        std::time::Duration::from_secs(90),
-        async { spider::tokio::join!(sub, crawl) },
-    )
+    let crawl_result = spider::tokio::time::timeout(std::time::Duration::from_secs(90), async {
+        spider::tokio::join!(sub, crawl)
+    })
     .await;
 
     assert!(crawl_result.is_ok(), "infinite crawl should not hang");

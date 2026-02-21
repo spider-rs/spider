@@ -49,10 +49,7 @@ async fn ajax_return_data() {
 
     if let Some(page) = fetch_page_chrome("/javascript/ajax-return-data").await {
         let html = page.get_html();
-        assert!(
-            html.len() > 100,
-            "chrome should wait for AJAX data"
-        );
+        assert!(html.len() > 100, "chrome should wait for AJAX data");
     } else {
         eprintln!("SKIP: chrome not available");
     }
@@ -282,7 +279,10 @@ async fn window_location_onclick() {
     }
 
     if let Some(page) = fetch_page_chrome("/javascript/window-location-onclick").await {
-        assert!(!page.get_html().is_empty(), "onclick page should have content");
+        assert!(
+            !page.get_html().is_empty(),
+            "onclick page should have content"
+        );
     } else {
         eprintln!("SKIP: chrome not available");
     }
@@ -296,7 +296,10 @@ async fn window_open() {
     }
 
     if let Some(page) = fetch_page_chrome("/javascript/window-open").await {
-        assert!(!page.get_html().is_empty(), "window-open should have content");
+        assert!(
+            !page.get_html().is_empty(),
+            "window-open should have content"
+        );
     } else {
         eprintln!("SKIP: chrome not available");
     }
@@ -312,7 +315,10 @@ async fn onmousedown() {
     }
 
     if let Some(page) = fetch_page_chrome("/javascript/onmousedown").await {
-        assert!(!page.get_html().is_empty(), "onmousedown should have content");
+        assert!(
+            !page.get_html().is_empty(),
+            "onmousedown should have content"
+        );
     } else {
         eprintln!("SKIP: chrome not available");
     }
@@ -326,7 +332,10 @@ async fn concatenatedlink() {
     }
 
     if let Some(page) = fetch_page_chrome("/javascript/concatenatedlink").await {
-        assert!(!page.get_html().is_empty(), "concatenatedlink should have content");
+        assert!(
+            !page.get_html().is_empty(),
+            "concatenatedlink should have content"
+        );
     } else {
         eprintln!("SKIP: chrome not available");
     }
@@ -340,7 +349,10 @@ async fn data_hreflink() {
     }
 
     if let Some(page) = fetch_page_chrome("/javascript/data-hreflink").await {
-        assert!(!page.get_html().is_empty(), "data-hreflink should have content");
+        assert!(
+            !page.get_html().is_empty(),
+            "data-hreflink should have content"
+        );
     } else {
         eprintln!("SKIP: chrome not available");
     }
@@ -354,7 +366,10 @@ async fn push_state() {
     }
 
     if let Some(page) = fetch_page_chrome("/javascript/push_state").await {
-        assert!(!page.get_html().is_empty(), "push_state should have content");
+        assert!(
+            !page.get_html().is_empty(),
+            "push_state should have content"
+        );
     } else {
         eprintln!("SKIP: chrome not available");
     }
@@ -371,7 +386,10 @@ async fn onclick_reveals_element() {
         fetch_page_chrome("/javascript/onclick-reveals-element-programmatically-added-onclick")
             .await
     {
-        assert!(!page.get_html().is_empty(), "onclick-reveals should have content");
+        assert!(
+            !page.get_html().is_empty(),
+            "onclick-reveals should have content"
+        );
     } else {
         eprintln!("SKIP: chrome not available");
     }
@@ -433,7 +451,10 @@ async fn analytics_script() {
     }
 
     if let Some(page) = fetch_page_chrome("/javascript/analytics_script").await {
-        assert!(!page.get_html().is_empty(), "analytics_script should have content");
+        assert!(
+            !page.get_html().is_empty(),
+            "analytics_script should have content"
+        );
     } else {
         eprintln!("SKIP: chrome not available");
     }
@@ -465,15 +486,9 @@ async fn dynamically_inserted_text_smart() {
     }
 
     let pages = crawl_collect_smart("/javascript/dynamically-inserted-text", 1, 0).await;
-    assert!(
-        !pages.is_empty(),
-        "smart mode should fetch JS page"
-    );
+    assert!(!pages.is_empty(), "smart mode should fetch JS page");
     let html = pages[0].get_html();
-    assert!(
-        html.len() > 100,
-        "smart mode should render JS content"
-    );
+    assert!(html.len() > 100, "smart mode should render JS content");
 }
 
 #[cfg(feature = "smart")]
@@ -484,8 +499,5 @@ async fn ajax_return_data_smart() {
     }
 
     let pages = crawl_collect_smart("/javascript/ajax-return-data", 1, 0).await;
-    assert!(
-        !pages.is_empty(),
-        "smart mode should fetch AJAX page"
-    );
+    assert!(!pages.is_empty(), "smart mode should fetch AJAX page");
 }

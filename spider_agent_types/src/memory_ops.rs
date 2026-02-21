@@ -238,7 +238,9 @@ impl AutomationMemory {
             *entry = serde_json::json!({});
         }
 
-        let map = entry.as_object_mut().expect("level attempts map must be object");
+        let map = entry
+            .as_object_mut()
+            .expect("level attempts map must be object");
         let current = map
             .get(level_key)
             .and_then(|v| v.as_u64())

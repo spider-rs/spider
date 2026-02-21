@@ -9,7 +9,9 @@
 //! [`ConcurrentChainResult`], [`StepResult`]) live in [`spider_agent_types`]
 //! and are re-exported at the parent module level.
 
-use super::{ConcurrentChainConfig, ConcurrentChainResult, DependencyGraph, DependentStep, StepResult};
+use super::{
+    ConcurrentChainConfig, ConcurrentChainResult, DependencyGraph, DependentStep, StepResult,
+};
 use std::time::Instant;
 
 /// Execute a dependency graph using a provided executor function.

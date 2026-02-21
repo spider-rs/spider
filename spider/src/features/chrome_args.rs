@@ -40,7 +40,7 @@ pub(crate) static CHROME_ARGS: [&str; 27] = [
     feature = "chrome",
     feature = "real_browser"
 ))]
-pub(crate) static CHROME_ARGS: [&'static str; 24] = [
+pub(crate) static CHROME_ARGS: [&str; 24] = [
     if cfg!(feature = "chrome_headless_new") {
         "--headless=new"
     } else {

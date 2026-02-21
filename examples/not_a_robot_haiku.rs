@@ -61,8 +61,8 @@ async fn main() {
 
     // Use Claude Haiku — fast and cheap, good baseline test.
     // Override with MODEL env var for other models (e.g. MODEL=anthropic/claude-sonnet-4-5).
-    let model =
-        std::env::var("MODEL").unwrap_or_else(|_| "anthropic/claude-haiku-4-5-20251001".to_string());
+    let model = std::env::var("MODEL")
+        .unwrap_or_else(|_| "anthropic/claude-haiku-4-5-20251001".to_string());
     let mut mm_config =
         RemoteMultimodalConfigs::new("https://openrouter.ai/api/v1/chat/completions", &model);
 

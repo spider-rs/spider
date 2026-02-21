@@ -234,7 +234,10 @@ async fn canonical_with_self_reference() {
     assert_eq!(page.status_code, StatusCode::OK);
     let html = page.get_html();
     let canonical = extract_canonical(&html);
-    assert!(canonical.is_some(), "should have self-referencing canonical");
+    assert!(
+        canonical.is_some(),
+        "should have self-referencing canonical"
+    );
     let c = canonical.unwrap();
     assert!(
         c.contains("canonical_tag_with_self_reference"),
@@ -315,10 +318,8 @@ async fn canonical_url_encoded_vs_non_encoded() {
         return;
     }
 
-    let page = fetch_page_http(
-        "/canonical_tags/canonical_url_encoded_vs_non_encoded/caf%C3%A9",
-    )
-    .await;
+    let page =
+        fetch_page_http("/canonical_tags/canonical_url_encoded_vs_non_encoded/caf%C3%A9").await;
     assert_eq!(page.status_code, StatusCode::OK);
 }
 
@@ -328,10 +329,9 @@ async fn canonical_url_encoded_emoji() {
         return;
     }
 
-    let page = fetch_page_http(
-        "/canonical_tags/canonical_url_encoded_vs_non_encoded/%F0%9F%8D%BA/ist",
-    )
-    .await;
+    let page =
+        fetch_page_http("/canonical_tags/canonical_url_encoded_vs_non_encoded/%F0%9F%8D%BA/ist")
+            .await;
     assert_eq!(page.status_code, StatusCode::OK);
 }
 
@@ -343,10 +343,8 @@ async fn canonical_parameter_key_case_sensitive() {
         return;
     }
 
-    let page = fetch_page_http(
-        "/canonical_tags/canonical_prameter_key_is_case_sensitive?key=value",
-    )
-    .await;
+    let page =
+        fetch_page_http("/canonical_tags/canonical_prameter_key_is_case_sensitive?key=value").await;
     assert_eq!(page.status_code, StatusCode::OK);
 }
 
@@ -356,10 +354,9 @@ async fn canonical_parameter_value_case_sensitive() {
         return;
     }
 
-    let page = fetch_page_http(
-        "/canonical_tags/canonical_prameter_value_is_case_sensitive?key=value",
-    )
-    .await;
+    let page =
+        fetch_page_http("/canonical_tags/canonical_prameter_value_is_case_sensitive?key=value")
+            .await;
     assert_eq!(page.status_code, StatusCode::OK);
 }
 

@@ -69,10 +69,7 @@ async fn og_no_twitter() {
         "og_no_twitter should have OG tags"
     );
     let has_twitter = html.contains("twitter:card");
-    assert!(
-        !has_twitter,
-        "og_no_twitter should not have twitter:card"
-    );
+    assert!(!has_twitter, "og_no_twitter should not have twitter:card");
 }
 
 #[tokio::test]

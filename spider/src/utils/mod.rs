@@ -14,6 +14,9 @@ pub(crate) mod detect_chrome;
 pub mod detect_system;
 /// Utils to modify the HTTP header.
 pub mod header_utils;
+#[cfg(feature = "hedge")]
+/// Work-stealing (hedged requests) for slow crawl requests.
+pub mod hedge;
 /// String interner.
 pub mod interner;
 /// A trie struct.
@@ -22,9 +25,6 @@ pub mod trie;
 pub mod uring_fs;
 /// Validate html false positives.
 pub mod validation;
-#[cfg(feature = "hedge")]
-/// Work-stealing (hedged requests) for slow crawl requests.
-pub mod hedge;
 
 #[cfg(feature = "chrome")]
 use crate::features::automation::RemoteMultimodalConfigs;
@@ -1172,8 +1172,14 @@ pub async fn perform_chrome_http_request_cache(
         Err(e) => {
             if is_cipher_mismatch(&e) {
                 if let Some(flipped) = flip_http_https(source) {
-                    return attempt_once(page, &flipped, referrer.clone(), cache_options, cache_policy)
-                        .await;
+                    return attempt_once(
+                        page,
+                        &flipped,
+                        referrer.clone(),
+                        cache_options,
+                        cache_policy,
+                    )
+                    .await;
                 }
             }
             if is_ssl_protocol_error(&e) {
@@ -1477,9 +1483,9 @@ pub async fn put_hybrid_cache(
 
         let has_no_cache = cc_lower
             .as_ref()
-            .map_or(false, |v| v.contains("no-cache") || v.contains("no-store"));
+            .is_some_and(|v| v.contains("no-cache") || v.contains("no-store"));
 
-        let has_positive_max_age = cc_lower.as_ref().map_or(false, |v| {
+        let has_positive_max_age = cc_lower.as_ref().is_some_and(|v| {
             v.split(',')
                 .filter_map(|d| {
                     let d = d.trim();
@@ -1489,13 +1495,15 @@ pub async fn put_hybrid_cache(
                 .any(|val| val.trim().parse::<u64>().unwrap_or(0) > 0)
         });
 
-        let has_heuristic_signal = policy_headers.contains_key("last-modified")
-            || policy_headers.contains_key("expires");
+        let has_heuristic_signal =
+            policy_headers.contains_key("last-modified") || policy_headers.contains_key("expires");
 
         // Override when: explicit no-cache/no-store, OR no caching signal at all
         if has_no_cache || (!has_positive_max_age && !has_heuristic_signal) {
-            policy_headers
-                .insert("cache-control".to_string(), "public, max-age=172800".to_string());
+            policy_headers.insert(
+                "cache-control".to_string(),
+                "public, max-age=172800".to_string(),
+            );
             // Remove conflicting headers that would override max-age
             policy_headers.remove("pragma");
         }
@@ -4550,12 +4558,15 @@ pub async fn fetch_page_html(
                                                 &utf8_percent_encode(target_url, NON_ALPHANUMERIC)
                                                     .to_string()
                                             );
-                                            match uring_fs::StreamingWriter::create(file_path.clone()).await {
+                                            match uring_fs::StreamingWriter::create(
+                                                file_path.clone(),
+                                            )
+                                            .await
+                                            {
                                                 Ok(w) => {
                                                     data.extend_from_slice(&text);
 
-                                                    if w.write(data.as_ref()).await.is_ok()
-                                                    {
+                                                    if w.write(data.as_ref()).await.is_ok() {
                                                         data.clear();
                                                     }
                                                     writer = Some(w);
@@ -4587,7 +4598,9 @@ pub async fn fetch_page_html(
                                 #[cfg(feature = "cookies")]
                                 cookies,
                                 content: Some(if !file_path.is_empty() {
-                                    let buffer = if let Ok(b) = uring_fs::read_file(file_path.clone()).await {
+                                    let buffer = if let Ok(b) =
+                                        uring_fs::read_file(file_path.clone()).await
+                                    {
                                         let _ = uring_fs::remove_file(file_path).await;
                                         b
                                     } else {
@@ -4972,7 +4985,7 @@ pub async fn fetch_page_html_base(
             Some(seeded)
         }
     } else {
-        get_cached_url(&target_url, cache_options.as_ref(), cache_policy).await
+        get_cached_url(target_url, cache_options.as_ref(), cache_policy).await
     };
     let cached = cached_html.is_some();
 
@@ -4994,7 +5007,7 @@ pub async fn fetch_page_html_base(
         } else {
             target_url
         },
-        &page,
+        page,
         cached,
         true,
         wait_for,
@@ -5021,7 +5034,7 @@ pub async fn fetch_page_html_base(
         Ok(page) => page,
         Err(err) => {
             log::error!("{:?}", err);
-            fetch_page_html_raw(&target_url, &client).await
+            fetch_page_html_raw(target_url, client).await
         }
     }
 }
@@ -6971,14 +6984,30 @@ mod tests {
             .checked_sub(std::time::Duration::from_secs(2 * 24 * 3600))
             .unwrap();
         let cache_policy_period = Some(super::BasicCachePolicy::Period(two_days_ago));
-        let result = get_cached_url_base(target_url, Some(CacheOptions::SkipBrowser), &cache_policy_period).await;
-        assert!(result.is_some(), "no-cache response should be cached via policy override");
+        let result = get_cached_url_base(
+            target_url,
+            Some(CacheOptions::SkipBrowser),
+            &cache_policy_period,
+        )
+        .await;
+        assert!(
+            result.is_some(),
+            "no-cache response should be cached via policy override"
+        );
         assert!(result.unwrap().contains("no-cache-but-cacheable"));
 
         // Normal policy also returns it (freshly stored, max-age=172800 > age≈0)
         let cache_policy_normal = Some(super::BasicCachePolicy::Normal);
-        let result_normal = get_cached_url_base(target_url, Some(CacheOptions::SkipBrowser), &cache_policy_normal).await;
-        assert!(result_normal.is_some(), "freshly stored entry should be fresh under Normal policy");
+        let result_normal = get_cached_url_base(
+            target_url,
+            Some(CacheOptions::SkipBrowser),
+            &cache_policy_normal,
+        )
+        .await;
+        assert!(
+            result_normal.is_some(),
+            "freshly stored entry should be fresh under Normal policy"
+        );
     }
 
     /// Verify no-store is also overridden on write.
@@ -7009,8 +7038,16 @@ mod tests {
             .checked_sub(std::time::Duration::from_secs(2 * 24 * 3600))
             .unwrap();
         let cache_policy_period = Some(super::BasicCachePolicy::Period(two_days_ago));
-        let result = get_cached_url_base(target_url, Some(CacheOptions::SkipBrowser), &cache_policy_period).await;
-        assert!(result.is_some(), "no-store response should be cached via policy override");
+        let result = get_cached_url_base(
+            target_url,
+            Some(CacheOptions::SkipBrowser),
+            &cache_policy_period,
+        )
+        .await;
+        assert!(
+            result.is_some(),
+            "no-store response should be cached via policy override"
+        );
         assert!(result.unwrap().contains("no-store-but-cacheable"));
     }
 
@@ -7047,8 +7084,16 @@ mod tests {
             .checked_sub(std::time::Duration::from_secs(2 * 24 * 3600))
             .unwrap();
         let cache_policy_period = Some(super::BasicCachePolicy::Period(two_days_ago));
-        let result = get_cached_url_base(target_url, Some(CacheOptions::SkipBrowser), &cache_policy_period).await;
-        assert!(result.is_some(), "last-modified heuristic should make entry fresh");
+        let result = get_cached_url_base(
+            target_url,
+            Some(CacheOptions::SkipBrowser),
+            &cache_policy_period,
+        )
+        .await;
+        assert!(
+            result.is_some(),
+            "last-modified heuristic should make entry fresh"
+        );
         assert!(result.unwrap().contains("heuristic-cached"));
     }
 
@@ -7087,8 +7132,16 @@ mod tests {
             .checked_sub(std::time::Duration::from_secs(2 * 24 * 3600))
             .unwrap();
         let cache_policy_period = Some(super::BasicCachePolicy::Period(two_days_ago));
-        let result = get_cached_url_base(target_url, Some(CacheOptions::SkipBrowser), &cache_policy_period).await;
-        assert!(result.is_some(), "Set-Cookie should not block caching with shared=false");
+        let result = get_cached_url_base(
+            target_url,
+            Some(CacheOptions::SkipBrowser),
+            &cache_policy_period,
+        )
+        .await;
+        assert!(
+            result.is_some(),
+            "Set-Cookie should not block caching with shared=false"
+        );
         assert!(result.unwrap().contains("set-cookie-cached"));
     }
 
@@ -7101,7 +7154,9 @@ mod tests {
 
     #[test]
     fn test_is_cacheable_body_empty_skeleton_html() {
-        assert!(is_cacheable_body_empty(b"<html><head></head><body></body></html>"));
+        assert!(is_cacheable_body_empty(
+            b"<html><head></head><body></body></html>"
+        ));
         assert!(is_cacheable_body_empty(b"<html></html>"));
     }
 
@@ -7137,22 +7192,32 @@ mod tests {
     #[test]
     fn test_is_cacheable_body_empty_binary_skip_html_checks() {
         // PNG header
-        assert!(!is_cacheable_body_empty(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A]));
+        assert!(!is_cacheable_body_empty(&[
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A
+        ]));
         // JPEG header
         assert!(!is_cacheable_body_empty(&[0xFF, 0xD8, 0xFF, 0xE0]));
         // Arbitrary binary
         assert!(!is_cacheable_body_empty(&[0x00, 0x01, 0x02, 0x03]));
     }
 
-    #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+    #[cfg(any(
+        feature = "cache",
+        feature = "cache_mem",
+        feature = "chrome_remote_cache"
+    ))]
     #[test]
     fn test_decode_cached_html_bytes_rejects_empty_html() {
         // Empty shell HTML must be treated as a cache miss (returns None)
-        assert!(decode_cached_html_bytes(b"<html><head></head><body></body></html>", None).is_none());
+        assert!(
+            decode_cached_html_bytes(b"<html><head></head><body></body></html>", None).is_none()
+        );
         assert!(decode_cached_html_bytes(b"<html></html>", None).is_none());
         assert!(decode_cached_html_bytes(b"", None).is_none());
         assert!(decode_cached_html_bytes(b"   ", None).is_none());
         // Real content must still be returned
-        assert!(decode_cached_html_bytes(b"<html><body><p>Hello</p></body></html>", None).is_some());
+        assert!(
+            decode_cached_html_bytes(b"<html><body><p>Hello</p></body></html>", None).is_some()
+        );
     }
 }

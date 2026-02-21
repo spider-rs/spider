@@ -9,7 +9,10 @@ async fn custom_text() {
 
     let page = fetch_page_http("/content/custom_text").await;
     assert_eq!(page.status_code, StatusCode::OK);
-    assert!(!page.get_html().is_empty(), "custom_text should have content");
+    assert!(
+        !page.get_html().is_empty(),
+        "custom_text should have content"
+    );
 }
 
 #[tokio::test]
@@ -211,10 +214,7 @@ async fn multiple_titles_and_descriptions() {
     assert_eq!(page.status_code, StatusCode::OK);
     let html = page.get_html().to_lowercase();
     let title_count = html.matches("<title").count();
-    assert!(
-        title_count >= 1,
-        "should have at least one title tag"
-    );
+    assert!(title_count >= 1, "should have at least one title tag");
 }
 
 #[tokio::test]
@@ -223,10 +223,8 @@ async fn title_with_special_chars() {
         return;
     }
 
-    let page = fetch_page_http(
-        "/content/title_with_newline_quote_doublequote_and_comma_characters",
-    )
-    .await;
+    let page =
+        fetch_page_http("/content/title_with_newline_quote_doublequote_and_comma_characters").await;
     assert_eq!(page.status_code, StatusCode::OK);
     let html = page.get_html();
     let title = extract_title(&html);

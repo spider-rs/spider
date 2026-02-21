@@ -863,10 +863,8 @@ impl Website {
     pub fn is_allowed(&mut self, link: &CaseInsensitiveString) -> ProcessLinkStatus {
         let status = self.is_allowed_budgetless(link);
 
-        if status.eq(&ProcessLinkStatus::Allowed) {
-            if self.is_over_budget(link) {
-                return ProcessLinkStatus::BudgetExceeded;
-            }
+        if status.eq(&ProcessLinkStatus::Allowed) && self.is_over_budget(link) {
+            return ProcessLinkStatus::BudgetExceeded;
         }
 
         status
@@ -906,10 +904,8 @@ impl Website {
         } else {
             let status = self.is_allowed_default(link.inner());
 
-            if status.eq(&ProcessLinkStatus::Allowed) {
-                if self.is_over_depth(link) {
-                    return ProcessLinkStatus::Blocked;
-                }
+            if status.eq(&ProcessLinkStatus::Allowed) && self.is_over_depth(link) {
+                return ProcessLinkStatus::Blocked;
             }
 
             status
@@ -1608,7 +1604,7 @@ impl Website {
             .danger_accept_invalid_certs(self.configuration.accept_invalid_certs);
 
         let client = if let Some(network_interface) = &self.configuration.network_interface {
-            set_interface(client, &network_interface)
+            set_interface(client, network_interface)
         } else {
             client
         };
@@ -1742,14 +1738,12 @@ impl Website {
                     // use HTTP instead as reqwest does not support the protocol on linux.
                     if replace_plain_socks && socks {
                         if let Ok(proxy) =
-                            crate::client::Proxy::all(&proxie.replacen("socks://", "http://", 1))
+                            crate::client::Proxy::all(proxie.replacen("socks://", "http://", 1))
                         {
                             client = client.proxy(proxy);
                         }
-                    } else {
-                        if let Ok(proxy) = crate::client::Proxy::all(proxie) {
-                            client = client.proxy(proxy);
-                        }
+                    } else if let Ok(proxy) = crate::client::Proxy::all(proxie) {
+                        client = client.proxy(proxy);
                     }
                 }
 
@@ -1825,14 +1819,12 @@ impl Website {
                     // use HTTP instead as reqwest does not support the protocol on linux.
                     if replace_plain_socks && socks {
                         if let Ok(proxy) =
-                            crate::client::Proxy::all(&proxie.replacen("socks://", "http://", 1))
+                            crate::client::Proxy::all(proxie.replacen("socks://", "http://", 1))
                         {
                             client = client.proxy(proxy);
                         }
-                    } else {
-                        if let Ok(proxy) = crate::client::Proxy::all(proxie) {
-                            client = client.proxy(proxy);
-                        }
+                    } else if let Ok(proxy) = crate::client::Proxy::all(proxie) {
+                        client = client.proxy(proxy);
                     }
                 }
 
@@ -1956,7 +1948,7 @@ impl Website {
         let socks = addr.starts_with("socks://");
 
         let client = if socks && linux {
-            match crate::client::Proxy::all(&addr.replacen("socks://", "http://", 1)) {
+            match crate::client::Proxy::all(addr.replacen("socks://", "http://", 1)) {
                 Ok(p) => client.proxy(p),
                 Err(_) => return None,
             }
@@ -2025,7 +2017,7 @@ impl Website {
         let socks = addr.starts_with("socks://");
 
         let client = if socks && linux {
-            match crate::client::Proxy::all(&addr.replacen("socks://", "http://", 1)) {
+            match crate::client::Proxy::all(addr.replacen("socks://", "http://", 1)) {
                 Ok(p) => client.proxy(p),
                 Err(_) => return None,
             }
@@ -2713,7 +2705,7 @@ impl Website {
                     &page_links_settings,
                     &mut links,
                     Some(&mut links_ssg),
-                    &mut domain_parsed, // original domain
+                    &domain_parsed, // original domain
                     &mut self.domain_parsed,
                     &mut links_pages,
                 )
@@ -2755,7 +2747,7 @@ impl Website {
                                 &page_links_settings,
                                 &mut links,
                                 Some(&mut links_ssg),
-                                &mut domain_parsed,
+                                &domain_parsed,
                                 &mut domain_parsed_clone,
                                 &mut links_pages,
                             )
@@ -2779,7 +2771,7 @@ impl Website {
                             &page_links_settings,
                             &mut links,
                             Some(&mut links_ssg),
-                            &mut domain_parsed,
+                            &domain_parsed,
                             &mut self.domain_parsed,
                             &mut links_pages,
                         )
@@ -3234,19 +3226,19 @@ impl Website {
         }
 
         if self
-            .is_allowed_default(&self.get_base_link())
+            .is_allowed_default(self.get_base_link())
             .eq(&ProcessLinkStatus::Allowed)
         {
             let (_, intercept_handle) = tokio::join!(
                 crate::features::chrome::setup_chrome_events(chrome_page, &self.configuration),
-                self.setup_chrome_interception(&chrome_page)
+                self.setup_chrome_interception(chrome_page)
             );
 
             let mut page = if let Some(seeded_html) = self.get_seeded_html() {
                 Page::new_seeded(
-                    &self.url.inner(),
-                    &client,
-                    &chrome_page,
+                    self.url.inner(),
+                    client,
+                    chrome_page,
                     &self.configuration.wait_for,
                     &self.configuration.screenshot,
                     false, // we use the initial about:blank page.
@@ -3267,9 +3259,9 @@ impl Website {
                 .await
             } else {
                 Page::new(
-                    &self.url.inner(),
-                    &client,
-                    &chrome_page,
+                    self.url.inner(),
+                    client,
+                    chrome_page,
                     &self.configuration.wait_for,
                     &self.configuration.screenshot,
                     false, // we use the initial about:blank page.
@@ -3310,9 +3302,9 @@ impl Website {
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                     if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                         let next_page = Page::new(
-                            &self.url.inner(),
-                            &client,
-                            &chrome_page,
+                            self.url.inner(),
+                            client,
+                            chrome_page,
                             &self.configuration.wait_for,
                             &self.configuration.screenshot,
                             false, // we use the initial about:blank page.
@@ -3337,9 +3329,9 @@ impl Website {
                     }
                 } else {
                     let next_page = Page::new(
-                        &self.url.inner(),
-                        &client,
-                        &chrome_page,
+                        self.url.inner(),
+                        client,
+                        chrome_page,
                         &self.configuration.wait_for,
                         &self.configuration.screenshot,
                         false, // we use the initial about:blank page.
@@ -3400,7 +3392,7 @@ impl Website {
                 }
             }
 
-            emit_log(&self.url.inner());
+            emit_log(self.url.inner());
 
             if let Some(sid) = page.signature {
                 self.insert_signature(sid).await;
@@ -3415,13 +3407,13 @@ impl Website {
 
             // setup link tracking.
             if self.configuration.return_page_links && page.page_links.is_none() {
-                page.page_links = Some(Box::new(Default::default()));
+                page.page_links = Some(Box::default());
             }
 
             let xml_file = page.get_html_bytes_u8().starts_with(b"<?xml");
 
             let mut links = if !page.is_empty() && !xml_file {
-                page.links_ssg(&base, &client, &self.domain_parsed).await
+                page.links_ssg(base, client, &self.domain_parsed).await
             } else {
                 Default::default()
             };
@@ -3465,18 +3457,18 @@ impl Website {
         chrome_page: &chromiumoxide::Page,
     ) -> HashSet<CaseInsensitiveString> {
         if self
-            .is_allowed_default(&self.get_base_link())
+            .is_allowed_default(self.get_base_link())
             .eq(&ProcessLinkStatus::Allowed)
         {
             let (_, intercept_handle) = tokio::join!(
                 crate::features::chrome::setup_chrome_events(chrome_page, &self.configuration),
-                self.setup_chrome_interception(&chrome_page)
+                self.setup_chrome_interception(chrome_page)
             );
 
             let mut page = Page::new(
-                url.unwrap_or(&self.url.inner()),
-                &client,
-                &chrome_page,
+                url.unwrap_or(self.url.inner()),
+                client,
+                chrome_page,
                 &self.configuration.wait_for,
                 &self.configuration.screenshot,
                 false, // we use the initial about:blank page.
@@ -3516,9 +3508,9 @@ impl Website {
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                     if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                         let next_page = Page::new(
-                            &self.url.inner(),
-                            &client,
-                            &chrome_page,
+                            self.url.inner(),
+                            client,
+                            chrome_page,
                             &self.configuration.wait_for,
                             &self.configuration.screenshot,
                             false, // we use the initial about:blank page.
@@ -3543,9 +3535,9 @@ impl Website {
                     }
                 } else {
                     let next_page = Page::new(
-                        &self.url.inner(),
-                        &client,
-                        &chrome_page,
+                        self.url.inner(),
+                        client,
+                        chrome_page,
                         &self.configuration.wait_for,
                         &self.configuration.screenshot,
                         false, // we use the initial about:blank page.
@@ -3603,16 +3595,16 @@ impl Website {
                 }
             }
 
-            emit_log(&self.url.inner());
+            emit_log(self.url.inner());
 
             if self.configuration.return_page_links && page.page_links.is_none() {
-                page.page_links = Some(Box::new(Default::default()));
+                page.page_links = Some(Box::default());
             }
 
             let xml_file = page.get_html_bytes_u8().starts_with(b"<?xml");
 
             let mut links = if !page.is_empty() && !xml_file {
-                page.links_ssg(&base, &client, &self.domain_parsed).await
+                page.links_ssg(base, client, &self.domain_parsed).await
             } else {
                 Default::default()
             };
@@ -3652,7 +3644,7 @@ impl Website {
         driver: &std::sync::Arc<thirtyfour::WebDriver>,
     ) -> HashSet<CaseInsensitiveString> {
         if self
-            .is_allowed_default(&self.get_base_link())
+            .is_allowed_default(self.get_base_link())
             .eq(&ProcessLinkStatus::Allowed)
         {
             let timeout = self
@@ -3665,7 +3657,7 @@ impl Website {
             crate::features::webdriver::setup_driver_events(driver, &self.configuration).await;
 
             let mut page =
-                Page::new_page_webdriver(url.unwrap_or(&self.url.inner()), driver, timeout).await;
+                Page::new_page_webdriver(url.unwrap_or(self.url.inner()), driver, timeout).await;
 
             let mut retry_count = self.configuration.retry;
 
@@ -3677,7 +3669,7 @@ impl Website {
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                     if let Err(elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                         let next_page =
-                            Page::new_page_webdriver(&self.url.inner(), driver, timeout).await;
+                            Page::new_page_webdriver(self.url.inner(), driver, timeout).await;
                         page.clone_from(&next_page);
                     })
                     .await
@@ -3686,7 +3678,7 @@ impl Website {
                     }
                 } else {
                     let next_page =
-                        Page::new_page_webdriver(&self.url.inner(), driver, timeout).await;
+                        Page::new_page_webdriver(self.url.inner(), driver, timeout).await;
                     page.clone_from(&next_page);
                 }
             }
@@ -3705,16 +3697,16 @@ impl Website {
                 }
             }
 
-            emit_log(&self.url.inner());
+            emit_log(self.url.inner());
 
             if self.configuration.return_page_links && page.page_links.is_none() {
-                page.page_links = Some(Box::new(Default::default()));
+                page.page_links = Some(Box::default());
             }
 
             let xml_file = page.get_html_bytes_u8().starts_with(b"<?xml");
 
             let mut links = if !page.is_empty() && !xml_file {
-                page.links_ssg(&base, &client, &self.domain_parsed).await
+                page.links_ssg(base, client, &self.domain_parsed).await
             } else {
                 Default::default()
             };
@@ -4373,7 +4365,11 @@ impl Website {
 
     /// Fast path: serve single-page crawl from cache, bypassing ALL heavy setup.
     /// No browser, no HTTP client, no robots.txt. Returns true on cache hit.
-    #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+    #[cfg(any(
+        feature = "cache",
+        feature = "cache_mem",
+        feature = "chrome_remote_cache"
+    ))]
     async fn try_cache_shortcircuit(&mut self) -> bool {
         use crate::utils::{cache_skip_browser, get_cached_url};
 
@@ -4391,13 +4387,15 @@ impl Website {
 
         let target_url = self.url.inner().to_string();
 
-        if let Some(html) =
-            get_cached_url(&target_url, cache_options.as_ref(), &self.configuration.cache_policy)
-                .await
+        if let Some(html) = get_cached_url(
+            &target_url,
+            cache_options.as_ref(),
+            &self.configuration.cache_policy,
+        )
+        .await
         {
             self.status = CrawlStatus::Active;
-            let page_response =
-                crate::utils::build_cached_html_page_response(&target_url, &html);
+            let page_response = crate::utils::build_cached_html_page_response(&target_url, &html);
             let page = build(&target_url, page_response);
             self.initial_status_code = page.status_code;
             self.initial_html_length = page.get_html_bytes_u8().len();
@@ -4412,7 +4410,11 @@ impl Website {
     }
 
     /// No-op stub when cache features not enabled.
-    #[cfg(not(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache")))]
+    #[cfg(not(any(
+        feature = "cache",
+        feature = "cache_mem",
+        feature = "chrome_remote_cache"
+    )))]
     async fn try_cache_shortcircuit(&mut self) -> bool {
         false
     }
@@ -4421,9 +4423,13 @@ impl Website {
     /// Returns `true` if all reachable pages were served from cache (Chrome/HTTP can be skipped).
     /// Any cache-miss links are left in `self.extra_links` for the subsequent Chrome/HTTP phase.
     /// No mutexes, no shared state — only lock-free cache lookups.
-    #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+    #[cfg(any(
+        feature = "cache",
+        feature = "cache_mem",
+        feature = "chrome_remote_cache"
+    ))]
     async fn crawl_cache_phase(&mut self, _client: &Client) -> bool {
-        use crate::utils::{cache_skip_browser, get_cached_url, build_cached_html_page_response};
+        use crate::utils::{build_cached_html_page_response, cache_skip_browser, get_cached_url};
 
         let cache_options = self.configuration.get_cache_options();
         if !cache_skip_browser(&cache_options) {
@@ -4457,7 +4463,7 @@ impl Website {
         let page_response = build_cached_html_page_response(&target_url, &html);
         let mut page = build(&target_url, page_response);
 
-        if self.configuration.external_domains_caseless.len() > 0 {
+        if !self.configuration.external_domains_caseless.is_empty() {
             page.set_external(self.configuration.external_domains_caseless.clone());
         }
         page.set_url_parsed_direct();
@@ -4475,7 +4481,7 @@ impl Website {
 
         if normalize {
             page.signature
-                .replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
+                .replace(crate::utils::hash_html(page.get_html_bytes_u8()).await);
         }
 
         // Set initial metadata
@@ -4557,10 +4563,8 @@ impl Website {
                             build_cached_html_page_response(&link_url, &cached_html);
                         let mut page = build(&link_url, page_response);
 
-                        if self.configuration.external_domains_caseless.len() > 0 {
-                            page.set_external(
-                                self.configuration.external_domains_caseless.clone(),
-                            );
+                        if !self.configuration.external_domains_caseless.is_empty() {
+                            page.set_external(self.configuration.external_domains_caseless.clone());
                         }
                         page.set_url_parsed_direct();
                         if return_page_links {
@@ -4576,9 +4580,8 @@ impl Website {
                         page.base = None;
 
                         if normalize {
-                            page.signature.replace(
-                                crate::utils::hash_html(&page.get_html_bytes_u8()).await,
-                            );
+                            page.signature
+                                .replace(crate::utils::hash_html(page.get_html_bytes_u8()).await);
                             if let Some(sig) = page.signature {
                                 if !self.is_signature_allowed(sig).await {
                                     continue;
@@ -4618,7 +4621,11 @@ impl Website {
     }
 
     /// No-op stub when cache features not enabled.
-    #[cfg(not(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache")))]
+    #[cfg(not(any(
+        feature = "cache",
+        feature = "cache_mem",
+        feature = "chrome_remote_cache"
+    )))]
     async fn crawl_cache_phase(&mut self, _client: &Client) -> bool {
         false
     }
@@ -4804,7 +4811,7 @@ impl Website {
                 Some(h) => (Some(h.0), Some(h.1)),
                 _ => (None, None),
             };
-            self._fetch_chrome_persisted(&client, &url, &browser).await;
+            self._fetch_chrome_persisted(&client, &url, browser).await;
             if let Some(h) = join_handle {
                 h.abort()
             }
@@ -5137,11 +5144,23 @@ impl Website {
             let full_resources = self.configuration.full_resources;
             let return_page_links = self.configuration.return_page_links;
             let only_html = self.configuration.only_html && !full_resources;
-            #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+            #[cfg(any(
+                feature = "cache",
+                feature = "cache_mem",
+                feature = "chrome_remote_cache"
+            ))]
             let cache_options_raw = self.configuration.get_cache_options();
-            #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+            #[cfg(any(
+                feature = "cache",
+                feature = "cache_mem",
+                feature = "chrome_remote_cache"
+            ))]
             let cache_policy_raw = self.configuration.cache_policy.clone();
-            #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+            #[cfg(any(
+                feature = "cache",
+                feature = "cache_mem",
+                feature = "chrome_remote_cache"
+            ))]
             let normalize_raw = self.configuration.normalize;
             let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
 
@@ -5266,7 +5285,7 @@ impl Website {
                                                 let page_response = build_cached_html_page_response(target_url, &html);
                                                 let mut page = build(target_url, page_response);
 
-                                                if shared.3.len() > 0 {
+                                                if !shared.3.is_empty() {
                                                     page.set_external(shared.3.clone());
                                                 }
                                                 page.set_url_parsed_direct();
@@ -5281,7 +5300,7 @@ impl Website {
                                                 };
                                                 page.base = None;
                                                 if normalize {
-                                                    page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
+                                                    page.signature.replace(crate::utils::hash_html(page.get_html_bytes_u8()).await);
                                                 }
                                                 if let Some(ref cb) = on_should_crawl_callback {
                                                     if !cb.call(&page) {
@@ -5633,7 +5652,7 @@ impl Website {
                         self.status = CrawlStatus::Active;
 
                         if self.single_page() {
-                            self.crawl_establish(&client, &mut selectors, false, &new_page)
+                            self.crawl_establish(client, &mut selectors, false, &new_page)
                                 .await;
                             drop(new_page);
                             self.subscription_guard().await;
@@ -5645,7 +5664,7 @@ impl Website {
                             let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
 
                             let base_links = self
-                                .crawl_establish(&client, &mut selectors, false, &new_page)
+                                .crawl_establish(client, &mut selectors, false, &new_page)
                                 .await;
 
                             drop(new_page);
@@ -5674,7 +5693,7 @@ impl Website {
                                 self.on_link_find_callback.clone(),
                             ));
 
-                            let add_external = shared.3.len() > 0;
+                            let add_external = !shared.3.is_empty();
                             let on_should_crawl_callback = self.on_should_crawl_callback.clone();
                             let full_resources = self.configuration.full_resources;
                             let return_page_links = self.configuration.return_page_links;
@@ -5718,7 +5737,7 @@ impl Website {
                                                     handle,
                                                     &mut interval,
                                                     async {
-                                                        emit_log_shutdown(&link.inner());
+                                                        emit_log_shutdown(link.inner());
                                                         let permits = set.len();
                                                         set.shutdown().await;
                                                         semaphore.add_permits(permits);
@@ -5741,7 +5760,7 @@ impl Website {
                                                 continue;
                                             }
 
-                                            emit_log(&link.inner());
+                                            emit_log(link.inner());
 
                                             self.insert_link(link.clone()).await;
 
@@ -5782,7 +5801,7 @@ impl Website {
                                                                 };
                                                                 page.base = None;
                                                                 if shared.6.normalize {
-                                                                    page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
+                                                                    page.signature.replace(crate::utils::hash_html(page.get_html_bytes_u8()).await);
                                                                 }
                                                                 if let Some(ref cb) = on_should_crawl_callback {
                                                                     if !cb.call(&page) {
@@ -5816,7 +5835,7 @@ impl Website {
                                                             let target_url = target_url_string.as_str();
 
                                                             let mut page = Page::new(
-                                                                &target_url,
+                                                                target_url,
                                                                 &shared.0,
                                                                 &new_page,
                                                                 &shared.6.wait_for,
@@ -5846,7 +5865,7 @@ impl Website {
                                                                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                                                                     if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                                                                         let p = Page::new(
-                                                                            &target_url,
+                                                                            target_url,
                                                                             &shared.0,
                                                                             &new_page,
                                                                             &shared.6.wait_for,
@@ -5872,7 +5891,7 @@ impl Website {
                                                                 } else {
                                                                     page.clone_from(
                                                                         &Page::new(
-                                                                            &target_url,
+                                                                            target_url,
                                                                             &shared.0,
                                                                             &new_page,
                                                                             &shared.6.wait_for,
@@ -5927,7 +5946,7 @@ impl Website {
                                                             page.base = prev_domain;
 
                                                             if shared.6.normalize {
-                                                                page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
+                                                                page.signature.replace(crate::utils::hash_html(page.get_html_bytes_u8()).await);
                                                             }
 
                                                             if let Some(ref cb) = on_should_crawl_callback {
@@ -6506,7 +6525,7 @@ impl Website {
                         }
 
                         let base_links = website
-                            .crawl_establish(&client, &mut selectors, false, &new_page)
+                            .crawl_establish(client, &mut selectors, false, &new_page)
                             .await;
 
                         drop(new_page);
@@ -6543,7 +6562,7 @@ impl Website {
                                 self.on_link_find_callback.clone(),
                             ));
 
-                            let add_external = shared.3.len() > 0;
+                            let add_external = !shared.3.is_empty();
                             let on_should_crawl_callback = self.on_should_crawl_callback.clone();
                             let full_resources = self.configuration.full_resources;
                             let return_page_links = self.configuration.return_page_links;
@@ -6589,7 +6608,7 @@ impl Website {
                                                     handle,
                                                     &mut interval,
                                                     async {
-                                                        emit_log_shutdown(&link.inner());
+                                                        emit_log_shutdown(link.inner());
                                                         let permits = set.len();
                                                         set.shutdown().await;
                                                         semaphore.add_permits(permits);
@@ -6612,7 +6631,7 @@ impl Website {
                                                 continue;
                                             }
 
-                                            emit_log(&link.inner());
+                                            emit_log(link.inner());
 
                                             website.insert_link(link.clone()).await;
 
@@ -6642,7 +6661,7 @@ impl Website {
                                                             let target_url = link_result.0.as_ref();
 
                                                             let mut page = Page::new(
-                                                                &target_url,
+                                                                target_url,
                                                                 &shared.0,
                                                                 &new_page,
                                                                 &shared.6.wait_for,
@@ -6672,7 +6691,7 @@ impl Website {
                                                                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                                                                     if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                                                                         let p = Page::new(
-                                                                            &target_url,
+                                                                            target_url,
                                                                             &shared.0,
                                                                             &new_page,
                                                                             &shared.6.wait_for,
@@ -6698,7 +6717,7 @@ impl Website {
                                                                 } else {
                                                                     page.clone_from(
                                                                         &Page::new(
-                                                                            &target_url,
+                                                                            target_url,
                                                                             &shared.0,
                                                                             &new_page,
                                                                             &shared.6.wait_for,
@@ -6753,7 +6772,7 @@ impl Website {
                                                             page.base = prev_domain;
 
                                                             if shared.6.normalize {
-                                                                page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
+                                                                page.signature.replace(crate::utils::hash_html(page.get_html_bytes_u8()).await);
                                                             }
 
                                                             if let Some(ref cb) = on_should_crawl_callback {
@@ -6861,7 +6880,7 @@ impl Website {
                 {
                     Ok(new_page) => {
                         let mut selectors = self.setup_selectors();
-                        self.crawl_establish_chrome_one(&client, &mut selectors, url, &new_page)
+                        self.crawl_establish_chrome_one(client, &mut selectors, url, &new_page)
                             .await;
                         self.subscription_guard().await;
                         b.dispose();
@@ -6899,7 +6918,7 @@ impl Website {
         {
             Ok(new_page) => {
                 let mut selectors = self.setup_selectors();
-                self.crawl_establish_chrome_one(&client, &mut selectors, url, &new_page)
+                self.crawl_establish_chrome_one(client, &mut selectors, url, &new_page)
                     .await;
                 self.subscription_guard().await;
             }
@@ -6930,7 +6949,7 @@ impl Website {
                 self.status = CrawlStatus::Active;
 
                 if self.single_page() {
-                    self.crawl_establish_webdriver_one(&client, &mut selectors, &None, driver)
+                    self.crawl_establish_webdriver_one(client, &mut selectors, &None, driver)
                         .await;
                     self.subscription_guard().await;
                     controller.dispose();
@@ -6941,7 +6960,7 @@ impl Website {
                     let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
 
                     let base_links = self
-                        .crawl_establish_webdriver_one(&client, &mut selectors, &None, driver)
+                        .crawl_establish_webdriver_one(client, &mut selectors, &None, driver)
                         .await;
 
                     let mut links: HashSet<CaseInsensitiveString> =
@@ -6974,7 +6993,7 @@ impl Website {
                         timeout,
                     ));
 
-                    let add_external = shared.3.len() > 0;
+                    let add_external = !shared.3.is_empty();
                     let on_should_crawl_callback = self.on_should_crawl_callback.clone();
                     let full_resources = self.configuration.full_resources;
                     let return_page_links = self.configuration.return_page_links;
@@ -7017,7 +7036,7 @@ impl Website {
                                             handle,
                                             &mut interval,
                                             async {
-                                                emit_log_shutdown(&link.inner());
+                                                emit_log_shutdown(link.inner());
                                                 let permits = set.len();
                                                 set.shutdown().await;
                                                 semaphore.add_permits(permits);
@@ -7038,7 +7057,7 @@ impl Website {
                                         continue;
                                     }
 
-                                    emit_log(&link.inner());
+                                    emit_log(link.inner());
 
                                     self.insert_link(link.clone()).await;
 
@@ -7118,7 +7137,7 @@ impl Website {
                                             page.base = prev_domain;
 
                                             if shared.6.normalize {
-                                                page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
+                                                page.signature.replace(crate::utils::hash_html(page.get_html_bytes_u8()).await);
                                             }
 
                                             if let Some(ref cb) = on_should_crawl_callback {
@@ -9547,10 +9566,7 @@ impl Website {
 
     /// Set the hedged request (work-stealing) configuration.
     #[cfg(feature = "hedge")]
-    pub fn with_hedge(
-        &mut self,
-        config: crate::utils::hedge::HedgeConfig,
-    ) -> &mut Self {
+    pub fn with_hedge(&mut self, config: crate::utils::hedge::HedgeConfig) -> &mut Self {
         self.configuration.with_hedge(config);
         self
     }
@@ -10636,7 +10652,10 @@ async fn test_crawl_smart_uses_seeded_cache_with_skip_browser() {
 
     let mut response_headers = StdHashMap::new();
     response_headers.insert("content-type".to_string(), "text/html".to_string());
-    response_headers.insert("cache-control".to_string(), "public, max-age=3600".to_string());
+    response_headers.insert(
+        "cache-control".to_string(),
+        "public, max-age=3600".to_string(),
+    );
 
     let body =
         b"<html><head><title>Cached Smart Test</title></head><body>cached</body></html>".to_vec();
@@ -10673,10 +10692,7 @@ async fn test_crawl_smart_uses_seeded_cache_with_skip_browser() {
 }
 
 #[tokio::test]
-#[cfg(all(
-    not(feature = "decentralized"),
-    feature = "cache_chrome_hybrid"
-))]
+#[cfg(all(not(feature = "decentralized"), feature = "cache_chrome_hybrid"))]
 async fn test_cache_shortcircuit_single_page() {
     use crate::utils::{create_cache_key_raw, put_hybrid_cache, HttpResponse, HttpVersion};
     use std::collections::HashMap as StdHashMap;
@@ -10686,10 +10702,14 @@ async fn test_cache_shortcircuit_single_page() {
 
     let mut response_headers = StdHashMap::new();
     response_headers.insert("content-type".to_string(), "text/html".to_string());
-    response_headers.insert("cache-control".to_string(), "public, max-age=3600".to_string());
+    response_headers.insert(
+        "cache-control".to_string(),
+        "public, max-age=3600".to_string(),
+    );
 
-    let body = b"<html><head><title>Shortcircuit</title></head><body><h1>Cached!</h1></body></html>"
-        .to_vec();
+    let body =
+        b"<html><head><title>Shortcircuit</title></head><body><h1>Cached!</h1></body></html>"
+            .to_vec();
     let http_response = HttpResponse {
         body,
         headers: response_headers,
@@ -10727,14 +10747,14 @@ async fn test_cache_shortcircuit_single_page() {
         elapsed.as_millis() < 2000,
         "shortcircuit too slow: {elapsed:?}"
     );
-    eprintln!("shortcircuit single_page latency: {}ms", elapsed.as_millis());
+    eprintln!(
+        "shortcircuit single_page latency: {}ms",
+        elapsed.as_millis()
+    );
 }
 
 #[tokio::test]
-#[cfg(all(
-    not(feature = "decentralized"),
-    feature = "cache_chrome_hybrid"
-))]
+#[cfg(all(not(feature = "decentralized"), feature = "cache_chrome_hybrid"))]
 async fn test_cache_shortcircuit_miss_falls_through() {
     let mut website = Website::new("http://localhost:9/uncached-shortcircuit");
     website.configuration.cache = true;
@@ -10746,10 +10766,7 @@ async fn test_cache_shortcircuit_miss_falls_through() {
 }
 
 #[tokio::test]
-#[cfg(all(
-    not(feature = "decentralized"),
-    feature = "cache_chrome_hybrid"
-))]
+#[cfg(all(not(feature = "decentralized"), feature = "cache_chrome_hybrid"))]
 async fn test_cache_shortcircuit_not_without_skip_browser() {
     use crate::utils::{create_cache_key_raw, put_hybrid_cache, HttpResponse, HttpVersion};
     use std::collections::HashMap as StdHashMap;
@@ -10759,7 +10776,10 @@ async fn test_cache_shortcircuit_not_without_skip_browser() {
 
     let mut response_headers = StdHashMap::new();
     response_headers.insert("content-type".to_string(), "text/html".to_string());
-    response_headers.insert("cache-control".to_string(), "public, max-age=3600".to_string());
+    response_headers.insert(
+        "cache-control".to_string(),
+        "public, max-age=3600".to_string(),
+    );
 
     let body = b"<html><body>No Skip</body></html>".to_vec();
     let http_response = HttpResponse {
@@ -10791,10 +10811,7 @@ async fn test_cache_shortcircuit_not_without_skip_browser() {
 }
 
 #[tokio::test]
-#[cfg(all(
-    not(feature = "decentralized"),
-    feature = "cache_chrome_hybrid"
-))]
+#[cfg(all(not(feature = "decentralized"), feature = "cache_chrome_hybrid"))]
 async fn test_cache_shortcircuit_not_for_multi_page() {
     use crate::utils::{create_cache_key_raw, put_hybrid_cache, HttpResponse, HttpVersion};
     use std::collections::HashMap as StdHashMap;
@@ -10804,7 +10821,10 @@ async fn test_cache_shortcircuit_not_for_multi_page() {
 
     let mut response_headers = StdHashMap::new();
     response_headers.insert("content-type".to_string(), "text/html".to_string());
-    response_headers.insert("cache-control".to_string(), "public, max-age=3600".to_string());
+    response_headers.insert(
+        "cache-control".to_string(),
+        "public, max-age=3600".to_string(),
+    );
 
     let body = b"<html><body>Multi Page</body></html>".to_vec();
     let http_response = HttpResponse {
@@ -10844,7 +10864,10 @@ async fn test_cache_shortcircuit_crawl_smart() {
 
     let mut response_headers = StdHashMap::new();
     response_headers.insert("content-type".to_string(), "text/html".to_string());
-    response_headers.insert("cache-control".to_string(), "public, max-age=3600".to_string());
+    response_headers.insert(
+        "cache-control".to_string(),
+        "public, max-age=3600".to_string(),
+    );
 
     let body =
         b"<html><head><title>Smart Shortcircuit</title></head><body>Smart Cached</body></html>"
@@ -11000,7 +11023,10 @@ async fn test_cache_phase_multi_page_all_cached() {
     let response_headers = {
         let mut h = StdHashMap::new();
         h.insert("content-type".to_string(), "text/html".to_string());
-        h.insert("cache-control".to_string(), "public, max-age=3600".to_string());
+        h.insert(
+            "cache-control".to_string(),
+            "public, max-age=3600".to_string(),
+        );
         h
     };
 
@@ -11073,7 +11099,10 @@ async fn test_cache_phase_partial_miss() {
     let response_headers = {
         let mut h = StdHashMap::new();
         h.insert("content-type".to_string(), "text/html".to_string());
-        h.insert("cache-control".to_string(), "public, max-age=3600".to_string());
+        h.insert(
+            "cache-control".to_string(),
+            "public, max-age=3600".to_string(),
+        );
         h
     };
 
@@ -11126,7 +11155,10 @@ async fn test_cache_phase_skipped_without_skip_browser() {
     let response_headers = {
         let mut h = StdHashMap::new();
         h.insert("content-type".to_string(), "text/html".to_string());
-        h.insert("cache-control".to_string(), "public, max-age=3600".to_string());
+        h.insert(
+            "cache-control".to_string(),
+            "public, max-age=3600".to_string(),
+        );
         h
     };
 
@@ -11176,7 +11208,10 @@ async fn test_cache_phase_respects_budget() {
     let response_headers = {
         let mut h = StdHashMap::new();
         h.insert("content-type".to_string(), "text/html".to_string());
-        h.insert("cache-control".to_string(), "public, max-age=3600".to_string());
+        h.insert(
+            "cache-control".to_string(),
+            "public, max-age=3600".to_string(),
+        );
         h
     };
 
@@ -11254,7 +11289,10 @@ async fn test_cache_phase_dedup_signatures() {
     let response_headers = {
         let mut h = StdHashMap::new();
         h.insert("content-type".to_string(), "text/html".to_string());
-        h.insert("cache-control".to_string(), "public, max-age=3600".to_string());
+        h.insert(
+            "cache-control".to_string(),
+            "public, max-age=3600".to_string(),
+        );
         h
     };
 

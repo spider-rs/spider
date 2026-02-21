@@ -12,10 +12,7 @@ async fn missing_description() {
     let html = page.get_html();
     let desc = extract_meta_description(&html);
     if desc.is_some() {
-        eprintln!(
-            "WARN: missing_description has a description: {:?}",
-            desc
-        );
+        eprintln!("WARN: missing_description has a description: {:?}", desc);
     }
 }
 

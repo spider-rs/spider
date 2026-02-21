@@ -748,7 +748,9 @@ Use Evaluate to click found cells programmatically."#;
         let registry = builtin_web_challenges();
 
         // L8: License plate
-        let lp = registry.get("license-plate").expect("license-plate missing");
+        let lp = registry
+            .get("license-plate")
+            .expect("license-plate missing");
         assert!(lp.matches("", "License Plate Challenge", ""));
         assert!(lp.content.contains("license plate"));
 
@@ -756,14 +758,20 @@ Use Evaluate to click found cells programmatically."#;
         let nested = registry.get("nested-grid").expect("nested-grid missing");
         assert!(nested.matches("", "Nested Squares", ""));
         assert!(nested.content.contains("SUBDIVIDE"));
-        assert!(nested.priority > 5, "nested-grid should override image-grid");
+        assert!(
+            nested.priority > 5,
+            "nested-grid should override image-grid"
+        );
 
         // L10: Whack-a-mole
         let wam = registry.get("whack-a-mole").expect("whack-a-mole missing");
         assert!(wam.matches("", "Whack a Mole!", ""));
         assert!(wam.pre_evaluate.is_some(), "WAM should have pre_evaluate");
         let js = wam.pre_evaluate.as_deref().unwrap();
-        assert!(js.contains("WAM:"), "WAM pre_evaluate should set WAM: prefix");
+        assert!(
+            js.contains("WAM:"),
+            "WAM pre_evaluate should set WAM: prefix"
+        );
 
         // L11: Waldo
         let waldo = registry.get("find-waldo").expect("find-waldo missing");
@@ -771,12 +779,16 @@ Use Evaluate to click found cells programmatically."#;
         assert!(waldo.content.contains("striped"));
 
         // L12: Chihuahua vs muffin
-        let cm = registry.get("chihuahua-muffin").expect("chihuahua-muffin missing");
+        let cm = registry
+            .get("chihuahua-muffin")
+            .expect("chihuahua-muffin missing");
         assert!(cm.matches("", "Muffins? Or Chihuahuas", ""));
         assert!(cm.content.contains("CHIHUAHUAS"));
 
         // L13: Reverse selection
-        let rev = registry.get("reverse-selection").expect("reverse-selection missing");
+        let rev = registry
+            .get("reverse-selection")
+            .expect("reverse-selection missing");
         assert!(rev.matches("", "Reverse CAPTCHA", ""));
         assert!(rev.content.contains("OPPOSITE"));
 

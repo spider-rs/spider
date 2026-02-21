@@ -734,8 +734,7 @@ impl RemoteMultimodalEngine {
             let (screenshot, html, mut url_now, mut title_now) = if include_screenshot_this_round {
                 let screenshot_fut = self.screenshot_as_data_url_with_profile(page, cap);
                 // Screenshot failures are non-fatal — continue without an image.
-                let (s_res, h, u, t) =
-                    tokio::join!(screenshot_fut, html_fut, url_fut, title_fut);
+                let (s_res, h, u, t) = tokio::join!(screenshot_fut, html_fut, url_fut, title_fut);
                 let h = h?;
                 let u = u?;
                 let t = t?;
@@ -792,30 +791,56 @@ impl RemoteMultimodalEngine {
                             // the page. Handles draws by waiting for auto-reset and
                             // replaying. Up to 3 games within one LLM round.
                             if new_title.starts_with("TTT:") {
-                                let ttt_js: Option<&str> = pre_evals.iter()
+                                let ttt_js: Option<&str> = pre_evals
+                                    .iter()
                                     .find(|(name, _)| *name == "tic-tac-toe")
                                     .map(|(_, js)| *js);
                                 if let Some(ttt_js) = ttt_js {
                                     let mut games_played = 0u32;
                                     for _ttt_step in 0..30 {
                                         // Parse current game state
-                                        let (my_win, th_win, full) = if let Some(json_str) = title_now.strip_prefix("TTT:") {
-                                            if let Ok(data) = serde_json::from_str::<serde_json::Value>(json_str) {
+                                        let (my_win, th_win, full) = if let Some(json_str) =
+                                            title_now.strip_prefix("TTT:")
+                                        {
+                                            if let Ok(data) =
+                                                serde_json::from_str::<serde_json::Value>(json_str)
+                                            {
                                                 (
-                                                    data.get("myWin").and_then(|v| v.as_bool()).unwrap_or(false),
-                                                    data.get("thWin").and_then(|v| v.as_bool()).unwrap_or(false),
-                                                    data.get("full").and_then(|v| v.as_bool()).unwrap_or(false),
+                                                    data.get("myWin")
+                                                        .and_then(|v| v.as_bool())
+                                                        .unwrap_or(false),
+                                                    data.get("thWin")
+                                                        .and_then(|v| v.as_bool())
+                                                        .unwrap_or(false),
+                                                    data.get("full")
+                                                        .and_then(|v| v.as_bool())
+                                                        .unwrap_or(false),
                                                 )
-                                            } else { (false, false, false) }
-                                        } else { break; }; // title changed away from TTT
+                                            } else {
+                                                (false, false, false)
+                                            }
+                                        } else {
+                                            break;
+                                        }; // title changed away from TTT
 
                                         if my_win || th_win {
-                                            log::info!("TTT game over: myWin={}, thWin={}", my_win, th_win);
+                                            log::info!(
+                                                "TTT game over: myWin={}, thWin={}",
+                                                my_win,
+                                                th_win
+                                            );
                                             if my_win {
                                                 // Engine clicks verify immediately — don't rely
                                                 // on the model since the game auto-resets quickly.
-                                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                                                let _ = page.click(chromiumoxide::layout::Point::new(0.0, 0.0)).await; // defocus
+                                                tokio::time::sleep(
+                                                    std::time::Duration::from_millis(500),
+                                                )
+                                                .await;
+                                                let _ = page
+                                                    .click(chromiumoxide::layout::Point::new(
+                                                        0.0, 0.0,
+                                                    ))
+                                                    .await; // defocus
                                                 let verify_js = r#"(function(){
                                                     var btn=document.querySelector('#captcha-verify-button,button.captcha-verify,.verify-button,[class*=verify]');
                                                     if(btn){var r=btn.getBoundingClientRect();
@@ -829,32 +854,51 @@ impl RemoteMultimodalEngine {
                                                 "#;
                                                 let _ = page.evaluate(verify_js).await;
                                                 log::info!("TTT: engine clicked verify after win");
-                                                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                                                tokio::time::sleep(
+                                                    std::time::Duration::from_millis(1500),
+                                                )
+                                                .await;
                                                 // Update title for model context
-                                                let post = self.title_context(page, &effective_cfg).await;
-                                                if !post.is_empty() { title_now = post; }
+                                                let post =
+                                                    self.title_context(page, &effective_cfg).await;
+                                                if !post.is_empty() {
+                                                    title_now = post;
+                                                }
                                             }
                                             break;
                                         }
                                         if full {
                                             // Draw — click refresh to reset, then play again
                                             games_played += 1;
-                                            if games_played >= 3 { break; }
-                                            log::info!("TTT draw (game {}), clicking refresh...", games_played);
+                                            if games_played >= 3 {
+                                                break;
+                                            }
+                                            log::info!(
+                                                "TTT draw (game {}), clicking refresh...",
+                                                games_played
+                                            );
                                             let refresh_js = r#"(function(){var btn=document.querySelector('.captcha-refresh,[class*=refresh],[class*=retry]');if(btn){btn.click();return 'clicked';}return 'not_found';})()"#;
                                             let _ = page.evaluate(refresh_js).await;
-                                            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                                            tokio::time::sleep(std::time::Duration::from_millis(
+                                                2000,
+                                            ))
+                                            .await;
                                         } else {
                                             // Wait for AI response
-                                            tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+                                            tokio::time::sleep(std::time::Duration::from_millis(
+                                                700,
+                                            ))
+                                            .await;
                                         }
                                         // Re-run pre_evaluate for next move
                                         let _ = page.evaluate(ttt_js).await;
-                                        let updated = self.title_context(page, &effective_cfg).await;
+                                        let updated =
+                                            self.title_context(page, &effective_cfg).await;
                                         if !updated.is_empty() {
                                             log::info!(
                                                 "TTT loop (game {}): '{}'",
-                                                games_played + 1, &updated[..updated.len().min(80)]
+                                                games_played + 1,
+                                                &updated[..updated.len().min(80)]
                                             );
                                             title_now = updated;
                                         }
@@ -865,7 +909,8 @@ impl RemoteMultimodalEngine {
                             // WAM: Whack-a-Mole engine loop — repeatedly detect and click moles
                             // since they appear/disappear too fast for LLM round-trips.
                             if new_title.starts_with("WAM:") {
-                                let wam_js: Option<&str> = pre_evals.iter()
+                                let wam_js: Option<&str> = pre_evals
+                                    .iter()
                                     .find(|(name, _)| *name == "whack-a-mole")
                                     .map(|(_, js)| *js);
                                 if let Some(wam_js) = wam_js {
@@ -873,31 +918,46 @@ impl RemoteMultimodalEngine {
                                     // Run up to 20 iterations over ~10 seconds
                                     for _wam_step in 0..20 {
                                         if let Some(json_str) = title_now.strip_prefix("WAM:") {
-                                            if let Ok(data) = serde_json::from_str::<serde_json::Value>(json_str) {
-                                                let clicked = data.get("clicked").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                                            if let Ok(data) =
+                                                serde_json::from_str::<serde_json::Value>(json_str)
+                                            {
+                                                let clicked = data
+                                                    .get("clicked")
+                                                    .and_then(|v| v.as_u64())
+                                                    .unwrap_or(0)
+                                                    as u32;
                                                 total_hits += clicked;
                                             }
                                         }
-                                        if total_hits >= 5 { break; }
+                                        if total_hits >= 5 {
+                                            break;
+                                        }
                                         // Wait for new moles to appear
-                                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                        tokio::time::sleep(std::time::Duration::from_millis(500))
+                                            .await;
                                         // Re-run pre_evaluate to detect and click new moles
                                         let _ = page.evaluate(wam_js).await;
-                                        let updated = self.title_context(page, &effective_cfg).await;
+                                        let updated =
+                                            self.title_context(page, &effective_cfg).await;
                                         if !updated.is_empty() {
                                             title_now = updated;
                                         }
                                     }
                                     if total_hits >= 5 {
-                                        log::info!("WAM: engine hit {} moles, clicking verify", total_hits);
+                                        log::info!(
+                                            "WAM: engine hit {} moles, clicking verify",
+                                            total_hits
+                                        );
                                         // Mark done to prevent re-running
-                                        let done_title = format!("WAM_DONE:{{\"hits\":{}}}", total_hits);
+                                        let done_title =
+                                            format!("WAM_DONE:{{\"hits\":{}}}", total_hits);
                                         let marker_js = format!(
                                             "document.title={t};if(!document.getElementById('wam-engine-done')){{var d=document.createElement('div');d.id='wam-engine-done';d.style.display='none';d.dataset.t={t};document.body.appendChild(d);}}",
                                             t = serde_json::to_string(&done_title).unwrap_or_default()
                                         );
                                         let _ = page.evaluate(marker_js).await;
-                                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                        tokio::time::sleep(std::time::Duration::from_millis(500))
+                                            .await;
                                         let verify_js = r#"(function(){
                                             var btn=document.querySelector('#captcha-verify-button,button.captcha-verify,.verify-button,[class*=verify]');
                                             if(btn){var r=btn.getBoundingClientRect();
@@ -910,9 +970,12 @@ impl RemoteMultimodalEngine {
                                             return 'clicked';}return 'not_found';})()
                                         "#;
                                         let _ = page.evaluate(verify_js).await;
-                                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                                        tokio::time::sleep(std::time::Duration::from_millis(1500))
+                                            .await;
                                         let post = self.title_context(page, &effective_cfg).await;
-                                        if !post.is_empty() { title_now = post; }
+                                        if !post.is_empty() {
+                                            title_now = post;
+                                        }
                                     }
                                 }
                             }
@@ -920,7 +983,8 @@ impl RemoteMultimodalEngine {
                             // NEST: Nested grid engine loop — detect stop sign overlap
                             // and click boxes automatically, wait for subdivision, repeat.
                             if new_title.starts_with("NEST:") {
-                                let nest_js: Option<&str> = pre_evals.iter()
+                                let nest_js: Option<&str> = pre_evals
+                                    .iter()
                                     .find(|(name, _)| *name == "nested-grid")
                                     .map(|(_, js)| *js);
                                 if let Some(nest_js) = nest_js {
@@ -928,20 +992,45 @@ impl RemoteMultimodalEngine {
                                     // Up to 8 subdivision rounds
                                     for _nest_step in 0..8 {
                                         if let Some(json_str) = title_now.strip_prefix("NEST:") {
-                                            if let Ok(data) = serde_json::from_str::<serde_json::Value>(json_str) {
-                                                let has_sign = data.get("hasSign").and_then(|v| v.as_bool()).unwrap_or(false);
-                                                let to_click = data.get("toClick").and_then(|v| v.as_array());
-                                                let boxes = data.get("boxes").and_then(|v| v.as_array());
-                                                if !has_sign { break; } // can't detect sign, let LLM handle
-                                                if let (Some(to_click), Some(boxes)) = (to_click, boxes) {
-                                                    if to_click.is_empty() { break; } // all done
-                                                    // Build id→center map
-                                                    let box_map: std::collections::HashMap<i64, (f64, f64)> = boxes.iter().filter_map(|b| {
-                                                        let id = b.get("id").and_then(|v| v.as_i64())?;
-                                                        let x = b.get("x").and_then(|v| v.as_f64())?;
-                                                        let y = b.get("y").and_then(|v| v.as_f64())?;
-                                                        Some((id, (x, y)))
-                                                    }).collect();
+                                            if let Ok(data) =
+                                                serde_json::from_str::<serde_json::Value>(json_str)
+                                            {
+                                                let has_sign = data
+                                                    .get("hasSign")
+                                                    .and_then(|v| v.as_bool())
+                                                    .unwrap_or(false);
+                                                let to_click =
+                                                    data.get("toClick").and_then(|v| v.as_array());
+                                                let boxes =
+                                                    data.get("boxes").and_then(|v| v.as_array());
+                                                if !has_sign {
+                                                    break;
+                                                } // can't detect sign, let LLM handle
+                                                if let (Some(to_click), Some(boxes)) =
+                                                    (to_click, boxes)
+                                                {
+                                                    if to_click.is_empty() {
+                                                        break;
+                                                    } // all done
+                                                      // Build id→center map
+                                                    let box_map: std::collections::HashMap<
+                                                        i64,
+                                                        (f64, f64),
+                                                    > = boxes
+                                                        .iter()
+                                                        .filter_map(|b| {
+                                                            let id = b
+                                                                .get("id")
+                                                                .and_then(|v| v.as_i64())?;
+                                                            let x = b
+                                                                .get("x")
+                                                                .and_then(|v| v.as_f64())?;
+                                                            let y = b
+                                                                .get("y")
+                                                                .and_then(|v| v.as_f64())?;
+                                                            Some((id, (x, y)))
+                                                        })
+                                                        .collect();
                                                     use chromiumoxide::cdp::browser_protocol::input::{
                                                         DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
                                                     };
@@ -956,47 +1045,79 @@ impl RemoteMultimodalEngine {
                                                                 .r#type(DispatchMouseEventType::MouseMoved).build() {
                                                                 let _ = page.send_command(cmd).await;
                                                             }
-                                                            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+                                                            tokio::time::sleep(
+                                                                std::time::Duration::from_millis(
+                                                                    30,
+                                                                ),
+                                                            )
+                                                            .await;
                                                             if let Ok(cmd) = DispatchMouseEventParams::builder()
                                                                 .x(*x).y(*y)
                                                                 .button(MouseButton::Left).buttons(1).click_count(1)
                                                                 .r#type(DispatchMouseEventType::MousePressed).build() {
                                                                 let _ = page.send_command(cmd).await;
                                                             }
-                                                            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+                                                            tokio::time::sleep(
+                                                                std::time::Duration::from_millis(
+                                                                    30,
+                                                                ),
+                                                            )
+                                                            .await;
                                                             if let Ok(cmd) = DispatchMouseEventParams::builder()
                                                                 .x(*x).y(*y)
                                                                 .button(MouseButton::Left).buttons(0).click_count(1)
                                                                 .r#type(DispatchMouseEventType::MouseReleased).build() {
                                                                 let _ = page.send_command(cmd).await;
                                                             }
-                                                            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+                                                            tokio::time::sleep(
+                                                                std::time::Duration::from_millis(
+                                                                    80,
+                                                                ),
+                                                            )
+                                                            .await;
                                                             clicked_this_round += 1;
                                                         }
                                                     }
                                                     total_clicked += clicked_this_round;
-                                                    log::info!("NEST: clicked {} boxes (total {})", clicked_this_round, total_clicked);
+                                                    log::info!(
+                                                        "NEST: clicked {} boxes (total {})",
+                                                        clicked_this_round,
+                                                        total_clicked
+                                                    );
                                                     // Wait for subdivision animation
-                                                    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+                                                    tokio::time::sleep(
+                                                        std::time::Duration::from_millis(1200),
+                                                    )
+                                                    .await;
                                                     // Re-run pre_evaluate to detect new leaf boxes
                                                     let _ = page.evaluate(nest_js).await;
-                                                    let updated = self.title_context(page, &effective_cfg).await;
+                                                    let updated = self
+                                                        .title_context(page, &effective_cfg)
+                                                        .await;
                                                     if !updated.is_empty() {
                                                         title_now = updated;
                                                     }
-                                                } else { break; }
-                                            } else { break; }
-                                        } else { break; }
+                                                } else {
+                                                    break;
+                                                }
+                                            } else {
+                                                break;
+                                            }
+                                        } else {
+                                            break;
+                                        }
                                     }
                                     if total_clicked > 0 {
                                         log::info!("NEST: engine auto-clicked {} total boxes, clicking verify", total_clicked);
-                                        let done_title = format!("NEST_DONE:{{\"clicked\":{}}}", total_clicked);
+                                        let done_title =
+                                            format!("NEST_DONE:{{\"clicked\":{}}}", total_clicked);
                                         let marker_js = format!(
                                             "document.title={t};if(!document.getElementById('nest-engine-done')){{var d=document.createElement('div');d.id='nest-engine-done';d.style.display='none';d.dataset.t={t};document.body.appendChild(d);}}",
                                             t = serde_json::to_string(&done_title).unwrap_or_default()
                                         );
                                         let _ = page.evaluate(marker_js).await;
-                                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                        tokio::time::sleep(std::time::Duration::from_millis(500))
+                                            .await;
                                         let verify_js = r#"(function(){
                                             var btn=document.querySelector('#captcha-verify-button,button.captcha-verify,.verify-button,[class*=verify]');
                                             if(btn){var r=btn.getBoundingClientRect();
@@ -1010,9 +1131,12 @@ impl RemoteMultimodalEngine {
                                         "#;
                                         let _ = page.evaluate(verify_js).await;
                                         log::info!("NEST: engine clicked verify");
-                                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                                        tokio::time::sleep(std::time::Duration::from_millis(1500))
+                                            .await;
                                         let post = self.title_context(page, &effective_cfg).await;
-                                        if !post.is_empty() { title_now = post; }
+                                        if !post.is_empty() {
+                                            title_now = post;
+                                        }
                                     }
                                 }
                             }
@@ -1021,61 +1145,104 @@ impl RemoteMultimodalEngine {
                             // pre-computed points, then clicks verify.
                             if new_title.starts_with("CIRCLE:") {
                                 if let Some(json_str) = new_title.strip_prefix("CIRCLE:") {
-                                    if let Ok(data) = serde_json::from_str::<serde_json::Value>(json_str) {
+                                    if let Ok(data) =
+                                        serde_json::from_str::<serde_json::Value>(json_str)
+                                    {
                                         let pts = data.get("pts").and_then(|v| v.as_array());
                                         if let Some(pts) = pts {
-                                            let coords: Vec<(f64, f64)> = pts.iter().filter_map(|p| {
-                                                let x = p.get("x").and_then(|v| v.as_f64())?;
-                                                let y = p.get("y").and_then(|v| v.as_f64())?;
-                                                Some((x, y))
-                                            }).collect();
+                                            let coords: Vec<(f64, f64)> = pts
+                                                .iter()
+                                                .filter_map(|p| {
+                                                    let x = p.get("x").and_then(|v| v.as_f64())?;
+                                                    let y = p.get("y").and_then(|v| v.as_f64())?;
+                                                    Some((x, y))
+                                                })
+                                                .collect();
                                             if coords.len() >= 2 {
                                                 use chromiumoxide::cdp::browser_protocol::input::{
-                                                    DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
+                                                    DispatchMouseEventParams,
+                                                    DispatchMouseEventType, MouseButton,
                                                 };
                                                 // Move to start
                                                 let (sx, sy) = coords[0];
                                                 if let Ok(cmd) = DispatchMouseEventParams::builder()
-                                                    .x(sx).y(sy)
-                                                    .button(MouseButton::None).buttons(0)
-                                                    .r#type(DispatchMouseEventType::MouseMoved).build() {
+                                                    .x(sx)
+                                                    .y(sy)
+                                                    .button(MouseButton::None)
+                                                    .buttons(0)
+                                                    .r#type(DispatchMouseEventType::MouseMoved)
+                                                    .build()
+                                                {
                                                     let _ = page.send_command(cmd).await;
                                                 }
-                                                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                                                tokio::time::sleep(
+                                                    std::time::Duration::from_millis(50),
+                                                )
+                                                .await;
                                                 // Press at start
                                                 if let Ok(cmd) = DispatchMouseEventParams::builder()
-                                                    .x(sx).y(sy)
-                                                    .button(MouseButton::Left).buttons(1)
-                                                    .r#type(DispatchMouseEventType::MousePressed).build() {
+                                                    .x(sx)
+                                                    .y(sy)
+                                                    .button(MouseButton::Left)
+                                                    .buttons(1)
+                                                    .r#type(DispatchMouseEventType::MousePressed)
+                                                    .build()
+                                                {
                                                     let _ = page.send_command(cmd).await;
                                                 }
                                                 // Drag through all points
                                                 for (x, y) in &coords[1..] {
-                                                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                                                    if let Ok(cmd) = DispatchMouseEventParams::builder()
-                                                        .x(*x).y(*y)
-                                                        .button(MouseButton::Left).buttons(1)
-                                                        .r#type(DispatchMouseEventType::MouseMoved).build() {
+                                                    tokio::time::sleep(
+                                                        std::time::Duration::from_millis(20),
+                                                    )
+                                                    .await;
+                                                    if let Ok(cmd) =
+                                                        DispatchMouseEventParams::builder()
+                                                            .x(*x)
+                                                            .y(*y)
+                                                            .button(MouseButton::Left)
+                                                            .buttons(1)
+                                                            .r#type(
+                                                                DispatchMouseEventType::MouseMoved,
+                                                            )
+                                                            .build()
+                                                    {
                                                         let _ = page.send_command(cmd).await;
                                                     }
                                                 }
                                                 // Release at end
                                                 let (ex, ey) = *coords.last().unwrap_or(&(sx, sy));
-                                                tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+                                                tokio::time::sleep(
+                                                    std::time::Duration::from_millis(30),
+                                                )
+                                                .await;
                                                 if let Ok(cmd) = DispatchMouseEventParams::builder()
-                                                    .x(ex).y(ey)
-                                                    .button(MouseButton::Left).buttons(0)
-                                                    .r#type(DispatchMouseEventType::MouseReleased).build() {
+                                                    .x(ex)
+                                                    .y(ey)
+                                                    .button(MouseButton::Left)
+                                                    .buttons(0)
+                                                    .r#type(DispatchMouseEventType::MouseReleased)
+                                                    .build()
+                                                {
                                                     let _ = page.send_command(cmd).await;
                                                 }
-                                                log::info!("CIRCLE: engine drew circle with {} points", coords.len());
-                                                let done_title = format!("CIRCLE_DONE:{{\"points\":{}}}", coords.len());
+                                                log::info!(
+                                                    "CIRCLE: engine drew circle with {} points",
+                                                    coords.len()
+                                                );
+                                                let done_title = format!(
+                                                    "CIRCLE_DONE:{{\"points\":{}}}",
+                                                    coords.len()
+                                                );
                                                 let marker_js = format!(
                                                     "document.title={t};if(!document.getElementById('circle-engine-done')){{var d=document.createElement('div');d.id='circle-engine-done';d.style.display='none';d.dataset.t={t};document.body.appendChild(d);}}",
                                                     t = serde_json::to_string(&done_title).unwrap_or_default()
                                                 );
                                                 let _ = page.evaluate(marker_js).await;
-                                                tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+                                                tokio::time::sleep(
+                                                    std::time::Duration::from_millis(1000),
+                                                )
+                                                .await;
                                                 let verify_js = r#"(function(){
                                                     var btn=document.querySelector('#captcha-verify-button,button.captcha-verify,.verify-button,[class*=verify]');
                                                     if(btn){var r=btn.getBoundingClientRect();
@@ -1089,9 +1256,15 @@ impl RemoteMultimodalEngine {
                                                 "#;
                                                 let _ = page.evaluate(verify_js).await;
                                                 log::info!("CIRCLE: engine clicked verify");
-                                                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-                                                let post = self.title_context(page, &effective_cfg).await;
-                                                if !post.is_empty() { title_now = post; }
+                                                tokio::time::sleep(
+                                                    std::time::Duration::from_millis(1500),
+                                                )
+                                                .await;
+                                                let post =
+                                                    self.title_context(page, &effective_cfg).await;
+                                                if !post.is_empty() {
+                                                    title_now = post;
+                                                }
                                             }
                                         }
                                     }
@@ -1103,7 +1276,9 @@ impl RemoteMultimodalEngine {
                             // click-to-select behavior, then engine clicks verify.
                             if new_title.starts_with("WS_DRAG:") {
                                 if let Some(json_str) = new_title.strip_prefix("WS_DRAG:") {
-                                    if let Ok(data) = serde_json::from_str::<serde_json::Value>(json_str) {
+                                    if let Ok(data) =
+                                        serde_json::from_str::<serde_json::Value>(json_str)
+                                    {
                                         let words = data.get("words").and_then(|v| v.as_array());
                                         let drags = data.get("drags").and_then(|v| v.as_array());
                                         if let (Some(words), Some(drags)) = (words, drags) {
@@ -1111,14 +1286,23 @@ impl RemoteMultimodalEngine {
                                             let mut all_coords: Vec<(f64, f64)> = Vec::new();
                                             for (wi, drag_pts) in drags.iter().enumerate() {
                                                 if let Some(pts) = drag_pts.as_array() {
-                                                    let coords: Vec<(f64, f64)> = pts.iter().filter_map(|p| {
-                                                        let x = p.get("x").and_then(|v| v.as_f64())?;
-                                                        let y = p.get("y").and_then(|v| v.as_f64())?;
-                                                        Some((x, y))
-                                                    }).collect();
+                                                    let coords: Vec<(f64, f64)> = pts
+                                                        .iter()
+                                                        .filter_map(|p| {
+                                                            let x = p
+                                                                .get("x")
+                                                                .and_then(|v| v.as_f64())?;
+                                                            let y = p
+                                                                .get("y")
+                                                                .and_then(|v| v.as_f64())?;
+                                                            Some((x, y))
+                                                        })
+                                                        .collect();
                                                     if !coords.is_empty() {
                                                         all_coords.extend_from_slice(&coords);
-                                                        if let Some(w) = words.get(wi).and_then(|v| v.as_str()) {
+                                                        if let Some(w) =
+                                                            words.get(wi).and_then(|v| v.as_str())
+                                                        {
                                                             dragged.push(w.to_string());
                                                         }
                                                     }
@@ -1127,40 +1311,68 @@ impl RemoteMultimodalEngine {
                                             // Deduplicate cells by rounded coordinate
                                             {
                                                 let mut seen = std::collections::HashSet::new();
-                                                all_coords.retain(|(x, y)| seen.insert((*x as i64, *y as i64)));
+                                                all_coords.retain(|(x, y)| {
+                                                    seen.insert((*x as i64, *y as i64))
+                                                });
                                             }
                                             if !all_coords.is_empty() {
                                                 use chromiumoxide::cdp::browser_protocol::input::{
-                                                    DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
+                                                    DispatchMouseEventParams,
+                                                    DispatchMouseEventType, MouseButton,
                                                 };
                                                 // Click each cell center individually (click-to-select)
                                                 for (x, y) in &all_coords {
-                                                    if let Ok(cmd) = DispatchMouseEventParams::builder()
-                                                        .x(*x).y(*y)
-                                                        .button(MouseButton::None).buttons(0)
-                                                        .r#type(DispatchMouseEventType::MouseMoved).build() {
+                                                    if let Ok(cmd) =
+                                                        DispatchMouseEventParams::builder()
+                                                            .x(*x)
+                                                            .y(*y)
+                                                            .button(MouseButton::None)
+                                                            .buttons(0)
+                                                            .r#type(
+                                                                DispatchMouseEventType::MouseMoved,
+                                                            )
+                                                            .build()
+                                                    {
                                                         let _ = page.send_command(cmd).await;
                                                     }
-                                                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                                                    tokio::time::sleep(
+                                                        std::time::Duration::from_millis(20),
+                                                    )
+                                                    .await;
                                                     if let Ok(cmd) = DispatchMouseEventParams::builder()
                                                         .x(*x).y(*y)
                                                         .button(MouseButton::Left).buttons(1).click_count(1)
                                                         .r#type(DispatchMouseEventType::MousePressed).build() {
                                                         let _ = page.send_command(cmd).await;
                                                     }
-                                                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                                                    tokio::time::sleep(
+                                                        std::time::Duration::from_millis(20),
+                                                    )
+                                                    .await;
                                                     if let Ok(cmd) = DispatchMouseEventParams::builder()
                                                         .x(*x).y(*y)
                                                         .button(MouseButton::Left).buttons(0).click_count(1)
                                                         .r#type(DispatchMouseEventType::MouseReleased).build() {
                                                         let _ = page.send_command(cmd).await;
                                                     }
-                                                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                                                    tokio::time::sleep(
+                                                        std::time::Duration::from_millis(50),
+                                                    )
+                                                    .await;
                                                 }
                                             }
                                             if !dragged.is_empty() {
-                                                log::info!("WS engine clicked {} cells for {} words: {:?}", all_coords.len(), dragged.len(), dragged);
-                                                let done_title = format!("WS_DONE:{{\"dragged\":{}}}", serde_json::to_string(&dragged).unwrap_or_default());
+                                                log::info!(
+                                                    "WS engine clicked {} cells for {} words: {:?}",
+                                                    all_coords.len(),
+                                                    dragged.len(),
+                                                    dragged
+                                                );
+                                                let done_title = format!(
+                                                    "WS_DONE:{{\"dragged\":{}}}",
+                                                    serde_json::to_string(&dragged)
+                                                        .unwrap_or_default()
+                                                );
                                                 // Set title + DOM marker to prevent re-clicking
                                                 let marker_js = format!(
                                                     "document.title={t};if(!document.getElementById('ws-engine-done')){{var d=document.createElement('div');d.id='ws-engine-done';d.style.display='none';d.dataset.t={t};document.body.appendChild(d);}}",
@@ -1168,7 +1380,10 @@ impl RemoteMultimodalEngine {
                                                 );
                                                 let _ = page.evaluate(marker_js).await;
                                                 // Engine clicks verify immediately after selecting cells
-                                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                                tokio::time::sleep(
+                                                    std::time::Duration::from_millis(500),
+                                                )
+                                                .await;
                                                 let verify_js = r#"(function(){
                                                     var btn=document.querySelector('#captcha-verify-button,button.captcha-verify,.verify-button,[class*=verify]');
                                                     if(btn){var r=btn.getBoundingClientRect();
@@ -1182,9 +1397,17 @@ impl RemoteMultimodalEngine {
                                                 "#;
                                                 let _ = page.evaluate(verify_js).await;
                                                 log::info!("WS: engine clicked verify after selecting cells");
-                                                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-                                                let post = self.title_context(page, &effective_cfg).await;
-                                                title_now = if !post.is_empty() { post } else { done_title };
+                                                tokio::time::sleep(
+                                                    std::time::Duration::from_millis(1500),
+                                                )
+                                                .await;
+                                                let post =
+                                                    self.title_context(page, &effective_cfg).await;
+                                                title_now = if !post.is_empty() {
+                                                    post
+                                                } else {
+                                                    done_title
+                                                };
                                             }
                                         }
                                     }
@@ -1892,8 +2115,8 @@ impl RemoteMultimodalEngine {
         };
 
         // Resolve model endpoint for this round (pool routing with complexity, or dual-model fallback)
-        let (resolved_api_url, resolved_model, resolved_api_key) =
-            self.resolve_model_for_round_with_complexity(
+        let (resolved_api_url, resolved_model, resolved_api_key) = self
+            .resolve_model_for_round_with_complexity(
                 use_vision,
                 &user_text,
                 html.len(),
@@ -2301,9 +2524,8 @@ impl RemoteMultimodalEngine {
             }
         }
 
-        Err(last_err.unwrap_or_else(|| {
-            EngineError::Remote("chrome_ai: max retries exceeded".to_string())
-        }))
+        Err(last_err
+            .unwrap_or_else(|| EngineError::Remote("chrome_ai: max retries exceeded".to_string())))
     }
 
     /// Single plan inference via Chrome's built-in LanguageModel API.
@@ -2848,22 +3070,17 @@ return await s.prompt(msg);
                         if KNOWN_ACTIONS.iter().any(|a| a == action_name) {
                             // Found an embedded step — normalize index references in the value
                             let mut step = val.clone();
-                            if let Some(inner) = step
-                                .as_object_mut()
-                                .and_then(|o| o.get_mut(action_name))
+                            if let Some(inner) =
+                                step.as_object_mut().and_then(|o| o.get_mut(action_name))
                             {
                                 if let Some(s) = inner.as_str() {
-                                    let t = s
-                                        .trim()
-                                        .trim_start_matches('[')
-                                        .trim_end_matches(']');
+                                    let t = s.trim().trim_start_matches('[').trim_end_matches(']');
                                     if !t.is_empty()
                                         && t.len() <= 2
                                         && t.chars().all(|c| c.is_ascii_digit())
                                     {
-                                        *inner = serde_json::json!(format!(
-                                            "[data-spider-idx='{t}']"
-                                        ));
+                                        *inner =
+                                            serde_json::json!(format!("[data-spider-idx='{t}']"));
                                     }
                                 }
                             }
@@ -2871,14 +3088,8 @@ return await s.prompt(msg);
                                 .get("label")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("automation");
-                            let done = obj
-                                .get("done")
-                                .and_then(|v| v.as_bool())
-                                .unwrap_or(false);
-                            log::debug!(
-                                "Normalized Chrome AI response: embedded step {:?}",
-                                step
-                            );
+                            let done = obj.get("done").and_then(|v| v.as_bool()).unwrap_or(false);
+                            log::debug!("Normalized Chrome AI response: embedded step {:?}", step);
                             return serde_json::json!({
                                 "label": label,
                                 "done": done,
@@ -2982,8 +3193,14 @@ return await s.prompt(msg);
                 // Skip metadata fields
                 if matches!(
                     key.as_str(),
-                    "label" | "action" | "action_type" | "type" | "done"
-                        | "extracted" | "memory_ops" | "reasoning"
+                    "label"
+                        | "action"
+                        | "action_type"
+                        | "type"
+                        | "done"
+                        | "extracted"
+                        | "memory_ops"
+                        | "reasoning"
                 ) {
                     continue;
                 }
@@ -3044,10 +3261,7 @@ return await s.prompt(msg);
         };
         let element = element.as_str();
         let value = obj.get("value");
-        let url = obj
-            .get("url")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let url = obj.get("url").and_then(|v| v.as_str()).unwrap_or("");
 
         if action.is_empty() && element.is_empty() {
             return parsed;
@@ -3059,15 +3273,11 @@ return await s.prompt(msg);
                 serde_json::json!({ "Click": element })
             }
             "fill" | "type" | "input" if !element.is_empty() => {
-                let val = value
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let val = value.and_then(|v| v.as_str()).unwrap_or("");
                 serde_json::json!({ "Fill": { "selector": element, "value": val } })
             }
             "scroll" | "scrolldown" | "scrollup" => {
-                let amount = value
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(300);
+                let amount = value.and_then(|v| v.as_i64()).unwrap_or(300);
                 serde_json::json!({ "ScrollY": amount })
             }
             "navigate" | "goto" if !url.is_empty() => {
@@ -3078,9 +3288,7 @@ return await s.prompt(msg);
                 serde_json::json!({ "Wait": ms })
             }
             "press" => {
-                let key = value
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Enter");
+                let key = value.and_then(|v| v.as_str()).unwrap_or("Enter");
                 serde_json::json!({ "Press": key })
             }
             // Evaluate: small models sometimes emit {"label":"Evaluate","selector":"..."}
@@ -3108,10 +3316,7 @@ return await s.prompt(msg);
             .or_else(|| obj.get("description"))
             .and_then(|v| v.as_str())
             .unwrap_or("automation");
-        let done = obj
-            .get("done")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let done = obj.get("done").and_then(|v| v.as_bool()).unwrap_or(false);
 
         log::debug!(
             "Normalized Chrome AI response: action={}, element={} → {:?}",
