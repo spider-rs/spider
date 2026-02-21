@@ -227,7 +227,7 @@ let mut website = Website::new("https://protected-site.com")
 
 Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and guidelines.
 
-Spider has been actively developed since 2018. Join the [Discord](https://discord.spider.cloud) for questions and discussion.
+Spider has been actively developed for the past 4 years. Join the [Discord](https://discord.spider.cloud) for questions and discussion.
 
 ## License
 

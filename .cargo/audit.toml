@@ -1,4 +1,8 @@
 # https://rustsec.org/advisories/
 [advisories]
-# lru 0.13.0 unsound IterMut — transitive via wreq, waiting on upstream fix
-ignore = ["RUSTSEC-2026-0002"]
+ignore = [
+    # lru 0.13.0 unsound IterMut — transitive via wreq
+    "RUSTSEC-2026-0002",
+    # rustls-pemfile unmaintained — transitive via warp (spider_worker)
+    "RUSTSEC-2025-0134",
+]
