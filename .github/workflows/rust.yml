@@ -17,8 +17,8 @@ jobs:
       SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
       RUN_LIVE_TESTS: ${{ secrets.RUN_LIVE_TESTS }}
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/cache@v3
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
         id: cache
         with:
           path: |

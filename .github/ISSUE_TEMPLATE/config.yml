@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Discord
+    url: https://discord.spider.cloud
+    about: Ask questions and get help from the community
+  - name: Documentation
+    url: https://docs.rs/spider/latest/spider
+    about: API reference and crate documentation
