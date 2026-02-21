@@ -5,4 +5,18 @@ ignore = [
     "RUSTSEC-2026-0002",
     # rustls-pemfile unmaintained — transitive via warp (spider_worker)
     "RUSTSEC-2025-0134",
+    # rsa timing sidechannel — transitive via sqlx-mysql (no fix available)
+    "RUSTSEC-2023-0071",
+    # backoff unmaintained — transitive via async-openai, memvid-rs
+    "RUSTSEC-2025-0012",
+    # bincode unmaintained — transitive via memvid-rs, http-cache
+    "RUSTSEC-2025-0141",
+    # fxhash unmaintained — transitive via selectors (spider_scraper)
+    "RUSTSEC-2025-0057",
+    # instant unmaintained — transitive via backoff
+    "RUSTSEC-2024-0384",
+    # number_prefix unmaintained — transitive via indicatif (memvid-rs)
+    "RUSTSEC-2025-0119",
+    # paste unmaintained — transitive dep
+    "RUSTSEC-2024-0436",
 ]
