@@ -1,0 +1,4 @@
+# https://rustsec.org/advisories/
+[advisories]
+# lru 0.13.0 unsound IterMut — transitive via wreq, waiting on upstream fix
+ignore = ["RUSTSEC-2026-0002"]
