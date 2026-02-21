@@ -19,7 +19,7 @@ maintenance = { status = "as-is" }
 convert_case = "0.6.0"
 env_logger = "0.11.3"
 htr = "0.5.27"
-flexbuffers = "2.0.0"
+flexbuffers = "25.12.19"
 console-subscriber = { version = "0.4" }
 serde_json = "1"
 

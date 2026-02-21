@@ -30,7 +30,7 @@ smallvec = "1"
 num_cpus = "1"
 bytes = { version = "1", features = ["serde"] }
 serde = { version = "1", optional = true, features = ["derive"] }
-flexbuffers = { version = "2", optional = true }
+flexbuffers = { version = "25", optional = true }
 itertools = { version = "0.14", optional = true }
 case_insensitive_string = { version = "0.2", features = ["compact", "serde"] }
 sitemap = { version = "0.4", optional = true }
