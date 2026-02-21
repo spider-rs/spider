@@ -30,7 +30,7 @@ smallvec = "1"
 num_cpus = "1"
 bytes = { version = "1", features = ["serde"] }
 serde = { version = "1", optional = true, features = ["derive"] }
-flexbuffers = { version = "2", optional = true }
+flexbuffers = { version = "25", optional = true }
 itertools = { version = "0.14", optional = true }
 case_insensitive_string = { version = "0.2", features = ["compact", "serde"] }
 sitemap = { version = "0.4", optional = true }
@@ -42,7 +42,7 @@ async_job = { version = "0.1", optional = true }
 reqwest-middleware = { version = "0.4", optional = true, default-features = false }
 http-cache-reqwest = { version = "0.15", optional = true, default-features = false }
 const_format = { version = "0.2", optional = true }
-async-openai = { version = "0.32", optional = true, features = ["chat-completion"] }
+async-openai = { version = "0.33", optional = true, features = ["chat-completion"] }
 tiktoken-rs = { version = "0.9", optional = true }
 gemini-rust = { version = "1.6", optional = true }
 lol_html = { version = "2" }
