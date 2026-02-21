@@ -17,7 +17,7 @@ jobs:
       SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
       RUN_LIVE_TESTS: ${{ secrets.RUN_LIVE_TESTS }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/cache@v4
         id: cache
         with:
@@ -41,7 +41,7 @@ jobs:
   io_uring:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/cache@v4
         with:
           path: |
