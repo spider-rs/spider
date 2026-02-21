@@ -1611,7 +1611,7 @@ dependencies = [
  "hex",
  "http-cache",
  "http-cache-reqwest",
- "http-cache-semantics",
+ "http-cache-semantics 2.1.1",
  "http-global-cache",
  "lazy_static",
  "lol_html",
@@ -3929,7 +3929,7 @@ dependencies = [
  "bincode",
  "cacache",
  "http 1.4.0",
- "http-cache-semantics",
+ "http-cache-semantics 2.1.1",
  "httpdate",
  "moka",
  "serde",
@@ -3946,7 +3946,7 @@ dependencies = [
  "async-trait",
  "http 1.4.0",
  "http-cache",
- "http-cache-semantics",
+ "http-cache-semantics 2.1.1",
  "reqwest",
  "reqwest-middleware",
  "serde",
@@ -3958,6 +3958,18 @@ name = "http-cache-semantics"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4311240f94cb6fe622337dc580b09ddd6ae4a891eb121dba20cf4f77ca4e7129"
+dependencies = [
+ "http 1.4.0",
+ "http-serde",
+ "serde",
+ "time",
+]
+
+[[package]]
+name = "http-cache-semantics"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0603b99309a1e404c2c0945650c0f775b50bb72ac90ae570cb93f9ff05d9efe7"
 dependencies = [
  "http 1.4.0",
  "http-serde",
@@ -7705,7 +7717,7 @@ dependencies = [
  "http 1.4.0",
  "http-cache",
  "http-cache-reqwest",
- "http-cache-semantics",
+ "http-cache-semantics 3.0.0",
  "http-global-cache",
  "httpdate",
  "itertools 0.14.0",

@@ -55,7 +55,7 @@ quick-xml = { version = "0.39", features = [
 ] }
 moka = { version = "0.12", features = ["future"], optional = true }
 fastrand = { version = "2", optional = true }
-http-cache-semantics = { version = "2", optional = true }
+http-cache-semantics = { version = "3", optional = true }
 http-cache = { version = "0.20", optional = true, default-features = false }
 http-global-cache = { version = "0.1.0", optional = true, default-features = false, features = ["cache_request"] }
 http = { version = "1", optional = true }
