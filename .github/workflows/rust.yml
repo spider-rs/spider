@@ -18,7 +18,7 @@ jobs:
       RUN_LIVE_TESTS: ${{ secrets.RUN_LIVE_TESTS }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         id: cache
         with:
           path: |
@@ -42,7 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin/
