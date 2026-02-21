@@ -2,6 +2,94 @@
 
 ## Unreleased
 
+1. chore: fix clippy warnings and formatting across workspace
+1. chore: remove cargo dependabot for Rust (too noisy), keep github-actions only
+1. chore(deps): bump flexbuffers 2 -> 25, async-openai 0.32 -> 0.33
+1. docs: rewrite README, add issue/PR templates, security policy, CI workflows
+1. docs: add Contributor Covenant v2.1 Code of Conduct
+1. docs: rewrite CONTRIBUTING.md and add zero-config quick start to README
+
+## v2.45.22
+
+1. fix(cache): proper HTTP staleness for Chrome-cached pages
+1. fix(cache): Period policy bypasses HTTP `is_stale` for Chrome-rendered pages
+
+## v2.45.21
+
+1. fix(cache): enable `cache_chrome_hybrid_mem` feature for Chrome cache writes
+
+## v2.45.19
+
+1. fix(chrome): default `no_sandbox()` for headless BrowserConfig (#354)
+
+## v2.45.18
+
+1. feat(agent): per-round model pool routing for cost-optimized automation
+1. test: comprehensive crawler-test.com integration suite (302 tests, 408 URLs)
+
+## v2.45.17
+
+1. perf(agent): skip model scoring for pools with 2 or fewer models
+
+## v2.45.16
+
+1. test(agent): comprehensive multi-LLM router reliability tests
+
+## v2.45.15
+
+1. feat(cli): add `--wait-for` capabilities to spider_cli (#352)
+
+## v2.45.14
+
+1. fix: Chrome mode honors `wait_for` config for networkIdle before HTML extraction
+
+## v2.45.13
+
+1. fix: smart mode lifecycle waiting -- match Chrome coverage without re-fetch
+
+## v2.45.12
+
+1. fix: auto-retry www. URLs on SSL protocol errors -- strip www prefix
+
+## v2.45.11
+
+1. fix: reject empty HTML from all cache and seeded resource paths
+
+## v2.45.10
+
+1. fix: invalidate empty HTML shell responses on cache read path
+
+## v2.45.9
+
+1. feat: deferred Chrome -- cache-only crawl phase before browser launch
+
+## v2.45.8
+
+1. feat: cache-first fast path -- skip browser/HTTP when cache has data
+
+## v2.45.7
+
+1. fix: add `Website::with_hedge()` forwarding method
+
+## v2.45.5
+
+1. feat: add work-stealing (hedged requests) for slow crawl requests
+1. fix: skip HTML-specific heuristics in cache empty check for non-HTML content
+1. fix: skip caching empty/near-empty HTML responses
+
+## v2.45.3
+
+1. fix(uring_fs): fix compile errors when io_uring feature is enabled
+
+## v2.45.2
+
+1. perf(io_uring): add StreamingWriter for streaming file I/O
+
+## v2.45.1
+
+1. feat(io_uring): expand io_uring integration for file I/O
+1. refactor(agent): extract types and HTML cleaning into `spider_agent_types` and `spider_agent_html` crates
+
 ## v2.45.0
 
 1. chore(deps): bump hashbrown 0.15 → 0.16
