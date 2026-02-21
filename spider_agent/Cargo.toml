@@ -39,7 +39,7 @@ aho-corasick = "1"
 llm_models_spider = "0.1.9"
 
 # LLM Providers (optional)
-async-openai = { version = "0.32", optional = true, features = ["chat-completion"] }
+async-openai = { version = "0.33", optional = true, features = ["chat-completion"] }
 tiktoken-rs = { version = "0.9", optional = true }
 
 # Browser (optional) - uses chromey (spider's chrome library)
