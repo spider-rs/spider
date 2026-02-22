@@ -4466,7 +4466,11 @@ impl Website {
         if !self.configuration.external_domains_caseless.is_empty() {
             page.set_external(self.configuration.external_domains_caseless.clone());
         }
-        page.set_url_parsed_direct();
+        if let Ok(final_base) = Url::parse(page.get_url_final()) {
+            page.set_url_parsed(final_base);
+        } else {
+            page.set_url_parsed_direct();
+        }
         if return_page_links {
             page.page_links = Some(Default::default());
         }
@@ -4566,7 +4570,11 @@ impl Website {
                         if !self.configuration.external_domains_caseless.is_empty() {
                             page.set_external(self.configuration.external_domains_caseless.clone());
                         }
-                        page.set_url_parsed_direct();
+                        if let Ok(final_base) = Url::parse(page.get_url_final()) {
+                            page.set_url_parsed(final_base);
+                        } else {
+                            page.set_url_parsed_direct();
+                        }
                         if return_page_links {
                             page.page_links = Some(Default::default());
                         }
@@ -5288,7 +5296,11 @@ impl Website {
                                                 if !shared.3.is_empty() {
                                                     page.set_external(shared.3.clone());
                                                 }
-                                                page.set_url_parsed_direct();
+                                                if let Ok(final_base) = Url::parse(page.get_url_final()) {
+                                                    page.set_url_parsed(final_base);
+                                                } else {
+                                                    page.set_url_parsed_direct();
+                                                }
                                                 if return_page_links {
                                                     page.page_links = Some(Default::default());
                                                 }
@@ -5789,7 +5801,11 @@ impl Website {
                                                                 if add_external {
                                                                     page.set_external(shared.3.clone());
                                                                 }
-                                                                page.set_url_parsed_direct();
+                                                                if let Ok(final_base) = Url::parse(page.get_url_final()) {
+                                                                    page.set_url_parsed(final_base);
+                                                                } else {
+                                                                    page.set_url_parsed_direct();
+                                                                }
                                                                 let page_base = page.base.take().map(Box::new);
                                                                 if return_page_links {
                                                                     page.page_links = Some(Default::default());
@@ -5928,9 +5944,13 @@ impl Website {
 
                                                             let prev_domain = page.base.take();
 
-                                                            // Use page's own URL for relative link resolution (not original crawl domain).
-                                                            // Fixes subdomain pages resolving e.g. href="/path" against wrong host.
-                                                            page.set_url_parsed_direct();
+                                                            // Use final URL (after redirects) for relative link resolution.
+                                                            // Prevents cross-domain redirects from polluting link sets.
+                                                            if let Ok(final_base) = Url::parse(page.get_url_final()) {
+                                                                page.set_url_parsed(final_base);
+                                                            } else {
+                                                                page.set_url_parsed_direct();
+                                                            }
                                                             let page_base = page.base.take().map(Box::new);
 
                                                             if return_page_links {
@@ -6754,9 +6774,13 @@ impl Website {
 
                                                             let prev_domain = page.base.take();
 
-                                                            // Use page's own URL for relative link resolution (not original crawl domain).
-                                                            // Fixes subdomain pages resolving e.g. href="/path" against wrong host.
-                                                            page.set_url_parsed_direct();
+                                                            // Use final URL (after redirects) for relative link resolution.
+                                                            // Prevents cross-domain redirects from polluting link sets.
+                                                            if let Ok(final_base) = Url::parse(page.get_url_final()) {
+                                                                page.set_url_parsed(final_base);
+                                                            } else {
+                                                                page.set_url_parsed_direct();
+                                                            }
                                                             let page_base = page.base.take().map(Box::new);
 
                                                             if return_page_links {
@@ -7119,9 +7143,12 @@ impl Website {
 
                                             let prev_domain = page.base.take();
 
-                                            // Use page's own URL for relative link resolution (not original crawl domain).
-                                            // Fixes subdomain pages resolving e.g. href="/path" against wrong host.
-                                            page.set_url_parsed_direct();
+                                            // Use final URL (after redirects) for relative link resolution.
+                                            if let Ok(final_base) = Url::parse(page.get_url_final()) {
+                                                page.set_url_parsed(final_base);
+                                            } else {
+                                                page.set_url_parsed_direct();
+                                            }
                                             let page_base = page.base.take().map(Box::new);
 
                                             if return_page_links {
@@ -7586,9 +7613,12 @@ impl Website {
 
                                     let prev_domain = page.base.take();
 
-                                    // Use page's own URL for relative link resolution (not original crawl domain).
-                                    // Fixes subdomain pages resolving e.g. href="/path" against wrong host.
-                                    page.set_url_parsed_direct();
+                                    // Use final URL (after redirects) for relative link resolution.
+                                    if let Ok(final_base) = Url::parse(page.get_url_final()) {
+                                        page.set_url_parsed(final_base);
+                                    } else {
+                                        page.set_url_parsed_direct();
+                                    }
                                     let page_base = page.base.take().map(Box::new);
 
                                     if return_page_links {
