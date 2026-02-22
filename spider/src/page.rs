@@ -1678,7 +1678,9 @@ impl Page {
                     domain_parsed
                 };
 
-                let original_page = Url::parse(url).ok();
+                // Use target_url (final URL after redirects) for relative link
+                // resolution so cross-domain redirects don't pollute the link set.
+                let original_page = Url::parse(target_url).ok();
 
                 let parent_host = &selectors.1[0];
                 // the host schemes
@@ -2957,11 +2959,12 @@ impl Page {
 
                 let base = base.as_deref();
 
-                // original domain to match local pages.
-                let original_page = {
-                    self.set_url_parsed_direct_empty();
-                    self.get_url_parsed_ref().as_ref()
+                // Use final URL after redirects for relative link resolution.
+                let redirect_base = {
+                    let effective_url = self.get_url_final();
+                    Url::parse(effective_url).ok()
                 };
+                let original_page = redirect_base.as_ref();
 
                 let xml_file = self.get_url().ends_with(".xml");
 
@@ -3117,11 +3120,12 @@ impl Page {
 
                 let base = base.as_deref();
 
-                // original domain to match local pages.
-                let original_page = {
-                    self.set_url_parsed_direct_empty();
-                    self.get_url_parsed_ref().as_ref()
+                // Use final URL after redirects for relative link resolution.
+                let redirect_base = {
+                    let effective_url = self.get_url_final();
+                    Url::parse(effective_url).ok()
                 };
+                let original_page = redirect_base.as_ref();
 
                 let xml_file = self.get_url().ends_with(".xml");
 
@@ -3403,12 +3407,23 @@ impl Page {
 
                 let external_domains_caseless = self.external_domains_caseless.clone();
 
+                // Use the final URL after redirects as the base for resolving
+                // relative links. When a page follows a cross-domain redirect
+                // (e.g. a.com/page 301→ b.com/article), the response HTML
+                // belongs to b.com — relative hrefs like "/path" must resolve
+                // against b.com, not a.com. Without this, parent_host_match
+                // incorrectly accepts the resolved URLs as same-domain.
+                let effective_base: Option<Box<Url>> = {
+                    let final_url = self.get_url_final();
+                    Url::parse(final_url).ok().map(Box::new)
+                };
+                let base = &effective_base;
+
                 let base1 = base.as_deref();
 
-                // original domain to match local pages.
                 let original_page = {
-                    self.set_url_parsed_direct_empty();
-                    self.get_url_parsed_ref().as_ref().cloned()
+                    let effective_url = self.get_url_final();
+                    Url::parse(effective_url).ok()
                 };
 
                 let rerender = AtomicBool::new(false);
@@ -3818,12 +3833,19 @@ impl Page {
 
                 let external_domains_caseless = self.external_domains_caseless.clone();
 
+                // Use final URL after redirects as base for relative link
+                // resolution (see not(full_resources) links_stream_smart for rationale).
+                let effective_base: Option<Box<Url>> = {
+                    let final_url = self.get_url_final();
+                    Url::parse(final_url).ok().map(Box::new)
+                };
+                let base = &effective_base;
+
                 let base1 = base.as_deref();
 
-                // original domain to match local pages.
                 let original_page = {
-                    self.set_url_parsed_direct_empty();
-                    self.get_url_parsed_ref().as_ref().cloned()
+                    let effective_url = self.get_url_final();
+                    Url::parse(effective_url).ok()
                 };
 
                 let rerender = AtomicBool::new(false);
@@ -4214,10 +4236,10 @@ impl Page {
 
                 let base = base.as_deref();
 
-                // original domain to match local pages.
+                // Use final URL after redirects for relative link resolution.
                 let original_page = {
-                    self.set_url_parsed_direct_empty();
-                    self.get_url_parsed_ref().as_ref().cloned()
+                    let effective_url = self.get_url_final();
+                    Url::parse(effective_url).ok()
                 };
 
                 let external_domains_caseless = self.external_domains_caseless.clone();
