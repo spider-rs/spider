@@ -2629,10 +2629,16 @@ impl Page {
         self.url = url;
     }
 
-    /// Set the url directly parsed url of the page. Useful for transforming the content and rewriting the url.
+    /// Set the url directly parsed url of the page.
+    /// Uses the final redirect destination when available, so that relative link
+    /// resolution and parent_host_match use the actual origin after redirects.
     #[cfg(not(feature = "decentralized"))]
     pub fn set_url_parsed_direct(&mut self) {
-        if let Ok(base) = Url::parse(&self.url) {
+        let effective_url = match &self.final_redirect_destination {
+            Some(u) => u.as_str(),
+            None => &self.url,
+        };
+        if let Ok(base) = Url::parse(effective_url) {
             self.base = Some(base);
         }
     }
