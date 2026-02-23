@@ -33,7 +33,7 @@ body:
     id: version
     attributes:
       label: Spider version
-      placeholder: "2.45.24"
+      placeholder: "2.45.25"
     validations:
       required: true
   - type: dropdown
