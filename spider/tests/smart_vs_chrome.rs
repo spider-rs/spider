@@ -135,18 +135,13 @@ mod compare {
 
         let _ = env_logger::try_init();
 
-        let result =
-            tokio::time::timeout(Duration::from_secs(90), fetch_chrome(URL)).await;
+        let result = tokio::time::timeout(Duration::from_secs(90), fetch_chrome(URL)).await;
         assert!(result.is_ok(), "crawl() should not timeout");
 
         if let Some(page) = result.unwrap() {
             let html = page.get_html();
             let status = page.status_code.as_u16();
-            eprintln!(
-                "crawl() chrome: {} bytes, status={}",
-                html.len(),
-                status
-            );
+            eprintln!("crawl() chrome: {} bytes, status={}", html.len(), status);
             assert!(
                 html.len() > 1000,
                 "crawl() HTML too small: {} bytes (status={})",
@@ -167,21 +162,19 @@ mod compare {
 
         let _ = env_logger::try_init();
 
-        let result =
-            tokio::time::timeout(Duration::from_secs(90), fetch_smart(URL)).await;
+        let result = tokio::time::timeout(Duration::from_secs(90), fetch_smart(URL)).await;
         assert!(result.is_ok(), "crawl_smart() should not timeout");
 
         let page = result.unwrap();
-        assert!(page.is_some(), "crawl_smart() should return at least one page");
+        assert!(
+            page.is_some(),
+            "crawl_smart() should return at least one page"
+        );
 
         let page = page.unwrap();
         let html = page.get_html();
         let status = page.status_code.as_u16();
-        eprintln!(
-            "crawl_smart(): {} bytes, status={}",
-            html.len(),
-            status
-        );
+        eprintln!("crawl_smart(): {} bytes, status={}", html.len(), status);
         assert!(
             html.len() > 1000,
             "crawl_smart() HTML too small: {} bytes (status={})",
@@ -201,8 +194,7 @@ mod compare {
 
         // --- Chrome rendering ---
         eprintln!("Fetching via crawl() (chrome)...");
-        let chrome_result =
-            tokio::time::timeout(Duration::from_secs(90), fetch_chrome(URL)).await;
+        let chrome_result = tokio::time::timeout(Duration::from_secs(90), fetch_chrome(URL)).await;
         assert!(chrome_result.is_ok(), "crawl() should not timeout");
 
         let chrome_page = chrome_result.unwrap();
@@ -227,8 +219,7 @@ mod compare {
 
         // --- Smart mode ---
         eprintln!("Fetching via crawl_smart()...");
-        let smart_result =
-            tokio::time::timeout(Duration::from_secs(90), fetch_smart(URL)).await;
+        let smart_result = tokio::time::timeout(Duration::from_secs(90), fetch_smart(URL)).await;
         assert!(smart_result.is_ok(), "crawl_smart() should not timeout");
 
         let smart_page = smart_result.unwrap();
@@ -265,10 +256,7 @@ mod compare {
         };
 
         eprintln!("=== fastbots.ai/blog: crawl vs crawl_smart ===");
-        eprintln!(
-            "Chrome: {} bytes | Smart: {} bytes",
-            chrome_len, smart_len
-        );
+        eprintln!("Chrome: {} bytes | Smart: {} bytes", chrome_len, smart_len);
         eprintln!("Size ratio  (smart/chrome): {:.2}", size_ratio);
         eprintln!(
             "Token overlap: {}/{} ({:.1}%)",
