@@ -302,12 +302,12 @@ impl Agent {
                             });
                         }
                         Err(e) => {
-                            log::debug!("Extraction failed for {}: {}", result.url, e);
+                            log::warn!("Extraction failed for {}: {}", result.url, e);
                         }
                     }
                 }
                 Err(e) => {
-                    log::debug!("Fetch failed for {}: {}", result.url, e);
+                    log::warn!("Fetch failed for {}: {}", result.url, e);
                 }
             }
         }
@@ -320,7 +320,7 @@ impl Agent {
                     Some(summary)
                 }
                 Err(e) => {
-                    log::debug!("Synthesis failed: {}", e);
+                    log::warn!("Synthesis failed: {}", e);
                     None
                 }
             }
@@ -1249,4 +1249,5 @@ mod tests {
         assert!(tools.contains(&"spider_cloud_ai_browser".to_string()));
         assert!(tools.contains(&"spider_cloud_ai_links".to_string()));
     }
+
 }

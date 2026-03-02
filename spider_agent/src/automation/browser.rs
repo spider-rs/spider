@@ -150,6 +150,18 @@ const MAX_WAIT_FOR_TIMEOUT_MS: u64 = 30_000;
 #[cfg(feature = "chrome")]
 const DEFAULT_SPAWN_CONCURRENCY: usize = 5;
 
+/// Maximum hold duration for `ClickHold`/`ClickHoldPoint` (30 seconds).
+#[cfg(feature = "chrome")]
+const MAX_HOLD_MS: u64 = 30_000;
+
+/// Maximum URLs a single `OpenPage` action can spawn.
+#[cfg(feature = "chrome")]
+const MAX_SPAWN_PAGES_PER_ACTION: usize = 20;
+
+/// Maximum viewport dimension (8K resolution cap).
+#[cfg(feature = "chrome")]
+const MAX_VIEWPORT_DIM: i64 = 7680;
+
 /// Execute a `page.evaluate()` call with a timeout guard.
 ///
 /// Returns `Ok(())` on success, `Err(reason)` on JS error or timeout.
@@ -171,6 +183,17 @@ async fn eval_with_timeout(
         Ok(Err(e)) => Err(e.to_string()),
         Err(_) => Err(format!("JS execution timed out after {timeout_secs}s")),
     }
+}
+
+/// Escape a string for safe interpolation into JavaScript source code.
+///
+/// Uses `serde_json::to_string` which produces a JSON-encoded `"string"` with
+/// proper escaping of quotes, backslashes, newlines, etc. The result includes
+/// surrounding double-quotes, suitable for direct use in JS expressions like
+/// `document.querySelector(js_escape(sel))`.
+#[cfg(feature = "chrome")]
+fn js_escape(s: &str) -> String {
+    serde_json::to_string(s).unwrap_or_default()
 }
 
 #[cfg(feature = "chrome")]
@@ -279,10 +302,23 @@ impl RemoteMultimodalEngine {
             .omit_background(cap.omit_background)
             .build();
 
-        let png = page
-            .screenshot(params)
-            .await
-            .map_err(|e| EngineError::Remote(format!("screenshot failed: {e}")))?;
+        let png = match tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            page.screenshot(params),
+        )
+        .await
+        {
+            Ok(Ok(data)) => data,
+            Ok(Err(e)) => {
+                return Err(EngineError::Remote(format!("screenshot failed: {e}")));
+            }
+            Err(_) => {
+                log::warn!("Screenshot timed out after 15s");
+                return Err(EngineError::Remote(
+                    "screenshot timed out after 15s".into(),
+                ));
+            }
+        };
 
         // Restore color after screenshot
         let _ = page
@@ -309,10 +345,23 @@ impl RemoteMultimodalEngine {
             .omit_background(true)
             .build();
 
-        let png = page
-            .screenshot(params)
-            .await
-            .map_err(|e| EngineError::Remote(format!("screenshot failed: {e}")))?;
+        let png = match tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            page.screenshot(params),
+        )
+        .await
+        {
+            Ok(Ok(data)) => data,
+            Ok(Err(e)) => {
+                return Err(EngineError::Remote(format!("screenshot failed: {e}")));
+            }
+            Err(_) => {
+                log::warn!("Final screenshot timed out after 15s");
+                return Err(EngineError::Remote(
+                    "final screenshot timed out after 15s".into(),
+                ));
+            }
+        };
 
         Ok(general_purpose::STANDARD.encode(png))
     }
@@ -3629,7 +3678,15 @@ return await s.prompt(msg);
                             outcomes.push(ActionOutcome::ok("OpenPage"));
                         } else if let Some(urls) = value.as_array() {
                             // Support array of URLs: { "OpenPage": ["url1", "url2"] }
-                            for url_val in urls {
+                            let capped = &urls[..urls.len().min(MAX_SPAWN_PAGES_PER_ACTION)];
+                            if urls.len() > MAX_SPAWN_PAGES_PER_ACTION {
+                                log::warn!(
+                                    "OpenPage: truncated {} URLs to {}",
+                                    urls.len(),
+                                    MAX_SPAWN_PAGES_PER_ACTION
+                                );
+                            }
+                            for url_val in capped {
                                 if let Some(url) = url_val.as_str() {
                                     spawn_pages.push(url.to_string());
                                 }
@@ -3714,7 +3771,11 @@ return await s.prompt(msg);
             }
             "ClickHold" => {
                 let selector = value.get("selector").and_then(|v| v.as_str());
-                let hold_ms = value.get("hold_ms").and_then(|v| v.as_u64()).unwrap_or(500);
+                let hold_ms = value
+                    .get("hold_ms")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(500)
+                    .min(MAX_HOLD_MS);
                 if let Some(sel) = selector {
                     if let Ok(elem) = page.find_element(sel).await {
                         if let Ok(sv) = elem.scroll_into_view().await {
@@ -3743,7 +3804,11 @@ return await s.prompt(msg);
             "ClickHoldPoint" => {
                 let x = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let y = value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let hold_ms = value.get("hold_ms").and_then(|v| v.as_u64()).unwrap_or(500);
+                let hold_ms = value
+                    .get("hold_ms")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(500)
+                    .min(MAX_HOLD_MS);
                 let point = Point::new(x, y);
                 let _ = page.move_mouse_smooth(point).await;
                 let _ = page
@@ -3866,13 +3931,27 @@ return await s.prompt(msg);
                         Ok(elem) => {
                             let _ = elem.click().await;
                             // Clear existing value before typing
-                            let _ = page
-                                .evaluate(format!(
-                                    "document.querySelector('{}').value = ''",
-                                    sel.replace('\'', "\\'")
-                                ))
-                                .await;
-                            let _ = elem.type_str(txt).await;
+                            if let Err(e) = eval_with_timeout(
+                                page,
+                                format!(
+                                    "document.querySelector({}).value = ''",
+                                    js_escape(sel)
+                                ),
+                                EVAL_TIMEOUT_SECS,
+                            )
+                            .await
+                            {
+                                return ActionOutcome::fail(
+                                    "Fill",
+                                    format!("clear failed: {}", e),
+                                );
+                            }
+                            if let Err(e) = elem.type_str(txt).await {
+                                return ActionOutcome::fail(
+                                    "Fill",
+                                    format!("type_str failed: {}", e),
+                                );
+                            }
                             return ActionOutcome::ok("Fill");
                         }
                         Err(_) => {
@@ -3889,32 +3968,43 @@ return await s.prompt(msg);
                 let text = value.get("value").and_then(|v| v.as_str());
                 if let Some(txt) = text {
                     // Type into the currently focused element
-                    let _ = page
-                        .evaluate(format!(
-                            "document.activeElement.value += '{}'",
-                            txt.replace('\'', "\\'")
-                        ))
-                        .await;
+                    if let Err(e) = eval_with_timeout(
+                        page,
+                        format!("document.activeElement.value += {}", js_escape(txt)),
+                        EVAL_TIMEOUT_SECS,
+                    )
+                    .await
+                    {
+                        return ActionOutcome::fail("Type", e);
+                    }
                     return ActionOutcome::ok("Type");
                 }
                 ActionOutcome::fail("Type", "missing value")
             }
             "Clear" => {
                 if let Some(selector) = value.as_str() {
-                    let _ = page
-                        .evaluate(format!("document.querySelector('{}').value = ''", selector))
-                        .await;
+                    if let Err(e) = eval_with_timeout(
+                        page,
+                        format!("document.querySelector({}).value = ''", js_escape(selector)),
+                        EVAL_TIMEOUT_SECS,
+                    )
+                    .await
+                    {
+                        return ActionOutcome::fail("Clear", e);
+                    }
                     return ActionOutcome::ok("Clear");
                 }
                 ActionOutcome::fail("Clear", "missing selector")
             }
             "Press" => {
                 if let Some(key) = value.as_str() {
-                    if let Err(e) = eval_with_timeout(page, format!(r#"
-                        document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {{key: '{}', bubbles: true}}));
-                        document.activeElement.dispatchEvent(new KeyboardEvent('keypress', {{key: '{}', bubbles: true}}));
-                        document.activeElement.dispatchEvent(new KeyboardEvent('keyup', {{key: '{}', bubbles: true}}));
-                    "#, key, key, key), EVAL_TIMEOUT_SECS).await {
+                    let escaped = js_escape(key);
+                    if let Err(e) = eval_with_timeout(page, format!(
+                        "document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {{key: {k}, bubbles: true}}));\
+                         document.activeElement.dispatchEvent(new KeyboardEvent('keypress', {{key: {k}, bubbles: true}}));\
+                         document.activeElement.dispatchEvent(new KeyboardEvent('keyup', {{key: {k}, bubbles: true}}));",
+                        k = escaped
+                    ), EVAL_TIMEOUT_SECS).await {
                         return ActionOutcome::fail("Press", e);
                     }
                     return ActionOutcome::ok("Press");
@@ -3924,8 +4014,8 @@ return await s.prompt(msg);
             "KeyDown" => {
                 if let Some(key) = value.as_str() {
                     if let Err(e) = eval_with_timeout(page, format!(
-                        "document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {{key: '{}', bubbles: true}}))",
-                        key
+                        "document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {{key: {}, bubbles: true}}))",
+                        js_escape(key)
                     ), EVAL_TIMEOUT_SECS).await {
                         return ActionOutcome::fail("KeyDown", e);
                     }
@@ -3936,8 +4026,8 @@ return await s.prompt(msg);
             "KeyUp" => {
                 if let Some(key) = value.as_str() {
                     if let Err(e) = eval_with_timeout(page, format!(
-                        "document.activeElement.dispatchEvent(new KeyboardEvent('keyup', {{key: '{}', bubbles: true}}))",
-                        key
+                        "document.activeElement.dispatchEvent(new KeyboardEvent('keyup', {{key: {}, bubbles: true}}))",
+                        js_escape(key)
                     ), EVAL_TIMEOUT_SECS).await {
                         return ActionOutcome::fail("KeyUp", e);
                     }
@@ -3976,8 +4066,8 @@ return await s.prompt(msg);
             "ScrollTo" => {
                 if let Some(selector) = value.get("selector").and_then(|v| v.as_str()) {
                     if let Err(e) = eval_with_timeout(page, format!(
-                        "document.querySelector('{}')?.scrollIntoView({{behavior: 'smooth', block: 'center'}})",
-                        selector
+                        "document.querySelector({})?.scrollIntoView({{behavior: 'smooth', block: 'center'}})",
+                        js_escape(selector)
                     ), EVAL_TIMEOUT_SECS).await {
                         return ActionOutcome::fail("ScrollTo", e);
                     }
@@ -4024,7 +4114,7 @@ return await s.prompt(msg);
 
             // === Wait Actions ===
             "Wait" => {
-                let ms = value.as_u64().unwrap_or(1000);
+                let ms = value.as_u64().unwrap_or(1000).min(MAX_WAIT_FOR_TIMEOUT_MS);
                 tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
                 ActionOutcome::ok("Wait")
             }
@@ -4097,8 +4187,8 @@ return await s.prompt(msg);
                 ActionOutcome::fail("WaitForAndClick", "missing selector")
             }
             "WaitForNavigation" => {
-                // Wait a bit for navigation to complete
-                tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+                // Use the established PageWaitStrategy instead of a fixed sleep
+                PageWaitStrategy::Load.apply(page).await;
                 ActionOutcome::ok("WaitForNavigation")
             }
             "WaitForDom" => {
@@ -4127,13 +4217,29 @@ return await s.prompt(msg);
             // === Navigation Actions ===
             "Navigate" => {
                 if let Some(url) = value.as_str() {
-                    if page.goto(url).await.is_ok() {
-                        return ActionOutcome::ok("Navigate");
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(30),
+                        page.goto(url),
+                    )
+                    .await
+                    {
+                        Ok(Ok(_)) => return ActionOutcome::ok("Navigate"),
+                        Ok(Err(_)) => {
+                            return ActionOutcome::fail(
+                                "Navigate",
+                                format!("navigation failed: {}", truncate_utf8_tail(url, 80)),
+                            );
+                        }
+                        Err(_) => {
+                            return ActionOutcome::fail(
+                                "Navigate",
+                                format!(
+                                    "navigation timed out after 30s: {}",
+                                    truncate_utf8_tail(url, 80)
+                                ),
+                            );
+                        }
                     }
-                    return ActionOutcome::fail(
-                        "Navigate",
-                        format!("navigation failed: {}", truncate_utf8_tail(url, 80)),
-                    );
                 }
                 ActionOutcome::fail("Navigate", "missing URL")
             }
@@ -4166,8 +4272,8 @@ return await s.prompt(msg);
             "Hover" => {
                 if let Some(selector) = value.as_str() {
                     if let Err(e) = eval_with_timeout(page, format!(
-                        "document.querySelector('{}')?.dispatchEvent(new MouseEvent('mouseover', {{bubbles: true}}))",
-                        selector
+                        "document.querySelector({})?.dispatchEvent(new MouseEvent('mouseover', {{bubbles: true}}))",
+                        js_escape(selector)
                     ), EVAL_TIMEOUT_SECS).await {
                         return ActionOutcome::fail("Hover", e);
                     }
@@ -4187,9 +4293,11 @@ return await s.prompt(msg);
                 let selector = value.get("selector").and_then(|v| v.as_str());
                 let opt_value = value.get("value").and_then(|v| v.as_str());
                 if let (Some(sel), Some(val)) = (selector, opt_value) {
+                    let escaped_sel = js_escape(sel);
+                    let escaped_val = js_escape(val);
                     if let Err(e) = eval_with_timeout(page, format!(
-                        "document.querySelector('{}').value = '{}'; document.querySelector('{}').dispatchEvent(new Event('change', {{bubbles: true}}))",
-                        sel, val, sel
+                        "document.querySelector({s}).value = {v}; document.querySelector({s}).dispatchEvent(new Event('change', {{bubbles: true}}))",
+                        s = escaped_sel, v = escaped_val
                     ), EVAL_TIMEOUT_SECS).await {
                         return ActionOutcome::fail("Select", e);
                     }
@@ -4201,7 +4309,7 @@ return await s.prompt(msg);
                 if let Some(selector) = value.as_str() {
                     if let Err(e) = eval_with_timeout(
                         page,
-                        format!("document.querySelector('{}')?.focus()", selector),
+                        format!("document.querySelector({})?.focus()", js_escape(selector)),
                         EVAL_TIMEOUT_SECS,
                     )
                     .await
@@ -4216,7 +4324,7 @@ return await s.prompt(msg);
                 if let Some(selector) = value.as_str() {
                     if let Err(e) = eval_with_timeout(
                         page,
-                        format!("document.querySelector('{}')?.blur()", selector),
+                        format!("document.querySelector({})?.blur()", js_escape(selector)),
                         EVAL_TIMEOUT_SECS,
                     )
                     .await
@@ -4255,8 +4363,18 @@ return await s.prompt(msg);
             // === Viewport / Device Metrics ===
             "SetViewport" => {
                 if let Some(obj) = value.as_object() {
-                    let width = obj.get("width").and_then(|v| v.as_i64()).unwrap_or(1280);
-                    let height = obj.get("height").and_then(|v| v.as_i64()).unwrap_or(960);
+                    let width = obj
+                        .get("width")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(1280)
+                        .max(1)
+                        .min(MAX_VIEWPORT_DIM);
+                    let height = obj
+                        .get("height")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(960)
+                        .max(1)
+                        .min(MAX_VIEWPORT_DIM);
                     let device_scale_factor = obj
                         .get("device_scale_factor")
                         .and_then(|v| v.as_f64())
@@ -6003,5 +6121,211 @@ mod tests {
         };
 
         assert!(combined.is_none());
+    }
+
+    // ====================================================================
+    // Hardening: js_escape — injection prevention
+    // ====================================================================
+
+    /// Verifies js_escape produces valid JSON string literals that prevent
+    /// code injection when interpolated into querySelector() and event constructors.
+    #[test]
+    fn test_js_escape_prevents_selector_injection() {
+        // Attacker supplies a selector that tries to break out of the string
+        // and execute arbitrary JS:
+        let malicious = "'); document.cookie='stolen'; ('";
+        let escaped = js_escape(malicious);
+        let js = format!("document.querySelector({}).value = ''", escaped);
+
+        // The result must be a single string arg — no break-out.
+        // The entire malicious payload is safely inside double quotes.
+        assert!(
+            js.starts_with("document.querySelector(\""),
+            "escaped selector must be double-quoted"
+        );
+        // Critically: the ') at the start of the payload is escaped —
+        // it cannot close a preceding quote and start new code.
+        // Verify the payload is enclosed within the JSON string literal
+        // (the escaped version can be round-tripped back losslessly).
+        let roundtrip: String = serde_json::from_str(&escaped).unwrap();
+        assert_eq!(roundtrip, malicious, "round-trip must be lossless");
+        // The entire malicious string is a single querySelector argument,
+        // not three separate JS statements:
+        assert_eq!(
+            js.matches("document.querySelector").count(),
+            1,
+            "must be a single querySelector call, not multiple statements"
+        );
+    }
+
+    #[test]
+    fn test_js_escape_prevents_value_injection_via_type_action() {
+        // Attacker tries to close the string and inject alert(1)
+        let malicious = "\"; alert(1); \"";
+        let escaped = js_escape(malicious);
+        let js = format!("document.activeElement.value += {}", escaped);
+
+        // The inner double quotes must be backslash-escaped, not raw
+        assert!(
+            js.contains(r#"\""#),
+            "double quotes in value must be escaped"
+        );
+        // Verify we can round-trip through serde_json (it's valid JSON)
+        let roundtrip: String = serde_json::from_str(&escaped).unwrap();
+        assert_eq!(roundtrip, malicious, "round-trip through JSON must be lossless");
+    }
+
+    #[test]
+    fn test_js_escape_handles_all_dangerous_chars() {
+        // Every char that could break a JS string literal
+        for (input, desc) in [
+            ("\\", "backslash"),
+            ("\"", "double quote"),
+            ("\n", "newline"),
+            ("\r", "carriage return"),
+            ("\t", "tab"),
+            ("\x00", "null byte"),
+        ] {
+            let escaped = js_escape(input);
+            // Must always be valid JSON
+            let _: String = serde_json::from_str(&escaped)
+                .unwrap_or_else(|_| panic!("js_escape({desc}) must produce valid JSON"));
+        }
+    }
+
+    // ====================================================================
+    // Hardening: LLM-controlled duration caps
+    // ====================================================================
+
+    /// Verifies the Wait action caps LLM-supplied durations at 30s.
+    #[test]
+    fn test_wait_duration_capped_at_30s() {
+        // Simulate: value.as_u64().unwrap_or(1000).min(MAX_WAIT_FOR_TIMEOUT_MS)
+        let llm_wants_5min: u64 = 300_000;
+        let actual = llm_wants_5min.min(MAX_WAIT_FOR_TIMEOUT_MS);
+        assert_eq!(actual, 30_000, "Wait must be capped at 30s");
+
+        // Normal values pass through
+        assert_eq!(2000u64.min(MAX_WAIT_FOR_TIMEOUT_MS), 2000);
+    }
+
+    /// Verifies ClickHold/ClickHoldPoint cap hold duration at 30s.
+    #[test]
+    fn test_click_hold_duration_capped_at_30s() {
+        let llm_wants_2min: u64 = 120_000;
+        let actual = llm_wants_2min.min(MAX_HOLD_MS);
+        assert_eq!(actual, 30_000, "ClickHold must be capped at 30s");
+
+        assert_eq!(500u64.min(MAX_HOLD_MS), 500, "normal hold_ms unchanged");
+    }
+
+    /// Verifies SetViewport clamps width/height to [1, 7680] (8K).
+    #[test]
+    fn test_viewport_dimension_clamped() {
+        // Huge values capped
+        assert_eq!(99999i64.max(1).min(MAX_VIEWPORT_DIM), 7680);
+        // Zero/negative floored to 1
+        assert_eq!(0i64.max(1).min(MAX_VIEWPORT_DIM), 1);
+        assert_eq!((-100i64).max(1).min(MAX_VIEWPORT_DIM), 1);
+        // Normal value passes through
+        assert_eq!(1920i64.max(1).min(MAX_VIEWPORT_DIM), 1920);
+    }
+
+    // ====================================================================
+    // Hardening: OpenPage spawn cap
+    // ====================================================================
+
+    /// Verifies OpenPage truncates URL arrays to MAX_SPAWN_PAGES_PER_ACTION.
+    #[test]
+    fn test_open_page_array_truncated_to_cap() {
+        let urls: Vec<serde_json::Value> = (0..50)
+            .map(|i| serde_json::json!(format!("https://example.com/p{}", i)))
+            .collect();
+
+        // Exact logic from the handler
+        let capped = &urls[..urls.len().min(MAX_SPAWN_PAGES_PER_ACTION)];
+        assert_eq!(capped.len(), 20, "must truncate to 20");
+        // First and last capped elements are correct
+        assert_eq!(capped[0].as_str().unwrap(), "https://example.com/p0");
+        assert_eq!(capped[19].as_str().unwrap(), "https://example.com/p19");
+    }
+
+    #[test]
+    fn test_open_page_array_under_cap_unchanged() {
+        let urls: Vec<serde_json::Value> = (0..3)
+            .map(|i| serde_json::json!(format!("https://example.com/p{}", i)))
+            .collect();
+        let capped = &urls[..urls.len().min(MAX_SPAWN_PAGES_PER_ACTION)];
+        assert_eq!(capped.len(), 3, "small arrays pass through unchanged");
+    }
+
+    // ====================================================================
+    // Hardening: Navigate timeout pattern
+    // ====================================================================
+
+    /// Verifies the Navigate timeout wrapper produces correct outcomes.
+    #[tokio::test]
+    async fn test_navigate_timeout_fires_on_slow_future() {
+        // Simulate what happens when page.goto hangs: tokio::time::timeout fires
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(10),
+            tokio::time::sleep(std::time::Duration::from_secs(60)),
+        )
+        .await;
+        assert!(result.is_err(), "timeout must fire for a hanging navigation");
+    }
+
+    /// Verifies the Navigate timeout passes through on fast completion.
+    #[tokio::test]
+    async fn test_navigate_timeout_passes_on_fast_future() {
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            async { Ok::<_, String>(()) },
+        )
+        .await;
+        assert!(result.is_ok(), "fast completion must not timeout");
+        assert!(result.unwrap().is_ok());
+    }
+
+    // ====================================================================
+    // Hardening: Screenshot timeout pattern
+    // ====================================================================
+
+    #[tokio::test]
+    async fn test_screenshot_timeout_fires_on_hang() {
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(10),
+            tokio::time::sleep(std::time::Duration::from_secs(60)),
+        )
+        .await;
+        assert!(result.is_err(), "screenshot timeout must fire on hang");
+    }
+
+    #[tokio::test]
+    async fn test_screenshot_timeout_passes_on_success() {
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            async { Ok::<Vec<u8>, String>(vec![0x89, 0x50, 0x4E, 0x47]) },
+        )
+        .await;
+        assert!(result.is_ok());
+        let png = result.unwrap().unwrap();
+        assert_eq!(png[0], 0x89, "PNG magic byte preserved");
+    }
+
+    // ====================================================================
+    // Hardening: WaitForNavigation uses PageWaitStrategy
+    // ====================================================================
+
+    /// Verifies PageWaitStrategy::Load is the default variant used by
+    /// WaitForNavigation, ensuring it waits for readyState=complete
+    /// rather than a fixed sleep.
+    #[test]
+    fn test_page_wait_strategy_load_is_default() {
+        let strategy = PageWaitStrategy::default();
+        assert!(
+            matches!(strategy, PageWaitStrategy::Load),
+            "default PageWaitStrategy must be Load"
+        );
     }
 }

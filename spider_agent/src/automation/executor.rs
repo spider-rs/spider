@@ -163,7 +163,13 @@ impl ChainExecutor {
         }
 
         // Acquire semaphore permit
-        let _permit = self.semaphore.acquire().await.ok();
+        let _permit = match self.semaphore.acquire().await {
+            Ok(p) => Some(p),
+            Err(_) => {
+                log::warn!("Semaphore closed, proceeding without permit");
+                None
+            }
+        };
 
         // Execute with timeout
         let timeout = step
@@ -216,7 +222,13 @@ impl ChainExecutor {
             let step_fn = step_fn.clone();
 
             handles.push(tokio::spawn(async move {
-                let _permit = semaphore.acquire().await.ok();
+                let _permit = match semaphore.acquire().await {
+                    Ok(p) => Some(p),
+                    Err(_) => {
+                        log::warn!("Semaphore closed, proceeding without permit");
+                        None
+                    }
+                };
 
                 if !step.should_execute(&ctx) {
                     return ChainStepResult::skipped(ctx.step_index, &step.instruction);
@@ -474,7 +486,13 @@ impl BatchExecutor {
                 let processor = processor.clone();
 
                 handles.push(tokio::spawn(async move {
-                    let _permit = semaphore.acquire().await.ok();
+                    let _permit = match semaphore.acquire().await {
+                        Ok(p) => Some(p),
+                        Err(_) => {
+                            log::warn!("Semaphore closed, proceeding without permit");
+                            None
+                        }
+                    };
                     processor(item).await
                 }));
             }
@@ -519,7 +537,13 @@ impl BatchExecutor {
                 let processor = processor.clone();
 
                 handles.push(tokio::spawn(async move {
-                    let _permit = semaphore.acquire().await.ok();
+                    let _permit = match semaphore.acquire().await {
+                        Ok(p) => Some(p),
+                        Err(_) => {
+                            log::warn!("Semaphore closed, proceeding without permit");
+                            None
+                        }
+                    };
                     (idx, processor(idx, item).await)
                 }));
             }
@@ -602,7 +626,13 @@ impl PrefetchManager {
         let max_cache_size = self.max_cache_size;
 
         let handle = tokio::spawn(async move {
-            let _permit = semaphore.acquire().await.ok();
+            let _permit = match semaphore.acquire().await {
+                Ok(p) => Some(p),
+                Err(_) => {
+                    log::warn!("Semaphore closed, proceeding without permit");
+                    None
+                }
+            };
             let result = fetcher(url_clone.clone()).await;
 
             if let Some(ref html) = result {
@@ -841,5 +871,80 @@ mod tests {
             "cache benchmark took unexpectedly long: {}ms",
             elapsed.as_millis()
         );
+    }
+
+    // ====================================================================
+    // Hardening: semaphore closed graceful degradation
+    // ====================================================================
+
+    /// When a semaphore is closed (e.g. executor dropped), the hardened
+    /// match pattern must not panic — it proceeds without a permit.
+    #[tokio::test]
+    async fn test_semaphore_closed_proceeds_without_permit() {
+        let sem = Arc::new(Semaphore::new(1));
+        sem.close();
+
+        let permit = match sem.acquire().await {
+            Ok(p) => Some(p),
+            Err(_) => None,
+        };
+        assert!(permit.is_none(), "closed semaphore must yield None, not panic");
+    }
+
+    /// Normal open semaphore still yields a valid permit.
+    #[tokio::test]
+    async fn test_semaphore_open_returns_valid_permit() {
+        let sem = Arc::new(Semaphore::new(1));
+        let permit = match sem.acquire().await {
+            Ok(p) => Some(p),
+            Err(_) => None,
+        };
+        assert!(permit.is_some(), "open semaphore must yield a permit");
+    }
+
+    /// The real executor must complete steps even when its semaphore
+    /// has been closed — verifies the hardened pattern end-to-end.
+    #[tokio::test]
+    async fn test_executor_completes_chain_after_semaphore_closed() {
+        let executor = ChainExecutor::new();
+        executor.semaphore.close();
+
+        let steps = vec![ChainStep::new("resilient step")];
+        let context = ChainContext::new("https://example.com");
+        let result = executor
+            .execute(steps, context, |s, _ctx| async move {
+                ChainStepResult::executed(0, &s.instruction, true)
+            })
+            .await;
+
+        assert!(!result.step_results.is_empty(), "chain must produce results despite closed semaphore");
+        assert!(result.step_results[0].success, "step must succeed despite closed semaphore");
+    }
+
+    /// Multiple concurrent spawned tasks must all proceed when the
+    /// semaphore is closed — none should hang or panic.
+    #[tokio::test]
+    async fn test_concurrent_tasks_proceed_with_closed_semaphore() {
+        let sem = Arc::new(Semaphore::new(5));
+        sem.close();
+
+        let mut set = tokio::task::JoinSet::new();
+        for i in 0..10usize {
+            let sem = sem.clone();
+            set.spawn(async move {
+                let _permit = match sem.acquire().await {
+                    Ok(p) => Some(p),
+                    Err(_) => None,
+                };
+                i * 2 // actual work
+            });
+        }
+
+        let mut results = Vec::new();
+        while let Some(joined) = set.join_next().await {
+            results.push(joined.expect("task must not panic"));
+        }
+        results.sort();
+        assert_eq!(results, vec![0, 2, 4, 6, 8, 10, 12, 14, 16, 18]);
     }
 }
