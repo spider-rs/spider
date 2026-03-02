@@ -1134,8 +1134,8 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.45.28",
- "spider_utils 2.45.28",
+ "spider 2.45.29",
+ "spider_utils 2.45.29",
 ]
 
 [[package]]
@@ -7712,7 +7712,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.45.28"
+version = "2.45.29"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -7765,7 +7765,7 @@ dependencies = [
  "smallvec",
  "sonic-rs",
  "spider_agent",
- "spider_agent_types 2.45.28",
+ "spider_agent_types 2.45.29",
  "spider_fingerprint",
  "spider_firewall",
  "sqlx",
@@ -7790,7 +7790,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent"
-version = "2.45.28"
+version = "2.45.29"
 dependencies = [
  "aho-corasick",
  "async-openai 0.33.0",
@@ -7812,7 +7812,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spider_agent_html",
- "spider_agent_types 2.45.28",
+ "spider_agent_types 2.45.29",
  "spider_skills",
  "tempfile",
  "thirtyfour",
@@ -7823,13 +7823,13 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_html"
-version = "2.45.28"
+version = "2.45.29"
 dependencies = [
  "aho-corasick",
  "lol_html",
  "serde",
  "serde_json",
- "spider_agent_types 2.45.28",
+ "spider_agent_types 2.45.29",
 ]
 
 [[package]]
@@ -7846,7 +7846,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.45.28"
+version = "2.45.29"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -7895,7 +7895,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.45.28"
+version = "2.45.29"
 dependencies = [
  "clap",
  "env_logger",
@@ -7903,7 +7903,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.45.28",
+ "spider 2.45.29",
  "tikv-jemallocator",
  "tokio",
  "unicode-normalization",
@@ -7919,7 +7919,7 @@ dependencies = [
  "flexbuffers",
  "htr",
  "serde_json",
- "spider 2.45.28",
+ "spider 2.45.29",
  "spider_transformations",
  "spider_utils 2.45.25",
 ]
@@ -8045,7 +8045,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.45.28"
+version = "2.45.29"
 dependencies = [
  "hashbrown 0.16.1",
  "indexmap 2.13.0",
@@ -8061,11 +8061,11 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.45.28"
+version = "2.45.29"
 dependencies = [
  "env_logger",
  "lazy_static",
- "spider 2.45.28",
+ "spider 2.45.29",
  "warp",
 ]
 

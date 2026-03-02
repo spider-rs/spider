@@ -402,7 +402,7 @@ impl BrowserContext {
                     .key("a")
                     .modifiers(2) // Ctrl/Cmd
                     .build()
-                    .unwrap(),
+                    .map_err(|e| CdpError::ChromeMessage(format!("key event build: {e}")))?,
             )
             .await?;
         self.page
@@ -411,7 +411,7 @@ impl BrowserContext {
                     .r#type(DispatchKeyEventType::KeyUp)
                     .key("a")
                     .build()
-                    .unwrap(),
+                    .map_err(|e| CdpError::ChromeMessage(format!("key event build: {e}")))?,
             )
             .await?;
 
@@ -433,16 +433,22 @@ impl BrowserContext {
         &self,
         selector: &str,
     ) -> Result<Option<(f64, f64, f64, f64)>, CdpError> {
+        let escaped_selector = serde_json::to_string(selector).unwrap_or_else(|_| {
+            format!(
+                "\"{}\"",
+                selector.replace('\\', "\\\\").replace('"', "\\\"")
+            )
+        });
         let script = format!(
             r#"
             (function() {{
-                const el = document.querySelector('{}');
+                const el = document.querySelector({});
                 if (!el) return null;
                 const rect = el.getBoundingClientRect();
                 return [rect.x, rect.y, rect.width, rect.height];
             }})()
             "#,
-            selector.replace('\'', "\\'")
+            escaped_selector
         );
 
         let result: Option<Vec<f64>> = self

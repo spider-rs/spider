@@ -302,23 +302,19 @@ impl RemoteMultimodalEngine {
             .omit_background(cap.omit_background)
             .build();
 
-        let png = match tokio::time::timeout(
-            std::time::Duration::from_secs(15),
-            page.screenshot(params),
-        )
-        .await
-        {
-            Ok(Ok(data)) => data,
-            Ok(Err(e)) => {
-                return Err(EngineError::Remote(format!("screenshot failed: {e}")));
-            }
-            Err(_) => {
-                log::warn!("Screenshot timed out after 15s");
-                return Err(EngineError::Remote(
-                    "screenshot timed out after 15s".into(),
-                ));
-            }
-        };
+        let png =
+            match tokio::time::timeout(std::time::Duration::from_secs(15), page.screenshot(params))
+                .await
+            {
+                Ok(Ok(data)) => data,
+                Ok(Err(e)) => {
+                    return Err(EngineError::Remote(format!("screenshot failed: {e}")));
+                }
+                Err(_) => {
+                    log::warn!("Screenshot timed out after 15s");
+                    return Err(EngineError::Remote("screenshot timed out after 15s".into()));
+                }
+            };
 
         // Restore color after screenshot
         let _ = page
@@ -345,23 +341,21 @@ impl RemoteMultimodalEngine {
             .omit_background(true)
             .build();
 
-        let png = match tokio::time::timeout(
-            std::time::Duration::from_secs(15),
-            page.screenshot(params),
-        )
-        .await
-        {
-            Ok(Ok(data)) => data,
-            Ok(Err(e)) => {
-                return Err(EngineError::Remote(format!("screenshot failed: {e}")));
-            }
-            Err(_) => {
-                log::warn!("Final screenshot timed out after 15s");
-                return Err(EngineError::Remote(
-                    "final screenshot timed out after 15s".into(),
-                ));
-            }
-        };
+        let png =
+            match tokio::time::timeout(std::time::Duration::from_secs(15), page.screenshot(params))
+                .await
+            {
+                Ok(Ok(data)) => data,
+                Ok(Err(e)) => {
+                    return Err(EngineError::Remote(format!("screenshot failed: {e}")));
+                }
+                Err(_) => {
+                    log::warn!("Final screenshot timed out after 15s");
+                    return Err(EngineError::Remote(
+                        "final screenshot timed out after 15s".into(),
+                    ));
+                }
+            };
 
         Ok(general_purpose::STANDARD.encode(png))
     }
@@ -1229,6 +1223,7 @@ impl RemoteMultimodalEngine {
                                                         DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
                                                     };
                                                     let mut clicked_this_round = 0u32;
+                                                    let mut cdp_errors = 0u32;
                                                     for tc_id in to_click {
                                                         let id = tc_id.as_i64().unwrap_or(-1);
                                                         if let Some((x, y)) = box_map.get(&id) {
@@ -1237,7 +1232,7 @@ impl RemoteMultimodalEngine {
                                                                 .x(*x).y(*y)
                                                                 .button(MouseButton::None).buttons(0)
                                                                 .r#type(DispatchMouseEventType::MouseMoved).build() {
-                                                                let _ = page.send_command(cmd).await;
+                                                                if page.send_command(cmd).await.is_err() { cdp_errors += 1; }
                                                             }
                                                             tokio::time::sleep(
                                                                 std::time::Duration::from_millis(
@@ -1249,7 +1244,7 @@ impl RemoteMultimodalEngine {
                                                                 .x(*x).y(*y)
                                                                 .button(MouseButton::Left).buttons(1).click_count(1)
                                                                 .r#type(DispatchMouseEventType::MousePressed).build() {
-                                                                let _ = page.send_command(cmd).await;
+                                                                if page.send_command(cmd).await.is_err() { cdp_errors += 1; }
                                                             }
                                                             tokio::time::sleep(
                                                                 std::time::Duration::from_millis(
@@ -1261,7 +1256,7 @@ impl RemoteMultimodalEngine {
                                                                 .x(*x).y(*y)
                                                                 .button(MouseButton::Left).buttons(0).click_count(1)
                                                                 .r#type(DispatchMouseEventType::MouseReleased).build() {
-                                                                let _ = page.send_command(cmd).await;
+                                                                if page.send_command(cmd).await.is_err() { cdp_errors += 1; }
                                                             }
                                                             tokio::time::sleep(
                                                                 std::time::Duration::from_millis(
@@ -1271,6 +1266,9 @@ impl RemoteMultimodalEngine {
                                                             .await;
                                                             clicked_this_round += 1;
                                                         }
+                                                    }
+                                                    if cdp_errors > 0 {
+                                                        log::warn!("NEST: {cdp_errors} CDP command(s) failed this iteration");
                                                     }
                                                     total_clicked += clicked_this_round;
                                                     log::info!(
@@ -1378,6 +1376,7 @@ impl RemoteMultimodalEngine {
                                                     DispatchMouseEventParams,
                                                     DispatchMouseEventType, MouseButton,
                                                 };
+                                                let mut cdp_errors = 0u32;
                                                 // Move to start
                                                 let (sx, sy) = coords[0];
                                                 if let Ok(cmd) = DispatchMouseEventParams::builder()
@@ -1388,7 +1387,9 @@ impl RemoteMultimodalEngine {
                                                     .r#type(DispatchMouseEventType::MouseMoved)
                                                     .build()
                                                 {
-                                                    let _ = page.send_command(cmd).await;
+                                                    if page.send_command(cmd).await.is_err() {
+                                                        cdp_errors += 1;
+                                                    }
                                                 }
                                                 tokio::time::sleep(
                                                     std::time::Duration::from_millis(50),
@@ -1403,7 +1404,9 @@ impl RemoteMultimodalEngine {
                                                     .r#type(DispatchMouseEventType::MousePressed)
                                                     .build()
                                                 {
-                                                    let _ = page.send_command(cmd).await;
+                                                    if page.send_command(cmd).await.is_err() {
+                                                        cdp_errors += 1;
+                                                    }
                                                 }
                                                 // Drag through all points
                                                 for (x, y) in &coords[1..] {
@@ -1422,7 +1425,9 @@ impl RemoteMultimodalEngine {
                                                             )
                                                             .build()
                                                     {
-                                                        let _ = page.send_command(cmd).await;
+                                                        if page.send_command(cmd).await.is_err() {
+                                                            cdp_errors += 1;
+                                                        }
                                                     }
                                                 }
                                                 // Release at end
@@ -1439,7 +1444,12 @@ impl RemoteMultimodalEngine {
                                                     .r#type(DispatchMouseEventType::MouseReleased)
                                                     .build()
                                                 {
-                                                    let _ = page.send_command(cmd).await;
+                                                    if page.send_command(cmd).await.is_err() {
+                                                        cdp_errors += 1;
+                                                    }
+                                                }
+                                                if cdp_errors > 0 {
+                                                    log::warn!("CIRCLE: {cdp_errors} CDP command(s) failed during draw");
                                                 }
                                                 log::info!(
                                                     "CIRCLE: engine drew circle with {} points",
@@ -1551,6 +1561,7 @@ impl RemoteMultimodalEngine {
                                                     DispatchMouseEventParams,
                                                     DispatchMouseEventType, MouseButton,
                                                 };
+                                                let mut cdp_errors = 0u32;
                                                 // Click each cell center individually (click-to-select)
                                                 for (x, y) in &all_coords {
                                                     if let Ok(cmd) =
@@ -1564,7 +1575,9 @@ impl RemoteMultimodalEngine {
                                                             )
                                                             .build()
                                                     {
-                                                        let _ = page.send_command(cmd).await;
+                                                        if page.send_command(cmd).await.is_err() {
+                                                            cdp_errors += 1;
+                                                        }
                                                     }
                                                     tokio::time::sleep(
                                                         std::time::Duration::from_millis(20),
@@ -1574,7 +1587,7 @@ impl RemoteMultimodalEngine {
                                                         .x(*x).y(*y)
                                                         .button(MouseButton::Left).buttons(1).click_count(1)
                                                         .r#type(DispatchMouseEventType::MousePressed).build() {
-                                                        let _ = page.send_command(cmd).await;
+                                                        if page.send_command(cmd).await.is_err() { cdp_errors += 1; }
                                                     }
                                                     tokio::time::sleep(
                                                         std::time::Duration::from_millis(20),
@@ -1584,12 +1597,15 @@ impl RemoteMultimodalEngine {
                                                         .x(*x).y(*y)
                                                         .button(MouseButton::Left).buttons(0).click_count(1)
                                                         .r#type(DispatchMouseEventType::MouseReleased).build() {
-                                                        let _ = page.send_command(cmd).await;
+                                                        if page.send_command(cmd).await.is_err() { cdp_errors += 1; }
                                                     }
                                                     tokio::time::sleep(
                                                         std::time::Duration::from_millis(50),
                                                     )
                                                     .await;
+                                                }
+                                                if cdp_errors > 0 {
+                                                    log::warn!("WS: {cdp_errors} CDP command(s) failed during cell clicks");
                                                 }
                                             }
                                             if !dragged.is_empty() {
@@ -1991,7 +2007,7 @@ impl RemoteMultimodalEngine {
                     force_vision_next_round = true;
                 }
                 // Inject DOM inspection so the model gets real state data next round
-                let _ = page
+                if let Err(e) = page
                     .evaluate(
                         r#"document.title = 'AUTO_DOM_INSPECT:' + JSON.stringify({
                         level_text: (document.querySelector('h2,h3,.level-title,.challenge-title')?.textContent || '').trim().slice(0, 120),
@@ -2015,7 +2031,10 @@ impl RemoteMultimodalEngine {
                         }))
                     })"#,
                     )
-                    .await;
+                    .await
+                {
+                    log::warn!("AUTO_DOM_INSPECT failed: {e}");
+                }
                 // Reset loop streak after injecting explicit recovery context.
                 // This avoids burning rounds on repeated skip-only cycles.
                 recent_step_hashes.clear();
@@ -2086,10 +2105,10 @@ impl RemoteMultimodalEngine {
                 });
             }
 
-            // Post-step delay
+            // Post-step delay (capped at 30s to prevent misconfigured values from blocking)
             if effective_cfg.post_plan_wait_ms > 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(
-                    effective_cfg.post_plan_wait_ms,
+                    effective_cfg.post_plan_wait_ms.min(30_000),
                 ))
                 .await;
             }
@@ -2196,9 +2215,9 @@ impl RemoteMultimodalEngine {
                 Err(e) => {
                     last_err = Some(e);
                     if attempt + 1 < max_attempts {
-                        // Exponential backoff with capped power
+                        // Exponential backoff with capped power and max delay
                         let power = attempt.min(6);
-                        let delay = effective_cfg.retry.backoff_ms * (1 << power);
+                        let delay = (effective_cfg.retry.backoff_ms * (1 << power)).min(60_000);
                         tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
                     }
                 }
@@ -2709,7 +2728,9 @@ impl RemoteMultimodalEngine {
             .expression(js)
             .await_promise(true)
             .build()
-            .expect("valid evaluate params");
+            .map_err(|e| {
+                EngineError::Remote(format!("warm_chrome_ai: build params failed: {e}"))
+            })?;
 
         match tokio::time::timeout(std::time::Duration::from_secs(60), page.evaluate(params)).await
         {
@@ -2750,16 +2771,16 @@ impl RemoteMultimodalEngine {
     /// rather than reusing one that may be in a broken state (e.g. after navigation).
     async fn invalidate_chrome_ai_session(page: &Page) {
         use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
-        let _ = page
-            .evaluate(
-                EvaluateParams::builder()
-                    .expression(
-                        "try{if(window.__spiderSession){window.__spiderSession.destroy();}window.__spiderSession=null;window.__spiderSessionHash=0;}catch(e){}",
-                    )
-                    .build()
-                    .expect("valid params"),
+        if let Ok(params) = EvaluateParams::builder()
+            .expression(
+                "try{if(window.__spiderSession){window.__spiderSession.destroy();}window.__spiderSession=null;window.__spiderSessionHash=0;}catch(e){}",
             )
-            .await;
+            .build()
+        {
+            if let Err(e) = page.evaluate(params).await {
+                log::debug!("Chrome AI session invalidation failed: {e}");
+            }
+        }
     }
 
     /// Infer plan via Chrome AI with retry policy.
@@ -2816,7 +2837,7 @@ impl RemoteMultimodalEngine {
                     last_err = Some(e);
                     if attempt + 1 < max_attempts {
                         let power = attempt.min(6);
-                        let delay = effective_cfg.retry.backoff_ms * (1 << power);
+                        let delay = (effective_cfg.retry.backoff_ms * (1 << power)).min(60_000);
                         tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
                     }
                 }
@@ -2927,15 +2948,15 @@ impl RemoteMultimodalEngine {
         // instead of guessing CSS selectors — much more reliable for small models.
         let interactive_hint = {
             let probe_js = r#"(()=>{try{document.querySelectorAll('[data-spider-idx]').forEach(el=>el.removeAttribute('data-spider-idx'));const seen=new Set();const items=[];let idx=0;function add(el,skipEmptyLinks){if(idx>=15||seen.has(el))return;const r=el.getBoundingClientRect();if(r.width<1||r.height<1)return;if(el.closest('footer,nav,.footer,.nav,.site-footer,.site-header,header'))return;seen.add(el);const tag=el.tagName.toLowerCase();const ty=el.getAttribute('type')||'';const role=el.getAttribute('role')||'';const txt=(el.textContent||el.getAttribute('aria-label')||el.getAttribute('placeholder')||'').trim().replace(/\s+/g,' ').slice(0,40);if(tag==='a'){if(!txt||skipEmptyLinks)return;const h=el.getAttribute('href')||'';if(h&&!h.startsWith('#')&&!h.startsWith('javascript')&&new URL(h,location.href).pathname!==location.pathname)return;}el.setAttribute('data-spider-idx',String(idx));const desc=role||ty||(tag==='a'?'link':tag);items.push('['+idx+'] '+desc+(txt?' "'+txt.replace(/"/g,"'")+'"':''));idx++;}const hi=document.querySelectorAll('button,input,select,textarea,label,[role="button"],[role="checkbox"],[role="link"],[onclick]');for(const el of hi)add(el,false);const links=document.querySelectorAll('a');for(const el of links)add(el,true);const all=document.querySelectorAll('div,span,li');for(const el of all){if(idx>=15)break;if(seen.has(el))continue;try{if(getComputedStyle(el).cursor==='pointer'){add(el,false);}}catch(e){}}return items.join('\n');}catch(e){return'';}})();"#;
-            match page
-                .evaluate(
-                    EvaluateParams::builder()
-                        .expression(probe_js)
-                        .build()
-                        .expect("valid params"),
-                )
-                .await
-            {
+            let probe_params = match EvaluateParams::builder().expression(probe_js).build() {
+                Ok(p) => p,
+                Err(_) => {
+                    return Err(EngineError::Remote(
+                        "chrome_ai: failed to build probe params".to_string(),
+                    ));
+                }
+            };
+            match page.evaluate(probe_params).await {
                 Ok(eval) => eval
                     .value()
                     .and_then(|v| v.as_str().map(|s| s.to_string()))
@@ -3067,7 +3088,9 @@ return await s.prompt(msg);
             .expression(&js)
             .await_promise(true)
             .build()
-            .expect("valid evaluate params");
+            .map_err(|e| {
+                EngineError::Remote(format!("chrome_ai: build eval params failed: {e}"))
+            })?;
 
         let eval_result =
             tokio::time::timeout(std::time::Duration::from_secs(120), page.evaluate(params)).await;
@@ -3631,17 +3654,13 @@ return await s.prompt(msg);
         });
 
         // Preserve any extracted data
-        if let Some(extracted) = obj.get("extracted") {
-            result
-                .as_object_mut()
-                .unwrap()
-                .insert("extracted".to_string(), extracted.clone());
-        }
-        if let Some(mem_ops) = obj.get("memory_ops") {
-            result
-                .as_object_mut()
-                .unwrap()
-                .insert("memory_ops".to_string(), mem_ops.clone());
+        if let Some(obj_mut) = result.as_object_mut() {
+            if let Some(extracted) = obj.get("extracted") {
+                obj_mut.insert("extracted".to_string(), extracted.clone());
+            }
+            if let Some(mem_ops) = obj.get("memory_ops") {
+                obj_mut.insert("memory_ops".to_string(), mem_ops.clone());
+            }
         }
 
         result
@@ -3811,10 +3830,15 @@ return await s.prompt(msg);
                     .min(MAX_HOLD_MS);
                 let point = Point::new(x, y);
                 let _ = page.move_mouse_smooth(point).await;
-                let _ = page
+                match page
                     .click_and_hold(point, std::time::Duration::from_millis(hold_ms))
-                    .await;
-                ActionOutcome::ok("ClickHoldPoint")
+                    .await
+                {
+                    Ok(_) => ActionOutcome::ok("ClickHoldPoint"),
+                    Err(e) => {
+                        ActionOutcome::fail("ClickHoldPoint", format!("CDP hold failed: {e}"))
+                    }
+                }
             }
             "DoubleClick" => {
                 if let Some(selector) = value.as_str() {
@@ -3842,8 +3866,13 @@ return await s.prompt(msg);
                 let y = value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let point = Point::new(x, y);
                 let _ = page.move_mouse_smooth(point).await;
-                let _ = page.double_click(point).await;
-                ActionOutcome::ok("DoubleClickPoint")
+                match page.double_click(point).await {
+                    Ok(_) => ActionOutcome::ok("DoubleClickPoint"),
+                    Err(e) => ActionOutcome::fail(
+                        "DoubleClickPoint",
+                        format!("CDP double-click failed: {e}"),
+                    ),
+                }
             }
             "RightClick" => {
                 if let Some(selector) = value.as_str() {
@@ -3871,8 +3900,13 @@ return await s.prompt(msg);
                 let y = value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let point = Point::new(x, y);
                 let _ = page.move_mouse_smooth(point).await;
-                let _ = page.right_click(point).await;
-                ActionOutcome::ok("RightClickPoint")
+                match page.right_click(point).await {
+                    Ok(_) => ActionOutcome::ok("RightClickPoint"),
+                    Err(e) => ActionOutcome::fail(
+                        "RightClickPoint",
+                        format!("CDP right-click failed: {e}"),
+                    ),
+                }
             }
             "ClickAllClickable" => {
                 if let Ok(elements) = page
@@ -3882,8 +3916,10 @@ return await s.prompt(msg);
                     for elem in elements {
                         let _ = elem.click().await;
                     }
+                    ActionOutcome::ok("ClickAllClickable")
+                } else {
+                    ActionOutcome::fail("ClickAllClickable", "find_elements failed")
                 }
-                ActionOutcome::ok("ClickAllClickable")
             }
 
             // === Drag Actions ===
@@ -3933,18 +3969,12 @@ return await s.prompt(msg);
                             // Clear existing value before typing
                             if let Err(e) = eval_with_timeout(
                                 page,
-                                format!(
-                                    "document.querySelector({}).value = ''",
-                                    js_escape(sel)
-                                ),
+                                format!("document.querySelector({}).value = ''", js_escape(sel)),
                                 EVAL_TIMEOUT_SECS,
                             )
                             .await
                             {
-                                return ActionOutcome::fail(
-                                    "Fill",
-                                    format!("clear failed: {}", e),
-                                );
+                                return ActionOutcome::fail("Fill", format!("clear failed: {}", e));
                             }
                             if let Err(e) = elem.type_str(txt).await {
                                 return ActionOutcome::fail(
@@ -4217,11 +4247,8 @@ return await s.prompt(msg);
             // === Navigation Actions ===
             "Navigate" => {
                 if let Some(url) = value.as_str() {
-                    match tokio::time::timeout(
-                        std::time::Duration::from_secs(30),
-                        page.goto(url),
-                    )
-                    .await
+                    match tokio::time::timeout(std::time::Duration::from_secs(30), page.goto(url))
+                        .await
                     {
                         Ok(Ok(_)) => return ActionOutcome::ok("Navigate"),
                         Ok(Err(_)) => {
@@ -5351,10 +5378,13 @@ pub async fn run_spawn_pages_with_options(
                     while let Some(event) = listener.next().await {
                         let bytes = event.encoded_data_length as u64;
                         total_bytes.fetch_add(bytes, Ordering::Relaxed);
-                        response_map
-                            .entry(event.request_id.inner().to_string())
-                            .and_modify(|v| *v += bytes)
-                            .or_insert(bytes);
+                        // Cap map growth to prevent unbounded memory usage
+                        if response_map.len() < 10_000 {
+                            response_map
+                                .entry(event.request_id.inner().to_string())
+                                .and_modify(|v| *v += bytes)
+                                .or_insert(bytes);
+                        }
                     }
                 }))
             } else {
@@ -6172,7 +6202,10 @@ mod tests {
         );
         // Verify we can round-trip through serde_json (it's valid JSON)
         let roundtrip: String = serde_json::from_str(&escaped).unwrap();
-        assert_eq!(roundtrip, malicious, "round-trip through JSON must be lossless");
+        assert_eq!(
+            roundtrip, malicious,
+            "round-trip through JSON must be lossless"
+        );
     }
 
     #[test]
@@ -6272,16 +6305,18 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_secs(60)),
         )
         .await;
-        assert!(result.is_err(), "timeout must fire for a hanging navigation");
+        assert!(
+            result.is_err(),
+            "timeout must fire for a hanging navigation"
+        );
     }
 
     /// Verifies the Navigate timeout passes through on fast completion.
     #[tokio::test]
     async fn test_navigate_timeout_passes_on_fast_future() {
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            async { Ok::<_, String>(()) },
-        )
+        let result = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            Ok::<_, String>(())
+        })
         .await;
         assert!(result.is_ok(), "fast completion must not timeout");
         assert!(result.unwrap().is_ok());
@@ -6303,10 +6338,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_screenshot_timeout_passes_on_success() {
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(15),
-            async { Ok::<Vec<u8>, String>(vec![0x89, 0x50, 0x4E, 0x47]) },
-        )
+        let result = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            Ok::<Vec<u8>, String>(vec![0x89, 0x50, 0x4E, 0x47])
+        })
         .await;
         assert!(result.is_ok());
         let png = result.unwrap().unwrap();

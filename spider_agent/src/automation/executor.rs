@@ -888,7 +888,10 @@ mod tests {
             Ok(p) => Some(p),
             Err(_) => None,
         };
-        assert!(permit.is_none(), "closed semaphore must yield None, not panic");
+        assert!(
+            permit.is_none(),
+            "closed semaphore must yield None, not panic"
+        );
     }
 
     /// Normal open semaphore still yields a valid permit.
@@ -917,8 +920,14 @@ mod tests {
             })
             .await;
 
-        assert!(!result.step_results.is_empty(), "chain must produce results despite closed semaphore");
-        assert!(result.step_results[0].success, "step must succeed despite closed semaphore");
+        assert!(
+            !result.step_results.is_empty(),
+            "chain must produce results despite closed semaphore"
+        );
+        assert!(
+            result.step_results[0].success,
+            "step must succeed despite closed semaphore"
+        );
     }
 
     /// Multiple concurrent spawned tasks must all proceed when the

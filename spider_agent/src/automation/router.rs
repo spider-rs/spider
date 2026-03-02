@@ -622,8 +622,16 @@ pub fn auto_policy(available_models: &[&str]) -> ModelPolicy {
     // Sort by arena score descending
     models.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
+    // Safety: models is guaranteed non-empty here (early returns above handle 0/1/2),
+    // but use defensive indexing to avoid panics if logic changes.
+    if models.is_empty() {
+        return ModelPolicy::default();
+    }
     let large = models[0].0.to_string();
-    let small = models.last().unwrap().0.to_string();
+    let small = models
+        .last()
+        .map(|m| m.0.to_string())
+        .unwrap_or_else(|| large.clone());
     let medium = if models.len() >= 3 {
         models[models.len() / 2].0.to_string()
     } else {

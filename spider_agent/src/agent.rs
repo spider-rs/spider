@@ -946,22 +946,34 @@ impl Agent {
     }
 }
 
-/// Remove specified HTML tags from content.
+/// Remove specified HTML tags (and their content) from HTML.
+///
+/// Single-pass per tag — avoids O(n²) from repeated `find()` + concatenation.
 fn remove_tags(html: &str, tags: &[&str]) -> String {
     let mut result = html.to_string();
     for tag in tags {
-        // Remove opening and closing tags with content
-        let open_tag = format!("<{}", tag);
-        let close_tag = format!("</{}>", tag);
-
-        while let Some(start) = result.to_lowercase().find(&open_tag) {
-            if let Some(end) = result[start..].to_lowercase().find(&close_tag) {
-                let end = start + end + close_tag.len();
-                result = format!("{}{}", &result[..start], &result[end..]);
+        let open = format!("<{}", tag);
+        let close = format!("</{}>", tag);
+        let mut out = String::with_capacity(result.len());
+        let lower = result.to_lowercase();
+        let mut pos = 0;
+        while pos < result.len() {
+            if let Some(rel_start) = lower[pos..].find(&open) {
+                let start = pos + rel_start;
+                out.push_str(&result[pos..start]);
+                if let Some(rel_end) = lower[start..].find(&close) {
+                    pos = start + rel_end + close.len();
+                } else {
+                    // No closing tag — keep remaining text as-is
+                    out.push_str(&result[start..]);
+                    pos = result.len();
+                }
             } else {
+                out.push_str(&result[pos..]);
                 break;
             }
         }
+        result = out;
     }
     result
 }
@@ -1249,5 +1261,4 @@ mod tests {
         assert!(tools.contains(&"spider_cloud_ai_browser".to_string()));
         assert!(tools.contains(&"spider_cloud_ai_links".to_string()));
     }
-
 }
