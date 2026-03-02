@@ -100,7 +100,7 @@ async fn main() {
 
 ## Benchmarks
 
-Crawling 185 pages on `rsseau.fr` ([source](./benches/BENCHMARKS.md), 10 samples averaged):
+Crawling 185 pages ([source](./benches/BENCHMARKS.md), 10 samples averaged):
 
 **Apple M1 Max** (10-core, 64 GB RAM):
 

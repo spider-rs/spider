@@ -68,6 +68,72 @@ pub(crate) struct AutomationPlan {
     pub reasoning: Option<String>,
 }
 
+/// Outcome of a single action execution, providing feedback for the LLM.
+#[cfg(feature = "chrome")]
+#[derive(Debug, Clone)]
+pub(crate) struct ActionOutcome {
+    /// The action name (e.g. "Click", "Fill", "Evaluate").
+    pub action: String,
+    /// Whether the action succeeded.
+    pub success: bool,
+    /// Human-readable detail when the action failed (e.g. "selector not found").
+    pub error: Option<String>,
+}
+
+#[cfg(feature = "chrome")]
+impl ActionOutcome {
+    /// Create a successful outcome.
+    pub fn ok(action: impl Into<String>) -> Self {
+        Self {
+            action: action.into(),
+            success: true,
+            error: None,
+        }
+    }
+
+    /// Create a failed outcome with a reason.
+    pub fn fail(action: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            action: action.into(),
+            success: false,
+            error: Some(reason.into()),
+        }
+    }
+
+    /// Format as a compact single-line summary for prompt injection.
+    pub fn to_feedback_line(&self) -> String {
+        if self.success {
+            format!("- {} → ok", self.action)
+        } else {
+            format!(
+                "- {} → FAILED: {}",
+                self.action,
+                self.error.as_deref().unwrap_or("unknown error")
+            )
+        }
+    }
+}
+
+/// Format a slice of action outcomes into a prompt section.
+/// Returns `None` if there are no outcomes or all succeeded (to avoid noise).
+#[cfg(feature = "chrome")]
+pub(crate) fn format_action_feedback(outcomes: &[ActionOutcome]) -> Option<String> {
+    if outcomes.is_empty() {
+        return None;
+    }
+    let has_failure = outcomes.iter().any(|o| !o.success);
+    if !has_failure {
+        return None;
+    }
+    let mut out = String::from("PREVIOUS ACTION RESULTS:\n");
+    for o in outcomes {
+        out.push_str(&o.to_feedback_line());
+        out.push('\n');
+    }
+    out.push('\n');
+    Some(out)
+}
+
 #[cfg(feature = "chrome")]
 impl RemoteMultimodalEngine {
     // -----------------------------------------------------------------
@@ -636,6 +702,8 @@ impl RemoteMultimodalEngine {
         let mut loop_blocklist: Vec<String> = Vec::new();
         // Dual-model routing: set by `request_vision` memory_op to force vision next round
         let mut force_vision_next_round: bool = false;
+        // Action feedback from previous round (injected when failures occurred)
+        let mut last_action_feedback: Option<String> = None;
 
         // Recall learned strategies from long-term experience memory.
         // Uses spawn_blocking to contain !Send ffmpeg temporaries from memvid-rs.
@@ -1449,6 +1517,22 @@ impl RemoteMultimodalEngine {
                 screenshot
             };
 
+            // Prepend action feedback from previous round to user message extra
+            // (only when at least one action failed, to avoid noise).
+            let user_extra_with_feedback: Option<String> =
+                match (&last_action_feedback, &effective_user_message_extra) {
+                    (Some(feedback), Some(extra)) => {
+                        let mut combined = feedback.clone();
+                        combined.push_str(extra);
+                        Some(combined)
+                    }
+                    (Some(feedback), None) => Some(feedback.clone()),
+                    (None, Some(extra)) => Some(extra.clone()),
+                    (None, None) => None,
+                };
+            // Clear feedback after injecting it (one-shot per round)
+            last_action_feedback = None;
+
             // Ask model (with retry policy) - pass memory as immutable ref for context
             let plan = if use_chrome_ai {
                 self.infer_plan_chrome_ai_with_retry(
@@ -1467,9 +1551,9 @@ impl RemoteMultimodalEngine {
                     memory.as_deref(),
                     effective_system_prompt.as_deref(),
                     effective_system_prompt_extra.as_deref(),
-                    effective_user_message_extra.as_deref(),
+                    user_extra_with_feedback.as_deref(),
                 )
-                .await?
+                .await
             } else {
                 self.infer_plan_with_retry(
                     &effective_cfg,
@@ -1487,9 +1571,44 @@ impl RemoteMultimodalEngine {
                     use_vision,
                     effective_system_prompt.as_deref(),
                     effective_system_prompt_extra.as_deref(),
-                    effective_user_message_extra.as_deref(),
+                    user_extra_with_feedback.as_deref(),
                 )
-                .await?
+                .await
+            };
+
+            // Improvement #2: Preserve partial results on fatal LLM errors.
+            // Instead of propagating the error with `?`, catch it and return
+            // accumulated data from prior rounds.
+            let plan = match plan {
+                Ok(p) => p,
+                Err(e) => {
+                    log::error!(
+                        "LLM inference failed after retries on round {}: {}",
+                        round_idx + 1,
+                        e
+                    );
+                    let final_screenshot = if effective_cfg.screenshot {
+                        self.take_final_screenshot(page).await.ok()
+                    } else {
+                        None
+                    };
+                    return Ok(AutomationResult {
+                        label: last_label,
+                        steps_executed: total_steps_executed,
+                        success: false,
+                        error: Some(format!(
+                            "LLM inference failed on round {}: {}",
+                            round_idx + 1,
+                            e
+                        )),
+                        usage: total_usage,
+                        extracted: last_extracted,
+                        screenshot: final_screenshot,
+                        spawn_pages: all_spawn_pages,
+                        relevant: last_relevant,
+                        reasoning: last_reasoning,
+                    });
+                }
             };
 
             // Accumulate token usage from this round
@@ -1658,7 +1777,7 @@ impl RemoteMultimodalEngine {
                     // Clear stale RECOVERY title so it doesn't confuse next rounds
                     serde_json::json!({ "Evaluate": "try{document.title=document.title.replace(/^RECOVERY:.*/,'')}catch(e){}" }),
                 ];
-                let (steps_executed, spawn_pages) = self
+                let (steps_executed, spawn_pages, _recovery_outcomes) = self
                     .execute_steps(page, &recovery_steps, &effective_cfg)
                     .await?;
                 total_steps_executed += steps_executed;
@@ -1730,11 +1849,12 @@ impl RemoteMultimodalEngine {
                     ));
                 }
             } else if !plan.steps.is_empty() {
-                let (steps_executed, spawn_pages) = self
+                let (steps_executed, spawn_pages, outcomes) = self
                     .execute_steps(page, &plan.steps, &effective_cfg)
                     .await?;
                 total_steps_executed += steps_executed;
                 all_spawn_pages.extend(spawn_pages);
+                last_action_feedback = format_action_feedback(&outcomes);
             }
 
             // Done condition (model-driven)
@@ -3351,16 +3471,18 @@ return await s.prompt(msg);
     /// Execute automation steps on the page.
     ///
     /// Handles WebAutomation enum-style actions like `{ "Click": "selector" }`.
-    /// Returns (steps_executed, spawn_pages) where spawn_pages contains URLs
-    /// from `OpenPage` actions that should be opened in new browser tabs.
+    /// Returns (steps_executed, spawn_pages, action_outcomes) where spawn_pages
+    /// contains URLs from `OpenPage` actions and action_outcomes provides
+    /// per-action feedback for the LLM.
     async fn execute_steps(
         &self,
         page: &Page,
         steps: &[serde_json::Value],
         _cfg: &RemoteMultimodalConfig,
-    ) -> EngineResult<(usize, Vec<String>)> {
+    ) -> EngineResult<(usize, Vec<String>, Vec<ActionOutcome>)> {
         let mut executed = 0;
         let mut spawn_pages = Vec::new();
+        let mut outcomes = Vec::new();
 
         for step in steps {
             log::debug!("Executing step: {:?}", step);
@@ -3374,6 +3496,7 @@ return await s.prompt(msg);
                         if let Some(url) = value.as_str() {
                             spawn_pages.push(url.to_string());
                             executed += 1;
+                            outcomes.push(ActionOutcome::ok("OpenPage"));
                         } else if let Some(urls) = value.as_array() {
                             // Support array of URLs: { "OpenPage": ["url1", "url2"] }
                             for url_val in urls {
@@ -3382,48 +3505,69 @@ return await s.prompt(msg);
                                 }
                             }
                             executed += 1;
+                            outcomes.push(ActionOutcome::ok("OpenPage"));
                         }
                         continue;
                     }
 
-                    let success = self.execute_single_action(page, action, value).await;
-                    if success {
+                    let outcome = self.execute_single_action(page, action, value).await;
+                    if outcome.success {
                         executed += 1;
                     }
+                    outcomes.push(outcome);
                 }
             }
         }
 
-        Ok((executed, spawn_pages))
+        Ok((executed, spawn_pages, outcomes))
     }
 
-    /// Execute a single WebAutomation action.
+    /// Execute a single WebAutomation action, returning a structured outcome.
     async fn execute_single_action(
         &self,
         page: &Page,
         action: &str,
         value: &serde_json::Value,
-    ) -> bool {
+    ) -> ActionOutcome {
         match action {
             // === Click Actions ===
             "Click" => {
                 if let Some(selector) = value.as_str() {
-                    if let Ok(elem) = page.find_element(selector).await {
-                        return elem.click().await.is_ok();
+                    match page.find_element(selector).await {
+                        Ok(elem) => {
+                            if elem.click().await.is_ok() {
+                                return ActionOutcome::ok("Click");
+                            }
+                            return ActionOutcome::fail("Click", "click event failed");
+                        }
+                        Err(_) => {
+                            return ActionOutcome::fail(
+                                "Click",
+                                format!("selector not found: {}", truncate_utf8_tail(selector, 80)),
+                            );
+                        }
                     }
                 }
-                false
+                ActionOutcome::fail("Click", "missing or invalid selector")
             }
             "ClickAll" => {
                 if let Some(selector) = value.as_str() {
-                    if let Ok(elements) = page.find_elements(selector).await {
-                        for elem in elements {
-                            let _ = elem.click().await;
+                    match page.find_elements(selector).await {
+                        Ok(elements) => {
+                            for elem in elements {
+                                let _ = elem.click().await;
+                            }
+                            return ActionOutcome::ok("ClickAll");
                         }
-                        return true;
+                        Err(_) => {
+                            return ActionOutcome::fail(
+                                "ClickAll",
+                                format!("selector not found: {}", truncate_utf8_tail(selector, 80)),
+                            );
+                        }
                     }
                 }
-                false
+                ActionOutcome::fail("ClickAll", "missing or invalid selector")
             }
             "ClickPoint" => {
                 let x = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -3431,8 +3575,12 @@ return await s.prompt(msg);
                 // Move mouse first to set hover target, then click
                 let point = Point::new(x, y);
                 let _ = page.move_mouse_smooth(point).await;
-                let _ = page.click(point).await;
-                true
+                match page.click(point).await {
+                    Ok(_) => ActionOutcome::ok("ClickPoint"),
+                    Err(_) => {
+                        ActionOutcome::fail("ClickPoint", format!("CDP click failed at ({x}, {y})"))
+                    }
+                }
             }
             "ClickHold" => {
                 let selector = value.get("selector").and_then(|v| v.as_str());
@@ -3448,12 +3596,19 @@ return await s.prompt(msg);
                                         std::time::Duration::from_millis(hold_ms),
                                     )
                                     .await;
-                                return true;
+                                return ActionOutcome::ok("ClickHold");
                             }
                         }
                     }
+                    return ActionOutcome::fail(
+                        "ClickHold",
+                        format!(
+                            "selector not found or not clickable: {}",
+                            truncate_utf8_tail(sel, 80)
+                        ),
+                    );
                 }
-                false
+                ActionOutcome::fail("ClickHold", "missing selector")
             }
             "ClickHoldPoint" => {
                 let x = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -3464,7 +3619,7 @@ return await s.prompt(msg);
                 let _ = page
                     .click_and_hold(point, std::time::Duration::from_millis(hold_ms))
                     .await;
-                true
+                ActionOutcome::ok("ClickHoldPoint")
             }
             "DoubleClick" => {
                 if let Some(selector) = value.as_str() {
@@ -3473,12 +3628,19 @@ return await s.prompt(msg);
                             if let Ok(point) = sv.clickable_point().await {
                                 let _ = page.move_mouse_smooth(point).await;
                                 let _ = page.double_click(point).await;
-                                return true;
+                                return ActionOutcome::ok("DoubleClick");
                             }
                         }
                     }
+                    return ActionOutcome::fail(
+                        "DoubleClick",
+                        format!(
+                            "selector not found or not clickable: {}",
+                            truncate_utf8_tail(selector, 80)
+                        ),
+                    );
                 }
-                false
+                ActionOutcome::fail("DoubleClick", "missing selector")
             }
             "DoubleClickPoint" => {
                 let x = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -3486,7 +3648,7 @@ return await s.prompt(msg);
                 let point = Point::new(x, y);
                 let _ = page.move_mouse_smooth(point).await;
                 let _ = page.double_click(point).await;
-                true
+                ActionOutcome::ok("DoubleClickPoint")
             }
             "RightClick" => {
                 if let Some(selector) = value.as_str() {
@@ -3495,12 +3657,19 @@ return await s.prompt(msg);
                             if let Ok(point) = sv.clickable_point().await {
                                 let _ = page.move_mouse_smooth(point).await;
                                 let _ = page.right_click(point).await;
-                                return true;
+                                return ActionOutcome::ok("RightClick");
                             }
                         }
                     }
+                    return ActionOutcome::fail(
+                        "RightClick",
+                        format!(
+                            "selector not found or not clickable: {}",
+                            truncate_utf8_tail(selector, 80)
+                        ),
+                    );
                 }
-                false
+                ActionOutcome::fail("RightClick", "missing selector")
             }
             "RightClickPoint" => {
                 let x = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -3508,7 +3677,7 @@ return await s.prompt(msg);
                 let point = Point::new(x, y);
                 let _ = page.move_mouse_smooth(point).await;
                 let _ = page.right_click(point).await;
-                true
+                ActionOutcome::ok("RightClickPoint")
             }
             "ClickAllClickable" => {
                 if let Ok(elements) = page
@@ -3519,7 +3688,7 @@ return await s.prompt(msg);
                         let _ = elem.click().await;
                     }
                 }
-                true
+                ActionOutcome::ok("ClickAllClickable")
             }
 
             // === Drag Actions ===
@@ -3536,15 +3705,16 @@ return await s.prompt(msg);
                                             let _ = page
                                                 .click_and_drag_smooth(from_point, to_point)
                                                 .await;
-                                            return true;
+                                            return ActionOutcome::ok("ClickDrag");
                                         }
                                     }
                                 }
                             }
                         }
                     }
+                    return ActionOutcome::fail("ClickDrag", "one or both selectors not found");
                 }
-                false
+                ActionOutcome::fail("ClickDrag", "missing from/to selectors")
             }
             "ClickDragPoint" => {
                 let from_x = value.get("from_x").and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -3554,7 +3724,7 @@ return await s.prompt(msg);
                 let _ = page
                     .click_and_drag_smooth(Point::new(from_x, from_y), Point::new(to_x, to_y))
                     .await;
-                true
+                ActionOutcome::ok("ClickDragPoint")
             }
 
             // === Input Actions ===
@@ -3562,20 +3732,28 @@ return await s.prompt(msg);
                 let selector = value.get("selector").and_then(|v| v.as_str());
                 let text = value.get("value").and_then(|v| v.as_str());
                 if let (Some(sel), Some(txt)) = (selector, text) {
-                    if let Ok(elem) = page.find_element(sel).await {
-                        let _ = elem.click().await;
-                        // Clear existing value before typing
-                        let _ = page
-                            .evaluate(format!(
-                                "document.querySelector('{}').value = ''",
-                                sel.replace('\'', "\\'")
-                            ))
-                            .await;
-                        let _ = elem.type_str(txt).await;
-                        return true;
+                    match page.find_element(sel).await {
+                        Ok(elem) => {
+                            let _ = elem.click().await;
+                            // Clear existing value before typing
+                            let _ = page
+                                .evaluate(format!(
+                                    "document.querySelector('{}').value = ''",
+                                    sel.replace('\'', "\\'")
+                                ))
+                                .await;
+                            let _ = elem.type_str(txt).await;
+                            return ActionOutcome::ok("Fill");
+                        }
+                        Err(_) => {
+                            return ActionOutcome::fail(
+                                "Fill",
+                                format!("selector not found: {}", truncate_utf8_tail(sel, 80)),
+                            );
+                        }
                     }
                 }
-                false
+                ActionOutcome::fail("Fill", "missing selector or value")
             }
             "Type" => {
                 let text = value.get("value").and_then(|v| v.as_str());
@@ -3587,18 +3765,18 @@ return await s.prompt(msg);
                             txt.replace('\'', "\\'")
                         ))
                         .await;
-                    return true;
+                    return ActionOutcome::ok("Type");
                 }
-                false
+                ActionOutcome::fail("Type", "missing value")
             }
             "Clear" => {
                 if let Some(selector) = value.as_str() {
                     let _ = page
                         .evaluate(format!("document.querySelector('{}').value = ''", selector))
                         .await;
-                    return true;
+                    return ActionOutcome::ok("Clear");
                 }
-                false
+                ActionOutcome::fail("Clear", "missing selector")
             }
             "Press" => {
                 if let Some(key) = value.as_str() {
@@ -3607,9 +3785,9 @@ return await s.prompt(msg);
                         document.activeElement.dispatchEvent(new KeyboardEvent('keypress', {{key: '{}', bubbles: true}}));
                         document.activeElement.dispatchEvent(new KeyboardEvent('keyup', {{key: '{}', bubbles: true}}));
                     "#, key, key, key)).await;
-                    return true;
+                    return ActionOutcome::ok("Press");
                 }
-                false
+                ActionOutcome::fail("Press", "missing key")
             }
             "KeyDown" => {
                 if let Some(key) = value.as_str() {
@@ -3617,9 +3795,9 @@ return await s.prompt(msg);
                         "document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {{key: '{}', bubbles: true}}))",
                         key
                     )).await;
-                    return true;
+                    return ActionOutcome::ok("KeyDown");
                 }
-                false
+                ActionOutcome::fail("KeyDown", "missing key")
             }
             "KeyUp" => {
                 if let Some(key) = value.as_str() {
@@ -3627,9 +3805,9 @@ return await s.prompt(msg);
                         "document.activeElement.dispatchEvent(new KeyboardEvent('keyup', {{key: '{}', bubbles: true}}))",
                         key
                     )).await;
-                    return true;
+                    return ActionOutcome::ok("KeyUp");
                 }
-                false
+                ActionOutcome::fail("KeyUp", "missing key")
             }
 
             // === Scroll Actions ===
@@ -3638,14 +3816,14 @@ return await s.prompt(msg);
                 let _ = page
                     .evaluate(format!("window.scrollBy({}, 0)", pixels))
                     .await;
-                true
+                ActionOutcome::ok("ScrollX")
             }
             "ScrollY" => {
                 let pixels = value.as_i64().unwrap_or(300);
                 let _ = page
                     .evaluate(format!("window.scrollBy(0, {})", pixels))
                     .await;
-                true
+                ActionOutcome::ok("ScrollY")
             }
             "ScrollTo" => {
                 if let Some(selector) = value.get("selector").and_then(|v| v.as_str()) {
@@ -3653,9 +3831,9 @@ return await s.prompt(msg);
                         "document.querySelector('{}')?.scrollIntoView({{behavior: 'smooth', block: 'center'}})",
                         selector
                     )).await;
-                    return true;
+                    return ActionOutcome::ok("ScrollTo");
                 }
-                false
+                ActionOutcome::fail("ScrollTo", "missing selector")
             }
             "ScrollToPoint" => {
                 let x = value.get("x").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -3663,7 +3841,7 @@ return await s.prompt(msg);
                 let _ = page
                     .evaluate(format!("window.scrollTo({}, {})", x, y))
                     .await;
-                true
+                ActionOutcome::ok("ScrollToPoint")
             }
             "InfiniteScroll" => {
                 let max_scrolls = value.as_u64().unwrap_or(5);
@@ -3673,25 +3851,32 @@ return await s.prompt(msg);
                         .await;
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
-                true
+                ActionOutcome::ok("InfiniteScroll")
             }
 
             // === Wait Actions ===
             "Wait" => {
                 let ms = value.as_u64().unwrap_or(1000);
                 tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
-                true
+                ActionOutcome::ok("Wait")
             }
             "WaitFor" => {
                 if let Some(selector) = value.as_str() {
                     for _ in 0..50 {
                         if page.find_element(selector).await.is_ok() {
-                            return true;
+                            return ActionOutcome::ok("WaitFor");
                         }
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     }
+                    return ActionOutcome::fail(
+                        "WaitFor",
+                        format!(
+                            "timed out waiting for: {}",
+                            truncate_utf8_tail(selector, 80)
+                        ),
+                    );
                 }
-                false
+                ActionOutcome::fail("WaitFor", "missing selector")
             }
             "WaitForWithTimeout" => {
                 let selector = value.get("selector").and_then(|v| v.as_str());
@@ -3703,28 +3888,49 @@ return await s.prompt(msg);
                     let iterations = timeout / 100;
                     for _ in 0..iterations {
                         if page.find_element(sel).await.is_ok() {
-                            return true;
+                            return ActionOutcome::ok("WaitForWithTimeout");
                         }
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     }
+                    return ActionOutcome::fail(
+                        "WaitForWithTimeout",
+                        format!(
+                            "timed out after {}ms: {}",
+                            timeout,
+                            truncate_utf8_tail(sel, 80)
+                        ),
+                    );
                 }
-                false
+                ActionOutcome::fail("WaitForWithTimeout", "missing selector")
             }
             "WaitForAndClick" => {
                 if let Some(selector) = value.as_str() {
                     for _ in 0..50 {
                         if let Ok(elem) = page.find_element(selector).await {
-                            return elem.click().await.is_ok();
+                            if elem.click().await.is_ok() {
+                                return ActionOutcome::ok("WaitForAndClick");
+                            }
+                            return ActionOutcome::fail(
+                                "WaitForAndClick",
+                                "element found but click failed",
+                            );
                         }
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     }
+                    return ActionOutcome::fail(
+                        "WaitForAndClick",
+                        format!(
+                            "timed out waiting for: {}",
+                            truncate_utf8_tail(selector, 80)
+                        ),
+                    );
                 }
-                false
+                ActionOutcome::fail("WaitForAndClick", "missing selector")
             }
             "WaitForNavigation" => {
                 // Wait a bit for navigation to complete
                 tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-                true
+                ActionOutcome::ok("WaitForNavigation")
             }
             "WaitForDom" => {
                 let selector = value.get("selector").and_then(|v| v.as_str());
@@ -3734,29 +3940,45 @@ return await s.prompt(msg);
                     .unwrap_or(5000);
                 tokio::time::sleep(std::time::Duration::from_millis(timeout.min(5000))).await;
                 if let Some(sel) = selector {
-                    return page.find_element(sel).await.is_ok();
+                    if page.find_element(sel).await.is_ok() {
+                        return ActionOutcome::ok("WaitForDom");
+                    }
+                    return ActionOutcome::fail(
+                        "WaitForDom",
+                        format!(
+                            "selector not found after {}ms: {}",
+                            timeout.min(5000),
+                            truncate_utf8_tail(sel, 80)
+                        ),
+                    );
                 }
-                true
+                ActionOutcome::ok("WaitForDom")
             }
 
             // === Navigation Actions ===
             "Navigate" => {
                 if let Some(url) = value.as_str() {
-                    return page.goto(url).await.is_ok();
+                    if page.goto(url).await.is_ok() {
+                        return ActionOutcome::ok("Navigate");
+                    }
+                    return ActionOutcome::fail(
+                        "Navigate",
+                        format!("navigation failed: {}", truncate_utf8_tail(url, 80)),
+                    );
                 }
-                false
+                ActionOutcome::fail("Navigate", "missing URL")
             }
             "GoBack" => {
                 let _ = page.evaluate("window.history.back()").await;
-                true
+                ActionOutcome::ok("GoBack")
             }
             "GoForward" => {
                 let _ = page.evaluate("window.history.forward()").await;
-                true
+                ActionOutcome::ok("GoForward")
             }
             "Reload" => {
                 let _ = page.evaluate("window.location.reload()").await;
-                true
+                ActionOutcome::ok("Reload")
             }
 
             // === Hover Actions ===
@@ -3766,15 +3988,15 @@ return await s.prompt(msg);
                         "document.querySelector('{}')?.dispatchEvent(new MouseEvent('mouseover', {{bubbles: true}}))",
                         selector
                     )).await;
-                    return true;
+                    return ActionOutcome::ok("Hover");
                 }
-                false
+                ActionOutcome::fail("Hover", "missing selector")
             }
             "HoverPoint" => {
                 let x = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let y = value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let _ = page.move_mouse_smooth(Point::new(x, y)).await;
-                true
+                ActionOutcome::ok("HoverPoint")
             }
 
             // === Select/Focus Actions ===
@@ -3786,42 +4008,52 @@ return await s.prompt(msg);
                         "document.querySelector('{}').value = '{}'; document.querySelector('{}').dispatchEvent(new Event('change', {{bubbles: true}}))",
                         sel, val, sel
                     )).await;
-                    return true;
+                    return ActionOutcome::ok("Select");
                 }
-                false
+                ActionOutcome::fail("Select", "missing selector or value")
             }
             "Focus" => {
                 if let Some(selector) = value.as_str() {
                     let _ = page
                         .evaluate(format!("document.querySelector('{}')?.focus()", selector))
                         .await;
-                    return true;
+                    return ActionOutcome::ok("Focus");
                 }
-                false
+                ActionOutcome::fail("Focus", "missing selector")
             }
             "Blur" => {
                 if let Some(selector) = value.as_str() {
                     let _ = page
                         .evaluate(format!("document.querySelector('{}')?.blur()", selector))
                         .await;
-                    return true;
+                    return ActionOutcome::ok("Blur");
                 }
-                false
+                ActionOutcome::fail("Blur", "missing selector")
             }
 
             // === JavaScript ===
             "Evaluate" => {
                 if let Some(code) = value.as_str() {
-                    let _ = page.evaluate(code).await;
-                    return true;
+                    match page.evaluate(code).await {
+                        Ok(_) => return ActionOutcome::ok("Evaluate"),
+                        Err(e) => {
+                            let err_msg = e.to_string();
+                            let truncated = truncate_utf8_tail(&err_msg, 150);
+                            log::debug!("Evaluate JS error: {}", truncated);
+                            return ActionOutcome::fail(
+                                "Evaluate",
+                                format!("JS error: {}", truncated),
+                            );
+                        }
+                    }
                 }
-                false
+                ActionOutcome::fail("Evaluate", "missing JS code")
             }
 
             // === Screenshot ===
             "Screenshot" => {
                 // Screenshot is handled separately - just mark as executed
-                true
+                ActionOutcome::ok("Screenshot")
             }
 
             // === Viewport / Device Metrics ===
@@ -3849,20 +4081,20 @@ return await s.prompt(msg);
                         height,
                         device_scale_factor
                     );
-                    return true;
+                    return ActionOutcome::ok("SetViewport");
                 }
-                false
+                ActionOutcome::fail("SetViewport", "missing viewport object")
             }
 
             // === Validation ===
             "ValidateChain" => {
                 // Validation step - always succeeds
-                true
+                ActionOutcome::ok("ValidateChain")
             }
 
             _ => {
                 log::debug!("Unknown action: {}", action);
-                false
+                ActionOutcome::fail(action, "unknown action")
             }
         }
     }
@@ -4001,7 +4233,7 @@ Only return the JSON object, no other text."#;
         let step = best_effort_parse_json_object(&content)?;
 
         // Execute the action
-        let (steps_executed, _spawn_pages) = self
+        let (steps_executed, _spawn_pages, _outcomes) = self
             .execute_steps(page, std::slice::from_ref(&step), &self.cfg)
             .await?;
 
@@ -5105,5 +5337,254 @@ mod tests {
             RemoteMultimodalEngine::extracted_level_key(Some(&val)).as_deref(),
             Some("L7:word-search")
         );
+    }
+
+    // ====================================================================
+    // ActionOutcome unit tests
+    // ====================================================================
+
+    #[test]
+    fn test_action_outcome_ok() {
+        let outcome = ActionOutcome::ok("Click");
+        assert!(outcome.success);
+        assert_eq!(outcome.action, "Click");
+        assert!(outcome.error.is_none());
+    }
+
+    #[test]
+    fn test_action_outcome_fail() {
+        let outcome = ActionOutcome::fail("Click", "selector not found: #missing");
+        assert!(!outcome.success);
+        assert_eq!(outcome.action, "Click");
+        assert_eq!(
+            outcome.error.as_deref(),
+            Some("selector not found: #missing")
+        );
+    }
+
+    #[test]
+    fn test_action_outcome_feedback_line_ok() {
+        let outcome = ActionOutcome::ok("Navigate");
+        assert_eq!(outcome.to_feedback_line(), "- Navigate → ok");
+    }
+
+    #[test]
+    fn test_action_outcome_feedback_line_fail() {
+        let outcome = ActionOutcome::fail("Fill", "selector not found: input#name");
+        assert_eq!(
+            outcome.to_feedback_line(),
+            "- Fill → FAILED: selector not found: input#name"
+        );
+    }
+
+    #[test]
+    fn test_action_outcome_feedback_line_fail_no_reason() {
+        let outcome = ActionOutcome {
+            action: "Evaluate".to_string(),
+            success: false,
+            error: None,
+        };
+        assert_eq!(
+            outcome.to_feedback_line(),
+            "- Evaluate → FAILED: unknown error"
+        );
+    }
+
+    // ====================================================================
+    // format_action_feedback unit tests
+    // ====================================================================
+
+    #[test]
+    fn test_format_action_feedback_empty() {
+        assert!(format_action_feedback(&[]).is_none());
+    }
+
+    #[test]
+    fn test_format_action_feedback_all_success() {
+        let outcomes = vec![
+            ActionOutcome::ok("Click"),
+            ActionOutcome::ok("Fill"),
+            ActionOutcome::ok("Navigate"),
+        ];
+        // No failures → no feedback (avoid noise)
+        assert!(format_action_feedback(&outcomes).is_none());
+    }
+
+    #[test]
+    fn test_format_action_feedback_with_failure() {
+        let outcomes = vec![
+            ActionOutcome::ok("Click"),
+            ActionOutcome::fail("Fill", "selector not found: input#name"),
+            ActionOutcome::ok("Navigate"),
+        ];
+        let feedback = format_action_feedback(&outcomes);
+        assert!(feedback.is_some());
+        let text = feedback.unwrap();
+        assert!(text.starts_with("PREVIOUS ACTION RESULTS:\n"));
+        assert!(text.contains("- Click → ok"));
+        assert!(text.contains("- Fill → FAILED: selector not found: input#name"));
+        assert!(text.contains("- Navigate → ok"));
+    }
+
+    #[test]
+    fn test_format_action_feedback_multiple_failures() {
+        let outcomes = vec![
+            ActionOutcome::fail("Click", "selector not found: #btn"),
+            ActionOutcome::fail("Evaluate", "JS error: ReferenceError: x is not defined"),
+        ];
+        let feedback = format_action_feedback(&outcomes).unwrap();
+        assert!(feedback.contains("PREVIOUS ACTION RESULTS:"));
+        assert!(feedback.contains("Click → FAILED"));
+        assert!(feedback.contains("Evaluate → FAILED: JS error:"));
+    }
+
+    #[test]
+    fn test_format_action_feedback_evaluate_js_error() {
+        let outcomes = vec![ActionOutcome::fail(
+            "Evaluate",
+            "JS error: SyntaxError: Unexpected token '}' at line 3",
+        )];
+        let feedback = format_action_feedback(&outcomes).unwrap();
+        assert!(feedback.contains("Evaluate → FAILED: JS error: SyntaxError"));
+    }
+
+    // ====================================================================
+    // Partial result preservation test
+    // ====================================================================
+
+    #[test]
+    fn test_automation_result_preserves_extracted_on_failure() {
+        // Simulates the partial result path: LLM error after some rounds
+        // succeeded with extracted data.
+        let extracted = serde_json::json!({"title": "Example", "items": [1, 2, 3]});
+        let result = AutomationResult {
+            label: "test".to_string(),
+            steps_executed: 5,
+            success: false,
+            error: Some("LLM inference failed on round 4: Http timeout".to_string()),
+            usage: AutomationUsage {
+                prompt_tokens: 1000,
+                completion_tokens: 200,
+                total_tokens: 1200,
+                llm_calls: 3,
+                ..Default::default()
+            },
+            extracted: Some(extracted.clone()),
+            screenshot: None,
+            spawn_pages: vec!["https://example.com/page1".to_string()],
+            relevant: Some(true),
+            reasoning: Some("Processing data".to_string()),
+        };
+
+        // Verify all accumulated data is preserved even on failure
+        assert!(!result.success);
+        assert!(result.error.is_some());
+        assert!(result
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("LLM inference failed"));
+        assert_eq!(result.extracted.as_ref().unwrap(), &extracted);
+        assert_eq!(result.steps_executed, 5);
+        assert_eq!(result.usage.llm_calls, 3);
+        assert_eq!(result.spawn_pages.len(), 1);
+        assert_eq!(result.relevant, Some(true));
+        assert!(result.reasoning.is_some());
+    }
+
+    #[test]
+    fn test_automation_result_failure_with_no_prior_data() {
+        // LLM fails on round 1 — no data accumulated
+        let result = AutomationResult {
+            label: "automation".to_string(),
+            steps_executed: 0,
+            success: false,
+            error: Some("LLM inference failed on round 1: Remote 401 Unauthorized".to_string()),
+            usage: AutomationUsage::default(),
+            extracted: None,
+            screenshot: None,
+            spawn_pages: vec![],
+            relevant: None,
+            reasoning: None,
+        };
+
+        assert!(!result.success);
+        assert!(result.extracted.is_none());
+        assert_eq!(result.steps_executed, 0);
+    }
+
+    // ====================================================================
+    // Action feedback injection into user prompt
+    // ====================================================================
+
+    #[test]
+    fn test_action_feedback_prepended_to_user_extra() {
+        // Simulates the logic in run_with_memory that prepends feedback
+        let last_action_feedback: Option<String> = Some(
+            "PREVIOUS ACTION RESULTS:\n- Click → ok\n- Fill → FAILED: selector not found\n\n"
+                .to_string(),
+        );
+        let effective_user_message_extra: Option<String> =
+            Some("Complete the form and submit".to_string());
+
+        let combined: Option<String> = match (&last_action_feedback, &effective_user_message_extra)
+        {
+            (Some(feedback), Some(extra)) => {
+                let mut combined = feedback.clone();
+                combined.push_str(extra);
+                Some(combined)
+            }
+            (Some(feedback), None) => Some(feedback.clone()),
+            (None, Some(extra)) => Some(extra.clone()),
+            (None, None) => None,
+        };
+
+        let text = combined.unwrap();
+        assert!(text.starts_with("PREVIOUS ACTION RESULTS:"));
+        assert!(text.contains("Fill → FAILED: selector not found"));
+        assert!(text.ends_with("Complete the form and submit"));
+    }
+
+    #[test]
+    fn test_action_feedback_only_when_no_user_extra() {
+        let last_action_feedback: Option<String> =
+            Some("PREVIOUS ACTION RESULTS:\n- Click → FAILED: selector not found\n\n".to_string());
+        let effective_user_message_extra: Option<String> = None;
+
+        let combined: Option<String> = match (&last_action_feedback, &effective_user_message_extra)
+        {
+            (Some(feedback), Some(extra)) => {
+                let mut combined = feedback.clone();
+                combined.push_str(extra);
+                Some(combined)
+            }
+            (Some(feedback), None) => Some(feedback.clone()),
+            (None, Some(extra)) => Some(extra.clone()),
+            (None, None) => None,
+        };
+
+        let text = combined.unwrap();
+        assert!(text.starts_with("PREVIOUS ACTION RESULTS:"));
+        assert!(!text.contains("USER INSTRUCTIONS"));
+    }
+
+    #[test]
+    fn test_no_feedback_no_extra() {
+        let last_action_feedback: Option<String> = None;
+        let effective_user_message_extra: Option<String> = None;
+
+        let combined: Option<String> = match (&last_action_feedback, &effective_user_message_extra)
+        {
+            (Some(feedback), Some(extra)) => {
+                let mut combined = feedback.clone();
+                combined.push_str(extra);
+                Some(combined)
+            }
+            (Some(feedback), None) => Some(feedback.clone()),
+            (None, Some(extra)) => Some(extra.clone()),
+            (None, None) => None,
+        };
+
+        assert!(combined.is_none());
     }
 }
