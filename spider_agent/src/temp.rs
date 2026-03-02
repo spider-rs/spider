@@ -24,6 +24,12 @@ impl TempStorage {
         Ok(Self { dir })
     }
 
+    /// Create temporary storage inside a specific parent directory.
+    pub fn new_in(parent: &Path) -> io::Result<Self> {
+        let dir = TempDir::new_in(parent)?;
+        Ok(Self { dir })
+    }
+
     /// Create temporary storage with a custom prefix.
     pub fn with_prefix(prefix: &str) -> io::Result<Self> {
         let dir = TempDir::with_prefix(prefix)?;
@@ -122,7 +128,19 @@ impl TempStorage {
 
 impl Default for TempStorage {
     fn default() -> Self {
-        Self::new().expect("Failed to create temporary storage")
+        match Self::new() {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("TempStorage::new() failed: {e}, falling back to std::env::temp_dir()");
+                let fallback =
+                    std::env::temp_dir().join(format!("spider_tmp_{}", std::process::id()));
+                let _ = std::fs::create_dir_all(&fallback);
+                // Second attempt with explicit path; if this also fails we
+                // have bigger OS-level problems and a panic is acceptable.
+                Self::new_in(&fallback)
+                    .expect("TempStorage fallback in std::env::temp_dir() also failed")
+            }
+        }
     }
 }
 

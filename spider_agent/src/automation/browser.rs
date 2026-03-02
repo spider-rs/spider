@@ -134,6 +134,45 @@ pub(crate) fn format_action_feedback(outcomes: &[ActionOutcome]) -> Option<Strin
     Some(out)
 }
 
+/// Default timeout for internal `page.evaluate()` calls (scroll, keyboard, etc).
+#[cfg(feature = "chrome")]
+const EVAL_TIMEOUT_SECS: u64 = 10;
+
+/// Maximum iterations for `InfiniteScroll` to prevent LLM-controlled unbounded loops.
+#[cfg(feature = "chrome")]
+const MAX_INFINITE_SCROLL_ITERATIONS: u64 = 100;
+
+/// Maximum timeout for `WaitForWithTimeout` action (30 seconds).
+#[cfg(feature = "chrome")]
+const MAX_WAIT_FOR_TIMEOUT_MS: u64 = 30_000;
+
+/// Default concurrency limit for `run_spawn_pages_*` functions.
+#[cfg(feature = "chrome")]
+const DEFAULT_SPAWN_CONCURRENCY: usize = 5;
+
+/// Execute a `page.evaluate()` call with a timeout guard.
+///
+/// Returns `Ok(())` on success, `Err(reason)` on JS error or timeout.
+/// This is a free function to avoid borrowing issues with `&self`.
+#[cfg(feature = "chrome")]
+async fn eval_with_timeout(
+    page: &Page,
+    js: impl Into<String>,
+    timeout_secs: u64,
+) -> Result<(), String> {
+    let js = js.into();
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(timeout_secs),
+        page.evaluate(js),
+    )
+    .await
+    {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => Err(format!("JS execution timed out after {timeout_secs}s")),
+    }
+}
+
 #[cfg(feature = "chrome")]
 impl RemoteMultimodalEngine {
     // -----------------------------------------------------------------
@@ -769,13 +808,15 @@ impl RemoteMultimodalEngine {
             }
         }
 
+        let default_cap = CaptureProfile::default();
         let rounds = effective_cfg.max_rounds.max(1);
         for round_idx in 0..rounds {
             let mut current_level_attempts: Option<u32> = None;
             // pick capture profile by round (clamp to last)
             let cap = capture_profiles
                 .get(round_idx)
-                .unwrap_or_else(|| capture_profiles.last().expect("non-empty capture_profiles"));
+                .or_else(|| capture_profiles.last())
+                .unwrap_or(&default_cap);
 
             // Dual-model routing decision (before capture)
             let use_vision = self.should_use_vision_this_round(
@@ -843,7 +884,9 @@ impl RemoteMultimodalEngine {
                                 skill_name,
                                 js.len()
                             );
-                            let _ = page.evaluate(*js).await;
+                            if let Err(e) = eval_with_timeout(page, *js, EVAL_TIMEOUT_SECS).await {
+                                log::warn!("pre_evaluate '{}' failed: {}", skill_name, e);
+                            }
                         }
                         // Re-capture title after pre_evaluate (JS sets document.title)
                         let new_title = self.title_context(page, &effective_cfg).await;
@@ -920,7 +963,15 @@ impl RemoteMultimodalEngine {
                                                     btn.dispatchEvent(new MouseEvent('click',ev));
                                                     return 'clicked';}return 'not_found';})()
                                                 "#;
-                                                let _ = page.evaluate(verify_js).await;
+                                                if let Err(e) = eval_with_timeout(
+                                                    page,
+                                                    verify_js,
+                                                    EVAL_TIMEOUT_SECS,
+                                                )
+                                                .await
+                                                {
+                                                    log::warn!("TTT verify JS failed: {}", e);
+                                                }
                                                 log::info!("TTT: engine clicked verify after win");
                                                 tokio::time::sleep(
                                                     std::time::Duration::from_millis(1500),
@@ -946,7 +997,15 @@ impl RemoteMultimodalEngine {
                                                 games_played
                                             );
                                             let refresh_js = r#"(function(){var btn=document.querySelector('.captcha-refresh,[class*=refresh],[class*=retry]');if(btn){btn.click();return 'clicked';}return 'not_found';})()"#;
-                                            let _ = page.evaluate(refresh_js).await;
+                                            if let Err(e) = eval_with_timeout(
+                                                page,
+                                                refresh_js,
+                                                EVAL_TIMEOUT_SECS,
+                                            )
+                                            .await
+                                            {
+                                                log::warn!("TTT refresh JS failed: {}", e);
+                                            }
                                             tokio::time::sleep(std::time::Duration::from_millis(
                                                 2000,
                                             ))
@@ -959,7 +1018,11 @@ impl RemoteMultimodalEngine {
                                             .await;
                                         }
                                         // Re-run pre_evaluate for next move
-                                        let _ = page.evaluate(ttt_js).await;
+                                        if let Err(e) =
+                                            eval_with_timeout(page, ttt_js, EVAL_TIMEOUT_SECS).await
+                                        {
+                                            log::warn!("TTT pre_evaluate re-run failed: {}", e);
+                                        }
                                         let updated =
                                             self.title_context(page, &effective_cfg).await;
                                         if !updated.is_empty() {
@@ -1004,7 +1067,11 @@ impl RemoteMultimodalEngine {
                                         tokio::time::sleep(std::time::Duration::from_millis(500))
                                             .await;
                                         // Re-run pre_evaluate to detect and click new moles
-                                        let _ = page.evaluate(wam_js).await;
+                                        if let Err(e) =
+                                            eval_with_timeout(page, wam_js, EVAL_TIMEOUT_SECS).await
+                                        {
+                                            log::warn!("WAM pre_evaluate re-run failed: {}", e);
+                                        }
                                         let updated =
                                             self.title_context(page, &effective_cfg).await;
                                         if !updated.is_empty() {
@@ -1023,7 +1090,12 @@ impl RemoteMultimodalEngine {
                                             "document.title={t};if(!document.getElementById('wam-engine-done')){{var d=document.createElement('div');d.id='wam-engine-done';d.style.display='none';d.dataset.t={t};document.body.appendChild(d);}}",
                                             t = serde_json::to_string(&done_title).unwrap_or_default()
                                         );
-                                        let _ = page.evaluate(marker_js).await;
+                                        if let Err(e) =
+                                            eval_with_timeout(page, marker_js, EVAL_TIMEOUT_SECS)
+                                                .await
+                                        {
+                                            log::warn!("WAM marker JS failed: {}", e);
+                                        }
                                         tokio::time::sleep(std::time::Duration::from_millis(500))
                                             .await;
                                         let verify_js = r#"(function(){
@@ -1037,7 +1109,12 @@ impl RemoteMultimodalEngine {
                                             btn.dispatchEvent(new MouseEvent('click',ev));
                                             return 'clicked';}return 'not_found';})()
                                         "#;
-                                        let _ = page.evaluate(verify_js).await;
+                                        if let Err(e) =
+                                            eval_with_timeout(page, verify_js, EVAL_TIMEOUT_SECS)
+                                                .await
+                                        {
+                                            log::warn!("WAM verify JS failed: {}", e);
+                                        }
                                         tokio::time::sleep(std::time::Duration::from_millis(1500))
                                             .await;
                                         let post = self.title_context(page, &effective_cfg).await;
@@ -1158,7 +1235,18 @@ impl RemoteMultimodalEngine {
                                                     )
                                                     .await;
                                                     // Re-run pre_evaluate to detect new leaf boxes
-                                                    let _ = page.evaluate(nest_js).await;
+                                                    if let Err(e) = eval_with_timeout(
+                                                        page,
+                                                        nest_js,
+                                                        EVAL_TIMEOUT_SECS,
+                                                    )
+                                                    .await
+                                                    {
+                                                        log::warn!(
+                                                            "NEST pre_evaluate re-run failed: {}",
+                                                            e
+                                                        );
+                                                    }
                                                     let updated = self
                                                         .title_context(page, &effective_cfg)
                                                         .await;
@@ -1183,7 +1271,12 @@ impl RemoteMultimodalEngine {
                                             "document.title={t};if(!document.getElementById('nest-engine-done')){{var d=document.createElement('div');d.id='nest-engine-done';d.style.display='none';d.dataset.t={t};document.body.appendChild(d);}}",
                                             t = serde_json::to_string(&done_title).unwrap_or_default()
                                         );
-                                        let _ = page.evaluate(marker_js).await;
+                                        if let Err(e) =
+                                            eval_with_timeout(page, marker_js, EVAL_TIMEOUT_SECS)
+                                                .await
+                                        {
+                                            log::warn!("NEST marker JS failed: {}", e);
+                                        }
                                         tokio::time::sleep(std::time::Duration::from_millis(500))
                                             .await;
                                         let verify_js = r#"(function(){
@@ -1197,7 +1290,12 @@ impl RemoteMultimodalEngine {
                                             btn.dispatchEvent(new MouseEvent('click',ev));
                                             return 'clicked';}return 'not_found';})()
                                         "#;
-                                        let _ = page.evaluate(verify_js).await;
+                                        if let Err(e) =
+                                            eval_with_timeout(page, verify_js, EVAL_TIMEOUT_SECS)
+                                                .await
+                                        {
+                                            log::warn!("NEST verify JS failed: {}", e);
+                                        }
                                         log::info!("NEST: engine clicked verify");
                                         tokio::time::sleep(std::time::Duration::from_millis(1500))
                                             .await;
@@ -1306,7 +1404,15 @@ impl RemoteMultimodalEngine {
                                                     "document.title={t};if(!document.getElementById('circle-engine-done')){{var d=document.createElement('div');d.id='circle-engine-done';d.style.display='none';d.dataset.t={t};document.body.appendChild(d);}}",
                                                     t = serde_json::to_string(&done_title).unwrap_or_default()
                                                 );
-                                                let _ = page.evaluate(marker_js).await;
+                                                if let Err(e) = eval_with_timeout(
+                                                    page,
+                                                    marker_js,
+                                                    EVAL_TIMEOUT_SECS,
+                                                )
+                                                .await
+                                                {
+                                                    log::warn!("CIRCLE marker JS failed: {}", e);
+                                                }
                                                 tokio::time::sleep(
                                                     std::time::Duration::from_millis(1000),
                                                 )
@@ -1322,7 +1428,15 @@ impl RemoteMultimodalEngine {
                                                     btn.dispatchEvent(new MouseEvent('click',ev));
                                                     return 'clicked';}return 'not_found';})()
                                                 "#;
-                                                let _ = page.evaluate(verify_js).await;
+                                                if let Err(e) = eval_with_timeout(
+                                                    page,
+                                                    verify_js,
+                                                    EVAL_TIMEOUT_SECS,
+                                                )
+                                                .await
+                                                {
+                                                    log::warn!("CIRCLE verify JS failed: {}", e);
+                                                }
                                                 log::info!("CIRCLE: engine clicked verify");
                                                 tokio::time::sleep(
                                                     std::time::Duration::from_millis(1500),
@@ -1446,7 +1560,15 @@ impl RemoteMultimodalEngine {
                                                     "document.title={t};if(!document.getElementById('ws-engine-done')){{var d=document.createElement('div');d.id='ws-engine-done';d.style.display='none';d.dataset.t={t};document.body.appendChild(d);}}",
                                                     t = serde_json::to_string(&done_title).unwrap_or_default()
                                                 );
-                                                let _ = page.evaluate(marker_js).await;
+                                                if let Err(e) = eval_with_timeout(
+                                                    page,
+                                                    marker_js,
+                                                    EVAL_TIMEOUT_SECS,
+                                                )
+                                                .await
+                                                {
+                                                    log::warn!("WS marker JS failed: {}", e);
+                                                }
                                                 // Engine clicks verify immediately after selecting cells
                                                 tokio::time::sleep(
                                                     std::time::Duration::from_millis(500),
@@ -1463,7 +1585,15 @@ impl RemoteMultimodalEngine {
                                                     btn.dispatchEvent(new MouseEvent('click',ev));
                                                     return 'clicked';}return 'not_found';})()
                                                 "#;
-                                                let _ = page.evaluate(verify_js).await;
+                                                if let Err(e) = eval_with_timeout(
+                                                    page,
+                                                    verify_js,
+                                                    EVAL_TIMEOUT_SECS,
+                                                )
+                                                .await
+                                                {
+                                                    log::warn!("WS verify JS failed: {}", e);
+                                                }
                                                 log::info!("WS: engine clicked verify after selecting cells");
                                                 tokio::time::sleep(
                                                     std::time::Duration::from_millis(1500),
@@ -3780,31 +3910,37 @@ return await s.prompt(msg);
             }
             "Press" => {
                 if let Some(key) = value.as_str() {
-                    let _ = page.evaluate(format!(r#"
+                    if let Err(e) = eval_with_timeout(page, format!(r#"
                         document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {{key: '{}', bubbles: true}}));
                         document.activeElement.dispatchEvent(new KeyboardEvent('keypress', {{key: '{}', bubbles: true}}));
                         document.activeElement.dispatchEvent(new KeyboardEvent('keyup', {{key: '{}', bubbles: true}}));
-                    "#, key, key, key)).await;
+                    "#, key, key, key), EVAL_TIMEOUT_SECS).await {
+                        return ActionOutcome::fail("Press", e);
+                    }
                     return ActionOutcome::ok("Press");
                 }
                 ActionOutcome::fail("Press", "missing key")
             }
             "KeyDown" => {
                 if let Some(key) = value.as_str() {
-                    let _ = page.evaluate(format!(
+                    if let Err(e) = eval_with_timeout(page, format!(
                         "document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {{key: '{}', bubbles: true}}))",
                         key
-                    )).await;
+                    ), EVAL_TIMEOUT_SECS).await {
+                        return ActionOutcome::fail("KeyDown", e);
+                    }
                     return ActionOutcome::ok("KeyDown");
                 }
                 ActionOutcome::fail("KeyDown", "missing key")
             }
             "KeyUp" => {
                 if let Some(key) = value.as_str() {
-                    let _ = page.evaluate(format!(
+                    if let Err(e) = eval_with_timeout(page, format!(
                         "document.activeElement.dispatchEvent(new KeyboardEvent('keyup', {{key: '{}', bubbles: true}}))",
                         key
-                    )).await;
+                    ), EVAL_TIMEOUT_SECS).await {
+                        return ActionOutcome::fail("KeyUp", e);
+                    }
                     return ActionOutcome::ok("KeyUp");
                 }
                 ActionOutcome::fail("KeyUp", "missing key")
@@ -3813,24 +3949,38 @@ return await s.prompt(msg);
             // === Scroll Actions ===
             "ScrollX" => {
                 let pixels = value.as_i64().unwrap_or(0);
-                let _ = page
-                    .evaluate(format!("window.scrollBy({}, 0)", pixels))
-                    .await;
+                if let Err(e) = eval_with_timeout(
+                    page,
+                    format!("window.scrollBy({}, 0)", pixels),
+                    EVAL_TIMEOUT_SECS,
+                )
+                .await
+                {
+                    return ActionOutcome::fail("ScrollX", e);
+                }
                 ActionOutcome::ok("ScrollX")
             }
             "ScrollY" => {
                 let pixels = value.as_i64().unwrap_or(300);
-                let _ = page
-                    .evaluate(format!("window.scrollBy(0, {})", pixels))
-                    .await;
+                if let Err(e) = eval_with_timeout(
+                    page,
+                    format!("window.scrollBy(0, {})", pixels),
+                    EVAL_TIMEOUT_SECS,
+                )
+                .await
+                {
+                    return ActionOutcome::fail("ScrollY", e);
+                }
                 ActionOutcome::ok("ScrollY")
             }
             "ScrollTo" => {
                 if let Some(selector) = value.get("selector").and_then(|v| v.as_str()) {
-                    let _ = page.evaluate(format!(
+                    if let Err(e) = eval_with_timeout(page, format!(
                         "document.querySelector('{}')?.scrollIntoView({{behavior: 'smooth', block: 'center'}})",
                         selector
-                    )).await;
+                    ), EVAL_TIMEOUT_SECS).await {
+                        return ActionOutcome::fail("ScrollTo", e);
+                    }
                     return ActionOutcome::ok("ScrollTo");
                 }
                 ActionOutcome::fail("ScrollTo", "missing selector")
@@ -3838,17 +3988,35 @@ return await s.prompt(msg);
             "ScrollToPoint" => {
                 let x = value.get("x").and_then(|v| v.as_i64()).unwrap_or(0);
                 let y = value.get("y").and_then(|v| v.as_i64()).unwrap_or(0);
-                let _ = page
-                    .evaluate(format!("window.scrollTo({}, {})", x, y))
-                    .await;
+                if let Err(e) = eval_with_timeout(
+                    page,
+                    format!("window.scrollTo({}, {})", x, y),
+                    EVAL_TIMEOUT_SECS,
+                )
+                .await
+                {
+                    return ActionOutcome::fail("ScrollToPoint", e);
+                }
                 ActionOutcome::ok("ScrollToPoint")
             }
             "InfiniteScroll" => {
-                let max_scrolls = value.as_u64().unwrap_or(5);
-                for _ in 0..max_scrolls {
-                    let _ = page
-                        .evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                        .await;
+                let max_scrolls = value
+                    .as_u64()
+                    .unwrap_or(5)
+                    .min(MAX_INFINITE_SCROLL_ITERATIONS);
+                for i in 0..max_scrolls {
+                    if let Err(e) = eval_with_timeout(
+                        page,
+                        "window.scrollTo(0, document.body.scrollHeight)",
+                        EVAL_TIMEOUT_SECS,
+                    )
+                    .await
+                    {
+                        return ActionOutcome::fail(
+                            "InfiniteScroll",
+                            format!("failed at scroll {}: {}", i + 1, e),
+                        );
+                    }
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
                 ActionOutcome::ok("InfiniteScroll")
@@ -3883,7 +4051,8 @@ return await s.prompt(msg);
                 let timeout = value
                     .get("timeout")
                     .and_then(|v| v.as_u64())
-                    .unwrap_or(5000);
+                    .unwrap_or(5000)
+                    .min(MAX_WAIT_FOR_TIMEOUT_MS);
                 if let Some(sel) = selector {
                     let iterations = timeout / 100;
                     for _ in 0..iterations {
@@ -3969,25 +4138,39 @@ return await s.prompt(msg);
                 ActionOutcome::fail("Navigate", "missing URL")
             }
             "GoBack" => {
-                let _ = page.evaluate("window.history.back()").await;
+                if let Err(e) =
+                    eval_with_timeout(page, "window.history.back()", EVAL_TIMEOUT_SECS).await
+                {
+                    return ActionOutcome::fail("GoBack", e);
+                }
                 ActionOutcome::ok("GoBack")
             }
             "GoForward" => {
-                let _ = page.evaluate("window.history.forward()").await;
+                if let Err(e) =
+                    eval_with_timeout(page, "window.history.forward()", EVAL_TIMEOUT_SECS).await
+                {
+                    return ActionOutcome::fail("GoForward", e);
+                }
                 ActionOutcome::ok("GoForward")
             }
             "Reload" => {
-                let _ = page.evaluate("window.location.reload()").await;
+                if let Err(e) =
+                    eval_with_timeout(page, "window.location.reload()", EVAL_TIMEOUT_SECS).await
+                {
+                    return ActionOutcome::fail("Reload", e);
+                }
                 ActionOutcome::ok("Reload")
             }
 
             // === Hover Actions ===
             "Hover" => {
                 if let Some(selector) = value.as_str() {
-                    let _ = page.evaluate(format!(
+                    if let Err(e) = eval_with_timeout(page, format!(
                         "document.querySelector('{}')?.dispatchEvent(new MouseEvent('mouseover', {{bubbles: true}}))",
                         selector
-                    )).await;
+                    ), EVAL_TIMEOUT_SECS).await {
+                        return ActionOutcome::fail("Hover", e);
+                    }
                     return ActionOutcome::ok("Hover");
                 }
                 ActionOutcome::fail("Hover", "missing selector")
@@ -4004,28 +4187,42 @@ return await s.prompt(msg);
                 let selector = value.get("selector").and_then(|v| v.as_str());
                 let opt_value = value.get("value").and_then(|v| v.as_str());
                 if let (Some(sel), Some(val)) = (selector, opt_value) {
-                    let _ = page.evaluate(format!(
+                    if let Err(e) = eval_with_timeout(page, format!(
                         "document.querySelector('{}').value = '{}'; document.querySelector('{}').dispatchEvent(new Event('change', {{bubbles: true}}))",
                         sel, val, sel
-                    )).await;
+                    ), EVAL_TIMEOUT_SECS).await {
+                        return ActionOutcome::fail("Select", e);
+                    }
                     return ActionOutcome::ok("Select");
                 }
                 ActionOutcome::fail("Select", "missing selector or value")
             }
             "Focus" => {
                 if let Some(selector) = value.as_str() {
-                    let _ = page
-                        .evaluate(format!("document.querySelector('{}')?.focus()", selector))
-                        .await;
+                    if let Err(e) = eval_with_timeout(
+                        page,
+                        format!("document.querySelector('{}')?.focus()", selector),
+                        EVAL_TIMEOUT_SECS,
+                    )
+                    .await
+                    {
+                        return ActionOutcome::fail("Focus", e);
+                    }
                     return ActionOutcome::ok("Focus");
                 }
                 ActionOutcome::fail("Focus", "missing selector")
             }
             "Blur" => {
                 if let Some(selector) = value.as_str() {
-                    let _ = page
-                        .evaluate(format!("document.querySelector('{}')?.blur()", selector))
-                        .await;
+                    if let Err(e) = eval_with_timeout(
+                        page,
+                        format!("document.querySelector('{}')?.blur()", selector),
+                        EVAL_TIMEOUT_SECS,
+                    )
+                    .await
+                    {
+                        return ActionOutcome::fail("Blur", e);
+                    }
                     return ActionOutcome::ok("Blur");
                 }
                 ActionOutcome::fail("Blur", "missing selector")
@@ -4034,11 +4231,10 @@ return await s.prompt(msg);
             // === JavaScript ===
             "Evaluate" => {
                 if let Some(code) = value.as_str() {
-                    match page.evaluate(code).await {
-                        Ok(_) => return ActionOutcome::ok("Evaluate"),
+                    match eval_with_timeout(page, code, EVAL_TIMEOUT_SECS).await {
+                        Ok(()) => return ActionOutcome::ok("Evaluate"),
                         Err(e) => {
-                            let err_msg = e.to_string();
-                            let truncated = truncate_utf8_tail(&err_msg, 150);
+                            let truncated = truncate_utf8_tail(&e, 150);
                             log::debug!("Evaluate JS error: {}", truncated);
                             return ActionOutcome::fail(
                                 "Evaluate",
@@ -4577,6 +4773,154 @@ pub type PageSetupFn = Box<
     dyn Fn(&Page) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync,
 >;
 
+/// Strategy for waiting on a spawned page before running automation.
+///
+/// Controls how the engine waits for page readiness after navigation.
+/// This replaces hard-coded `tokio::time::sleep` calls with real
+/// browser-level waiting (network idle, DOM stability, etc.).
+#[cfg(feature = "chrome")]
+#[derive(Debug, Clone, Default)]
+pub enum PageWaitStrategy {
+    /// Wait for `load` event + `document.readyState === "complete"` (default).
+    ///
+    /// Uses a JS promise that resolves when the page fires the `load` event.
+    /// Roughly equivalent to Puppeteer's `waitUntil: "load"`.
+    #[default]
+    Load,
+    /// Wait for zero in-flight network connections.
+    ///
+    /// Uses `Page::wait_for_network_idle_with_timeout()` via CDP
+    /// `Page.lifecycleEvent("networkIdle")`. Best for SPAs and pages with
+    /// async data fetching.
+    NetworkIdle {
+        /// Timeout for the idle wait. Defaults to 15s.
+        timeout: std::time::Duration,
+    },
+    /// Wait for ≤2 in-flight network connections.
+    ///
+    /// Less strict than `NetworkIdle` — useful for pages with long-polling or
+    /// analytics beacons that never fully go quiet.
+    NetworkAlmostIdle {
+        /// Timeout for the almost-idle wait. Defaults to 15s.
+        timeout: std::time::Duration,
+    },
+    /// Wait for a specific CSS selector to appear in the DOM.
+    Selector {
+        /// The CSS selector to wait for.
+        selector: String,
+        /// Timeout. Defaults to 10s.
+        timeout: std::time::Duration,
+    },
+    /// Wait for DOM mutations to stabilize (no changes for 100ms).
+    DomStable {
+        /// Timeout. Defaults to 10s.
+        timeout: std::time::Duration,
+    },
+    /// Fixed delay (escape hatch — prefer the other variants).
+    Delay(std::time::Duration),
+    /// No waiting beyond the initial navigation.
+    None,
+}
+
+#[cfg(feature = "chrome")]
+impl PageWaitStrategy {
+    /// `NetworkIdle` with a 15-second timeout.
+    pub fn network_idle() -> Self {
+        Self::NetworkIdle {
+            timeout: std::time::Duration::from_secs(15),
+        }
+    }
+
+    /// `NetworkAlmostIdle` with a 15-second timeout.
+    pub fn network_almost_idle() -> Self {
+        Self::NetworkAlmostIdle {
+            timeout: std::time::Duration::from_secs(15),
+        }
+    }
+
+    /// Wait for a CSS selector with a 10-second timeout.
+    pub fn selector(sel: impl Into<String>) -> Self {
+        Self::Selector {
+            selector: sel.into(),
+            timeout: std::time::Duration::from_secs(10),
+        }
+    }
+
+    /// Apply this wait strategy to a page. Returns `Ok(())` on success or
+    /// timeout (timeouts are logged as warnings, not errors — the page may
+    /// still be usable).
+    pub(crate) async fn apply(&self, page: &Page) {
+        match self {
+            Self::Load => {
+                let js = "new Promise(r => { if (document.readyState === 'complete') r(); else window.addEventListener('load', r); })";
+                match tokio::time::timeout(std::time::Duration::from_secs(15), page.evaluate(js))
+                    .await
+                {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(e)) => log::warn!("PageWaitStrategy::Load JS error: {e}"),
+                    Err(_) => log::warn!("PageWaitStrategy::Load timed out after 15s"),
+                }
+            }
+            Self::NetworkIdle { timeout } => {
+                if let Err(e) = page.wait_for_network_idle_with_timeout(*timeout).await {
+                    log::warn!("PageWaitStrategy::NetworkIdle error: {e}");
+                }
+            }
+            Self::NetworkAlmostIdle { timeout } => {
+                if let Err(e) = page
+                    .wait_for_network_almost_idle_with_timeout(*timeout)
+                    .await
+                {
+                    log::warn!("PageWaitStrategy::NetworkAlmostIdle error: {e}");
+                }
+            }
+            Self::Selector { selector, timeout } => {
+                match tokio::time::timeout(*timeout, page.find_element(selector)).await {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(e)) => {
+                        log::warn!("PageWaitStrategy::Selector({selector}) error: {e}")
+                    }
+                    Err(_) => {
+                        log::warn!(
+                            "PageWaitStrategy::Selector({selector}) timed out after {}ms",
+                            timeout.as_millis()
+                        )
+                    }
+                }
+            }
+            Self::DomStable { timeout } => {
+                let timeout_ms = timeout.as_millis() as u32;
+                let js = format!(
+                    r#"new Promise((resolve) => {{
+                        let timer;
+                        const observer = new MutationObserver(() => {{
+                            clearTimeout(timer);
+                            timer = setTimeout(() => {{ observer.disconnect(); resolve(); }}, 100);
+                        }});
+                        observer.observe(document.body || document.documentElement, {{ childList: true, subtree: true, attributes: true }});
+                        timer = setTimeout(() => {{ observer.disconnect(); resolve(); }}, 100);
+                        setTimeout(() => {{ observer.disconnect(); resolve(); }}, {timeout_ms});
+                    }})"#
+                );
+                match tokio::time::timeout(
+                    *timeout + std::time::Duration::from_secs(2),
+                    page.evaluate(js),
+                )
+                .await
+                {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(e)) => log::warn!("PageWaitStrategy::DomStable error: {e}"),
+                    Err(_) => log::warn!("PageWaitStrategy::DomStable timed out"),
+                }
+            }
+            Self::Delay(d) => {
+                tokio::time::sleep(*d).await;
+            }
+            Self::None => {}
+        }
+    }
+}
+
 /// Options for configuring spawned page automation.
 ///
 /// Configure extraction prompts, screenshots, and event tracking propagation
@@ -4598,11 +4942,19 @@ pub struct SpawnPageOptions {
     pub page_setup: Option<std::sync::Arc<PageSetupFn>>,
     /// Whether to track bytes transferred via CDP network events.
     pub track_bytes: bool,
+    /// Maximum number of pages processed concurrently.
+    /// Defaults to [`DEFAULT_SPAWN_CONCURRENCY`].
+    pub max_concurrency: usize,
+    /// How to wait for page readiness after navigation.
+    /// Defaults to [`PageWaitStrategy::Load`].
+    pub page_wait: PageWaitStrategy,
 }
 
 #[cfg(feature = "chrome")]
 impl SpawnPageOptions {
-    /// Create new options with defaults (screenshot enabled, 1 round).
+    /// Create new options with defaults (screenshot enabled, 1 round,
+    /// concurrency capped at [`DEFAULT_SPAWN_CONCURRENCY`],
+    /// waits for page `load` event).
     pub fn new() -> Self {
         Self {
             extraction_prompt: None,
@@ -4611,6 +4963,8 @@ impl SpawnPageOptions {
             user_message_extra: None,
             page_setup: None,
             track_bytes: false,
+            max_concurrency: DEFAULT_SPAWN_CONCURRENCY,
+            page_wait: PageWaitStrategy::Load,
         }
     }
 
@@ -4666,6 +5020,29 @@ impl SpawnPageOptions {
         self.track_bytes = enabled;
         self
     }
+
+    /// Set maximum number of pages processed concurrently.
+    /// A per-call semaphore limits how many spawned tasks do real work
+    /// at the same time, preventing browser/LLM overload.
+    pub fn with_max_concurrency(mut self, n: usize) -> Self {
+        self.max_concurrency = n.max(1);
+        self
+    }
+
+    /// Set the page-wait strategy applied after navigation.
+    ///
+    /// Determines how the engine waits for page readiness before running
+    /// automation. Defaults to [`PageWaitStrategy::Load`].
+    ///
+    /// # Example
+    /// ```ignore
+    /// let options = SpawnPageOptions::new()
+    ///     .with_page_wait(PageWaitStrategy::network_idle());
+    /// ```
+    pub fn with_page_wait(mut self, strategy: PageWaitStrategy) -> Self {
+        self.page_wait = strategy;
+        self
+    }
 }
 
 // Manual Debug implementation since PageSetupFn doesn't implement Debug
@@ -4679,6 +5056,8 @@ impl std::fmt::Debug for SpawnPageOptions {
             .field("user_message_extra", &self.user_message_extra)
             .field("page_setup", &self.page_setup.as_ref().map(|_| "<fn>"))
             .field("track_bytes", &self.track_bytes)
+            .field("max_concurrency", &self.max_concurrency)
+            .field("page_wait", &self.page_wait)
             .finish()
     }
 }
@@ -4694,6 +5073,8 @@ impl Clone for SpawnPageOptions {
             user_message_extra: self.user_message_extra.clone(),
             page_setup: self.page_setup.clone(),
             track_bytes: self.track_bytes,
+            max_concurrency: self.max_concurrency,
+            page_wait: self.page_wait.clone(),
         }
     }
 }
@@ -4787,17 +5168,32 @@ pub async fn run_spawn_pages_with_options(
     }
 
     let base_cfgs = Arc::new(base_cfgs.clone());
+    let sem = Arc::new(tokio::sync::Semaphore::new(options.max_concurrency.max(1)));
     let options = Arc::new(options);
     let mut handles = Vec::with_capacity(urls.len());
 
-    // Spawn all pages concurrently
+    // Spawn all pages concurrently (semaphore limits in-flight work)
     for url in urls {
         let browser = browser.clone();
         let base_cfgs = base_cfgs.clone();
         let options = options.clone();
         let url_clone = url.clone();
+        let sem = sem.clone();
 
         handles.push(tokio::spawn(async move {
+            // Acquire concurrency permit before doing real work
+            let _permit = match sem.acquire().await {
+                Ok(p) => p,
+                Err(_) => {
+                    return SpawnedPageResult {
+                        url: url_clone,
+                        result: Err("Spawn semaphore closed".to_string()),
+                        bytes_transferred: None,
+                        response_map: None,
+                    };
+                }
+            };
+
             // Create new page for this URL
             let new_page = match browser.new_page(&url_clone).await {
                 Ok(page) => page,
@@ -4815,6 +5211,9 @@ pub async fn run_spawn_pages_with_options(
             if let Some(ref setup) = options.page_setup {
                 setup(&new_page).await;
             }
+
+            // Wait for page readiness using the configured strategy
+            options.page_wait.apply(&new_page).await;
 
             // Set up bytes tracking if enabled
             let total_bytes: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
@@ -4987,17 +5386,32 @@ pub async fn run_spawn_pages_with_factory<E: std::fmt::Display + Send + 'static>
     }
 
     let base_cfgs = Arc::new(base_cfgs.clone());
+    let sem = Arc::new(tokio::sync::Semaphore::new(options.max_concurrency.max(1)));
     let options = Arc::new(options);
     let mut handles = Vec::with_capacity(urls.len());
 
-    // Spawn all pages concurrently
+    // Spawn all pages concurrently (semaphore limits in-flight work)
     for url in urls {
         let page_factory = page_factory.clone();
         let base_cfgs = base_cfgs.clone();
         let options = options.clone();
         let url_clone = url.clone();
+        let sem = sem.clone();
 
         handles.push(tokio::spawn(async move {
+            // Acquire concurrency permit before doing real work
+            let _permit = match sem.acquire().await {
+                Ok(p) => p,
+                Err(_) => {
+                    return SpawnedPageResult {
+                        url: url_clone,
+                        result: Err("Spawn semaphore closed".to_string()),
+                        bytes_transferred: None,
+                        response_map: None,
+                    };
+                }
+            };
+
             let result = async {
                 // Create new page using the factory
                 let new_page = page_factory(url_clone.clone())
@@ -5008,6 +5422,9 @@ pub async fn run_spawn_pages_with_factory<E: std::fmt::Display + Send + 'static>
                 if let Some(ref setup) = options.page_setup {
                     setup(&new_page).await;
                 }
+
+                // Wait for page readiness using the configured strategy
+                options.page_wait.apply(&new_page).await;
 
                 // Build page-specific config from the full base config to preserve
                 // routing, schemas, relevance gates, and other production knobs.
