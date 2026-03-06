@@ -1529,7 +1529,11 @@ pub async fn put_hybrid_cache(
                     url: http_response.url,
                     body: http_response.body,
                     headers: http_cache::HttpHeaders::Modern(
-                        http_response.headers.iter().map(|(k, v)| (k.clone(), vec![v.clone()])).collect()
+                        http_response
+                            .headers
+                            .iter()
+                            .map(|(k, v)| (k.clone(), vec![v.clone()]))
+                            .collect(),
                     ),
                     version: match http_response.version {
                         HttpVersion::H2 => http_cache::HttpVersion::H2,
@@ -4805,13 +4809,15 @@ pub async fn get_cached_url_base(
                 return decode_cached_html_bytes(
                     &http_response.body,
                     hdrs.get("accept-language").and_then(|vals| {
-                        vals.first().and_then(|h| {
-                            if h.is_empty() {
-                                None
-                            } else {
-                                Some(h.as_str())
-                            }
-                        })
+                        vals.first().and_then(
+                            |h| {
+                                if h.is_empty() {
+                                    None
+                                } else {
+                                    Some(h.as_str())
+                                }
+                            },
+                        )
                     }),
                 );
             }
