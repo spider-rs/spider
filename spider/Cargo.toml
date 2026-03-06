@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.45.29"
+version = "2.46.0"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -39,8 +39,8 @@ cron = { version = "0.15", optional = true }
 async-trait = { version = "0.1", optional = true }
 strum = { version = "0.27", features = ["derive"] }
 async_job = { version = "0.1", optional = true }
-reqwest-middleware = { version = "0.4", optional = true, default-features = false }
-http-cache-reqwest = { version = "0.15", optional = true, default-features = false }
+reqwest-middleware = { version = "0.5", optional = true, default-features = false }
+http-cache-reqwest = { version = "1.0.0-alpha.5", optional = true, default-features = false }
 const_format = { version = "0.2", optional = true }
 async-openai = { version = "0.33", optional = true, features = ["chat-completion"] }
 tiktoken-rs = { version = "0.9", optional = true }
@@ -55,9 +55,9 @@ quick-xml = { version = "0.39", features = [
 ] }
 moka = { version = "0.12", features = ["future"], optional = true }
 fastrand = { version = "2", optional = true }
-http-cache-semantics = { version = "2", optional = true }
-http-cache = { version = "0.20", optional = true, default-features = false }
-http-global-cache = { version = "0.1.0", optional = true, default-features = false, features = ["cache_request"] }
+http-cache-semantics = { version = "3", optional = true }
+http-cache = { version = "1.0.0-alpha.5", optional = true, default-features = false, features = ["url-standard"] }
+http-global-cache = { version = "0.2.0", optional = true, default-features = false, features = ["cache_request"] }
 http = { version = "1", optional = true }
 phf = "0.11"
 auto_encoder = { version = "0.1" }
@@ -104,7 +104,7 @@ which = { version = "6.0", optional = true }
 home = { version = "0.5", optional = true }
 
 [dependencies.chromey]
-version = "2"
+version = "2.40"
 optional = true
 default-features = false
 features = ["bytes", "stream"]
@@ -124,7 +124,7 @@ version = "2.45.29"
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.45.29"
+version = "2.46.0"
 optional = true
 default-features = false
 
@@ -139,13 +139,14 @@ tokio = { version = "1", default-features = false, features = [
     "rt-multi-thread",
 ] }
 fastrand = { version = "2", optional = true }
-reqwest = { version = "0.12", features = [
+reqwest = { version = "0.13", features = [
     "brotli",
     "gzip",
     "deflate",
     "zstd",
     "stream",
-    "http2"
+    "http2",
+    "query"
 ] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -155,12 +156,13 @@ tokio = { version = "1", default-features = false, features = [
     "rt",
 ] }
 fastrand = { version = "2", optional = true, features = ["js"] }
-reqwest = { version = "0.12", features = [
+reqwest = { version = "0.13", features = [
     "brotli",
     "gzip",
     "deflate",
     "stream",
-    "http2"
+    "http2",
+    "query"
 ] }
 
 [dev-dependencies]
@@ -217,7 +219,7 @@ full_resources = []
 socks = ["reqwest/socks"]
 reqwest_json = ["reqwest/json"]
 sitemap = ["dep:sitemap"]
-cache_request = ["dep:http-global-cache","dep:reqwest-middleware", "dep:http-cache-reqwest", "dep:http"]
+cache_request = ["dep:http-global-cache","dep:reqwest-middleware", "dep:http-cache-reqwest", "dep:http", "dep:http-cache"]
 cache = ["cache_request", "http-global-cache/cache", "http-cache-reqwest/manager-cacache"]
 cache_mem = ["cache_request", "http-global-cache/cache_mem"]
 cache_openai = ["dep:moka"]
@@ -275,13 +277,13 @@ gemini = [
 cache_gemini = ["dep:moka"]
 decentralized_headers = ["dep:const_format", "dep:itertools"]
 spoof = ["dep:fastrand"]
-reqwest_rustls_tls = ["reqwest/rustls-tls"]
+reqwest_rustls_tls = ["reqwest/rustls"]
 reqwest_native_tls = ["reqwest/native-tls"]
-reqwest_native_tls_alpn = ["reqwest/native-tls-alpn"]
+reqwest_native_tls_alpn = ["reqwest/native-tls"]
 reqwest_native_tls_vendored = ["reqwest/native-tls-vendored"]
-reqwest_native_tls_manual_roots = ["reqwest/rustls-tls-manual-roots"]
-reqwest_native_tls_webpki_roots = ["reqwest/rustls-tls-webpki-roots"]
-reqwest_native_tls_native_roots = ["reqwest/rustls-tls-native-roots"]
+reqwest_native_tls_manual_roots = ["reqwest/rustls"]
+reqwest_native_tls_webpki_roots = ["reqwest/rustls"]
+reqwest_native_tls_native_roots = ["reqwest/rustls"]
 reqwest_hickory_dns = ["reqwest/hickory-dns"]
 reqwest_multipart = ["reqwest/multipart"]
 tokio_io_std = ["tokio/io-std"]

@@ -1528,7 +1528,9 @@ pub async fn put_hybrid_cache(
                 http_cache_reqwest::HttpResponse {
                     url: http_response.url,
                     body: http_response.body,
-                    headers: http_response.headers,
+                    headers: http_cache::HttpHeaders::Modern(
+                        http_response.headers.iter().map(|(k, v)| (k.clone(), vec![v.clone()])).collect()
+                    ),
                     version: match http_response.version {
                         HttpVersion::H2 => http_cache::HttpVersion::H2,
                         HttpVersion::Http10 => http_cache::HttpVersion::Http10,
@@ -1537,6 +1539,7 @@ pub async fn put_hybrid_cache(
                         HttpVersion::Http11 => http_cache::HttpVersion::Http11,
                     },
                     status: http_response.status,
+                    metadata: None,
                 },
                 policy,
             )
@@ -4798,14 +4801,17 @@ pub async fn get_cached_url_base(
     if let Ok(cache_result) = result {
         if let Ok(Some((http_response, stored_policy))) = cache_result {
             if allow_stale || !stored_policy.is_stale(now) {
+                let http_cache::HttpHeaders::Modern(ref hdrs) = http_response.headers;
                 return decode_cached_html_bytes(
                     &http_response.body,
-                    http_response.headers.get("accept-language").and_then(|h| {
-                        if h.is_empty() {
-                            None
-                        } else {
-                            Some(h.as_str())
-                        }
+                    hdrs.get("accept-language").and_then(|vals| {
+                        vals.first().and_then(|h| {
+                            if h.is_empty() {
+                                None
+                            } else {
+                                Some(h.as_str())
+                            }
+                        })
                     }),
                 );
             }
