@@ -613,6 +613,47 @@ impl RemoteMultimodalEngine {
             .find(|ep| super::supports_vision(&ep.model_name))
     }
 
+    /// Pick a fallback model from the pool, excluding already-tried models.
+    ///
+    /// Used by `infer_plan_with_retry` when a retryable error (502, 503, 429,
+    /// timeout) occurs and the pool has alternative endpoints to try.
+    /// Returns `(api_url, model_name, api_key)` or `None` if all pool models
+    /// have been tried.
+    pub fn pick_fallback_model(
+        &self,
+        tried: &[String],
+        use_vision: bool,
+    ) -> Option<(String, String, Option<String>)> {
+        // Prefer vision-capable models when vision is needed, but accept any untried model
+        let mut candidates: Vec<_> = self
+            .model_pool
+            .iter()
+            .filter(|ep| !tried.iter().any(|t| t == &ep.model_name))
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        // Sort vision-capable models first when vision is needed
+        if use_vision {
+            candidates.sort_by_key(|ep| if super::supports_vision(&ep.model_name) { 0 } else { 1 });
+        }
+
+        let ep = candidates.first()?;
+        let url = ep
+            .api_url
+            .as_deref()
+            .unwrap_or(&self.api_url)
+            .to_string();
+        let key = ep
+            .api_key
+            .as_deref()
+            .or(self.api_key.as_deref())
+            .map(|s| s.to_string());
+        Some((url, ep.model_name.clone(), key))
+    }
+
     /// Decide whether to use vision this round.
     pub fn should_use_vision_this_round(
         &self,
@@ -860,9 +901,10 @@ impl RemoteMultimodalEngine {
         );
 
         if !status.is_success() {
-            return Err(EngineError::Remote(format!(
-                "non-success status {status}: {raw_body}"
-            )));
+            return Err(EngineError::RemoteStatus(
+                status.as_u16(),
+                format!("non-success status {status}: {raw_body}"),
+            ));
         }
 
         let root: serde_json::Value = serde_json::from_str(&raw_body)
@@ -1213,9 +1255,10 @@ impl RemoteMultimodalEngine {
         );
 
         if !status.is_success() {
-            return Err(EngineError::Remote(format!(
-                "non-success status {status}: {raw_body}"
-            )));
+            return Err(EngineError::RemoteStatus(
+                status.as_u16(),
+                format!("non-success status {status}: {raw_body}"),
+            ));
         }
 
         let root: serde_json::Value = serde_json::from_str(&raw_body)
@@ -1432,9 +1475,10 @@ impl RemoteMultimodalEngine {
         let raw_body = http_resp.text().await?;
 
         if !status.is_success() {
-            return Err(EngineError::Remote(format!(
-                "non-success status {status}: {raw_body}"
-            )));
+            return Err(EngineError::RemoteStatus(
+                status.as_u16(),
+                format!("non-success status {status}: {raw_body}"),
+            ));
         }
 
         let root: serde_json::Value = serde_json::from_str(&raw_body)
@@ -2203,5 +2247,97 @@ mod tests {
             assert_eq!(url, "https://api.example.com");
             assert_eq!(key, Some("sk-parent"));
         }
+    }
+
+    #[test]
+    fn test_pick_fallback_model_skips_tried() {
+        let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
+        engine.api_key = Some("sk-test".to_string());
+        engine.model_pool = vec![
+            crate::automation::ModelEndpoint::new("gpt-4o"),
+            crate::automation::ModelEndpoint::new("claude-sonnet-4-20250514")
+                .with_api_url("https://api.anthropic.com/v1/messages")
+                .with_api_key("sk-ant"),
+            crate::automation::ModelEndpoint::new("gpt-4o-mini"),
+        ];
+
+        // First fallback should skip gpt-4o (already tried)
+        let tried = vec!["gpt-4o".to_string()];
+        let fallback = engine.pick_fallback_model(&tried, false);
+        assert!(fallback.is_some());
+        let (_, model, _) = fallback.unwrap();
+        assert_ne!(model, "gpt-4o", "should not re-pick already-tried model");
+
+        // After trying all models, should return None
+        let tried_all = vec![
+            "gpt-4o".to_string(),
+            "claude-sonnet-4-20250514".to_string(),
+            "gpt-4o-mini".to_string(),
+        ];
+        assert!(engine.pick_fallback_model(&tried_all, false).is_none());
+    }
+
+    #[test]
+    fn test_pick_fallback_model_prefers_vision_when_needed() {
+        let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "deepseek-chat", None);
+        engine.model_pool = vec![
+            crate::automation::ModelEndpoint::new("deepseek-chat"),
+            crate::automation::ModelEndpoint::new("gpt-4o-mini"),
+            crate::automation::ModelEndpoint::new("gpt-4o"),
+        ];
+
+        let tried = vec!["deepseek-chat".to_string()];
+        let fallback = engine.pick_fallback_model(&tried, true);
+        assert!(fallback.is_some());
+        let (_, model, _) = fallback.unwrap();
+        // Should prefer a vision-capable model
+        assert!(
+            llm_models_spider::supports_vision(&model),
+            "should pick vision-capable model for vision round, got {model}"
+        );
+    }
+
+    #[test]
+    fn test_pick_fallback_model_inherits_endpoint_config() {
+        let mut engine = RemoteMultimodalEngine::new("https://api.default.com", "model-a", None);
+        engine.api_key = Some("sk-default".to_string());
+        engine.model_pool = vec![
+            crate::automation::ModelEndpoint::new("model-a"),
+            crate::automation::ModelEndpoint::new("model-b")
+                .with_api_url("https://api.custom.com")
+                .with_api_key("sk-custom"),
+        ];
+
+        let tried = vec!["model-a".to_string()];
+        let fallback = engine.pick_fallback_model(&tried, false);
+        let (url, model, key) = fallback.unwrap();
+        assert_eq!(model, "model-b");
+        assert_eq!(url, "https://api.custom.com");
+        assert_eq!(key, Some("sk-custom".to_string()));
+    }
+
+    #[test]
+    fn test_pick_fallback_model_empty_pool() {
+        let engine = RemoteMultimodalEngine::new("https://api.example.com", "gpt-4o", None);
+        // model_pool is empty by default
+        assert!(engine.pick_fallback_model(&[], false).is_none());
+    }
+
+    #[test]
+    fn test_engine_error_retryable_status_codes() {
+        use crate::automation::EngineError;
+        assert!(EngineError::RemoteStatus(502, "bad gateway".into()).is_retryable_on_different_model());
+        assert!(EngineError::RemoteStatus(503, "unavailable".into()).is_retryable_on_different_model());
+        assert!(EngineError::RemoteStatus(429, "rate limit".into()).is_retryable_on_different_model());
+        assert!(EngineError::RemoteStatus(500, "internal".into()).is_retryable_on_different_model());
+        assert!(EngineError::RemoteStatus(504, "timeout".into()).is_retryable_on_different_model());
+        // 4xx client errors should NOT be retryable on a different model
+        assert!(!EngineError::RemoteStatus(400, "bad request".into()).is_retryable_on_different_model());
+        assert!(!EngineError::RemoteStatus(401, "unauthorized".into()).is_retryable_on_different_model());
+        assert!(!EngineError::RemoteStatus(403, "forbidden".into()).is_retryable_on_different_model());
+        assert!(!EngineError::RemoteStatus(404, "not found".into()).is_retryable_on_different_model());
+        // Parse/field errors should NOT be retryable
+        assert!(!EngineError::MissingField("test").is_retryable_on_different_model());
+        assert!(!EngineError::InvalidField("test").is_retryable_on_different_model());
     }
 }

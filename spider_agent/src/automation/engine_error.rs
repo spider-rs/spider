@@ -34,6 +34,11 @@ pub enum EngineError {
     ///
     /// The contained string should be a human-readable explanation suitable for logs.
     Remote(String),
+    /// The remote endpoint returned a non-success HTTP status with a known status code.
+    ///
+    /// Carries the numeric status code (e.g. 502, 429) so retry logic can
+    /// distinguish transient/retryable errors from permanent ones.
+    RemoteStatus(u16, String),
     /// The operation is not supported in the current build configuration.
     ///
     /// Example: calling browser automation without the `chrome` feature.
@@ -48,12 +53,32 @@ impl fmt::Display for EngineError {
             EngineError::MissingField(s) => write!(f, "missing field: {s}"),
             EngineError::InvalidField(s) => write!(f, "invalid field: {s}"),
             EngineError::Remote(s) => write!(f, "remote error: {s}"),
+            EngineError::RemoteStatus(code, s) => write!(f, "remote error {code}: {s}"),
             EngineError::Unsupported(s) => write!(f, "unsupported: {s}"),
         }
     }
 }
 
 impl StdError for EngineError {}
+
+impl EngineError {
+    /// Whether this error is transient and warrants retrying on a different model.
+    ///
+    /// Returns `true` for server errors (500, 502, 503), rate limits (429),
+    /// and transport-level failures (timeouts, connection resets).
+    pub fn is_retryable_on_different_model(&self) -> bool {
+        match self {
+            EngineError::RemoteStatus(code, _) => matches!(code, 429 | 500 | 502 | 503 | 504),
+            EngineError::Http(e) => e.is_timeout() || e.is_connect() || e.is_request(),
+            // Legacy Remote — check if message contains status hint
+            EngineError::Remote(msg) => {
+                msg.contains("502") || msg.contains("503") || msg.contains("429")
+                    || msg.contains("500") || msg.contains("504")
+            }
+            _ => false,
+        }
+    }
+}
 
 impl From<reqwest::Error> for EngineError {
     fn from(e: reqwest::Error) -> Self {

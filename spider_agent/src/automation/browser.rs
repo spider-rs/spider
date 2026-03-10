@@ -2188,8 +2188,39 @@ impl RemoteMultimodalEngine {
     ) -> EngineResult<AutomationPlan> {
         let max_attempts = effective_cfg.retry.max_attempts.max(1);
         let mut last_err = None;
+        // Track which models have been tried so we can rotate on retryable errors
+        let mut tried_models: Vec<String> = Vec::new();
 
         for attempt in 0..max_attempts {
+            // On retryable errors (502, 503, 429, timeout), try a different model from the pool
+            let model_override = if attempt > 0 && !self.model_pool.is_empty() {
+                if let Some(ref err) = last_err {
+                    if err.is_retryable_on_different_model() {
+                        self.pick_fallback_model(&tried_models, use_vision)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            if let Some((ref u, ref m, _)) = model_override {
+                log::warn!(
+                    "Attempt {}/{}: falling back to model {} at {} after retryable error",
+                    attempt + 1,
+                    max_attempts,
+                    m,
+                    u,
+                );
+            }
+
+            let override_refs = model_override
+                .as_ref()
+                .map(|(u, m, k)| (u.as_str(), m.as_str(), k.as_deref()));
+
             match self
                 .infer_plan_once(
                     effective_cfg,
@@ -2208,11 +2239,34 @@ impl RemoteMultimodalEngine {
                     base_system_prompt,
                     system_prompt_extra,
                     user_message_extra,
+                    override_refs,
                 )
                 .await
             {
                 Ok(plan) => return Ok(plan),
                 Err(e) => {
+                    // Record which model was attempted
+                    if let Some((_, ref m, _)) = model_override {
+                        if !tried_models.contains(m) {
+                            tried_models.push(m.clone());
+                        }
+                    } else if tried_models.is_empty() {
+                        // First attempt used the default model
+                        tried_models.push(self.model_name.clone());
+                    }
+
+                    log::warn!(
+                        "Attempt {}/{} failed: {}{}",
+                        attempt + 1,
+                        max_attempts,
+                        e,
+                        if e.is_retryable_on_different_model() && !self.model_pool.is_empty() {
+                            " (will try different model)"
+                        } else {
+                            ""
+                        }
+                    );
+
                     last_err = Some(e);
                     if attempt + 1 < max_attempts {
                         // Exponential backoff with capped power and max delay
@@ -2247,6 +2301,7 @@ impl RemoteMultimodalEngine {
         base_system_prompt: Option<&str>,
         system_prompt_extra: Option<&str>,
         user_message_extra: Option<&str>,
+        model_override: Option<(&str, &str, Option<&str>)>,
     ) -> EngineResult<AutomationPlan> {
         use super::{
             best_effort_parse_json_object, effective_thinking_payload, extract_assistant_content,
@@ -2437,15 +2492,21 @@ impl RemoteMultimodalEngine {
             ])
         };
 
-        // Resolve model endpoint for this round (pool routing with complexity, or dual-model fallback)
-        let (resolved_api_url, resolved_model, resolved_api_key) = self
-            .resolve_model_for_round_with_complexity(
-                use_vision,
-                &user_text,
-                html.len(),
-                round_idx,
-                stagnated,
-            );
+        // Resolve model endpoint — use override (from fallback retry) or standard routing
+        let owned_override: Option<(String, String, Option<String>)> =
+            model_override.map(|(u, m, k)| (u.to_string(), m.to_string(), k.map(|s| s.to_string())));
+        let (resolved_api_url, resolved_model, resolved_api_key): (&str, &str, Option<&str>) =
+            if let Some((ref u, ref m, ref k)) = owned_override {
+                (u.as_str(), m.as_str(), k.as_deref())
+            } else {
+                self.resolve_model_for_round_with_complexity(
+                    use_vision,
+                    &user_text,
+                    html.len(),
+                    round_idx,
+                    stagnated,
+                )
+            };
 
         let is_anthropic = is_anthropic_endpoint(resolved_api_url);
         let thinking_pl = if is_anthropic {
@@ -2559,11 +2620,15 @@ impl RemoteMultimodalEngine {
         let body: serde_json::Value = resp.json().await?;
 
         if !status.is_success() {
-            return Err(EngineError::Remote(format!(
-                "API error {}: {}",
-                status,
-                serde_json::to_string_pretty(&body).unwrap_or_default()
-            )));
+            return Err(EngineError::RemoteStatus(
+                status.as_u16(),
+                format!(
+                    "API error {} (model={}): {}",
+                    status,
+                    resolved_model,
+                    serde_json::to_string_pretty(&body).unwrap_or_default()
+                ),
+            ));
         }
 
         // Extract content and usage
@@ -4786,11 +4851,14 @@ Only return the JSON object."#;
         let body: serde_json::Value = resp.json().await?;
 
         if !status.is_success() {
-            return Err(EngineError::Remote(format!(
-                "API error {}: {}",
-                status,
-                serde_json::to_string_pretty(&body).unwrap_or_default()
-            )));
+            return Err(EngineError::RemoteStatus(
+                status.as_u16(),
+                format!(
+                    "API error {}: {}",
+                    status,
+                    serde_json::to_string_pretty(&body).unwrap_or_default()
+                ),
+            ));
         }
 
         let content = extract_assistant_content(&body)
