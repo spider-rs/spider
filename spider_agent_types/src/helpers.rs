@@ -6,38 +6,104 @@
 use crate::AutomationUsage;
 use serde_json::Value;
 
-/// Extract the assistant's text content from an OpenAI-compatible response.
+/// Extract the assistant's text content from an LLM API response.
 ///
-/// Handles various response formats:
-/// - Standard `choices[0].message.content` string
-/// - Array of content blocks with `text` or `content` fields
+/// Handles various response formats (tried in order):
+/// - OpenAI: `choices[0].message.content` string or array of content blocks
+/// - Anthropic Messages API: root-level `content` array with `type: "text"` blocks
 /// - `output_text` field (some providers)
 pub fn extract_assistant_content(root: &Value) -> Option<String> {
-    let choice0 = root.get("choices")?.as_array()?.first()?;
-    let msg = choice0.get("message").or_else(|| choice0.get("delta"))?;
-
-    if let Some(c) = msg.get("content") {
-        if let Some(s) = c.as_str() {
-            return Some(s.to_string());
-        }
-        if let Some(arr) = c.as_array() {
-            let mut out = String::new();
-            for block in arr {
-                if let Some(t) = block.get("text").and_then(|v| v.as_str()) {
-                    out.push_str(t);
-                } else if let Some(t) = block.get("content").and_then(|v| v.as_str()) {
-                    out.push_str(t);
+    // 1. OpenAI-compatible: choices[0].message.content
+    if let Some(choices) = root.get("choices").and_then(|v| v.as_array()) {
+        if let Some(choice0) = choices.first() {
+            let msg = choice0.get("message").or_else(|| choice0.get("delta"));
+            if let Some(msg) = msg {
+                if let Some(c) = msg.get("content") {
+                    if let Some(s) = c.as_str() {
+                        return Some(s.to_string());
+                    }
+                    if let Some(arr) = c.as_array() {
+                        let mut out = String::new();
+                        for block in arr {
+                            if let Some(t) = block.get("text").and_then(|v| v.as_str()) {
+                                out.push_str(t);
+                            } else if let Some(t) =
+                                block.get("content").and_then(|v| v.as_str())
+                            {
+                                out.push_str(t);
+                            }
+                        }
+                        if !out.is_empty() {
+                            return Some(out);
+                        }
+                    }
                 }
-            }
-            if !out.is_empty() {
-                return Some(out);
             }
         }
     }
 
+    // 2. Anthropic Messages API: root.content[] with type:"text"
+    if let Some(content_arr) = root.get("content").and_then(|v| v.as_array()) {
+        let mut out = String::new();
+        for block in content_arr {
+            if block.get("type").and_then(|v| v.as_str()) == Some("text") {
+                if let Some(t) = block.get("text").and_then(|v| v.as_str()) {
+                    out.push_str(t);
+                }
+            }
+        }
+        if !out.is_empty() {
+            return Some(out);
+        }
+    }
+
+    // 3. output_text fallback (some providers)
     root.get("output_text")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
+}
+
+/// Extract thinking/reasoning content from an LLM API response.
+///
+/// Handles:
+/// - Anthropic: root-level `content` array with `type: "thinking"` blocks
+/// - OpenAI: `choices[0].message.reasoning_content` field
+///
+/// Returns `None` if no thinking content is present.
+pub fn extract_thinking_content(root: &Value) -> Option<String> {
+    // Anthropic: content[] with type:"thinking"
+    if let Some(content_arr) = root.get("content").and_then(|v| v.as_array()) {
+        let mut out = String::new();
+        for block in content_arr {
+            if block.get("type").and_then(|v| v.as_str()) == Some("thinking") {
+                if let Some(t) = block.get("thinking").and_then(|v| v.as_str()) {
+                    if !out.is_empty() {
+                        out.push('\n');
+                    }
+                    out.push_str(t);
+                }
+            }
+        }
+        if !out.is_empty() {
+            return Some(out);
+        }
+    }
+
+    // OpenAI: choices[0].message.reasoning_content
+    if let Some(choices) = root.get("choices").and_then(|v| v.as_array()) {
+        if let Some(choice0) = choices.first() {
+            if let Some(msg) = choice0.get("message") {
+                if let Some(s) = msg.get("reasoning_content").and_then(|v| v.as_str()) {
+                    let trimmed = s.trim();
+                    if !trimmed.is_empty() {
+                        return Some(trimmed.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Extract token usage from an OpenAI-compatible response.
@@ -61,13 +127,17 @@ pub fn extract_usage(root: &Value) -> AutomationUsage {
         None => return AutomationUsage::with_api_calls(0, 0, 1),
     };
 
+    // OpenAI: prompt_tokens / completion_tokens
+    // Anthropic: input_tokens / output_tokens
     let prompt_tokens = usage
         .get("prompt_tokens")
+        .or_else(|| usage.get("input_tokens"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as u32;
 
     let completion_tokens = usage
         .get("completion_tokens")
+        .or_else(|| usage.get("output_tokens"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as u32;
 
@@ -302,5 +372,135 @@ mod tests {
 
         // Different input should produce different hash
         assert_ne!(fnv1a64(b"hello"), fnv1a64(b"world"));
+    }
+
+    // ── Anthropic Messages API format tests ──
+
+    #[test]
+    fn test_extract_assistant_content_anthropic() {
+        let resp = serde_json::json!({
+            "id": "msg_01",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": "Let me reason..."},
+                {"type": "text", "text": "{\"label\": \"test\"}"}
+            ]
+        });
+        let content = extract_assistant_content(&resp);
+        assert_eq!(content, Some("{\"label\": \"test\"}".to_string()));
+    }
+
+    #[test]
+    fn test_extract_assistant_content_anthropic_multi_text() {
+        let resp = serde_json::json!({
+            "content": [
+                {"type": "text", "text": "Hello "},
+                {"type": "text", "text": "world"}
+            ]
+        });
+        assert_eq!(
+            extract_assistant_content(&resp),
+            Some("Hello world".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_assistant_content_openai_still_works() {
+        let resp = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "hello world"
+                }
+            }]
+        });
+        assert_eq!(
+            extract_assistant_content(&resp),
+            Some("hello world".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_thinking_content_anthropic() {
+        let resp = serde_json::json!({
+            "content": [
+                {"type": "thinking", "thinking": "Step 1: analyze"},
+                {"type": "thinking", "thinking": "Step 2: decide"},
+                {"type": "text", "text": "{\"label\": \"done\"}"}
+            ]
+        });
+        let thinking = extract_thinking_content(&resp);
+        assert_eq!(
+            thinking,
+            Some("Step 1: analyze\nStep 2: decide".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_thinking_content_openai_reasoning() {
+        let resp = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "{\"done\": true}",
+                    "reasoning_content": "I need to think about this..."
+                }
+            }]
+        });
+        let thinking = extract_thinking_content(&resp);
+        assert_eq!(
+            thinking,
+            Some("I need to think about this...".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_thinking_content_none_when_absent() {
+        let resp = serde_json::json!({
+            "choices": [{
+                "message": { "content": "hello" }
+            }]
+        });
+        assert!(extract_thinking_content(&resp).is_none());
+    }
+
+    #[test]
+    fn test_extract_usage_anthropic() {
+        let resp = serde_json::json!({
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 50
+            }
+        });
+        let usage = extract_usage(&resp);
+        assert_eq!(usage.prompt_tokens, 100);
+        assert_eq!(usage.completion_tokens, 50);
+        assert_eq!(usage.api_calls, 1);
+    }
+
+    #[test]
+    fn test_extract_usage_openai_still_works() {
+        let resp = serde_json::json!({
+            "usage": {
+                "prompt_tokens": 200,
+                "completion_tokens": 75,
+                "total_tokens": 275
+            }
+        });
+        let usage = extract_usage(&resp);
+        assert_eq!(usage.prompt_tokens, 200);
+        assert_eq!(usage.completion_tokens, 75);
+    }
+
+    #[test]
+    fn test_extract_assistant_content_prefers_openai_over_anthropic() {
+        // If both formats are present (unlikely but tests priority)
+        let resp = serde_json::json!({
+            "choices": [{"message": {"content": "openai"}}],
+            "content": [{"type": "text", "text": "anthropic"}]
+        });
+        assert_eq!(
+            extract_assistant_content(&resp),
+            Some("openai".to_string())
+        );
     }
 }

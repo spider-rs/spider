@@ -117,6 +117,22 @@ impl ToolCall {
         })
     }
 
+    /// Parse from Anthropic `tool_use` content block.
+    ///
+    /// Anthropic format: `{type: "tool_use", id: "...", name: "...", input: {...}}`
+    /// The `input` field is a JSON object (not a string), so we serialize it.
+    pub fn from_anthropic_json(value: &Value) -> Option<Self> {
+        let id = value.get("id")?.as_str()?.to_string();
+        let name = value.get("name")?.as_str()?.to_string();
+        let input = value.get("input")?;
+        let arguments = serde_json::to_string(input).ok()?;
+        Some(Self {
+            id,
+            call_type: "function".to_string(),
+            function: FunctionCall { name, arguments },
+        })
+    }
+
     /// Convert to automation action Value.
     pub fn to_action(&self) -> Value {
         // Convert function call to enum-style action
@@ -858,24 +874,37 @@ impl ActionToolSchemas {
     }
 }
 
-/// Parse tool calls from an OpenAI-compatible response.
+/// Parse tool calls from an LLM API response.
+///
+/// Tries OpenAI format first (`choices[0].message.tool_calls`), then falls
+/// back to Anthropic format (root `content[]` with `type: "tool_use"` blocks).
 pub fn parse_tool_calls(response: &Value) -> Vec<ToolCall> {
-    let choices = match response.get("choices").and_then(|v| v.as_array()) {
-        Some(c) => c,
-        None => return Vec::new(),
-    };
+    // OpenAI: choices[0].message.tool_calls
+    if let Some(choices) = response.get("choices").and_then(|v| v.as_array()) {
+        if let Some(message) = choices.first().and_then(|c| c.get("message")) {
+            if let Some(tool_calls) = message.get("tool_calls").and_then(|v| v.as_array()) {
+                let calls: Vec<ToolCall> =
+                    tool_calls.iter().filter_map(ToolCall::from_json).collect();
+                if !calls.is_empty() {
+                    return calls;
+                }
+            }
+        }
+    }
 
-    let message = match choices.first().and_then(|c| c.get("message")) {
-        Some(m) => m,
-        None => return Vec::new(),
-    };
+    // Anthropic: content[] with type:"tool_use"
+    if let Some(content_arr) = response.get("content").and_then(|v| v.as_array()) {
+        let calls: Vec<ToolCall> = content_arr
+            .iter()
+            .filter(|block| block.get("type").and_then(|v| v.as_str()) == Some("tool_use"))
+            .filter_map(ToolCall::from_anthropic_json)
+            .collect();
+        if !calls.is_empty() {
+            return calls;
+        }
+    }
 
-    let tool_calls = match message.get("tool_calls").and_then(|v| v.as_array()) {
-        Some(tc) => tc,
-        None => return Vec::new(),
-    };
-
-    tool_calls.iter().filter_map(ToolCall::from_json).collect()
+    Vec::new()
 }
 
 /// Convert tool calls to automation step actions.
@@ -1001,5 +1030,75 @@ mod tests {
         let common = ActionToolSchemas::common();
         assert!(common.len() < ActionToolSchemas::all().len());
         assert!(common.len() >= 5); // Should have at least the basics
+    }
+
+    #[test]
+    fn test_parse_tool_calls_anthropic() {
+        let response = json!({
+            "id": "msg_01",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "I'll click that for you."},
+                {
+                    "type": "tool_use",
+                    "id": "toolu_abc123",
+                    "name": "Click",
+                    "input": {"selector": "button.submit"}
+                }
+            ]
+        });
+
+        let calls = parse_tool_calls(&response);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "toolu_abc123");
+        assert_eq!(calls[0].function.name, "Click");
+        assert_eq!(calls[0].call_type, "function");
+
+        // Arguments should be a JSON string of the input object
+        let args: Value = serde_json::from_str(&calls[0].function.arguments).unwrap();
+        assert_eq!(args["selector"], "button.submit");
+    }
+
+    #[test]
+    fn test_parse_tool_calls_anthropic_multiple() {
+        let response = json!({
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "Click",
+                    "input": {"selector": "#btn1"}
+                },
+                {
+                    "type": "tool_use",
+                    "id": "toolu_2",
+                    "name": "Fill",
+                    "input": {"selector": "#input", "value": "hello"}
+                }
+            ]
+        });
+
+        let calls = parse_tool_calls(&response);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].function.name, "Click");
+        assert_eq!(calls[1].function.name, "Fill");
+    }
+
+    #[test]
+    fn test_parse_tool_calls_prefers_openai() {
+        // If both formats somehow present, OpenAI takes priority
+        let response = json!({
+            "choices": [{"message": {"tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "Click", "arguments": "{\"selector\": \"a\"}"}
+            }]}}],
+            "content": [{"type": "tool_use", "id": "toolu_2", "name": "Fill", "input": {}}]
+        });
+
+        let calls = parse_tool_calls(&response);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function.name, "Click");
     }
 }

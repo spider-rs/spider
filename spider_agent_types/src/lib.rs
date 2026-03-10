@@ -71,8 +71,9 @@ pub use confidence::{
 
 // Re-export config types
 pub use config::{
-    arena_rank, is_url_allowed, merged_config, model_profile, reasoning_payload, supports_pdf,
-    supports_video, supports_vision, AutomationConfig, CaptureProfile, CleaningIntent,
+    arena_rank, effective_thinking_budget, effective_thinking_payload, is_anthropic_endpoint,
+    is_url_allowed, merged_config, model_profile, reasoning_payload, supports_pdf, supports_video,
+    supports_vision, thinking_payload, AutomationConfig, CaptureProfile, CleaningIntent,
     ClipViewport, CostTier, HtmlCleaningProfile, ModelCapabilities, ModelEndpoint, ModelInfoEntry,
     ModelPolicy, ModelPricing, ModelProfile, ModelRanks, ReasoningEffort, RecoveryStrategy,
     RemoteMultimodalConfig, RetryPolicy, VisionRouteMode, MODEL_INFO,
@@ -84,8 +85,8 @@ pub use content::ContentAnalysis;
 // Re-export helpers
 pub use helpers::{
     extract_assistant_content, extract_last_code_block, extract_last_json_array,
-    extract_last_json_boundaries, extract_last_json_object, extract_usage, fnv1a64,
-    truncate_utf8_tail,
+    extract_last_json_boundaries, extract_last_json_object, extract_thinking_content,
+    extract_usage, fnv1a64, truncate_utf8_tail,
 };
 
 // Re-export HTML diff types

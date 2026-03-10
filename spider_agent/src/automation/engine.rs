@@ -9,7 +9,8 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 
 use super::{
-    best_effort_parse_json_object, extract_assistant_content, extract_usage, reasoning_payload,
+    best_effort_parse_json_object, effective_thinking_payload, extract_assistant_content,
+    extract_thinking_content, extract_usage, is_anthropic_endpoint, reasoning_payload,
     truncate_utf8_tail, AutomationResult, AutomationUsage, ContentAnalysis, EngineError,
     EngineResult, ExtractionSchema, PromptUrlGate, RemoteMultimodalConfig, DEFAULT_SYSTEM_PROMPT,
     EXTRACTION_ONLY_SYSTEM_PROMPT,
@@ -680,13 +681,19 @@ impl RemoteMultimodalEngine {
         struct InferenceRequest {
             model: String,
             messages: Vec<Message>,
-            temperature: f32,
-            max_tokens: u16,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            temperature: Option<f32>,
+            max_tokens: u32,
             #[serde(skip_serializing_if = "Option::is_none")]
             #[serde(rename = "response_format")]
             response_format: Option<ResponseFormat>,
             #[serde(skip_serializing_if = "Option::is_none")]
             reasoning: Option<serde_json::Value>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            thinking: Option<serde_json::Value>,
+            /// Anthropic top-level system prompt (outside messages array).
+            #[serde(skip_serializing_if = "Option::is_none")]
+            system: Option<String>,
         }
 
         let Some((
@@ -713,6 +720,8 @@ impl RemoteMultimodalEngine {
         let mut prompt_engine = self.clone();
         prompt_engine.system_prompt = effective_system_prompt;
         prompt_engine.system_prompt_extra = effective_system_prompt_extra;
+
+        let is_anthropic = is_anthropic_endpoint(&self.api_url);
 
         // Build user prompt with HTML context
         let mut user_text =
@@ -753,14 +762,34 @@ impl RemoteMultimodalEngine {
             }
         }
 
-        let request_body = InferenceRequest {
-            model: self.model_name.clone(),
-            messages: vec![
+        let system_text = prompt_engine.system_prompt_compiled(&effective_cfg);
+
+        // Anthropic: system as top-level field, thinking instead of reasoning,
+        // no response_format, max_tokens includes thinking budget.
+        // Temperature is omitted when thinking is enabled (Anthropic requires it).
+        let thinking_pl = if is_anthropic {
+            effective_thinking_payload(&effective_cfg)
+        } else {
+            None
+        };
+        let has_thinking = thinking_pl.is_some();
+
+        let messages = if is_anthropic {
+            // Anthropic: no system role in messages
+            vec![Message {
+                role: "user".into(),
+                content: vec![ContentBlock {
+                    content_type: "text".into(),
+                    text: Some(user_text),
+                }],
+            }]
+        } else {
+            vec![
                 Message {
                     role: "system".into(),
                     content: vec![ContentBlock {
                         content_type: "text".into(),
-                        text: Some(prompt_engine.system_prompt_compiled(&effective_cfg)),
+                        text: Some(system_text.clone()),
                     }],
                 },
                 Message {
@@ -770,17 +799,44 @@ impl RemoteMultimodalEngine {
                         text: Some(user_text),
                     }],
                 },
-            ],
-            temperature: effective_cfg.temperature,
-            max_tokens: effective_cfg.max_tokens,
-            response_format: if effective_cfg.request_json_object {
+            ]
+        };
+
+        let max_tokens = if let Some(budget) = thinking_pl
+            .as_ref()
+            .and_then(|v| v.get("budget_tokens"))
+            .and_then(|v| v.as_u64())
+        {
+            effective_cfg.max_tokens as u32 + budget as u32
+        } else {
+            effective_cfg.max_tokens as u32
+        };
+
+        let request_body = InferenceRequest {
+            model: self.model_name.clone(),
+            messages,
+            temperature: if has_thinking { None } else { Some(effective_cfg.temperature) },
+            max_tokens,
+            response_format: if is_anthropic || has_thinking {
+                None
+            } else if effective_cfg.request_json_object {
                 Some(ResponseFormat {
                     format_type: "json_object".into(),
                 })
             } else {
                 None
             },
-            reasoning: reasoning_payload(&effective_cfg),
+            reasoning: if is_anthropic {
+                None
+            } else {
+                reasoning_payload(&effective_cfg)
+            },
+            thinking: thinking_pl,
+            system: if is_anthropic {
+                Some(system_text)
+            } else {
+                None
+            },
         };
 
         // Acquire permit before sending
@@ -813,7 +869,7 @@ impl RemoteMultimodalEngine {
             .map_err(|e| EngineError::Remote(format!("JSON parse error: {e}")))?;
 
         let content = extract_assistant_content(&root)
-            .ok_or(EngineError::MissingField("choices[0].message.content"))?;
+            .ok_or(EngineError::MissingField("assistant content"))?;
 
         let usage = extract_usage(&root);
 
@@ -841,20 +897,25 @@ impl RemoteMultimodalEngine {
         } else {
             None
         };
-        let reasoning = plan_value.get("reasoning").and_then(|v| {
-            if let Some(s) = v.as_str() {
-                let trimmed = s.trim();
-                return if trimmed.is_empty() {
+
+        // Reasoning: prefer API-level thinking content (Anthropic/OpenAI thinking blocks),
+        // fall back to JSON-level "reasoning" field from the model's response.
+        let reasoning = extract_thinking_content(&root).or_else(|| {
+            plan_value.get("reasoning").and_then(|v| {
+                if let Some(s) = v.as_str() {
+                    let trimmed = s.trim();
+                    return if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    };
+                }
+                if v.is_null() {
                     None
                 } else {
-                    Some(trimmed.to_string())
-                };
-            }
-            if v.is_null() {
-                None
-            } else {
-                Some(v.to_string())
-            }
+                    Some(v.to_string())
+                }
+            })
         });
 
         // Try to get extracted field, or fallback to the entire response
@@ -959,12 +1020,17 @@ impl RemoteMultimodalEngine {
         struct InferenceRequest {
             model: String,
             messages: Vec<Message>,
-            temperature: f32,
-            max_tokens: u16,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            temperature: Option<f32>,
+            max_tokens: u32,
             #[serde(skip_serializing_if = "Option::is_none")]
             response_format: Option<ResponseFormat>,
             #[serde(skip_serializing_if = "Option::is_none")]
             reasoning: Option<serde_json::Value>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            thinking: Option<serde_json::Value>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            system: Option<String>,
         }
 
         let Some((
@@ -991,6 +1057,8 @@ impl RemoteMultimodalEngine {
         let mut prompt_engine = self.clone();
         prompt_engine.system_prompt = effective_system_prompt;
         prompt_engine.system_prompt_extra = effective_system_prompt_extra;
+
+        let is_anthropic = is_anthropic_endpoint(&self.api_url);
 
         // Build user prompt with HTML context
         let mut user_text =
@@ -1058,14 +1126,26 @@ impl RemoteMultimodalEngine {
             });
         }
 
-        let request_body = InferenceRequest {
-            model: self.model_name.clone(),
-            messages: vec![
+        let system_text = prompt_engine.system_prompt_compiled(&effective_cfg);
+        let thinking_pl = if is_anthropic {
+            effective_thinking_payload(&effective_cfg)
+        } else {
+            None
+        };
+        let has_thinking = thinking_pl.is_some();
+
+        let messages = if is_anthropic {
+            vec![Message {
+                role: "user".into(),
+                content: user_content,
+            }]
+        } else {
+            vec![
                 Message {
                     role: "system".into(),
                     content: vec![ContentBlock {
                         content_type: "text".into(),
-                        text: Some(prompt_engine.system_prompt_compiled(&effective_cfg)),
+                        text: Some(system_text.clone()),
                         image_url: None,
                     }],
                 },
@@ -1073,17 +1153,44 @@ impl RemoteMultimodalEngine {
                     role: "user".into(),
                     content: user_content,
                 },
-            ],
-            temperature: effective_cfg.temperature,
-            max_tokens: effective_cfg.max_tokens,
-            response_format: if effective_cfg.request_json_object {
+            ]
+        };
+
+        let max_tokens = if let Some(budget) = thinking_pl
+            .as_ref()
+            .and_then(|v| v.get("budget_tokens"))
+            .and_then(|v| v.as_u64())
+        {
+            effective_cfg.max_tokens as u32 + budget as u32
+        } else {
+            effective_cfg.max_tokens as u32
+        };
+
+        let request_body = InferenceRequest {
+            model: self.model_name.clone(),
+            messages,
+            temperature: if has_thinking { None } else { Some(effective_cfg.temperature) },
+            max_tokens,
+            response_format: if is_anthropic || has_thinking {
+                None
+            } else if effective_cfg.request_json_object {
                 Some(ResponseFormat {
                     format_type: "json_object".into(),
                 })
             } else {
                 None
             },
-            reasoning: reasoning_payload(&effective_cfg),
+            reasoning: if is_anthropic {
+                None
+            } else {
+                reasoning_payload(&effective_cfg)
+            },
+            thinking: thinking_pl,
+            system: if is_anthropic {
+                Some(system_text)
+            } else {
+                None
+            },
         };
 
         let _permit = self.acquire_llm_permit().await;
@@ -1115,7 +1222,7 @@ impl RemoteMultimodalEngine {
             .map_err(|e| EngineError::Remote(format!("JSON parse error: {e}")))?;
 
         let content = extract_assistant_content(&root)
-            .ok_or(EngineError::MissingField("choices[0].message.content"))?;
+            .ok_or(EngineError::MissingField("assistant content"))?;
 
         let usage = extract_usage(&root);
 
@@ -1143,20 +1250,24 @@ impl RemoteMultimodalEngine {
         } else {
             None
         };
-        let reasoning = plan_value.get("reasoning").and_then(|v| {
-            if let Some(s) = v.as_str() {
-                let trimmed = s.trim();
-                return if trimmed.is_empty() {
+
+        // Reasoning: prefer API-level thinking content, fall back to JSON field
+        let reasoning = extract_thinking_content(&root).or_else(|| {
+            plan_value.get("reasoning").and_then(|v| {
+                if let Some(s) = v.as_str() {
+                    let trimmed = s.trim();
+                    return if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    };
+                }
+                if v.is_null() {
                     None
                 } else {
-                    Some(trimmed.to_string())
-                };
-            }
-            if v.is_null() {
-                None
-            } else {
-                Some(v.to_string())
-            }
+                    Some(v.to_string())
+                }
+            })
         });
 
         // Try to get extracted field, or fallback to the entire response
@@ -1233,17 +1344,34 @@ impl RemoteMultimodalEngine {
         struct InferenceRequest {
             model: String,
             messages: Vec<Message>,
-            temperature: f32,
-            max_tokens: u16,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            temperature: Option<f32>,
+            max_tokens: u32,
             #[serde(skip_serializing_if = "Option::is_none")]
             response_format: Option<ResponseFormat>,
             #[serde(skip_serializing_if = "Option::is_none")]
             reasoning: Option<serde_json::Value>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            thinking: Option<serde_json::Value>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            system: Option<String>,
         }
 
-        let request_body = InferenceRequest {
-            model: self.model_name.clone(),
-            messages: vec![
+        let is_anthropic = is_anthropic_endpoint(&self.api_url);
+        let thinking_pl = if is_anthropic {
+            effective_thinking_payload(&self.cfg)
+        } else {
+            None
+        };
+        let has_thinking = thinking_pl.is_some();
+
+        let messages = if is_anthropic {
+            vec![Message {
+                role: "user".into(),
+                content: user_message.to_string(),
+            }]
+        } else {
+            vec![
                 Message {
                     role: "system".into(),
                     content: system_prompt.to_string(),
@@ -1252,17 +1380,44 @@ impl RemoteMultimodalEngine {
                     role: "user".into(),
                     content: user_message.to_string(),
                 },
-            ],
-            temperature: self.cfg.temperature,
-            max_tokens: self.cfg.max_tokens,
-            response_format: if self.cfg.request_json_object {
+            ]
+        };
+
+        let max_tokens = if let Some(budget) = thinking_pl
+            .as_ref()
+            .and_then(|v| v.get("budget_tokens"))
+            .and_then(|v| v.as_u64())
+        {
+            self.cfg.max_tokens as u32 + budget as u32
+        } else {
+            self.cfg.max_tokens as u32
+        };
+
+        let request_body = InferenceRequest {
+            model: self.model_name.clone(),
+            messages,
+            temperature: if has_thinking { None } else { Some(self.cfg.temperature) },
+            max_tokens,
+            response_format: if is_anthropic || has_thinking {
+                None
+            } else if self.cfg.request_json_object {
                 Some(ResponseFormat {
                     format_type: "json_object".into(),
                 })
             } else {
                 None
             },
-            reasoning: reasoning_payload(&self.cfg),
+            reasoning: if is_anthropic {
+                None
+            } else {
+                reasoning_payload(&self.cfg)
+            },
+            thinking: thinking_pl,
+            system: if is_anthropic {
+                Some(system_prompt.to_string())
+            } else {
+                None
+            },
         };
 
         let _permit = self.acquire_llm_permit().await;
@@ -1286,7 +1441,7 @@ impl RemoteMultimodalEngine {
             .map_err(|e| EngineError::Remote(format!("JSON parse error: {e}")))?;
 
         let content = extract_assistant_content(&root)
-            .ok_or(EngineError::MissingField("choices[0].message.content"))?;
+            .ok_or(EngineError::MissingField("assistant content"))?;
 
         let usage = extract_usage(&root);
 
@@ -1328,6 +1483,7 @@ impl RemoteMultimodalEngine {
 
         // Use the text model endpoint (cheap/fast)
         let (api_url, model_name, api_key) = self.resolve_model_for_round(false);
+        let is_anthropic = is_anthropic_endpoint(api_url);
 
         #[derive(Serialize)]
         struct Message {
@@ -1338,27 +1494,68 @@ impl RemoteMultimodalEngine {
         struct InferenceRequest {
             model: String,
             messages: Vec<Message>,
-            temperature: f32,
-            max_tokens: u16,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            temperature: Option<f32>,
+            max_tokens: u32,
             #[serde(skip_serializing_if = "Option::is_none")]
             reasoning: Option<serde_json::Value>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            thinking: Option<serde_json::Value>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            system: Option<String>,
         }
 
-        let request_body = InferenceRequest {
-            model: model_name.to_string(),
-            messages: vec![
+        let thinking_pl = if is_anthropic {
+            effective_thinking_payload(&self.cfg)
+        } else {
+            None
+        };
+        let has_thinking = thinking_pl.is_some();
+
+        let classify_max_tokens = if let Some(budget) = thinking_pl
+            .as_ref()
+            .and_then(|v| v.get("budget_tokens"))
+            .and_then(|v| v.as_u64())
+        {
+            max_tokens as u32 + budget as u32
+        } else {
+            max_tokens as u32
+        };
+
+        let messages = if is_anthropic {
+            vec![Message {
+                role: "user".into(),
+                content: user_msg,
+            }]
+        } else {
+            vec![
                 Message {
                     role: "system".into(),
-                    content: system,
+                    content: system.clone(),
                 },
                 Message {
                     role: "user".into(),
                     content: user_msg,
                 },
-            ],
-            temperature: 0.0,
-            max_tokens,
-            reasoning: reasoning_payload(&self.cfg),
+            ]
+        };
+
+        let request_body = InferenceRequest {
+            model: model_name.to_string(),
+            messages,
+            temperature: if has_thinking { None } else { Some(0.0) },
+            max_tokens: classify_max_tokens,
+            reasoning: if is_anthropic {
+                None
+            } else {
+                reasoning_payload(&self.cfg)
+            },
+            thinking: thinking_pl,
+            system: if is_anthropic {
+                Some(system)
+            } else {
+                None
+            },
         };
 
         let _permit = self.acquire_llm_permit().await;

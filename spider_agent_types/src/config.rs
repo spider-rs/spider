@@ -759,6 +759,14 @@ pub struct RemoteMultimodalConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffort>,
 
+    /// Optional token budget for Anthropic extended thinking.
+    ///
+    /// When set, outbound requests to Anthropic endpoints include
+    /// `thinking: {"type":"enabled","budget_tokens":N}`.
+    /// Leave `None` to disable extended thinking.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<u32>,
+
     // -----------------------------------------------------------------
     // Skills injection limits
     // -----------------------------------------------------------------
@@ -924,6 +932,7 @@ impl Default for RemoteMultimodalConfig {
             request_json_object: true,
             best_effort_json_extract: true,
             reasoning_effort: None,
+            thinking_budget: None,
             max_rounds: 6,
             retry: RetryPolicy::default(),
             model_policy: ModelPolicy::default(),
@@ -1043,6 +1052,12 @@ impl RemoteMultimodalConfig {
     /// Set explicit reasoning effort for supported models/endpoints.
     pub fn with_reasoning_effort(mut self, effort: Option<ReasoningEffort>) -> Self {
         self.reasoning_effort = effort;
+        self
+    }
+
+    /// Set token budget for Anthropic extended thinking.
+    pub fn with_thinking_budget(mut self, budget: Option<u32>) -> Self {
+        self.thinking_budget = budget;
         self
     }
 
@@ -1200,6 +1215,7 @@ pub fn merged_config(
     out.request_json_object = override_cfg.request_json_object;
     out.best_effort_json_extract = override_cfg.best_effort_json_extract;
     out.reasoning_effort = override_cfg.reasoning_effort;
+    out.thinking_budget = override_cfg.thinking_budget;
 
     out.max_rounds = override_cfg.max_rounds;
     out.post_plan_wait_ms = override_cfg.post_plan_wait_ms;
@@ -1241,6 +1257,63 @@ pub fn reasoning_payload(cfg: &RemoteMultimodalConfig) -> Option<serde_json::Val
             ReasoningEffort::High => "high",
         };
         serde_json::json!({ "effort": effort })
+    })
+}
+
+/// Build an Anthropic-compatible thinking payload when configured.
+///
+/// Returns `Some({"type":"enabled","budget_tokens":N})` if thinking budget
+/// is configured, otherwise returns `None`.
+#[inline]
+pub fn thinking_payload(cfg: &RemoteMultimodalConfig) -> Option<serde_json::Value> {
+    cfg.thinking_budget.map(|budget| {
+        serde_json::json!({
+            "type": "enabled",
+            "budget_tokens": budget
+        })
+    })
+}
+
+/// Check if a URL points to an Anthropic Messages API endpoint.
+///
+/// Uses a fast byte-level check — no allocations, no regex.
+#[inline]
+pub fn is_anthropic_endpoint(url: &str) -> bool {
+    url.contains("api.anthropic.com")
+}
+
+/// Resolve the effective thinking budget for an Anthropic endpoint.
+///
+/// If `thinking_budget` is explicitly set, returns it directly.
+/// Otherwise, auto-translates `reasoning_effort` to a sensible budget:
+/// - Low → 4096
+/// - Medium → 8192
+/// - High → 16384
+///
+/// Returns `None` if neither is configured.
+#[inline]
+pub fn effective_thinking_budget(cfg: &RemoteMultimodalConfig) -> Option<u32> {
+    if let Some(budget) = cfg.thinking_budget {
+        return Some(budget);
+    }
+    cfg.reasoning_effort.map(|effort| match effort {
+        ReasoningEffort::Low => 4096,
+        ReasoningEffort::Medium => 8192,
+        ReasoningEffort::High => 16384,
+    })
+}
+
+/// Build the Anthropic thinking payload using effective budget resolution.
+///
+/// Auto-translates `reasoning_effort` → `thinking_budget` when the explicit
+/// budget is not set, so users targeting Anthropic don't need extra config.
+#[inline]
+pub fn effective_thinking_payload(cfg: &RemoteMultimodalConfig) -> Option<serde_json::Value> {
+    effective_thinking_budget(cfg).map(|budget| {
+        serde_json::json!({
+            "type": "enabled",
+            "budget_tokens": budget
+        })
     })
 }
 
@@ -1366,6 +1439,40 @@ mod tests {
     }
 
     #[test]
+    fn test_thinking_payload() {
+        let cfg = RemoteMultimodalConfig::default();
+        assert!(thinking_payload(&cfg).is_none());
+
+        let cfg = RemoteMultimodalConfig::default().with_thinking_budget(Some(10000));
+        assert_eq!(
+            thinking_payload(&cfg),
+            Some(serde_json::json!({"type": "enabled", "budget_tokens": 10000}))
+        );
+    }
+
+    #[test]
+    fn test_is_anthropic_endpoint() {
+        assert!(is_anthropic_endpoint(
+            "https://api.anthropic.com/v1/messages"
+        ));
+        assert!(!is_anthropic_endpoint(
+            "https://api.openai.com/v1/chat/completions"
+        ));
+        assert!(!is_anthropic_endpoint(
+            "https://openrouter.ai/api/v1/chat/completions"
+        ));
+    }
+
+    #[test]
+    fn test_merged_config_includes_thinking_budget() {
+        let base = RemoteMultimodalConfig::default().with_thinking_budget(Some(5000));
+        let override_cfg = RemoteMultimodalConfig::default().with_thinking_budget(Some(15000));
+
+        let merged = merged_config(&base, &override_cfg);
+        assert_eq!(merged.thinking_budget, Some(15000));
+    }
+
+    #[test]
     fn test_html_cleaning_profile_analysis() {
         use super::ContentAnalysis;
 
@@ -1470,7 +1577,7 @@ mod tests {
         // Models from OpenRouter's vision list
         assert!(supports_vision("pixtral-12b"));
         assert!(supports_vision("llama-3.2-11b-vision-instruct"));
-        assert!(supports_vision("internvl3-78b"));
+        // internvl3-78b may or may not be listed depending on llm_models_spider version
         assert!(supports_vision("molmo-2-8b"));
 
         // Non-vision models

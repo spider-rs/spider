@@ -2249,8 +2249,9 @@ impl RemoteMultimodalEngine {
         user_message_extra: Option<&str>,
     ) -> EngineResult<AutomationPlan> {
         use super::{
-            best_effort_parse_json_object, extract_assistant_content, extract_usage,
-            reasoning_payload, DEFAULT_SYSTEM_PROMPT, EXTRACTION_ONLY_SYSTEM_PROMPT,
+            best_effort_parse_json_object, effective_thinking_payload, extract_assistant_content,
+            extract_thinking_content, extract_usage, is_anthropic_endpoint, reasoning_payload,
+            DEFAULT_SYSTEM_PROMPT, EXTRACTION_ONLY_SYSTEM_PROMPT,
         };
         use serde::Serialize;
 
@@ -2272,6 +2273,10 @@ impl RemoteMultimodalEngine {
             response_format: Option<serde_json::Value>,
             #[serde(skip_serializing_if = "Option::is_none")]
             reasoning: Option<serde_json::Value>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            thinking: Option<serde_json::Value>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            system: Option<String>,
             #[serde(skip_serializing_if = "Option::is_none")]
             tools: Option<Vec<serde_json::Value>>,
             #[serde(skip_serializing_if = "Option::is_none")]
@@ -2442,23 +2447,38 @@ impl RemoteMultimodalEngine {
                 stagnated,
             );
 
-        let messages = vec![
-            Message {
-                role: "system".to_string(),
-                content: serde_json::Value::String(system_msg),
-            },
-            Message {
+        let is_anthropic = is_anthropic_endpoint(resolved_api_url);
+        let thinking_pl = if is_anthropic {
+            effective_thinking_payload(effective_cfg)
+        } else {
+            None
+        };
+        let has_thinking = thinking_pl.is_some();
+
+        let messages = if is_anthropic {
+            vec![Message {
                 role: "user".to_string(),
                 content: user_content,
-            },
-        ];
+            }]
+        } else {
+            vec![
+                Message {
+                    role: "system".to_string(),
+                    content: serde_json::Value::String(system_msg.clone()),
+                },
+                Message {
+                    role: "user".to_string(),
+                    content: user_content,
+                },
+            ]
+        };
 
         let use_tools = !effective_cfg.is_extraction_only()
             && effective_cfg
                 .tool_calling_mode
                 .should_use_tools(resolved_model);
 
-        let response_format = if use_tools {
+        let response_format = if is_anthropic || has_thinking || use_tools {
             None
         } else if effective_cfg.request_json_object {
             Some(serde_json::json!({ "type": "json_object" }))
@@ -2483,13 +2503,37 @@ impl RemoteMultimodalEngine {
             None
         };
 
+        let max_tokens = if let Some(budget) = thinking_pl
+            .as_ref()
+            .and_then(|v| v.get("budget_tokens"))
+            .and_then(|v| v.as_u64())
+        {
+            Some(effective_cfg.max_tokens as u32 + budget as u32)
+        } else {
+            Some(effective_cfg.max_tokens as u32)
+        };
+
         let request = Request {
             model: resolved_model.to_string(),
             messages,
-            temperature: Some(effective_cfg.temperature),
-            max_tokens: Some(effective_cfg.max_tokens as u32),
+            temperature: if has_thinking {
+                None
+            } else {
+                Some(effective_cfg.temperature)
+            },
+            max_tokens,
             response_format,
-            reasoning: reasoning_payload(effective_cfg),
+            reasoning: if is_anthropic {
+                None
+            } else {
+                reasoning_payload(effective_cfg)
+            },
+            thinking: thinking_pl,
+            system: if is_anthropic {
+                Some(system_msg)
+            } else {
+                None
+            },
             tools,
             tool_choice,
         };
@@ -2595,20 +2639,24 @@ impl RemoteMultimodalEngine {
         } else {
             None
         };
-        let reasoning = parsed.get("reasoning").and_then(|v| {
-            if let Some(s) = v.as_str() {
-                let trimmed = s.trim();
-                return if trimmed.is_empty() {
+        // Reasoning: prefer API-level thinking content (Anthropic/OpenAI thinking blocks),
+        // fall back to JSON-level "reasoning" field from the model's response.
+        let reasoning = extract_thinking_content(&body).or_else(|| {
+            parsed.get("reasoning").and_then(|v| {
+                if let Some(s) = v.as_str() {
+                    let trimmed = s.trim();
+                    return if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    };
+                }
+                if v.is_null() {
                     None
                 } else {
-                    Some(trimmed.to_string())
-                };
-            }
-            if v.is_null() {
-                None
-            } else {
-                Some(v.to_string())
-            }
+                    Some(v.to_string())
+                }
+            })
         });
 
         // Try to get extracted field, or fallback to the entire response when in extraction mode.
@@ -4568,7 +4616,7 @@ Only return the JSON object, no other text."#;
         }
 
         let content = extract_assistant_content(&body)
-            .ok_or_else(|| EngineError::MissingField("choices[0].message.content"))?;
+            .ok_or_else(|| EngineError::MissingField("assistant content"))?;
         let usage = extract_usage(&body);
 
         let step = best_effort_parse_json_object(&content)?;
@@ -4746,7 +4794,7 @@ Only return the JSON object."#;
         }
 
         let content = extract_assistant_content(&body)
-            .ok_or_else(|| EngineError::MissingField("choices[0].message.content"))?;
+            .ok_or_else(|| EngineError::MissingField("assistant content"))?;
         let usage = extract_usage(&body);
 
         let parsed = best_effort_parse_json_object(&content)?;
