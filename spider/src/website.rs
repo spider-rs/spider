@@ -4422,7 +4422,6 @@ impl Website {
     /// Cache-only crawl phase: process initial URL + follow links from cache.
     /// Returns `true` if all reachable pages were served from cache (Chrome/HTTP can be skipped).
     /// Any cache-miss links are left in `self.extra_links` for the subsequent Chrome/HTTP phase.
-    /// No mutexes, no shared state — only lock-free cache lookups.
     #[cfg(any(
         feature = "cache",
         feature = "cache_mem",

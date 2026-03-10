@@ -46,6 +46,8 @@ pub use spider_agent_types::{
     build_schema_generation_prompt,
     // Map result types
     categories,
+    effective_thinking_budget,
+    effective_thinking_payload,
     // Helpers
     extract_assistant_content,
     // Self-healing types
@@ -60,8 +62,6 @@ pub use spider_agent_types::{
     generate_schema,
     infer_schema,
     infer_schema_from_examples,
-    effective_thinking_budget,
-    effective_thinking_payload,
     is_anthropic_endpoint,
     is_url_allowed,
     merged_config,

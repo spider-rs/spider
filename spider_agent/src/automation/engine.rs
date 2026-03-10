@@ -637,15 +637,17 @@ impl RemoteMultimodalEngine {
 
         // Sort vision-capable models first when vision is needed
         if use_vision {
-            candidates.sort_by_key(|ep| if super::supports_vision(&ep.model_name) { 0 } else { 1 });
+            candidates.sort_by_key(|ep| {
+                if super::supports_vision(&ep.model_name) {
+                    0
+                } else {
+                    1
+                }
+            });
         }
 
         let ep = candidates.first()?;
-        let url = ep
-            .api_url
-            .as_deref()
-            .unwrap_or(&self.api_url)
-            .to_string();
+        let url = ep.api_url.as_deref().unwrap_or(&self.api_url).to_string();
         let key = ep
             .api_key
             .as_deref()
@@ -856,7 +858,11 @@ impl RemoteMultimodalEngine {
         let request_body = InferenceRequest {
             model: self.model_name.clone(),
             messages,
-            temperature: if has_thinking { None } else { Some(effective_cfg.temperature) },
+            temperature: if has_thinking {
+                None
+            } else {
+                Some(effective_cfg.temperature)
+            },
             max_tokens,
             response_format: if is_anthropic || has_thinking {
                 None
@@ -1211,7 +1217,11 @@ impl RemoteMultimodalEngine {
         let request_body = InferenceRequest {
             model: self.model_name.clone(),
             messages,
-            temperature: if has_thinking { None } else { Some(effective_cfg.temperature) },
+            temperature: if has_thinking {
+                None
+            } else {
+                Some(effective_cfg.temperature)
+            },
             max_tokens,
             response_format: if is_anthropic || has_thinking {
                 None
@@ -1439,7 +1449,11 @@ impl RemoteMultimodalEngine {
         let request_body = InferenceRequest {
             model: self.model_name.clone(),
             messages,
-            temperature: if has_thinking { None } else { Some(self.cfg.temperature) },
+            temperature: if has_thinking {
+                None
+            } else {
+                Some(self.cfg.temperature)
+            },
             max_tokens,
             response_format: if is_anthropic || has_thinking {
                 None
@@ -1595,11 +1609,7 @@ impl RemoteMultimodalEngine {
                 reasoning_payload(&self.cfg)
             },
             thinking: thinking_pl,
-            system: if is_anthropic {
-                Some(system)
-            } else {
-                None
-            },
+            system: if is_anthropic { Some(system) } else { None },
         };
 
         let _permit = self.acquire_llm_permit().await;
@@ -2279,7 +2289,8 @@ mod tests {
 
     #[test]
     fn test_pick_fallback_model_prefers_vision_when_needed() {
-        let mut engine = RemoteMultimodalEngine::new("https://api.example.com", "deepseek-chat", None);
+        let mut engine =
+            RemoteMultimodalEngine::new("https://api.example.com", "deepseek-chat", None);
         engine.model_pool = vec![
             crate::automation::ModelEndpoint::new("deepseek-chat"),
             crate::automation::ModelEndpoint::new("gpt-4o-mini"),
@@ -2326,16 +2337,29 @@ mod tests {
     #[test]
     fn test_engine_error_retryable_status_codes() {
         use crate::automation::EngineError;
-        assert!(EngineError::RemoteStatus(502, "bad gateway".into()).is_retryable_on_different_model());
-        assert!(EngineError::RemoteStatus(503, "unavailable".into()).is_retryable_on_different_model());
-        assert!(EngineError::RemoteStatus(429, "rate limit".into()).is_retryable_on_different_model());
+        assert!(
+            EngineError::RemoteStatus(502, "bad gateway".into()).is_retryable_on_different_model()
+        );
+        assert!(
+            EngineError::RemoteStatus(503, "unavailable".into()).is_retryable_on_different_model()
+        );
+        assert!(
+            EngineError::RemoteStatus(429, "rate limit".into()).is_retryable_on_different_model()
+        );
         assert!(EngineError::RemoteStatus(500, "internal".into()).is_retryable_on_different_model());
         assert!(EngineError::RemoteStatus(504, "timeout".into()).is_retryable_on_different_model());
         // 4xx client errors should NOT be retryable on a different model
-        assert!(!EngineError::RemoteStatus(400, "bad request".into()).is_retryable_on_different_model());
-        assert!(!EngineError::RemoteStatus(401, "unauthorized".into()).is_retryable_on_different_model());
-        assert!(!EngineError::RemoteStatus(403, "forbidden".into()).is_retryable_on_different_model());
-        assert!(!EngineError::RemoteStatus(404, "not found".into()).is_retryable_on_different_model());
+        assert!(
+            !EngineError::RemoteStatus(400, "bad request".into()).is_retryable_on_different_model()
+        );
+        assert!(!EngineError::RemoteStatus(401, "unauthorized".into())
+            .is_retryable_on_different_model());
+        assert!(
+            !EngineError::RemoteStatus(403, "forbidden".into()).is_retryable_on_different_model()
+        );
+        assert!(
+            !EngineError::RemoteStatus(404, "not found".into()).is_retryable_on_different_model()
+        );
         // Parse/field errors should NOT be retryable
         assert!(!EngineError::MissingField("test").is_retryable_on_different_model());
         assert!(!EngineError::InvalidField("test").is_retryable_on_different_model());

@@ -72,8 +72,11 @@ impl EngineError {
             EngineError::Http(e) => e.is_timeout() || e.is_connect() || e.is_request(),
             // Legacy Remote — check if message contains status hint
             EngineError::Remote(msg) => {
-                msg.contains("502") || msg.contains("503") || msg.contains("429")
-                    || msg.contains("500") || msg.contains("504")
+                msg.contains("502")
+                    || msg.contains("503")
+                    || msg.contains("429")
+                    || msg.contains("500")
+                    || msg.contains("504")
             }
             _ => false,
         }

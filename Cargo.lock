@@ -7943,7 +7943,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent"
-version = "2.46.2"
+version = "2.46.3"
 dependencies = [
  "aho-corasick",
  "async-openai 0.33.0",

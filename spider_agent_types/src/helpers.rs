@@ -27,9 +27,7 @@ pub fn extract_assistant_content(root: &Value) -> Option<String> {
                         for block in arr {
                             if let Some(t) = block.get("text").and_then(|v| v.as_str()) {
                                 out.push_str(t);
-                            } else if let Some(t) =
-                                block.get("content").and_then(|v| v.as_str())
-                            {
+                            } else if let Some(t) = block.get("content").and_then(|v| v.as_str()) {
                                 out.push_str(t);
                             }
                         }
@@ -447,10 +445,7 @@ mod tests {
             }]
         });
         let thinking = extract_thinking_content(&resp);
-        assert_eq!(
-            thinking,
-            Some("I need to think about this...".to_string())
-        );
+        assert_eq!(thinking, Some("I need to think about this...".to_string()));
     }
 
     #[test]
@@ -498,9 +493,6 @@ mod tests {
             "choices": [{"message": {"content": "openai"}}],
             "content": [{"type": "text", "text": "anthropic"}]
         });
-        assert_eq!(
-            extract_assistant_content(&resp),
-            Some("openai".to_string())
-        );
+        assert_eq!(extract_assistant_content(&resp), Some("openai".to_string()));
     }
 }

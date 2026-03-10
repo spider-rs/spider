@@ -124,7 +124,7 @@ version = "2.46.2"
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.46.2"
+version = "2.46.3"
 optional = true
 default-features = false
 

@@ -215,8 +215,7 @@ fn thinking_budget_auto_resolves_from_reasoning_effort() {
     assert!(effective_thinking_payload(&cfg).is_none());
 
     // reasoning_effort → auto-translated to thinking budget
-    let cfg = RemoteMultimodalConfig::default()
-        .with_reasoning_effort(Some(ReasoningEffort::High));
+    let cfg = RemoteMultimodalConfig::default().with_reasoning_effort(Some(ReasoningEffort::High));
     assert_eq!(effective_thinking_budget(&cfg), Some(16384));
 
     let pl = effective_thinking_payload(&cfg).unwrap();
@@ -348,7 +347,10 @@ async fn live_thinking_extraction_openrouter() {
                 res.usage.prompt_tokens, res.usage.completion_tokens, res.usage.api_calls
             );
             if let Some(reasoning) = &res.reasoning {
-                println!("Reasoning captured: {}...", &reasoning[..reasoning.len().min(100)]);
+                println!(
+                    "Reasoning captured: {}...",
+                    &reasoning[..reasoning.len().min(100)]
+                );
             }
         }
         Err(e) => {

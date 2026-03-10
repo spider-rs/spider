@@ -2187,7 +2187,7 @@ impl RemoteMultimodalEngine {
         user_message_extra: Option<&str>,
     ) -> EngineResult<AutomationPlan> {
         let max_attempts = effective_cfg.retry.max_attempts.max(1);
-        let mut last_err = None;
+        let mut last_err: Option<EngineError> = None;
         // Track which models have been tried so we can rotate on retryable errors
         let mut tried_models: Vec<String> = Vec::new();
 
@@ -2493,8 +2493,8 @@ impl RemoteMultimodalEngine {
         };
 
         // Resolve model endpoint — use override (from fallback retry) or standard routing
-        let owned_override: Option<(String, String, Option<String>)> =
-            model_override.map(|(u, m, k)| (u.to_string(), m.to_string(), k.map(|s| s.to_string())));
+        let owned_override: Option<(String, String, Option<String>)> = model_override
+            .map(|(u, m, k)| (u.to_string(), m.to_string(), k.map(|s| s.to_string())));
         let (resolved_api_url, resolved_model, resolved_api_key): (&str, &str, Option<&str>) =
             if let Some((ref u, ref m, ref k)) = owned_override {
                 (u.as_str(), m.as_str(), k.as_deref())
@@ -2590,11 +2590,7 @@ impl RemoteMultimodalEngine {
                 reasoning_payload(effective_cfg)
             },
             thinking: thinking_pl,
-            system: if is_anthropic {
-                Some(system_msg)
-            } else {
-                None
-            },
+            system: if is_anthropic { Some(system_msg) } else { None },
             tools,
             tool_choice,
         };
