@@ -2451,7 +2451,8 @@ pub async fn fetch_page_html_chrome_base(
             }
         },
         async {
-            if should_block {
+            let chunk_idle = chunk_idle_timeout();
+            if should_block || chunk_idle.is_some() {
                 page.event_listener::<EventDataReceived>().await
             } else {
                 Err(CdpError::NotFound)
@@ -2475,7 +2476,8 @@ pub async fn fetch_page_html_chrome_base(
         (None, None)
     };
 
-    let page_clone = if should_block {
+    let chunk_idle = chunk_idle_timeout();
+    let page_clone = if should_block || chunk_idle.is_some() {
         Some(page.clone())
     } else {
         None
@@ -2680,10 +2682,32 @@ pub async fn fetch_page_html_chrome_base(
                 if let Ok(mut listener) = event_data_received {
                     let mut total_bytes: u64 = 0;
                     let total_max = f64_to_u64_floor(max_page_bytes.unwrap_or_default());
-                    while let Some(event) = listener.next().await {
+                    let check_max = total_max > 0;
+
+                    loop {
+                        let next_event = async { listener.next().await };
+
+                        let event = match chunk_idle {
+                            Some(timeout) => match tokio::time::timeout(timeout, next_event).await {
+                                Ok(Some(event)) => event,
+                                Ok(None) => break,
+                                Err(_elapsed) => {
+                                    log::warn!(
+                                        "chrome network idle timeout ({timeout:?}), force-stopping page"
+                                    );
+                                    let _ = page_clone.force_stop_all().await;
+                                    break;
+                                }
+                            },
+                            None => match next_event.await {
+                                Some(event) => event,
+                                None => break,
+                            },
+                        };
+
                         let encoded = event.encoded_data_length.max(0) as u64;
                         total_bytes = total_bytes.saturating_add(encoded);
-                        if total_bytes > total_max {
+                        if check_max && total_bytes > total_max {
                             let _ = page_clone.force_stop_all().await;
                             break;
                         }
