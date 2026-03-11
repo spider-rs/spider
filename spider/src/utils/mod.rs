@@ -2688,17 +2688,19 @@ pub async fn fetch_page_html_chrome_base(
                         let next_event = async { listener.next().await };
 
                         let event = match chunk_idle {
-                            Some(timeout) => match tokio::time::timeout(timeout, next_event).await {
-                                Ok(Some(event)) => event,
-                                Ok(None) => break,
-                                Err(_elapsed) => {
-                                    log::warn!(
+                            Some(timeout) => {
+                                match tokio::time::timeout(timeout, next_event).await {
+                                    Ok(Some(event)) => event,
+                                    Ok(None) => break,
+                                    Err(_elapsed) => {
+                                        log::warn!(
                                         "chrome network idle timeout ({timeout:?}), force-stopping page"
                                     );
-                                    let _ = page_clone.force_stop_all().await;
-                                    break;
+                                        let _ = page_clone.force_stop_all().await;
+                                        break;
+                                    }
                                 }
-                            },
+                            }
                             None => match next_event.await {
                                 Some(event) => event,
                                 None => break,

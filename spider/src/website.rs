@@ -2461,8 +2461,9 @@ impl Website {
             self.status = CrawlStatus::Blocked;
         } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
             self.status = CrawlStatus::RateLimited;
-        } else if page.status_code == *UNKNOWN_STATUS_ERROR
-            || page.status_code == *CHROME_UNKNOWN_STATUS_ERROR
+        } else if (page.status_code == *UNKNOWN_STATUS_ERROR
+            || page.status_code == *CHROME_UNKNOWN_STATUS_ERROR)
+            && (page.is_empty() || page.error_status.is_some())
         {
             self.status = CrawlStatus::ConnectError;
         } else if page.status_code.is_server_error() {
@@ -10989,6 +10990,96 @@ mod tests {
             rotator.is_none(),
             "Should not build rotator with no proxies"
         );
+    }
+
+    fn make_page(status: reqwest::StatusCode) -> crate::page::Page {
+        let mut page = crate::page::Page::default();
+        page.status_code = status;
+        page
+    }
+
+    #[test]
+    fn test_crawl_status_599_empty_page_is_connect_error() {
+        let mut website = crate::website::Website::new("http://example.com");
+        let page = make_page(*crate::page::UNKNOWN_STATUS_ERROR);
+        let links = hashbrown::HashSet::new();
+        website.set_crawl_initial_status(&page, &links);
+        assert_eq!(*website.get_status(), super::CrawlStatus::ConnectError);
+    }
+
+    #[test]
+    fn test_crawl_status_598_empty_page_is_connect_error() {
+        let mut website = crate::website::Website::new("http://example.com");
+        let page = make_page(*crate::page::CHROME_UNKNOWN_STATUS_ERROR);
+        let links = hashbrown::HashSet::new();
+        website.set_crawl_initial_status(&page, &links);
+        assert_eq!(*website.get_status(), super::CrawlStatus::ConnectError);
+    }
+
+    #[test]
+    fn test_crawl_status_598_with_error_status_is_connect_error() {
+        let mut website = crate::website::Website::new("http://example.com");
+        let mut page = make_page(*crate::page::CHROME_UNKNOWN_STATUS_ERROR);
+        page.html = Some(b"<html><body>some content</body></html>".to_vec().into());
+        page.error_status = Some("Invalid proxy configuration.".into());
+        let links = hashbrown::HashSet::new();
+        website.set_crawl_initial_status(&page, &links);
+        assert_eq!(*website.get_status(), super::CrawlStatus::ConnectError);
+    }
+
+    #[test]
+    fn test_crawl_status_598_with_content_no_error_is_server_error() {
+        let mut website = crate::website::Website::new("http://example.com");
+        let mut page = make_page(*crate::page::CHROME_UNKNOWN_STATUS_ERROR);
+        page.html = Some(
+            b"<html><body>real server content</body></html>"
+                .to_vec()
+                .into(),
+        );
+        let links = hashbrown::HashSet::new();
+        website.set_crawl_initial_status(&page, &links);
+        assert_eq!(*website.get_status(), super::CrawlStatus::ServerError);
+    }
+
+    #[test]
+    fn test_crawl_status_599_with_content_no_error_is_server_error() {
+        let mut website = crate::website::Website::new("http://example.com");
+        let mut page = make_page(*crate::page::UNKNOWN_STATUS_ERROR);
+        page.html = Some(
+            b"<html><body>real server content</body></html>"
+                .to_vec()
+                .into(),
+        );
+        let links = hashbrown::HashSet::new();
+        website.set_crawl_initial_status(&page, &links);
+        assert_eq!(*website.get_status(), super::CrawlStatus::ServerError);
+    }
+
+    #[test]
+    fn test_crawl_status_500_is_server_error() {
+        let mut website = crate::website::Website::new("http://example.com");
+        let page = make_page(reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+        let links = hashbrown::HashSet::new();
+        website.set_crawl_initial_status(&page, &links);
+        assert_eq!(*website.get_status(), super::CrawlStatus::ServerError);
+    }
+
+    #[test]
+    fn test_crawl_status_429_is_rate_limited() {
+        let mut website = crate::website::Website::new("http://example.com");
+        let page = make_page(reqwest::StatusCode::TOO_MANY_REQUESTS);
+        let links = hashbrown::HashSet::new();
+        website.set_crawl_initial_status(&page, &links);
+        assert_eq!(*website.get_status(), super::CrawlStatus::RateLimited);
+    }
+
+    #[test]
+    fn test_crawl_status_empty_page_200_is_empty() {
+        let mut website = crate::website::Website::new("http://example.com");
+        let page = make_page(reqwest::StatusCode::OK);
+        let links = hashbrown::HashSet::new();
+        website.set_crawl_initial_status(&page, &links);
+        assert_eq!(*website.get_status(), super::CrawlStatus::Empty);
     }
 }
 
