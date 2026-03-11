@@ -2461,16 +2461,14 @@ impl Website {
             self.status = CrawlStatus::Blocked;
         } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
             self.status = CrawlStatus::RateLimited;
+        } else if page.status_code == *UNKNOWN_STATUS_ERROR
+            || page.status_code == *CHROME_UNKNOWN_STATUS_ERROR
+        {
+            self.status = CrawlStatus::ConnectError;
         } else if page.status_code.is_server_error() {
             self.status = CrawlStatus::ServerError;
         } else if page.is_empty() {
-            if page.status_code == *UNKNOWN_STATUS_ERROR
-                || page.status_code == *CHROME_UNKNOWN_STATUS_ERROR
-            {
-                self.status = CrawlStatus::ConnectError;
-            } else {
-                self.status = CrawlStatus::Empty;
-            }
+            self.status = CrawlStatus::Empty;
         }
     }
 
