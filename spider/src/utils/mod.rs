@@ -292,6 +292,24 @@ lazy_static! {
             _ => 0
         }
     };
+
+}
+
+/// Per-chunk idle timeout for body streaming. If no data arrives within
+/// this duration, the stream is terminated and any partial data collected
+/// so far is returned. Prevents tarpitting / slow-drip antibot attacks.
+/// Set via SPIDER_CHUNK_IDLE_TIMEOUT_SECS (default: 30 seconds, 0 = disabled).
+pub fn chunk_idle_timeout() -> Option<Duration> {
+    let secs = std::env::var("SPIDER_CHUNK_IDLE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(30);
+
+    if secs == 0 {
+        None
+    } else {
+        Some(Duration::from_secs(secs))
+    }
 }
 
 /// The response of a web page.
@@ -3836,8 +3854,29 @@ pub async fn handle_response_bytes(
         };
         let mut stream = res.bytes_stream();
         let mut first_bytes = true;
+        let chunk_idle_timeout = chunk_idle_timeout();
 
-        while let Some(item) = stream.next().await {
+        loop {
+            let next_chunk = async { stream.next().await };
+
+            let item = match chunk_idle_timeout {
+                Some(timeout) => match tokio::time::timeout(timeout, next_chunk).await {
+                    Ok(Some(item)) => item,
+                    Ok(None) => break,
+                    Err(_elapsed) => {
+                        log::warn!(
+                            "chunk idle timeout ({timeout:?}) for {target_url}, returning {} bytes of partial content",
+                            data.len()
+                        );
+                        break;
+                    }
+                },
+                None => match next_chunk.await {
+                    Some(item) => item,
+                    None => break,
+                },
+            };
+
             match item {
                 Ok(text) => {
                     if only_html && first_bytes {
@@ -3916,8 +3955,28 @@ where
         let mut stream = res.bytes_stream();
         let mut first_bytes = true;
         let mut data_len = 0;
+        let chunk_idle_timeout = chunk_idle_timeout();
 
-        while let Some(item) = stream.next().await {
+        loop {
+            let next_chunk = async { stream.next().await };
+
+            let item = match chunk_idle_timeout {
+                Some(timeout) => match tokio::time::timeout(timeout, next_chunk).await {
+                    Ok(Some(item)) => item,
+                    Ok(None) => break,
+                    Err(_elapsed) => {
+                        log::warn!(
+                            "chunk idle timeout ({timeout:?}) for {target_url}, returning {data_len} bytes of partial content",
+                        );
+                        break;
+                    }
+                },
+                None => match next_chunk.await {
+                    Some(item) => item,
+                    None => break,
+                },
+            };
+
             match item {
                 Ok(res_bytes) => {
                     if only_html && first_bytes {
