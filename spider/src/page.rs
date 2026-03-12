@@ -495,6 +495,8 @@ pub enum AntiBotTech {
     Incode,
     /// Singula - AI-based marketing and user protection, offering user behavior analysis and fraud insights.
     Singula,
+    /// Alibaba TMD (TMall Defense) - anti-bot system used by Alibaba group sites (Taobao, Tmall, Lazada, Miravia, AliExpress).
+    AlibabaTMD,
     /// Fallback value if none match or detection failed.
     #[default]
     None,
@@ -3606,8 +3608,14 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                let should_upgrade =
-                    rerender.load(Ordering::Relaxed) || script_src.load(Ordering::Relaxed);
+                // Anti-bot body detection as additional upgrade signal
+                let anti_bot_upgrade =
+                    crate::utils::detect_anti_bot_from_body(&html_resource.as_bytes().to_vec())
+                        .is_some();
+
+                let should_upgrade = rerender.load(Ordering::Relaxed)
+                    || script_src.load(Ordering::Relaxed)
+                    || anti_bot_upgrade;
                 if should_upgrade {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {
@@ -4017,8 +4025,14 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                let should_upgrade =
-                    rerender.load(Ordering::Relaxed) || script_src.load(Ordering::Relaxed);
+                // Anti-bot body detection as additional upgrade signal
+                let anti_bot_upgrade =
+                    crate::utils::detect_anti_bot_from_body(&html_resource.as_bytes().to_vec())
+                        .is_some();
+
+                let should_upgrade = rerender.load(Ordering::Relaxed)
+                    || script_src.load(Ordering::Relaxed)
+                    || anti_bot_upgrade;
                 if should_upgrade {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {

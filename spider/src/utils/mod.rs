@@ -143,12 +143,14 @@ error was encountered while trying to use an ErrorDocument to handle the request
 
     /// Scan for error anti-bot pages.
     static ref AC_BODY_SCAN: AhoCorasick = AhoCorasick::new([
-        "cf-error-code",
-        "Access to this page has been denied",
-        "DataDome",
-        "perimeterx",
-        "funcaptcha",
-        "Request unsuccessful. Incapsula incident ID",
+        "cf-error-code",                                     // 0 → Cloudflare
+        "Access to this page has been denied",               // 1 → Cloudflare
+        "DataDome",                                          // 2 → DataDome
+        "perimeterx",                                        // 3 → PerimeterX
+        "funcaptcha",                                        // 4 → ArkoseLabs
+        "Request unsuccessful. Incapsula incident ID",       // 5 → Imperva
+        "_____tmd_____",                                      // 6 → AlibabaTMD
+        "x5secdata",                                         // 7 → AlibabaTMD
     ]).unwrap();
 
     static ref AC_URL_SCAN: AhoCorasick = AhoCorasick::builder()
@@ -169,6 +171,7 @@ error was encountered while trying to use an ErrorDocument to handle the request
             "radwarebotmanager",                 // 12
             "reblaze.com",                       // 13
             "cheq.ai",                           // 14
+            "_____tmd_____/punish",              // 15 → AlibabaTMD
         ])
         .unwrap();
 }
@@ -719,11 +722,12 @@ pub fn detect_anti_bot_from_body(body: &Vec<u8>) -> Option<AntiBotTech> {
         if let Ok(finder) = AC_BODY_SCAN.try_find_iter(body) {
             for mat in finder {
                 match mat.pattern().as_usize() {
-                    0 => return Some(AntiBotTech::Cloudflare),
-                    1 | 2 => return Some(AntiBotTech::DataDome),
+                    0 | 1 => return Some(AntiBotTech::Cloudflare),
+                    2 => return Some(AntiBotTech::DataDome),
                     3 => return Some(AntiBotTech::PerimeterX),
                     4 => return Some(AntiBotTech::ArkoseLabs),
                     5 => return Some(AntiBotTech::Imperva),
+                    6 | 7 => return Some(AntiBotTech::AlibabaTMD),
                     _ => (),
                 }
             }
@@ -747,6 +751,7 @@ pub fn detect_antibot_from_url(url: &str) -> Option<AntiBotTech> {
             12 => AntiBotTech::RadwareBotManager,
             13 => AntiBotTech::Reblaze,
             14 => AntiBotTech::CHEQ,
+            15 => AntiBotTech::AlibabaTMD,
             _ => return None,
         };
         Some(tech)
@@ -6674,6 +6679,18 @@ mod tests {
         // Normal page
         let normal = b"<html><body>Hello world</body></html>".to_vec();
         assert!(detect_anti_bot_from_body(&normal).is_none());
+        // Alibaba TMD - _____tmd_____
+        let tmd = br#"<script>window.location.replace("https://example.com/_____tmd_____/punish?x5secdata=abc");</script>"#.to_vec();
+        assert_eq!(
+            detect_anti_bot_from_body(&tmd),
+            Some(AntiBotTech::AlibabaTMD)
+        );
+        // Alibaba TMD - x5secdata in body
+        let x5sec = br#"<script>sessionStorage.x5referer=window.location.href;window.location.replace("https://example.com/punish?x5secdata=xyz&x5step=1");</script>"#.to_vec();
+        assert_eq!(
+            detect_anti_bot_from_body(&x5sec),
+            Some(AntiBotTech::AlibabaTMD)
+        );
     }
 
     #[test]
@@ -6682,6 +6699,13 @@ mod tests {
             detect_antibot_from_url("https://example.com/cdn-cgi/challenge-platform").is_some()
         );
         assert!(detect_antibot_from_url("https://example.com/page").is_none());
+        // Alibaba TMD URL pattern
+        assert_eq!(
+            detect_antibot_from_url(
+                "https://www.miravia.es/p/i123/_____tmd_____/punish?x5secdata=abc"
+            ),
+            Some(AntiBotTech::AlibabaTMD)
+        );
     }
 
     #[test]
