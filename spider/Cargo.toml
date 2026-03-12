@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.47.11"
+version = "2.47.12"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -29,7 +29,7 @@ dashmap = { version = "6", optional = true }
 smallvec = "1"
 num_cpus = "1"
 bytes = { version = "1", features = ["serde"] }
-serde = { version = "1", optional = true, features = ["derive"] }
+serde = { version = "1", optional = true, features = ["derive", "rc"] }
 flexbuffers = { version = "25", optional = true }
 itertools = { version = "0.14", optional = true }
 case_insensitive_string = { version = "0.2", features = ["compact", "serde"] }
@@ -120,11 +120,11 @@ features = ["serde", "headers", "dynamic-versions"]
 
 [dependencies.spider_agent_types]
 path = "../spider_agent_types"
-version = "2.47.11"
+version = "2.47.12"
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.47.11"
+version = "2.47.12"
 optional = true
 default-features = false
 
