@@ -11013,7 +11013,11 @@ mod tests {
     fn test_crawl_status_598_with_error_status_is_connect_error() {
         let mut website = crate::website::Website::new("http://example.com");
         let mut page = make_page(*crate::page::CHROME_UNKNOWN_STATUS_ERROR);
-        page.html = Some(b"<html><body>some content</body></html>".to_vec().into());
+        page.html = Some(
+            b"<html><body>some content</body></html>"
+                .to_vec()
+                .into_boxed_slice(),
+        );
         page.error_status = Some("Invalid proxy configuration.".into());
         let links = hashbrown::HashSet::new();
         website.set_crawl_initial_status(&page, &links);
@@ -11027,7 +11031,7 @@ mod tests {
         page.html = Some(
             b"<html><body>real server content</body></html>"
                 .to_vec()
-                .into(),
+                .into_boxed_slice(),
         );
         let links = hashbrown::HashSet::new();
         website.set_crawl_initial_status(&page, &links);
@@ -11041,7 +11045,7 @@ mod tests {
         page.html = Some(
             b"<html><body>real server content</body></html>"
                 .to_vec()
-                .into(),
+                .into_boxed_slice(),
         );
         let links = hashbrown::HashSet::new();
         website.set_crawl_initial_status(&page, &links);
