@@ -1345,8 +1345,9 @@ pub(crate) fn get_charset_from_content_type(
     if let Some(content_type) = headers.get(reqwest::header::CONTENT_TYPE) {
         if let Ok(content_type_str) = content_type.to_str() {
             for part in content_type_str.split(';') {
-                let part = part.trim().to_lowercase();
-                if let Some(stripped) = part.strip_prefix("charset=") {
+                let part = part.trim();
+                if part.len() >= 8 && part.as_bytes()[..8].eq_ignore_ascii_case(b"charset=") {
+                    let stripped = &part[8..];
                     if let Some(encoding) = encoding_rs::Encoding::for_label(stripped.as_bytes()) {
                         if let Some(ascii_encoding) = AsciiCompatibleEncoding::new(encoding) {
                             return Some(ascii_encoding);
@@ -2180,7 +2181,7 @@ impl Page {
         execution_scripts: &Option<ExecutionScripts>,
         automation_scripts: &Option<AutomationScripts>,
         viewport: &Option<crate::configuration::Viewport>,
-        request_timeout: &Option<Box<Duration>>,
+        request_timeout: &Option<Duration>,
         track_events: &Option<crate::configuration::ChromeEventTracker>,
         referrer: Option<String>,
         max_page_bytes: Option<f64>,
@@ -2259,7 +2260,7 @@ impl Page {
         execution_scripts: &Option<ExecutionScripts>,
         automation_scripts: &Option<AutomationScripts>,
         viewport: &Option<crate::configuration::Viewport>,
-        request_timeout: &Option<Box<Duration>>,
+        request_timeout: &Option<Duration>,
         track_events: &Option<crate::configuration::ChromeEventTracker>,
         referrer: Option<String>,
         max_page_bytes: Option<f64>,
@@ -2305,7 +2306,7 @@ impl Page {
         execution_scripts: &Option<ExecutionScripts>,
         automation_scripts: &Option<AutomationScripts>,
         viewport: &Option<crate::configuration::Viewport>,
-        request_timeout: &Option<Box<Duration>>,
+        request_timeout: &Option<Duration>,
         track_events: &Option<crate::configuration::ChromeEventTracker>,
         referrer: Option<String>,
         max_page_bytes: Option<f64>,

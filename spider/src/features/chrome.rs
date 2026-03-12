@@ -227,14 +227,14 @@ pub fn get_browser_config(
     intercept: bool,
     cache_enabled: bool,
     viewport: impl Into<Option<chromiumoxide::handler::viewport::Viewport>>,
-    request_timeout: &Option<Box<core::time::Duration>>,
+    request_timeout: &Option<core::time::Duration>,
     use_chrome_ai: bool,
 ) -> Option<BrowserConfig> {
     let builder = BrowserConfig::builder()
         .disable_default_args()
         .no_sandbox()
         .request_timeout(match request_timeout.as_ref() {
-            Some(timeout) => **timeout,
+            Some(timeout) => *timeout,
             _ => Duration::from_millis(REQUEST_TIMEOUT),
         });
 
@@ -306,14 +306,14 @@ pub fn get_browser_config(
     intercept: bool,
     cache_enabled: bool,
     viewport: impl Into<Option<chromiumoxide::handler::viewport::Viewport>>,
-    request_timeout: &Option<Box<core::time::Duration>>,
+    request_timeout: &Option<core::time::Duration>,
     use_chrome_ai: bool,
 ) -> Option<BrowserConfig> {
     let builder = BrowserConfig::builder()
         .disable_default_args()
         .no_sandbox()
         .request_timeout(match request_timeout.as_ref() {
-            Some(timeout) => **timeout,
+            Some(timeout) => *timeout,
             _ => Duration::from_millis(REQUEST_TIMEOUT),
         })
         .with_head();
@@ -378,7 +378,7 @@ pub fn get_browser_config(
 fn create_handler_config(config: &Configuration) -> HandlerConfig {
     HandlerConfig {
         request_timeout: match config.request_timeout.as_ref() {
-            Some(timeout) => **timeout,
+            Some(timeout) => *timeout,
             _ => Duration::from_millis(REQUEST_TIMEOUT),
         },
         request_intercept: config.chrome_intercept.enabled,
@@ -879,7 +879,7 @@ pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
 pub(crate) async fn attempt_navigation(
     url: &str,
     browser: &Browser,
-    request_timeout: &Option<Box<core::time::Duration>>,
+    request_timeout: &Option<core::time::Duration>,
     browser_context_id: &Option<BrowserContextId>,
     viewport: &Option<crate::features::chrome_common::Viewport>,
 ) -> Result<Page, CdpError> {
@@ -912,7 +912,7 @@ pub(crate) async fn attempt_navigation(
 
     let page_result = tokio::time::timeout(
         match request_timeout {
-            Some(timeout) => **timeout,
+            Some(timeout) => *timeout,
             _ => tokio::time::Duration::from_secs(60),
         },
         browser.new_page(cdp_params),

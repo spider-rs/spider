@@ -170,7 +170,7 @@ pub struct Configuration {
     /// Polite crawling delay in milli seconds.
     pub delay: u64,
     /// Request max timeout per page. By default the request times out in 15s. Set to None to disable.
-    pub request_timeout: Option<Box<Duration>>,
+    pub request_timeout: Option<Duration>,
     /// Use HTTP2 for connection. Enable if you know the website has http2 support.
     pub http2_prior_knowledge: bool,
     /// Use proxy list for performing network request.
@@ -184,12 +184,12 @@ pub struct Configuration {
     /// Prevent including the sitemap links with the crawl.
     pub ignore_sitemap: bool,
     /// The max redirections allowed for request.
-    pub redirect_limit: Box<usize>,
+    pub redirect_limit: usize,
     /// The redirect policy type to use.
     pub redirect_policy: RedirectPolicy,
     #[cfg(feature = "cookies")]
     /// Cookie string to use for network requests ex: "foo=bar; Domain=blog.spider"
-    pub cookie_str: Box<String>,
+    pub cookie_str: String,
     #[cfg(feature = "wreq")]
     /// The type of request emulation. This does nothing without the flag `sync` enabled.
     pub emulation: Option<wreq_util::Emulation>,
@@ -512,8 +512,8 @@ impl Configuration {
         Self {
             delay: 0,
             depth: 25,
-            redirect_limit: Box::new(7),
-            request_timeout: Some(Box::new(Duration::from_secs(120))),
+            redirect_limit: 7,
+            request_timeout: Some(Duration::from_secs(120)),
             only_html: true,
             modify_headers: true,
             ..Default::default()
@@ -526,8 +526,8 @@ impl Configuration {
         Self {
             delay: 0,
             depth: 25,
-            redirect_limit: Box::new(7),
-            request_timeout: Some(Box::new(Duration::from_secs(120))),
+            redirect_limit: 7,
+            request_timeout: Some(Duration::from_secs(120)),
             chrome_intercept: RequestInterceptConfiguration::new(cfg!(
                 feature = "chrome_intercept"
             )),
@@ -800,7 +800,7 @@ impl Configuration {
     /// Max time to wait for request. By default request times out in 15s. Set to None to disable.
     pub fn with_request_timeout(&mut self, request_timeout: Option<Duration>) -> &mut Self {
         match request_timeout {
-            Some(timeout) => self.request_timeout = Some(timeout.into()),
+            Some(timeout) => self.request_timeout = Some(timeout),
             _ => self.request_timeout = None,
         };
 
@@ -910,7 +910,7 @@ impl Configuration {
     #[cfg(feature = "cookies")]
     /// Cookie string to use in request. This does nothing without the `cookies` flag enabled.
     pub fn with_cookies(&mut self, cookie_str: &str) -> &mut Self {
-        self.cookie_str = Box::new(cookie_str.into());
+        self.cookie_str = cookie_str.into();
         self
     }
 
@@ -1010,7 +1010,7 @@ impl Configuration {
 
     /// Set the max redirects allowed for request.
     pub fn with_redirect_limit(&mut self, redirect_limit: usize) -> &mut Self {
-        self.redirect_limit = redirect_limit.into();
+        self.redirect_limit = redirect_limit;
         self
     }
 

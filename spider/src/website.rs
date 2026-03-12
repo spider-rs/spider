@@ -1472,7 +1472,7 @@ impl Website {
                 } else {
                     Default::default()
                 };
-                let redirect_limit = *self.configuration.redirect_limit;
+                let redirect_limit = self.configuration.redirect_limit;
 
                 let custom_policy = {
                     let initial_redirect = Arc::new(AtomicU8::new(0));
@@ -1510,7 +1510,7 @@ impl Website {
     /// Setup redirect policy for reqwest.
     pub fn setup_redirect_policy(&self) -> Policy {
         match self.configuration.redirect_policy {
-            RedirectPolicy::Loose => Policy::limited(*self.configuration.redirect_limit),
+            RedirectPolicy::Loose => Policy::limited(self.configuration.redirect_limit),
             RedirectPolicy::None => Policy::none(),
             RedirectPolicy::Strict => self.setup_strict_policy(),
         }
@@ -1712,7 +1712,7 @@ impl Website {
         let client = self.configure_base_client();
 
         let mut client = match &self.configuration.request_timeout {
-            Some(t) => client.timeout(**t),
+            Some(t) => client.timeout(*t),
             _ => client,
         };
 
@@ -1793,7 +1793,7 @@ impl Website {
         let client = self.configure_base_client();
 
         let mut client = match &self.configuration.request_timeout {
-            Some(t) => client.timeout(**t),
+            Some(t) => client.timeout(*t),
             _ => client,
         };
 
@@ -1939,7 +1939,7 @@ impl Website {
         let client = self.configure_base_client();
 
         let client = match &self.configuration.request_timeout {
-            Some(t) => client.timeout(**t),
+            Some(t) => client.timeout(*t),
             _ => client,
         };
 
@@ -2008,7 +2008,7 @@ impl Website {
         let client = self.configure_base_client();
 
         let client = match &self.configuration.request_timeout {
-            Some(t) => client.timeout(**t),
+            Some(t) => client.timeout(*t),
             _ => client,
         };
 
@@ -2194,7 +2194,7 @@ impl Website {
         // should unwrap using native-tls-alpn
         unsafe {
             match &self.configuration.request_timeout {
-                Some(t) => client.timeout(**t),
+                Some(t) => client.timeout(*t),
                 _ => client,
             }
             .default_headers(headers)
@@ -2288,7 +2288,7 @@ impl Website {
 
         let client = ClientBuilder::new(unsafe {
             match &self.configuration.request_timeout {
-                Some(t) => client.timeout(**t),
+                Some(t) => client.timeout(*t),
                 _ => client,
             }
             .default_headers(headers)
@@ -9906,8 +9906,7 @@ impl Website {
             self.configuration.delay = v;
         }
         if let Some(ms) = config.request_timeout_ms {
-            self.configuration.request_timeout =
-                Some(Box::new(std::time::Duration::from_millis(ms)));
+            self.configuration.request_timeout = Some(std::time::Duration::from_millis(ms));
         }
         if let Some(ms) = config.crawl_timeout_ms {
             self.configuration.crawl_timeout = Some(std::time::Duration::from_millis(ms));
@@ -9923,11 +9922,11 @@ impl Website {
                 Some(urls.iter().map(|s| s.as_str().into()).collect());
         }
         if let Some(ref domains) = config.external_domains {
+            let mut set = (*self.configuration.external_domains_caseless).clone();
             for domain in domains {
-                self.configuration
-                    .external_domains_caseless
-                    .insert(case_insensitive_string::CaseInsensitiveString::new(domain));
+                set.insert(case_insensitive_string::CaseInsensitiveString::new(domain));
             }
+            self.configuration.external_domains_caseless = std::sync::Arc::new(set);
         }
 
         // Request settings
@@ -9943,7 +9942,7 @@ impl Website {
 
         // Limits
         if let Some(v) = config.redirect_limit {
-            self.configuration.redirect_limit = Box::new(v);
+            self.configuration.redirect_limit = v;
         }
         if let Some(ref budget_map) = config.budget {
             let mut budget = hashbrown::HashMap::new();
