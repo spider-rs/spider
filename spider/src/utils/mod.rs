@@ -6676,30 +6676,141 @@ mod tests {
         // Too large - returns None
         let large_body = vec![0u8; 40_000];
         assert!(detect_anti_bot_from_body(&large_body).is_none());
-        // Normal page
+        // Normal page - no match
         let normal = b"<html><body>Hello world</body></html>".to_vec();
         assert!(detect_anti_bot_from_body(&normal).is_none());
-        // Alibaba TMD - _____tmd_____
-        let tmd = br#"<script>window.location.replace("https://example.com/_____tmd_____/punish?x5secdata=abc");</script>"#.to_vec();
+
+        // Pattern 0: cf-error-code → Cloudflare
         assert_eq!(
-            detect_anti_bot_from_body(&tmd),
+            detect_anti_bot_from_body(&b"<span class=\"cf-error-code\">1020</span>".to_vec()),
+            Some(AntiBotTech::Cloudflare)
+        );
+        // Pattern 1: Access to this page has been denied → Cloudflare
+        assert_eq!(
+            detect_anti_bot_from_body(&b"<h1>Access to this page has been denied</h1>".to_vec()),
+            Some(AntiBotTech::Cloudflare)
+        );
+        // Pattern 2: DataDome
+        assert_eq!(
+            detect_anti_bot_from_body(&b"<script src=\"https://js.DataDome.co/tags.js\">".to_vec()),
+            Some(AntiBotTech::DataDome)
+        );
+        // Pattern 3: perimeterx → PerimeterX
+        assert_eq!(
+            detect_anti_bot_from_body(&b"<script>window._pxAppId='perimeterx';</script>".to_vec()),
+            Some(AntiBotTech::PerimeterX)
+        );
+        // Pattern 4: funcaptcha → ArkoseLabs
+        assert_eq!(
+            detect_anti_bot_from_body(
+                &b"<iframe src=\"https://client-api.arkoselabs.com/funcaptcha\">".to_vec()
+            ),
+            Some(AntiBotTech::ArkoseLabs)
+        );
+        // Pattern 5: Incapsula → Imperva
+        assert_eq!(
+            detect_anti_bot_from_body(
+                &b"Request unsuccessful. Incapsula incident ID: 123".to_vec()
+            ),
+            Some(AntiBotTech::Imperva)
+        );
+        // Pattern 6: _____tmd_____ → AlibabaTMD
+        assert_eq!(
+            detect_anti_bot_from_body(
+                &br#"<script>window.location.replace("https://example.com/_____tmd_____/punish?x5secdata=abc");</script>"#.to_vec()
+            ),
             Some(AntiBotTech::AlibabaTMD)
         );
-        // Alibaba TMD - x5secdata in body
-        let x5sec = br#"<script>sessionStorage.x5referer=window.location.href;window.location.replace("https://example.com/punish?x5secdata=xyz&x5step=1");</script>"#.to_vec();
+        // Pattern 7: x5secdata → AlibabaTMD
         assert_eq!(
-            detect_anti_bot_from_body(&x5sec),
+            detect_anti_bot_from_body(
+                &br#"<script>sessionStorage.x5referer=window.location.href;window.location.replace("https://example.com/punish?x5secdata=xyz&x5step=1");</script>"#.to_vec()
+            ),
             Some(AntiBotTech::AlibabaTMD)
         );
     }
 
     #[test]
     fn test_detect_antibot_from_url() {
-        assert!(
-            detect_antibot_from_url("https://example.com/cdn-cgi/challenge-platform").is_some()
-        );
+        // No match
         assert!(detect_antibot_from_url("https://example.com/page").is_none());
-        // Alibaba TMD URL pattern
+
+        // Pattern 0: /cdn-cgi/challenge-platform → Cloudflare
+        assert_eq!(
+            detect_antibot_from_url("https://example.com/cdn-cgi/challenge-platform/h/b"),
+            Some(AntiBotTech::Cloudflare)
+        );
+        // Pattern 1: datadome.co → DataDome
+        assert_eq!(
+            detect_antibot_from_url("https://api.datadome.co/validate"),
+            Some(AntiBotTech::DataDome)
+        );
+        // Pattern 2: dd-api.io → DataDome
+        assert_eq!(
+            detect_antibot_from_url("https://dd-api.io/js/v1"),
+            Some(AntiBotTech::DataDome)
+        );
+        // Pattern 3: perimeterx.net → PerimeterX
+        assert_eq!(
+            detect_antibot_from_url("https://client.perimeterx.net/main.min.js"),
+            Some(AntiBotTech::PerimeterX)
+        );
+        // Pattern 4: px-captcha → PerimeterX
+        assert_eq!(
+            detect_antibot_from_url("https://example.com/px-captcha"),
+            Some(AntiBotTech::PerimeterX)
+        );
+        // Pattern 5: arkoselabs.com → ArkoseLabs
+        assert_eq!(
+            detect_antibot_from_url("https://client-api.arkoselabs.com/fc/gt2/"),
+            Some(AntiBotTech::ArkoseLabs)
+        );
+        // Pattern 6: funcaptcha → ArkoseLabs
+        assert_eq!(
+            detect_antibot_from_url("https://example.com/funcaptcha/verify"),
+            Some(AntiBotTech::ArkoseLabs)
+        );
+        // Pattern 7: kasada.io → Kasada
+        assert_eq!(
+            detect_antibot_from_url("https://ips.kasada.io/149/script"),
+            Some(AntiBotTech::Kasada)
+        );
+        // Pattern 8: fingerprint.com → FingerprintJS
+        assert_eq!(
+            detect_antibot_from_url("https://api.fingerprint.com/v3"),
+            Some(AntiBotTech::FingerprintJS)
+        );
+        // Pattern 9: fpjs.io → FingerprintJS
+        assert_eq!(
+            detect_antibot_from_url("https://fpjs.io/agent"),
+            Some(AntiBotTech::FingerprintJS)
+        );
+        // Pattern 10: incapsula → Imperva
+        assert_eq!(
+            detect_antibot_from_url("https://example.com/incapsula/resource"),
+            Some(AntiBotTech::Imperva)
+        );
+        // Pattern 11: imperva → Imperva
+        assert_eq!(
+            detect_antibot_from_url("https://example.com/imperva/block"),
+            Some(AntiBotTech::Imperva)
+        );
+        // Pattern 12: radwarebotmanager → RadwareBotManager
+        assert_eq!(
+            detect_antibot_from_url("https://example.com/radwarebotmanager/api"),
+            Some(AntiBotTech::RadwareBotManager)
+        );
+        // Pattern 13: reblaze.com → Reblaze
+        assert_eq!(
+            detect_antibot_from_url("https://reblaze.com/check"),
+            Some(AntiBotTech::Reblaze)
+        );
+        // Pattern 14: cheq.ai → CHEQ
+        assert_eq!(
+            detect_antibot_from_url("https://api.cheq.ai/verify"),
+            Some(AntiBotTech::CHEQ)
+        );
+        // Pattern 15: _____tmd_____/punish → AlibabaTMD
         assert_eq!(
             detect_antibot_from_url(
                 "https://www.miravia.es/p/i123/_____tmd_____/punish?x5secdata=abc"
