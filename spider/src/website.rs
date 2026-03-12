@@ -3003,8 +3003,7 @@ impl Website {
             #[cfg(all(feature = "agent", feature = "serde"))]
             self.apply_url_prefilter(&mut links).await;
 
-            let mut stream =
-                tokio_stream::iter(links.drain().collect::<Vec<_>>());
+            let mut stream = tokio_stream::iter(links.drain().collect::<Vec<_>>());
 
             loop {
                 if !concurrency {
@@ -5214,8 +5213,7 @@ impl Website {
                 #[cfg(all(feature = "agent", feature = "serde"))]
                 self.apply_url_prefilter(&mut links).await;
 
-                let mut stream =
-                    tokio_stream::iter(links.drain().collect::<Vec<_>>());
+                let mut stream = tokio_stream::iter(links.drain().collect::<Vec<_>>());
 
                 loop {
                     if !concurrency {
@@ -6133,8 +6131,7 @@ impl Website {
                 #[cfg(all(feature = "agent", feature = "serde"))]
                 self.apply_url_prefilter(&mut links).await;
 
-                let mut stream =
-                    tokio_stream::iter(links.drain().collect::<Vec<_>>());
+                let mut stream = tokio_stream::iter(links.drain().collect::<Vec<_>>());
 
                 loop {
                     if !concurrency {
@@ -7267,9 +7264,7 @@ impl Website {
             #[cfg(all(feature = "agent", feature = "serde"))]
             self.apply_url_prefilter(&mut links).await;
 
-            let stream =
-                tokio_stream::iter(links.drain().collect::<Vec<_>>())
-                    .throttle(*throttle);
+            let stream = tokio_stream::iter(links.drain().collect::<Vec<_>>()).throttle(*throttle);
             tokio::pin!(stream);
 
             loop {
@@ -7450,8 +7445,7 @@ impl Website {
                 #[cfg(all(feature = "agent", feature = "serde"))]
                 self.apply_url_prefilter(&mut links).await;
 
-                let mut stream =
-                    tokio_stream::iter(links.drain().collect::<Vec<_>>());
+                let mut stream = tokio_stream::iter(links.drain().collect::<Vec<_>>());
 
                 loop {
                     if !concurrency {

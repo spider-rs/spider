@@ -21,6 +21,7 @@ use lol_html::AsciiCompatibleEncoding;
 use phf::phf_set;
 use regex::bytes::Regex;
 use reqwest::StatusCode;
+use std::sync::Arc;
 use tokio::time::Duration;
 #[cfg(feature = "time")]
 use tokio::time::Instant;
@@ -529,7 +530,7 @@ pub struct Page {
     /// The error of the request if any.
     pub error_status: Option<std::sync::Arc<reqwest::Error>>,
     /// The external urls to group with the domain
-    pub external_domains_caseless: Box<HashSet<CaseInsensitiveString>>,
+    pub external_domains_caseless: Arc<HashSet<CaseInsensitiveString>>,
     /// The final destination of the page if redirects were performed [Not implemented in the chrome feature].
     pub final_redirect_destination: Option<String>,
     #[cfg(feature = "time")]
@@ -610,7 +611,7 @@ pub struct Page {
     /// The current links for the page.
     pub links: HashSet<CaseInsensitiveString>,
     /// The external urls to group with the domain.
-    pub external_domains_caseless: Box<HashSet<CaseInsensitiveString>>,
+    pub external_domains_caseless: Arc<HashSet<CaseInsensitiveString>>,
     /// The final destination of the page if redirects were performed [Unused].
     pub final_redirect_destination: Option<String>,
     #[cfg(feature = "time")]
@@ -739,7 +740,7 @@ pub(crate) fn validate_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
     parent_host: &CompactString,
     base_input_domain: &CompactString,
     sub_matcher: &CompactString,
-    external_domains_caseless: &Box<HashSet<CaseInsensitiveString>>,
+    external_domains_caseless: &Arc<HashSet<CaseInsensitiveString>>,
     links_pages: &mut Option<HashSet<A>>,
 ) -> Option<Url> {
     if let Some(b) = base {
@@ -816,7 +817,7 @@ pub(crate) fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
     parent_host_scheme: &CompactString,
     base_input_domain: &CompactString,
     sub_matcher: &CompactString,
-    external_domains_caseless: &Box<HashSet<CaseInsensitiveString>>,
+    external_domains_caseless: &Arc<HashSet<CaseInsensitiveString>>,
     links_pages: &mut Option<HashSet<A>>,
 ) {
     let abs = validate_link(
@@ -848,7 +849,7 @@ pub(crate) fn push_link_verify<A: PartialEq + Eq + std::hash::Hash + From<String
     parent_host_scheme: &CompactString,
     base_input_domain: &CompactString,
     sub_matcher: &CompactString,
-    external_domains_caseless: &Box<HashSet<CaseInsensitiveString>>,
+    external_domains_caseless: &Arc<HashSet<CaseInsensitiveString>>,
     full_resources: bool,
     links_pages: &mut Option<HashSet<A>>,
     verify: bool,
@@ -1615,7 +1616,7 @@ impl Page {
         client: &Client,
         only_html: bool,
         selectors: &mut RelativeSelectors,
-        external_domains_caseless: &Box<HashSet<CaseInsensitiveString>>,
+        external_domains_caseless: &Arc<HashSet<CaseInsensitiveString>>,
         r_settings: &PageLinkBuildSettings,
         map: &mut hashbrown::HashSet<A>,
         ssg_map: Option<&mut hashbrown::HashSet<A>>,
@@ -1964,7 +1965,7 @@ impl Page {
         url: &str,
         input_bytes: &[u8],
         selectors: &mut RelativeSelectors,
-        external_domains_caseless: &Box<HashSet<CaseInsensitiveString>>,
+        external_domains_caseless: &Arc<HashSet<CaseInsensitiveString>>,
         r_settings: &PageLinkBuildSettings,
         map: &mut hashbrown::HashSet<A>,
         ssg_map: Option<&mut hashbrown::HashSet<A>>,
@@ -2616,7 +2617,7 @@ impl Page {
     }
 
     /// Set the external domains to treat as one
-    pub fn set_external(&mut self, external_domains_caseless: Box<HashSet<CaseInsensitiveString>>) {
+    pub fn set_external(&mut self, external_domains_caseless: Arc<HashSet<CaseInsensitiveString>>) {
         self.external_domains_caseless = external_domains_caseless;
     }
 
@@ -4757,7 +4758,7 @@ async fn test_metadata_from_streaming_bytes() {
 
     let url = "https://example.com/test";
     let mut selectors = get_page_selectors(url, false, false);
-    let external_domains: Box<HashSet<CaseInsensitiveString>> = Default::default();
+    let external_domains: Arc<HashSet<CaseInsensitiveString>> = Default::default();
     let r_settings = PageLinkBuildSettings::default();
     let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
     let prior_domain: Option<Box<Url>> = None;
@@ -4818,7 +4819,7 @@ async fn test_metadata_partial_title_only() {
 
     let url = "https://example.com/test";
     let mut selectors = get_page_selectors(url, false, false);
-    let external_domains: Box<HashSet<CaseInsensitiveString>> = Default::default();
+    let external_domains: Arc<HashSet<CaseInsensitiveString>> = Default::default();
     let r_settings = PageLinkBuildSettings::default();
     let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
     let prior_domain: Option<Box<Url>> = None;
@@ -4871,7 +4872,7 @@ async fn test_metadata_partial_description_only() {
 
     let url = "https://example.com/test";
     let mut selectors = get_page_selectors(url, false, false);
-    let external_domains: Box<HashSet<CaseInsensitiveString>> = Default::default();
+    let external_domains: Arc<HashSet<CaseInsensitiveString>> = Default::default();
     let r_settings = PageLinkBuildSettings::default();
     let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
     let prior_domain: Option<Box<Url>> = None;
@@ -4924,7 +4925,7 @@ async fn test_metadata_partial_image_only() {
 
     let url = "https://example.com/test";
     let mut selectors = get_page_selectors(url, false, false);
-    let external_domains: Box<HashSet<CaseInsensitiveString>> = Default::default();
+    let external_domains: Arc<HashSet<CaseInsensitiveString>> = Default::default();
     let r_settings = PageLinkBuildSettings::default();
     let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
     let prior_domain: Option<Box<Url>> = None;
@@ -4975,7 +4976,7 @@ async fn test_metadata_empty_html() {
 
     let url = "https://example.com/test";
     let mut selectors = get_page_selectors(url, false, false);
-    let external_domains: Box<HashSet<CaseInsensitiveString>> = Default::default();
+    let external_domains: Arc<HashSet<CaseInsensitiveString>> = Default::default();
     let r_settings = PageLinkBuildSettings::default();
     let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
     let prior_domain: Option<Box<Url>> = None;
@@ -5020,7 +5021,7 @@ async fn test_metadata_special_characters() {
 
     let url = "https://example.com/test";
     let mut selectors = get_page_selectors(url, false, false);
-    let external_domains: Box<HashSet<CaseInsensitiveString>> = Default::default();
+    let external_domains: Arc<HashSet<CaseInsensitiveString>> = Default::default();
     let r_settings = PageLinkBuildSettings::default();
     let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
     let prior_domain: Option<Box<Url>> = None;
@@ -5080,7 +5081,7 @@ async fn test_metadata_unicode() {
 
     let url = "https://example.com/test";
     let mut selectors = get_page_selectors(url, false, false);
-    let external_domains: Box<HashSet<CaseInsensitiveString>> = Default::default();
+    let external_domains: Arc<HashSet<CaseInsensitiveString>> = Default::default();
     let r_settings = PageLinkBuildSettings::default();
     let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
     let prior_domain: Option<Box<Url>> = None;
@@ -5896,7 +5897,7 @@ fn test_validate_link_subdomain_relative_resolution() {
     // currently on a page at sub.example.com
     let selectors = get_page_selectors("https://www.example.com/", true, false);
 
-    let external_domains: Box<HashSet<CaseInsensitiveString>> = Box::new(HashSet::new());
+    let external_domains: Arc<HashSet<CaseInsensitiveString>> = Arc::new(HashSet::new());
 
     // With the fix: base is the page's own URL (sub.example.com)
     let subdomain_base = url::Url::parse("https://sub.example.com/page").unwrap();
@@ -5953,7 +5954,7 @@ fn test_validate_link_subdomain_relative_resolution() {
 fn test_validate_link_same_domain_resolution() {
     let selectors = get_page_selectors("https://www.example.com/", false, false);
 
-    let external_domains: Box<HashSet<CaseInsensitiveString>> = Box::new(HashSet::new());
+    let external_domains: Arc<HashSet<CaseInsensitiveString>> = Arc::new(HashSet::new());
 
     let page_base = url::Url::parse("https://www.example.com/some-page").unwrap();
     let mut no_page_links: Option<HashSet<CaseInsensitiveString>> = None;

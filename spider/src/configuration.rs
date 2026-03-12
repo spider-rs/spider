@@ -18,6 +18,7 @@ use crate::utils::BasicCachePolicy;
 use crate::website::CronType;
 use reqwest::header::{AsHeaderName, HeaderMap, HeaderName, HeaderValue, IntoHeaderName};
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(feature = "chrome")]
@@ -212,7 +213,7 @@ pub struct Configuration {
     pub wild_card_budgeting: bool,
     /// External domains to include case-insensitive.
     pub external_domains_caseless:
-        Box<hashbrown::HashSet<case_insensitive_string::CaseInsensitiveString>>,
+        Arc<hashbrown::HashSet<case_insensitive_string::CaseInsensitiveString>>,
     /// Collect all the resources found on the page.
     pub full_resources: bool,
     /// Dangerously accept invalid certficates.
@@ -1518,7 +1519,7 @@ impl Configuration {
                     .collect::<hashbrown::HashSet<case_insensitive_string::CaseInsensitiveString>>()
                     .into();
             }
-            _ => self.external_domains_caseless.clear(),
+            _ => self.external_domains_caseless = Default::default(),
         }
 
         self
@@ -2138,7 +2139,7 @@ mod tests {
     #[test]
     fn test_configuration_external_domains() {
         let mut config = Configuration::default();
-        config.external_domains_caseless = Box::new(
+        config.external_domains_caseless = Arc::new(
             [
                 case_insensitive_string::CaseInsensitiveString::from("Example.Com"),
                 case_insensitive_string::CaseInsensitiveString::from("OTHER.org"),
