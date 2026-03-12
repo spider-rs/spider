@@ -2463,7 +2463,7 @@ impl Website {
             self.status = CrawlStatus::RateLimited;
         } else if (page.status_code == *UNKNOWN_STATUS_ERROR
             || page.status_code == *CHROME_UNKNOWN_STATUS_ERROR)
-            && (page.is_empty() || page.error_status.is_some())
+            && page.is_empty()
         {
             self.status = CrawlStatus::ConnectError;
         } else if page.status_code.is_server_error() {
@@ -11010,7 +11010,7 @@ mod tests {
     }
 
     #[test]
-    fn test_crawl_status_598_with_error_status_is_connect_error() {
+    fn test_crawl_status_598_with_error_status_and_content_is_server_error() {
         let mut website = crate::website::Website::new("http://example.com");
         let mut page = make_page(*crate::page::CHROME_UNKNOWN_STATUS_ERROR);
         page.html = Some(
@@ -11021,7 +11021,32 @@ mod tests {
         page.error_status = Some("Invalid proxy configuration.".into());
         let links = hashbrown::HashSet::new();
         website.set_crawl_initial_status(&page, &links);
+        assert_eq!(*website.get_status(), super::CrawlStatus::ServerError);
+    }
+
+    #[test]
+    fn test_crawl_status_598_with_error_status_empty_is_connect_error() {
+        let mut website = crate::website::Website::new("http://example.com");
+        let mut page = make_page(*crate::page::CHROME_UNKNOWN_STATUS_ERROR);
+        page.error_status = Some("Invalid proxy configuration.".into());
+        let links = hashbrown::HashSet::new();
+        website.set_crawl_initial_status(&page, &links);
         assert_eq!(*website.get_status(), super::CrawlStatus::ConnectError);
+    }
+
+    #[test]
+    fn test_crawl_status_599_with_content_and_error_status_is_server_error() {
+        let mut website = crate::website::Website::new("http://example.com");
+        let mut page = make_page(*crate::page::UNKNOWN_STATUS_ERROR);
+        page.html = Some(
+            b"<html><body>real server content</body></html>"
+                .to_vec()
+                .into_boxed_slice(),
+        );
+        page.error_status = Some("599 Server Error".into());
+        let links = hashbrown::HashSet::new();
+        website.set_crawl_initial_status(&page, &links);
+        assert_eq!(*website.get_status(), super::CrawlStatus::ServerError);
     }
 
     #[test]
