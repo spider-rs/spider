@@ -3004,7 +3004,7 @@ impl Website {
             self.apply_url_prefilter(&mut links).await;
 
             let mut stream =
-                tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect());
+                tokio_stream::iter(links.drain().collect::<Vec<_>>());
 
             loop {
                 if !concurrency {
@@ -5215,7 +5215,7 @@ impl Website {
                 self.apply_url_prefilter(&mut links).await;
 
                 let mut stream =
-                    tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect());
+                    tokio_stream::iter(links.drain().collect::<Vec<_>>());
 
                 loop {
                     if !concurrency {
@@ -6134,7 +6134,7 @@ impl Website {
                 self.apply_url_prefilter(&mut links).await;
 
                 let mut stream =
-                    tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect());
+                    tokio_stream::iter(links.drain().collect::<Vec<_>>());
 
                 loop {
                     if !concurrency {
@@ -7268,7 +7268,7 @@ impl Website {
             self.apply_url_prefilter(&mut links).await;
 
             let stream =
-                tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect())
+                tokio_stream::iter(links.drain().collect::<Vec<_>>())
                     .throttle(*throttle);
             tokio::pin!(stream);
 
@@ -7451,7 +7451,7 @@ impl Website {
                 self.apply_url_prefilter(&mut links).await;
 
                 let mut stream =
-                    tokio_stream::iter::<HashSet<CaseInsensitiveString>>(links.drain().collect());
+                    tokio_stream::iter(links.drain().collect::<Vec<_>>());
 
                 loop {
                     if !concurrency {

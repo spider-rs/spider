@@ -923,17 +923,20 @@ pub(crate) fn domain_name(domain: &Url) -> &str {
 
 /// extract the valid domains from a url.
 fn extract_root_domain(domain: &str) -> &str {
-    let parts: Vec<&str> = domain.split('.').collect();
+    let dot_count = domain.bytes().filter(|&b| b == b'.').count();
 
-    if parts.len() >= 3 {
-        let start_index = parts.len() - 2;
-        if let Some(start_pos) = domain.find(parts[start_index]) {
-            &domain[start_pos..]
-        } else {
-            domain
-        }
-    } else if parts.len() == 2 {
-        parts[0]
+    if dot_count >= 2 {
+        // Find second-to-last dot: skip past the first (dot_count - 1) dots
+        let skip = dot_count - 1;
+        let start = domain
+            .match_indices('.')
+            .nth(skip - 1)
+            .map(|(i, _)| i + 1)
+            .unwrap_or(0);
+        &domain[start..]
+    } else if dot_count == 1 {
+        // "example.com" → "example"
+        domain.split('.').next().unwrap_or(domain)
     } else {
         domain
     }
@@ -1194,10 +1197,8 @@ pub fn build(url: &str, res: PageResponse) -> Page {
 
             if should_retry {
                 if let Some(message) = &error_status {
-                    if message
-                        .to_string()
-                        .starts_with("error sending request for url ")
-                    {
+                    let msg: &str = message.as_ref();
+                    if msg.starts_with("error sending request for url ") {
                         should_retry = false;
                     }
                 }
@@ -1342,8 +1343,7 @@ pub(crate) fn get_charset_from_content_type(
 
     if let Some(content_type) = headers.get(reqwest::header::CONTENT_TYPE) {
         if let Ok(content_type_str) = content_type.to_str() {
-            let parts: Vec<&str> = content_type_str.split(';').collect();
-            for part in parts {
+            for part in content_type_str.split(';') {
                 let part = part.trim().to_lowercase();
                 if let Some(stripped) = part.strip_prefix("charset=") {
                     if let Some(encoding) = encoding_rs::Encoding::for_label(stripped.as_bytes()) {
@@ -3611,7 +3611,7 @@ impl Page {
                 let should_upgrade = rerender.load(Ordering::Relaxed)
                     || script_src.load(Ordering::Relaxed)
                     // Anti-bot body detection as fallback upgrade signal (lazy — skipped when already upgrading)
-                    || crate::utils::detect_anti_bot_from_body(&html_resource.as_bytes().to_vec()).is_some();
+                    || crate::utils::detect_anti_bot_from_body(html_resource.as_bytes()).is_some();
                 if should_upgrade {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {
@@ -4024,7 +4024,7 @@ impl Page {
                 let should_upgrade = rerender.load(Ordering::Relaxed)
                     || script_src.load(Ordering::Relaxed)
                     // Anti-bot body detection as fallback upgrade signal (lazy — skipped when already upgrading)
-                    || crate::utils::detect_anti_bot_from_body(&html_resource.as_bytes().to_vec()).is_some();
+                    || crate::utils::detect_anti_bot_from_body(html_resource.as_bytes()).is_some();
                 if should_upgrade {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {

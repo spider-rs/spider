@@ -253,15 +253,18 @@ pub fn is_cacheable_body_empty(body: &[u8]) -> bool {
     if trimmed == *crate::utils::templates::EMPTY_HTML || trimmed == *EMPTY_HTML_BASIC {
         return true;
     }
-    // Detect pages with HTML structure but empty <body> (< 2KB only for speed)
+    // Detect pages with HTML structure but empty <body> (< 2KB only for speed).
+    // Case-insensitive matching without allocating a lowercase copy.
     if trimmed.len() <= 2048 {
-        let lower: Vec<u8> = trimmed.iter().map(|c| c.to_ascii_lowercase()).collect();
-        if let Some(body_open) = lower.windows(5).position(|w| w == b"<body") {
-            if let Some(gt) = lower[body_open..].iter().position(|&c| c == b'>') {
+        if let Some(body_open) = trimmed
+            .windows(5)
+            .position(|w| w.eq_ignore_ascii_case(b"<body"))
+        {
+            if let Some(gt) = trimmed[body_open..].iter().position(|&c| c == b'>') {
                 let content_start = body_open + gt + 1;
-                if let Some(close) = lower[content_start..]
+                if let Some(close) = trimmed[content_start..]
                     .windows(7)
-                    .position(|w| w == b"</body>")
+                    .position(|w| w.eq_ignore_ascii_case(b"</body>"))
                 {
                     let content_end = content_start + close;
                     if trimmed[content_start..content_end]
@@ -716,7 +719,7 @@ pub fn detect_anti_bot_from_headers(headers: &HeaderSource) -> Option<AntiBotTec
 }
 
 /// Detect the anti-bot technology.
-pub fn detect_anti_bot_from_body(body: &Vec<u8>) -> Option<AntiBotTech> {
+pub fn detect_anti_bot_from_body(body: &[u8]) -> Option<AntiBotTech> {
     // Scan body for anti-bot fingerprints (only for small pages)
     if body.len() < 30_000 {
         if let Ok(finder) = AC_BODY_SCAN.try_find_iter(body) {
@@ -781,7 +784,7 @@ pub fn flip_http_https(url: &str) -> Option<String> {
 pub fn detect_anti_bot_tech_response(
     url: &str,
     headers: &HeaderSource,
-    body: &Vec<u8>,
+    body: &[u8],
     subject_name: Option<&str>,
 ) -> AntiBotTech {
     // Check by TLS subject (Chrome/CDP TLS details)
@@ -962,7 +965,7 @@ pub async fn perform_chrome_http_request(
                                     anti_bot_tech = detect_anti_bot_tech_response(
                                         &response.url,
                                         &HeaderSource::Map(&response_headers),
-                                        &Default::default(),
+                                        &[],
                                         Some(&security_details.subject_name),
                                     );
                                     firewall = true;
@@ -971,7 +974,7 @@ pub async fn perform_chrome_http_request(
                                     anti_bot_tech = detect_anti_bot_tech_response(
                                         &response.url,
                                         &HeaderSource::Map(&response_headers),
-                                        &Default::default(),
+                                        &[],
                                         None,
                                     );
                                     if anti_bot_tech == AntiBotTech::Cloudflare {
@@ -1125,7 +1128,7 @@ pub async fn perform_chrome_http_request_cache(
                                 anti_bot_tech = detect_anti_bot_tech_response(
                                     &response.url,
                                     &HeaderSource::Map(&response_headers),
-                                    &Default::default(),
+                                    &[],
                                     Some(&security_details.subject_name),
                                 );
                                 firewall = true;
@@ -1134,7 +1137,7 @@ pub async fn perform_chrome_http_request_cache(
                                 anti_bot_tech = detect_anti_bot_tech_response(
                                     &response.url,
                                     &HeaderSource::Map(&response_headers),
-                                    &Default::default(),
+                                    &[],
                                     None,
                                 );
                                 if anti_bot_tech == AntiBotTech::Cloudflare {
@@ -3858,7 +3861,7 @@ pub async fn handle_response_bytes(
             anti_bot_tech = detect_anti_bot_tech_response(
                 target_url,
                 &HeaderSource::HeaderMap(&headers),
-                &Default::default(),
+                &[],
                 None,
             );
             return PageResponse {
