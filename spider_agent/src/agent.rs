@@ -89,6 +89,11 @@ impl Agent {
         AgentBuilder::new()
     }
 
+    /// Returns a reference to the underlying HTTP client.
+    pub fn client(&self) -> &reqwest::Client {
+        &self.client
+    }
+
     // ==================== Search Methods ====================
 
     /// Search the web and return results.
@@ -1024,6 +1029,7 @@ pub struct AgentBuilder {
     llm: Option<Box<dyn LLMProvider>>,
     spider_cloud: Option<SpiderCloudToolConfig>,
     proxies: Option<Vec<String>>,
+    client: Option<reqwest::Client>,
     #[cfg(feature = "search")]
     search_provider: Option<Box<dyn SearchProvider>>,
     #[cfg(feature = "chrome")]
@@ -1042,6 +1048,7 @@ impl AgentBuilder {
             llm: None,
             spider_cloud: None,
             proxies: None,
+            client: None,
             #[cfg(feature = "search")]
             search_provider: None,
             #[cfg(feature = "chrome")]
@@ -1107,6 +1114,48 @@ impl AgentBuilder {
     /// Use this when you need custom API URL, route toggles, or AI route gating.
     pub fn with_spider_cloud_config(mut self, config: SpiderCloudToolConfig) -> Self {
         self.spider_cloud = Some(config);
+        self
+    }
+
+    /// Set the HTTP request timeout.
+    ///
+    /// Pass `None` for no timeout (infinite).  Defaults to 60 seconds.
+    ///
+    /// # Example
+    /// ```ignore
+    /// use std::time::Duration;
+    /// let agent = Agent::builder()
+    ///     .with_timeout(Some(Duration::from_secs(300)))
+    ///     .build()?;
+    /// ```
+    pub fn with_timeout(mut self, timeout: Option<std::time::Duration>) -> Self {
+        match timeout {
+            Some(d) => self.config.timeout = d,
+            None => self.config.timeout = std::time::Duration::MAX,
+        }
+        self
+    }
+
+    /// Provide a pre-built [`reqwest::Client`].
+    ///
+    /// When set, the builder skips its own client construction (timeout,
+    /// proxy settings, etc.) and uses this client directly.  This gives
+    /// full control over TLS, timeouts, connection pools, and proxies.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let client = reqwest::Client::builder()
+    ///     .timeout(std::time::Duration::from_secs(120))
+    ///     .proxy(reqwest::Proxy::all("http://proxy:8080")?)
+    ///     .build()?;
+    ///
+    /// let agent = Agent::builder()
+    ///     .with_client(client)
+    ///     .with_openai("sk-...", "gpt-4o")
+    ///     .build()?;
+    /// ```
+    pub fn with_client(mut self, client: reqwest::Client) -> Self {
+        self.client = Some(client);
         self
     }
 
@@ -1208,16 +1257,25 @@ impl AgentBuilder {
 
     /// Build the agent.
     pub fn build(self) -> AgentResult<Agent> {
-        let mut builder = reqwest::Client::builder().timeout(self.config.timeout);
+        let client = if let Some(client) = self.client {
+            client
+        } else {
+            let mut builder = reqwest::Client::builder();
 
-        if let Some(proxies) = &self.proxies {
-            for proxy_url in proxies {
-                let proxy = reqwest::Proxy::all(proxy_url).map_err(AgentError::Http)?;
-                builder = builder.proxy(proxy);
+            // Duration::MAX effectively disables the timeout.
+            if self.config.timeout != std::time::Duration::MAX {
+                builder = builder.timeout(self.config.timeout);
             }
-        }
 
-        let client = builder.build().map_err(AgentError::Http)?;
+            if let Some(proxies) = &self.proxies {
+                for proxy_url in proxies {
+                    let proxy = reqwest::Proxy::all(proxy_url).map_err(AgentError::Http)?;
+                    builder = builder.proxy(proxy);
+                }
+            }
+
+            builder.build().map_err(AgentError::Http)?
+        };
 
         let semaphore = Arc::new(Semaphore::new(self.config.max_concurrent_llm_calls));
 
@@ -1351,5 +1409,60 @@ mod tests {
             .build()
             .expect("default agent should build");
         drop(agent);
+    }
+
+    #[test]
+    fn test_builder_with_custom_client() {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .expect("custom client should build");
+
+        let agent = Agent::builder()
+            .with_client(client)
+            .build()
+            .expect("agent with custom client should build");
+        // Verify the client accessor works.
+        let _ = agent.client();
+    }
+
+    #[test]
+    fn test_builder_with_custom_client_ignores_proxy_and_timeout() {
+        // When a custom client is provided, proxy/timeout settings on the
+        // builder are bypassed — the caller owns the full client config.
+        let client = reqwest::Client::new();
+        let agent = Agent::builder()
+            .with_client(client)
+            .with_proxy("http://proxy.example.com:8080")
+            .with_timeout(Some(std::time::Duration::from_secs(999)))
+            .build()
+            .expect("custom client should take precedence");
+        drop(agent);
+    }
+
+    #[test]
+    fn test_builder_with_timeout_some() {
+        let agent = Agent::builder()
+            .with_timeout(Some(std::time::Duration::from_secs(300)))
+            .build()
+            .expect("agent with 300s timeout should build");
+        drop(agent);
+    }
+
+    #[test]
+    fn test_builder_with_timeout_none_infinite() {
+        let agent = Agent::builder()
+            .with_timeout(None)
+            .build()
+            .expect("agent with no timeout should build");
+        drop(agent);
+    }
+
+    #[test]
+    fn test_client_accessor_returns_reference() {
+        let agent = Agent::builder().build().expect("agent should build");
+        // Ensure we can obtain a shared reference without moving.
+        let _c1 = agent.client();
+        let _c2 = agent.client();
     }
 }
