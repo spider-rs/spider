@@ -84,7 +84,46 @@ lazy_static! {
         StatusCode::from_u16(503).expect("valid status code");
 }
 
+lazy_static! {
+    /// Aho-Corasick automaton for DNS error detection — single O(n) scan.
+    static ref DNS_ERROR_AC: aho_corasick::AhoCorasick = aho_corasick::AhoCorasick::new([
+        "dns error",
+        "failed to lookup address",
+        "Name or service not known",
+        "No address associated with hostname",
+        "ENOTFOUND",
+    ]).expect("valid patterns");
+}
+
+/// Check if a connect error is a DNS resolution failure.
+/// Zero-alloc fast path via `downcast_ref`, single-alloc fallback via Aho-Corasick O(n) scan.
+/// Only called when `err.is_connect()` is already true.
+fn is_dns_error(err: &crate::client::Error) -> bool {
+    use std::error::Error;
+
+    // Fast path: walk source chain looking for io::Error with specific kinds.
+    // Hickory DNS surfaces as: reqwest → hyper → io::Error(Custom("dns error: ..."))
+    let mut source: Option<&(dyn Error + 'static)> = err.source();
+    let mut depth = 0u8;
+    while let Some(e) = source {
+        if depth >= 6 {
+            break;
+        }
+        if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
+            if matches!(io_err.kind(), std::io::ErrorKind::NotFound) {
+                return true;
+            }
+        }
+        source = e.source();
+        depth += 1;
+    }
+
+    // Slow fallback: single to_string() + single-pass Aho-Corasick scan.
+    DNS_ERROR_AC.is_match(&err.to_string())
+}
+
 /// Get the HTTP status code of errors.
+
 pub(crate) fn get_error_http_status_code(err: &crate::client::Error) -> StatusCode {
     use std::error::Error;
     use std::io;
@@ -98,6 +137,10 @@ pub(crate) fn get_error_http_status_code(err: &crate::client::Error) -> StatusCo
     }
 
     if err.is_connect() {
+        // DNS resolution failure — never retried
+        if is_dns_error(err) {
+            return *DNS_RESOLVE_ERROR;
+        }
         if let Some(io_err) = err.source().and_then(|e| e.downcast_ref::<io::Error>()) {
             match io_err.kind() {
                 io::ErrorKind::ConnectionRefused => return *CONNECTION_REFUSED_ERROR,
@@ -1070,7 +1113,7 @@ fn get_error_status_base(
             Ok(_) => None,
             Err(er) => {
                 if er.is_status() || er.is_connect() || er.is_timeout() {
-                    *should_retry = !er.to_string().contains("ENOTFOUND");
+                    *should_retry = true;
                 }
                 if !*should_retry && should_attempt_retry(&er) {
                     *should_retry = true;
@@ -1142,11 +1185,13 @@ pub fn build(url: &str, res: PageResponse) -> Page {
 
     let status = res.status_code;
 
-    let should_retry_status = status.is_server_error()
-        || matches!(
-            status,
-            StatusCode::TOO_MANY_REQUESTS | StatusCode::FORBIDDEN | StatusCode::REQUEST_TIMEOUT
-        );
+    // DNS resolve error (525) is permanent — never retry
+    let should_retry_status = status != *DNS_RESOLVE_ERROR
+        && (status.is_server_error()
+            || matches!(
+                status,
+                StatusCode::TOO_MANY_REQUESTS | StatusCode::FORBIDDEN | StatusCode::REQUEST_TIMEOUT
+            ));
 
     let should_retry_resource = resource_found && !success;
 
@@ -6075,4 +6120,33 @@ async fn test_same_domain_page_links_resolution() {
         "Same-domain relative link should resolve correctly, got: {:?}",
         &links
     );
+}
+
+/// DNS resolve error (525) should not be retried.
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_dns_error_no_retry() {
+    let res = PageResponse {
+        status_code: StatusCode::from_u16(525).unwrap(),
+        content: None,
+        ..Default::default()
+    };
+    let page = build("https://nonexistent.invalid", res);
+    assert!(
+        !page.should_retry,
+        "DNS resolve errors (525) must not be retried"
+    );
+}
+
+/// Normal server errors should still be retried.
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_server_error_still_retries() {
+    let res = PageResponse {
+        status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        content: Some(Default::default()),
+        ..Default::default()
+    };
+    let page = build("https://example.com", res);
+    assert!(page.should_retry, "500 errors should still be retried");
 }
