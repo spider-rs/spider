@@ -1023,6 +1023,7 @@ pub struct AgentBuilder {
     config: AgentConfig,
     llm: Option<Box<dyn LLMProvider>>,
     spider_cloud: Option<SpiderCloudToolConfig>,
+    proxies: Option<Vec<String>>,
     #[cfg(feature = "search")]
     search_provider: Option<Box<dyn SearchProvider>>,
     #[cfg(feature = "chrome")]
@@ -1040,6 +1041,7 @@ impl AgentBuilder {
             config: AgentConfig::default(),
             llm: None,
             spider_cloud: None,
+            proxies: None,
             #[cfg(feature = "search")]
             search_provider: None,
             #[cfg(feature = "chrome")]
@@ -1105,6 +1107,32 @@ impl AgentBuilder {
     /// Use this when you need custom API URL, route toggles, or AI route gating.
     pub fn with_spider_cloud_config(mut self, config: SpiderCloudToolConfig) -> Self {
         self.spider_cloud = Some(config);
+        self
+    }
+
+    /// Configure one or more HTTP/SOCKS proxies.
+    ///
+    /// Each entry is a proxy URL (e.g. `http://host:port`, `socks5://host:port`).
+    /// The first proxy is applied to the underlying HTTP client; additional
+    /// proxies are added via `reqwest::Proxy::all`.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let agent = Agent::builder()
+    ///     .with_openai("sk-...", "gpt-4o")
+    ///     .with_proxies(vec!["http://proxy.example.com:8080".into()])
+    ///     .build()?;
+    /// ```
+    pub fn with_proxies(mut self, proxies: Vec<String>) -> Self {
+        if !proxies.is_empty() {
+            self.proxies = Some(proxies);
+        }
+        self
+    }
+
+    /// Configure a single HTTP/SOCKS proxy.
+    pub fn with_proxy(mut self, proxy: impl Into<String>) -> Self {
+        self.proxies = Some(vec![proxy.into()]);
         self
     }
 
@@ -1180,10 +1208,16 @@ impl AgentBuilder {
 
     /// Build the agent.
     pub fn build(self) -> AgentResult<Agent> {
-        let client = reqwest::Client::builder()
-            .timeout(self.config.timeout)
-            .build()
-            .map_err(AgentError::Http)?;
+        let mut builder = reqwest::Client::builder().timeout(self.config.timeout);
+
+        if let Some(proxies) = &self.proxies {
+            for proxy_url in proxies {
+                let proxy = reqwest::Proxy::all(proxy_url).map_err(AgentError::Http)?;
+                builder = builder.proxy(proxy);
+            }
+        }
+
+        let client = builder.build().map_err(AgentError::Http)?;
 
         let semaphore = Arc::new(Semaphore::new(self.config.max_concurrent_llm_calls));
 
@@ -1260,5 +1294,62 @@ mod tests {
         assert!(tools.contains(&"spider_cloud_ai_search".to_string()));
         assert!(tools.contains(&"spider_cloud_ai_browser".to_string()));
         assert!(tools.contains(&"spider_cloud_ai_links".to_string()));
+    }
+
+    #[test]
+    fn test_builder_with_single_proxy() {
+        let agent = Agent::builder()
+            .with_proxy("http://proxy.example.com:8080")
+            .build()
+            .expect("agent with proxy should build");
+        // Client was constructed — no panic, proxy applied at reqwest level.
+        drop(agent);
+    }
+
+    #[test]
+    fn test_builder_with_multiple_proxies() {
+        let agent = Agent::builder()
+            .with_proxies(vec![
+                "http://proxy1.example.com:8080".into(),
+                "http://proxy2.example.com:9090".into(),
+            ])
+            .build()
+            .expect("agent with multiple proxies should build");
+        drop(agent);
+    }
+
+    #[test]
+    fn test_builder_with_socks5_proxy() {
+        let agent = Agent::builder()
+            .with_proxy("socks5://127.0.0.1:1080")
+            .build()
+            .expect("agent with socks5 proxy should build");
+        drop(agent);
+    }
+
+    #[test]
+    fn test_builder_with_empty_proxies_no_op() {
+        let agent = Agent::builder()
+            .with_proxies(vec![])
+            .build()
+            .expect("agent with empty proxies should build");
+        drop(agent);
+    }
+
+    #[test]
+    fn test_builder_with_invalid_proxy_returns_error() {
+        let result = Agent::builder()
+            .with_proxy("not a valid url at all ://")
+            .build();
+        assert!(result.is_err(), "invalid proxy URL should fail at build");
+    }
+
+    #[test]
+    fn test_builder_no_proxies_by_default() {
+        // Default builder has no proxies — just ensure it builds fine.
+        let agent = Agent::builder()
+            .build()
+            .expect("default agent should build");
+        drop(agent);
     }
 }

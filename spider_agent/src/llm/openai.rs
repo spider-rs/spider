@@ -44,8 +44,12 @@ impl OpenAIProvider {
     }
 
     /// Use a custom API endpoint (for compatible APIs).
+    ///
+    /// If the URL does not already end with `/chat/completions`,
+    /// the path is appended automatically so callers can pass just a
+    /// base URL (e.g. `https://my-server.com/v1`).
     pub fn with_api_url(mut self, url: impl Into<String>) -> Self {
-        self.api_url = url.into();
+        self.api_url = normalize_api_url(url.into());
         self
     }
 
@@ -135,6 +139,24 @@ impl LLMProvider for OpenAIProvider {
     }
 }
 
+/// Ensure the URL ends with `/chat/completions`.
+///
+/// Accepts both full endpoints (`https://host/v1/chat/completions`) and
+/// base-only URLs (`https://host/v1`).  A trailing slash on the input is
+/// tolerated.  Avoids allocation when the URL is already correct.
+fn normalize_api_url(mut url: String) -> String {
+    // Strip trailing slashes in-place.
+    while url.ends_with('/') {
+        url.pop();
+    }
+
+    if !url.ends_with("/chat/completions") {
+        url.push_str("/chat/completions");
+    }
+
+    url
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,12 +169,62 @@ mod tests {
     }
 
     #[test]
-    fn test_openai_provider_custom_url() {
+    fn test_openai_provider_custom_url_full_path() {
         let provider = OpenAIProvider::new("sk-test", "gpt-4o")
             .with_api_url("https://custom.api.com/v1/chat/completions");
         assert_eq!(
             provider.api_url,
             "https://custom.api.com/v1/chat/completions"
         );
+    }
+
+    #[test]
+    fn test_openai_provider_custom_url_base_only() {
+        let provider =
+            OpenAIProvider::new("sk-test", "gpt-4o").with_api_url("https://api.xyz.com/llm/v1");
+        assert_eq!(
+            provider.api_url,
+            "https://api.xyz.com/llm/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn test_openai_provider_custom_url_trailing_slash() {
+        let provider =
+            OpenAIProvider::new("sk-test", "gpt-4o").with_api_url("https://api.xyz.com/llm/v1/");
+        assert_eq!(
+            provider.api_url,
+            "https://api.xyz.com/llm/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn test_openai_provider_custom_url_full_path_trailing_slash() {
+        let provider = OpenAIProvider::new("sk-test", "gpt-4o")
+            .with_api_url("https://custom.api.com/v1/chat/completions/");
+        assert_eq!(
+            provider.api_url,
+            "https://custom.api.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn test_normalize_api_url_bare_host() {
+        assert_eq!(
+            normalize_api_url("https://localhost:8000".into()),
+            "https://localhost:8000/chat/completions"
+        );
+    }
+
+    #[test]
+    fn test_normalize_api_url_idempotent() {
+        let url = "https://api.openai.com/v1/chat/completions".to_string();
+        assert_eq!(normalize_api_url(url.clone()), url);
+    }
+
+    #[test]
+    fn test_openai_provider_empty_key_not_configured() {
+        let provider = OpenAIProvider::new("", "gpt-4o");
+        assert!(!provider.is_configured());
     }
 }
