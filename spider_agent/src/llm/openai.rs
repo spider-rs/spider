@@ -4,20 +4,33 @@ use super::{CompletionOptions, CompletionResponse, LLMProvider, Message, TokenUs
 use crate::error::{AgentError, AgentResult};
 use async_trait::async_trait;
 
-/// Default OpenAI Chat Completions endpoint.
-const DEFAULT_API_URL: &str = "https://api.openai.com/v1/chat/completions";
-
-/// Default OpenAI Responses endpoint.
-const DEFAULT_RESPONSES_URL: &str = "https://api.openai.com/v1/responses";
+/// Default OpenAI base URL.
+const DEFAULT_OPENAI_BASE: &str = "https://api.openai.com";
 
 /// Which OpenAI API surface to target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OpenAiApiMode {
-    /// Chat Completions API (`/v1/chat/completions`).  Default.
+    /// Auto-detect from the URL: `api.openai.com` → Responses,
+    /// everything else → Completions.  This is the default.
     #[default]
+    Auto,
+    /// Chat Completions API (`/v1/chat/completions`).
     Completions,
     /// Responses API (`/v1/responses`).
     Responses,
+}
+
+/// Resolved (non-Auto) mode used at request time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResolvedMode {
+    Completions,
+    Responses,
+}
+
+/// Returns true when the URL points at OpenAI's first-party API.
+fn is_openai_url(url: &str) -> bool {
+    // Fast byte check — avoid allocations.
+    url.starts_with("https://api.openai.com") || url.starts_with("http://api.openai.com")
 }
 
 /// OpenAI-compatible LLM provider.
@@ -48,23 +61,35 @@ pub struct OpenAIProvider {
 }
 
 impl OpenAIProvider {
-    /// Create a new OpenAI provider (Chat Completions API by default).
+    /// Create a new OpenAI provider.
+    ///
+    /// Defaults to `Auto` mode: uses the Responses API for `api.openai.com`
+    /// and Chat Completions for everything else.
     pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
             api_key: api_key.into(),
-            api_url: DEFAULT_API_URL.to_string(),
+            api_url: DEFAULT_OPENAI_BASE.to_string(),
             model: model.into(),
-            api_mode: OpenAiApiMode::Completions,
+            api_mode: OpenAiApiMode::Auto,
         }
     }
 
     /// Use a custom API endpoint (for compatible APIs).
     ///
-    /// If the URL does not already end with the expected path for the
-    /// current API mode, it is appended automatically so callers can pass
-    /// just a base URL (e.g. `https://my-server.com/v1`).
+    /// In `Auto` mode the path suffix is resolved at request time based on
+    /// the host.  In explicit `Completions` / `Responses` mode the correct
+    /// suffix is appended immediately if missing.
     pub fn with_api_url(mut self, url: impl Into<String>) -> Self {
-        self.api_url = normalize_api_url(url.into(), self.api_mode);
+        let raw = url.into();
+        match self.api_mode {
+            OpenAiApiMode::Auto => {
+                // Store the base; path is resolved at request time.
+                self.api_url = strip_known_suffixes(raw);
+            }
+            mode => {
+                self.api_url = normalize_api_url(raw, mode);
+            }
+        }
         self
     }
 
@@ -74,26 +99,55 @@ impl OpenAIProvider {
         self
     }
 
-    /// Switch to the OpenAI Responses API (`/v1/responses`).
+    /// Force the Chat Completions API (`/v1/chat/completions`).
+    pub fn with_completions_api(mut self) -> Self {
+        self.api_mode = OpenAiApiMode::Completions;
+        self.api_url = normalize_api_url(self.api_url, OpenAiApiMode::Completions);
+        self
+    }
+
+    /// Force the Responses API (`/v1/responses`).
     ///
     /// The Responses API uses `instructions` + `input` instead of a
     /// `messages` array and returns structured `output` items.
-    ///
-    /// # Example
-    /// ```ignore
-    /// let provider = OpenAIProvider::new("sk-...", "gpt-4o")
-    ///     .with_responses_api();
-    /// ```
     pub fn with_responses_api(mut self) -> Self {
         self.api_mode = OpenAiApiMode::Responses;
-        // Reset URL to the correct default when switching mode, unless the
-        // caller already set a custom URL.
-        if self.api_url == DEFAULT_API_URL {
-            self.api_url = DEFAULT_RESPONSES_URL.to_string();
-        } else {
-            self.api_url = normalize_api_url(self.api_url, OpenAiApiMode::Responses);
-        }
+        self.api_url = normalize_api_url(self.api_url, OpenAiApiMode::Responses);
         self
+    }
+
+    /// Resolve the effective mode (never `Auto`).
+    fn resolved_mode(&self) -> ResolvedMode {
+        match self.api_mode {
+            OpenAiApiMode::Completions => ResolvedMode::Completions,
+            OpenAiApiMode::Responses => ResolvedMode::Responses,
+            OpenAiApiMode::Auto => {
+                if is_openai_url(&self.api_url) {
+                    ResolvedMode::Responses
+                } else {
+                    ResolvedMode::Completions
+                }
+            }
+        }
+    }
+
+    /// Build the full request URL, appending the path suffix when in Auto mode.
+    fn request_url(&self) -> String {
+        match self.api_mode {
+            OpenAiApiMode::Auto => {
+                let base = self.api_url.trim_end_matches('/');
+                // Already has a known endpoint suffix — use as-is.
+                if base.ends_with("/responses") || base.ends_with("/chat/completions") {
+                    return base.to_string();
+                }
+                let suffix = match self.resolved_mode() {
+                    ResolvedMode::Responses => "/responses",
+                    ResolvedMode::Completions => "/chat/completions",
+                };
+                format!("{}{}", base, suffix)
+            }
+            _ => self.api_url.clone(),
+        }
     }
 }
 
@@ -105,13 +159,17 @@ impl LLMProvider for OpenAIProvider {
         options: &CompletionOptions,
         client: &reqwest::Client,
     ) -> AgentResult<CompletionResponse> {
-        let body = match self.api_mode {
-            OpenAiApiMode::Completions => build_completions_body(&self.model, &messages, options),
-            OpenAiApiMode::Responses => build_responses_body(&self.model, &messages, options),
+        let mode = self.resolved_mode();
+
+        let body = match mode {
+            ResolvedMode::Completions => build_completions_body(&self.model, &messages, options),
+            ResolvedMode::Responses => build_responses_body(&self.model, &messages, options),
         };
 
+        let url = self.request_url();
+
         let response = client
-            .post(&self.api_url)
+            .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .json(&body)
@@ -132,16 +190,16 @@ impl LLMProvider for OpenAIProvider {
 
         let json: serde_json::Value = response.json().await?;
 
-        match self.api_mode {
-            OpenAiApiMode::Completions => parse_completions_response(json),
-            OpenAiApiMode::Responses => parse_responses_response(json),
+        match mode {
+            ResolvedMode::Completions => parse_completions_response(json),
+            ResolvedMode::Responses => parse_responses_response(json),
         }
     }
 
     fn provider_name(&self) -> &'static str {
-        match self.api_mode {
-            OpenAiApiMode::Completions => "openai",
-            OpenAiApiMode::Responses => "openai_responses",
+        match self.resolved_mode() {
+            ResolvedMode::Completions => "openai",
+            ResolvedMode::Responses => "openai_responses",
         }
     }
 
@@ -285,94 +343,189 @@ fn extract_usage(json: &serde_json::Value) -> TokenUsage {
     }
 }
 
-/// Ensure the URL ends with the correct path for the given API mode.
-///
-/// Accepts both full endpoints and base-only URLs.  A trailing slash on
-/// the input is tolerated.  Avoids allocation when the URL is already correct.
-fn normalize_api_url(mut url: String, mode: OpenAiApiMode) -> String {
-    // Strip trailing slashes in-place.
+/// Strip `/chat/completions` or `/responses` suffix, returning just the base.
+fn strip_known_suffixes(mut url: String) -> String {
     while url.ends_with('/') {
         url.pop();
     }
+    if let Some(base) = url.strip_suffix("/chat/completions") {
+        url.truncate(base.len());
+    } else if let Some(base) = url.strip_suffix("/responses") {
+        url.truncate(base.len());
+    }
+    url
+}
 
+/// Ensure the URL ends with the correct path for the given API mode.
+///
+/// Only called with explicit `Completions` / `Responses` (never `Auto`).
+/// Avoids allocation when the URL is already correct.
+fn normalize_api_url(url: String, mode: OpenAiApiMode) -> String {
+    let mut base = strip_known_suffixes(url);
     let suffix = match mode {
-        OpenAiApiMode::Completions => "/chat/completions",
+        OpenAiApiMode::Completions | OpenAiApiMode::Auto => "/chat/completions",
         OpenAiApiMode::Responses => "/responses",
     };
-
-    if !url.ends_with(suffix) {
-        // When switching modes, strip the *other* mode's suffix first.
-        match mode {
-            OpenAiApiMode::Responses => {
-                if let Some(base) = url.strip_suffix("/chat/completions") {
-                    url.truncate(base.len());
-                }
-            }
-            OpenAiApiMode::Completions => {
-                if let Some(base) = url.strip_suffix("/responses") {
-                    url.truncate(base.len());
-                }
-            }
-        }
-        url.push_str(suffix);
-    }
-
-    url
+    base.push_str(suffix);
+    base
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // --------------- Constructor & config ---------------
+
     #[test]
     fn test_openai_provider_new() {
-        let provider = OpenAIProvider::new("sk-test", "gpt-4o");
-        assert!(provider.is_configured());
-        assert_eq!(provider.model, "gpt-4o");
+        let p = OpenAIProvider::new("sk-test", "gpt-4o");
+        assert!(p.is_configured());
+        assert_eq!(p.model, "gpt-4o");
+        assert_eq!(p.api_mode, OpenAiApiMode::Auto);
     }
 
     #[test]
-    fn test_openai_provider_custom_url_full_path() {
-        let provider = OpenAIProvider::new("sk-test", "gpt-4o")
-            .with_api_url("https://custom.api.com/v1/chat/completions");
-        assert_eq!(
-            provider.api_url,
-            "https://custom.api.com/v1/chat/completions"
-        );
+    fn test_openai_provider_empty_key_not_configured() {
+        assert!(!OpenAIProvider::new("", "gpt-4o").is_configured());
+    }
+
+    // --------------- Auto mode detection ---------------
+
+    #[test]
+    fn test_auto_mode_openai_resolves_to_responses() {
+        let p = OpenAIProvider::new("sk-test", "gpt-4o");
+        assert_eq!(p.resolved_mode(), ResolvedMode::Responses);
+        assert_eq!(p.request_url(), "https://api.openai.com/responses");
     }
 
     #[test]
-    fn test_openai_provider_custom_url_base_only() {
-        let provider =
-            OpenAIProvider::new("sk-test", "gpt-4o").with_api_url("https://api.xyz.com/llm/v1");
+    fn test_auto_mode_custom_url_resolves_to_completions() {
+        let p = OpenAIProvider::new("sk-test", "gpt-4o").with_api_url("https://api.xyz.com/llm/v1");
+        assert_eq!(p.resolved_mode(), ResolvedMode::Completions);
         assert_eq!(
-            provider.api_url,
+            p.request_url(),
             "https://api.xyz.com/llm/v1/chat/completions"
         );
     }
 
     #[test]
-    fn test_openai_provider_custom_url_trailing_slash() {
-        let provider =
+    fn test_auto_mode_localhost_resolves_to_completions() {
+        let p = OpenAIProvider::new("sk-test", "gpt-4o").with_api_url("https://localhost:8000");
+        assert_eq!(p.resolved_mode(), ResolvedMode::Completions);
+        assert_eq!(p.request_url(), "https://localhost:8000/chat/completions");
+    }
+
+    #[test]
+    fn test_auto_mode_strips_completions_suffix_stores_base() {
+        let p = OpenAIProvider::new("sk-test", "gpt-4o")
+            .with_api_url("https://api.xyz.com/v1/chat/completions");
+        assert_eq!(p.api_url, "https://api.xyz.com/v1");
+        assert_eq!(p.request_url(), "https://api.xyz.com/v1/chat/completions");
+    }
+
+    #[test]
+    fn test_auto_mode_strips_responses_suffix_stores_base() {
+        let p = OpenAIProvider::new("sk-test", "gpt-4o")
+            .with_api_url("https://api.xyz.com/v1/responses");
+        assert_eq!(p.api_url, "https://api.xyz.com/v1");
+    }
+
+    #[test]
+    fn test_auto_mode_trailing_slash() {
+        let p =
             OpenAIProvider::new("sk-test", "gpt-4o").with_api_url("https://api.xyz.com/llm/v1/");
-        assert_eq!(
-            provider.api_url,
-            "https://api.xyz.com/llm/v1/chat/completions"
-        );
+        assert_eq!(p.api_url, "https://api.xyz.com/llm/v1");
+    }
+
+    // --------------- Explicit Completions mode ---------------
+
+    #[test]
+    fn test_explicit_completions_url() {
+        let p = OpenAIProvider::new("sk-test", "gpt-4o").with_completions_api();
+        assert_eq!(p.api_mode, OpenAiApiMode::Completions);
+        assert!(p.request_url().ends_with("/chat/completions"));
     }
 
     #[test]
-    fn test_openai_provider_custom_url_full_path_trailing_slash() {
-        let provider = OpenAIProvider::new("sk-test", "gpt-4o")
-            .with_api_url("https://custom.api.com/v1/chat/completions/");
-        assert_eq!(
-            provider.api_url,
-            "https://custom.api.com/v1/chat/completions"
-        );
+    fn test_explicit_completions_custom_url_base() {
+        let p = OpenAIProvider::new("sk-test", "gpt-4o")
+            .with_completions_api()
+            .with_api_url("https://api.xyz.com/v1");
+        assert_eq!(p.request_url(), "https://api.xyz.com/v1/chat/completions");
     }
 
     #[test]
-    fn test_normalize_api_url_bare_host() {
+    fn test_explicit_completions_custom_url_full() {
+        let p = OpenAIProvider::new("sk-test", "gpt-4o")
+            .with_completions_api()
+            .with_api_url("https://api.xyz.com/v1/chat/completions");
+        assert_eq!(p.request_url(), "https://api.xyz.com/v1/chat/completions");
+    }
+
+    // --------------- Explicit Responses mode ---------------
+
+    #[test]
+    fn test_explicit_responses_url() {
+        let p = OpenAIProvider::new("sk-test", "gpt-4o").with_responses_api();
+        assert_eq!(p.api_mode, OpenAiApiMode::Responses);
+        assert!(p.request_url().ends_with("/responses"));
+    }
+
+    #[test]
+    fn test_explicit_responses_custom_base() {
+        let p = OpenAIProvider::new("sk-test", "gpt-4o")
+            .with_responses_api()
+            .with_api_url("https://custom.api.com/v1");
+        assert_eq!(p.request_url(), "https://custom.api.com/v1/responses");
+    }
+
+    #[test]
+    fn test_explicit_responses_full_url() {
+        let p = OpenAIProvider::new("sk-test", "gpt-4o")
+            .with_responses_api()
+            .with_api_url("https://custom.api.com/v1/responses");
+        assert_eq!(p.request_url(), "https://custom.api.com/v1/responses");
+    }
+
+    #[test]
+    fn test_explicit_responses_switches_from_completions_url() {
+        let p = OpenAIProvider::new("sk-test", "gpt-4o")
+            .with_completions_api()
+            .with_api_url("https://custom.api.com/v1/chat/completions")
+            .with_responses_api();
+        assert_eq!(p.request_url(), "https://custom.api.com/v1/responses");
+    }
+
+    // --------------- Provider name ---------------
+
+    #[test]
+    fn test_provider_name_auto_openai() {
+        let p = OpenAIProvider::new("sk-test", "gpt-4o");
+        assert_eq!(p.provider_name(), "openai_responses");
+    }
+
+    #[test]
+    fn test_provider_name_auto_custom() {
+        let p = OpenAIProvider::new("sk-test", "gpt-4o").with_api_url("https://vllm.local");
+        assert_eq!(p.provider_name(), "openai");
+    }
+
+    #[test]
+    fn test_provider_name_explicit_responses() {
+        let p = OpenAIProvider::new("sk-test", "gpt-4o").with_responses_api();
+        assert_eq!(p.provider_name(), "openai_responses");
+    }
+
+    #[test]
+    fn test_provider_name_explicit_completions() {
+        let p = OpenAIProvider::new("sk-test", "gpt-4o").with_completions_api();
+        assert_eq!(p.provider_name(), "openai");
+    }
+
+    // --------------- normalize / strip helpers ---------------
+
+    #[test]
+    fn test_normalize_completions_bare_host() {
         assert_eq!(
             normalize_api_url("https://localhost:8000".into(), OpenAiApiMode::Completions),
             "https://localhost:8000/chat/completions"
@@ -380,53 +533,7 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_api_url_idempotent() {
-        let url = "https://api.openai.com/v1/chat/completions".to_string();
-        assert_eq!(
-            normalize_api_url(url.clone(), OpenAiApiMode::Completions),
-            url
-        );
-    }
-
-    #[test]
-    fn test_openai_provider_empty_key_not_configured() {
-        let provider = OpenAIProvider::new("", "gpt-4o");
-        assert!(!provider.is_configured());
-    }
-
-    #[test]
-    fn test_responses_api_default_url() {
-        let provider = OpenAIProvider::new("sk-test", "gpt-4o").with_responses_api();
-        assert_eq!(provider.api_url, DEFAULT_RESPONSES_URL);
-        assert_eq!(provider.api_mode, OpenAiApiMode::Responses);
-    }
-
-    #[test]
-    fn test_responses_api_custom_base_url() {
-        let provider = OpenAIProvider::new("sk-test", "gpt-4o")
-            .with_responses_api()
-            .with_api_url("https://custom.api.com/v1");
-        assert_eq!(provider.api_url, "https://custom.api.com/v1/responses");
-    }
-
-    #[test]
-    fn test_responses_api_full_url_preserved() {
-        let provider = OpenAIProvider::new("sk-test", "gpt-4o")
-            .with_responses_api()
-            .with_api_url("https://custom.api.com/v1/responses");
-        assert_eq!(provider.api_url, "https://custom.api.com/v1/responses");
-    }
-
-    #[test]
-    fn test_responses_api_switches_from_completions_url() {
-        let provider = OpenAIProvider::new("sk-test", "gpt-4o")
-            .with_api_url("https://custom.api.com/v1/chat/completions")
-            .with_responses_api();
-        assert_eq!(provider.api_url, "https://custom.api.com/v1/responses");
-    }
-
-    #[test]
-    fn test_normalize_url_responses_mode_bare_host() {
+    fn test_normalize_responses_bare_host() {
         assert_eq!(
             normalize_api_url("https://localhost:8000".into(), OpenAiApiMode::Responses),
             "https://localhost:8000/responses"
@@ -434,7 +541,7 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_url_strips_completions_for_responses() {
+    fn test_normalize_strips_completions_for_responses() {
         assert_eq!(
             normalize_api_url(
                 "https://api.example.com/v1/chat/completions".into(),
@@ -445,7 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_url_strips_responses_for_completions() {
+    fn test_normalize_strips_responses_for_completions() {
         assert_eq!(
             normalize_api_url(
                 "https://api.example.com/v1/responses".into(),
@@ -456,23 +563,48 @@ mod tests {
     }
 
     #[test]
-    fn test_responses_provider_name() {
-        let provider = OpenAIProvider::new("sk-test", "gpt-4o").with_responses_api();
-        assert_eq!(provider.provider_name(), "openai_responses");
+    fn test_strip_known_suffixes_completions() {
+        assert_eq!(
+            strip_known_suffixes("https://api.example.com/v1/chat/completions".into()),
+            "https://api.example.com/v1"
+        );
     }
 
     #[test]
-    fn test_completions_provider_name() {
-        let provider = OpenAIProvider::new("sk-test", "gpt-4o");
-        assert_eq!(provider.provider_name(), "openai");
+    fn test_strip_known_suffixes_responses() {
+        assert_eq!(
+            strip_known_suffixes("https://api.example.com/v1/responses".into()),
+            "https://api.example.com/v1"
+        );
     }
+
+    #[test]
+    fn test_strip_known_suffixes_no_suffix() {
+        assert_eq!(
+            strip_known_suffixes("https://api.example.com/v1".into()),
+            "https://api.example.com/v1"
+        );
+    }
+
+    #[test]
+    fn test_is_openai_url_true() {
+        assert!(is_openai_url("https://api.openai.com/v1/responses"));
+        assert!(is_openai_url("https://api.openai.com"));
+    }
+
+    #[test]
+    fn test_is_openai_url_false() {
+        assert!(!is_openai_url("https://api.xyz.com/v1"));
+        assert!(!is_openai_url("https://localhost:8000"));
+        assert!(!is_openai_url("https://openai.example.com"));
+    }
+
+    // --------------- Request body builders ---------------
 
     #[test]
     fn test_build_responses_body_system_becomes_instructions() {
         let messages = vec![Message::system("You are helpful."), Message::user("Hello")];
-        let options = CompletionOptions::default();
-        let body = build_responses_body("gpt-4o", &messages, &options);
-
+        let body = build_responses_body("gpt-4o", &messages, &CompletionOptions::default());
         assert_eq!(body["instructions"], "You are helpful.");
         assert!(body.get("messages").is_none());
         let input = body["input"].as_array().expect("input should be array");
@@ -483,30 +615,28 @@ mod tests {
     #[test]
     fn test_build_responses_body_no_system() {
         let messages = vec![Message::user("Hello")];
-        let options = CompletionOptions::default();
-        let body = build_responses_body("gpt-4o", &messages, &options);
-
+        let body = build_responses_body("gpt-4o", &messages, &CompletionOptions::default());
         assert!(body.get("instructions").is_none());
         assert_eq!(body["input"].as_array().expect("array").len(), 1);
     }
 
     #[test]
     fn test_build_responses_body_json_mode() {
-        let messages = vec![Message::user("Hello")];
-        let mut options = CompletionOptions::default();
-        options.json_mode = true;
-        let body = build_responses_body("gpt-4o", &messages, &options);
+        let mut opts = CompletionOptions::default();
+        opts.json_mode = true;
+        let body = build_responses_body("gpt-4o", &[Message::user("Hi")], &opts);
         assert_eq!(body["text"]["format"]["type"], "json_object");
     }
 
     #[test]
     fn test_build_completions_body_json_mode() {
-        let messages = vec![Message::user("Hello")];
-        let mut options = CompletionOptions::default();
-        options.json_mode = true;
-        let body = build_completions_body("gpt-4o", &messages, &options);
+        let mut opts = CompletionOptions::default();
+        opts.json_mode = true;
+        let body = build_completions_body("gpt-4o", &[Message::user("Hi")], &opts);
         assert_eq!(body["response_format"]["type"], "json_object");
     }
+
+    // --------------- Response parsers ---------------
 
     #[test]
     fn test_parse_responses_output_text_shorthand() {
@@ -524,34 +654,30 @@ mod tests {
     #[test]
     fn test_parse_responses_output_array() {
         let json = serde_json::json!({
-            "output": [{
-                "type": "message",
-                "content": [{
-                    "type": "output_text",
-                    "text": "Extracted data"
-                }]
-            }]
+            "output": [{ "type": "message", "content": [{ "type": "output_text", "text": "Extracted" }] }]
         });
         let resp = parse_responses_response(json).expect("should parse");
-        assert_eq!(resp.content, "Extracted data");
+        assert_eq!(resp.content, "Extracted");
     }
 
     #[test]
     fn test_parse_responses_missing_output() {
-        let json = serde_json::json!({});
-        let err = parse_responses_response(json).unwrap_err();
+        let err = parse_responses_response(serde_json::json!({})).unwrap_err();
         assert!(format!("{}", err).contains("Missing field"));
     }
 
+    // --------------- Usage extraction ---------------
+
     #[test]
-    fn test_extract_usage_openai_keys() {
+    fn test_extract_usage_completions_keys() {
         let json = serde_json::json!({
             "usage": { "prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30 }
         });
         let u = extract_usage(&json);
-        assert_eq!(u.prompt_tokens, 10);
-        assert_eq!(u.completion_tokens, 20);
-        assert_eq!(u.total_tokens, 30);
+        assert_eq!(
+            (u.prompt_tokens, u.completion_tokens, u.total_tokens),
+            (10, 20, 30)
+        );
     }
 
     #[test]
@@ -560,16 +686,15 @@ mod tests {
             "usage": { "input_tokens": 10, "output_tokens": 20, "total_tokens": 30 }
         });
         let u = extract_usage(&json);
-        assert_eq!(u.prompt_tokens, 10);
-        assert_eq!(u.completion_tokens, 20);
+        assert_eq!((u.prompt_tokens, u.completion_tokens), (10, 20));
     }
 
     #[test]
     fn test_extract_usage_missing() {
-        let json = serde_json::json!({});
-        let u = extract_usage(&json);
-        assert_eq!(u.prompt_tokens, 0);
-        assert_eq!(u.completion_tokens, 0);
-        assert_eq!(u.total_tokens, 0);
+        let u = extract_usage(&serde_json::json!({}));
+        assert_eq!(
+            (u.prompt_tokens, u.completion_tokens, u.total_tokens),
+            (0, 0, 0)
+        );
     }
 }
