@@ -1099,6 +1099,39 @@ impl AgentBuilder {
         self
     }
 
+    /// Configure with OpenAI Responses API.
+    ///
+    /// Uses the stateful Responses API (`/v1/responses`) instead of Chat
+    /// Completions.  System messages become `instructions`, user/assistant
+    /// messages become `input` items.
+    #[cfg(feature = "openai")]
+    pub fn with_openai_responses(
+        mut self,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
+        self.llm = Some(Box::new(
+            crate::llm::OpenAIProvider::new(api_key, model).with_responses_api(),
+        ));
+        self
+    }
+
+    /// Configure with OpenAI-compatible provider using the Responses API.
+    #[cfg(feature = "openai")]
+    pub fn with_openai_compatible_responses(
+        mut self,
+        api_url: impl Into<String>,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
+        self.llm = Some(Box::new(
+            crate::llm::OpenAIProvider::new(api_key, model)
+                .with_responses_api()
+                .with_api_url(api_url),
+        ));
+        self
+    }
+
     /// Register Spider Cloud tools using an API key.
     ///
     /// Registers `/crawl`, `/scrape`, `/search`, `/links`, `/transform`, and

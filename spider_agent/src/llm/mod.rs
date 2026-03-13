@@ -4,7 +4,7 @@
 mod openai;
 
 #[cfg(feature = "openai")]
-pub use openai::OpenAIProvider;
+pub use openai::{OpenAIProvider, OpenAiApiMode};
 
 use crate::error::AgentResult;
 use async_trait::async_trait;
