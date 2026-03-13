@@ -20,6 +20,24 @@ use crate::utils::{
     crawl_duration_expired, emit_log, emit_log_shutdown, get_path_from_url, get_semaphore,
     networking_capable, prepare_url, setup_website_selectors, spawn_set, AllowedDomainTypes,
 };
+
+/// Run a future with an optional hard wall-clock timeout.
+/// When `timeout` is `None`, the future runs without any timer overhead.
+/// When the timeout fires, the future is dropped (cancelling all in-flight work).
+async fn run_with_crawl_timeout(
+    timeout: Option<core::time::Duration>,
+    url: &str,
+    fut: impl core::future::Future<Output = ()>,
+) {
+    match timeout {
+        Some(t) => {
+            if tokio::time::timeout(t, fut).await.is_err() {
+                log::warn!("crawl hard timeout after {t:?} for {url}");
+            }
+        }
+        None => fut.await,
+    }
+}
 use crate::{CaseInsensitiveString, Client, ClientBuilder, RelativeSelectors};
 #[cfg(feature = "cron")]
 use async_job::{async_trait, Job, Runner};
@@ -4640,8 +4658,13 @@ impl Website {
                 Some(h) => (Some(h.0), Some(h.1)),
                 _ => (None, None),
             };
-            self.crawl_concurrent(&client, &handle).await;
-            self.sitemap_crawl_chain(&client, &handle, false).await;
+            let crawl_timeout = self.configuration.crawl_timeout;
+            let url = self.url.inner().to_string();
+            run_with_crawl_timeout(crawl_timeout, &url, async {
+                self.crawl_concurrent(&client, &handle).await;
+                self.sitemap_crawl_chain(&client, &handle, false).await;
+            })
+            .await;
             self.set_crawl_status();
             if let Some(h) = join_handle {
                 h.abort()
@@ -4663,7 +4686,12 @@ impl Website {
                 Some(h) => (Some(h.0), Some(h.1)),
                 _ => (None, None),
             };
-            self.sitemap_crawl(&client, &handle, false).await;
+            let crawl_timeout = self.configuration.crawl_timeout;
+            let url = self.url.inner().to_string();
+            run_with_crawl_timeout(crawl_timeout, &url, async {
+                self.sitemap_crawl(&client, &handle, false).await;
+            })
+            .await;
             self.set_crawl_status();
             if let Some(h) = join_handle {
                 h.abort()
@@ -4686,7 +4714,12 @@ impl Website {
                 Some(h) => (Some(h.0), Some(h.1)),
                 _ => (None, None),
             };
-            self.sitemap_crawl_chrome(&client, &handle, false).await;
+            let crawl_timeout = self.configuration.crawl_timeout;
+            let url = self.url.inner().to_string();
+            run_with_crawl_timeout(crawl_timeout, &url, async {
+                self.sitemap_crawl_chrome(&client, &handle, false).await;
+            })
+            .await;
             self.set_crawl_status();
             if let Some(h) = join_handle {
                 h.abort()
@@ -4732,7 +4765,12 @@ impl Website {
                 Some(h) => (Some(h.0), Some(h.1)),
                 _ => (None, None),
             };
-            self.crawl_concurrent_raw_send(&client, &handle, &url).await;
+            let crawl_timeout = self.configuration.crawl_timeout;
+            let u = self.url.inner().to_string();
+            run_with_crawl_timeout(crawl_timeout, &u, async {
+                self.crawl_concurrent_raw_send(&client, &handle, &url).await;
+            })
+            .await;
             if let Some(h) = join_handle {
                 h.abort()
             }
@@ -4756,7 +4794,12 @@ impl Website {
                 Some(h) => (Some(h.0), Some(h.1)),
                 _ => (None, None),
             };
-            self.crawl_concurrent_send(&client, &handle, &url).await;
+            let crawl_timeout = self.configuration.crawl_timeout;
+            let u = self.url.inner().to_string();
+            run_with_crawl_timeout(crawl_timeout, &u, async {
+                self.crawl_concurrent_send(&client, &handle, &url).await;
+            })
+            .await;
             if let Some(h) = join_handle {
                 h.abort()
             }
@@ -4841,7 +4884,12 @@ impl Website {
                 Some(h) => (Some(h.0), Some(h.1)),
                 _ => (None, None),
             };
-            self.crawl_concurrent_smart(&client, &handle).await;
+            let crawl_timeout = self.configuration.crawl_timeout;
+            let url = self.url.inner().to_string();
+            run_with_crawl_timeout(crawl_timeout, &url, async {
+                self.crawl_concurrent_smart(&client, &handle).await;
+            })
+            .await;
             self.set_crawl_status();
             if let Some(h) = join_handle {
                 h.abort()
@@ -4869,8 +4917,13 @@ impl Website {
                 Some(h) => (Some(h.0), Some(h.1)),
                 _ => (None, None),
             };
-            self.crawl_concurrent_raw(&client, &handle).await;
-            self.sitemap_crawl_chain(&client, &handle, false).await;
+            let crawl_timeout = self.configuration.crawl_timeout;
+            let url = self.url.inner().to_string();
+            run_with_crawl_timeout(crawl_timeout, &url, async {
+                self.crawl_concurrent_raw(&client, &handle).await;
+                self.sitemap_crawl_chain(&client, &handle, false).await;
+            })
+            .await;
             self.set_crawl_status();
             if let Some(h) = join_handle {
                 h.abort()
