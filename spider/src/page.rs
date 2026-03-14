@@ -627,6 +627,9 @@ pub struct Page {
     pub anti_bot_tech: AntiBotTech,
     /// Page metadata.
     pub metadata: Option<Box<Metadata>>,
+    /// Whether the response content was truncated due to a stream error,
+    /// chunk idle timeout, or Content-Length mismatch.
+    pub content_truncated: bool,
 }
 
 /// Represent a page visited.
@@ -705,6 +708,9 @@ pub struct Page {
     pub anti_bot_tech: AntiBotTech,
     /// Page metadata.
     pub metadata: Option<Box<Metadata>>,
+    /// Whether the response content was truncated due to a stream error,
+    /// chunk idle timeout, or Content-Length mismatch.
+    pub content_truncated: bool,
 }
 
 /// Assign properties from a new page.
@@ -1279,6 +1285,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         request_map: res.request_map,
         anti_bot_tech: res.anti_bot_tech,
         metadata: res.metadata,
+        content_truncated: res.content_truncated,
         ..Default::default()
     }
 }
@@ -1297,6 +1304,7 @@ pub fn build(_: &str, res: PageResponse) -> Page {
         status_code: res.status_code,
         metadata: res.metadata,
         spawn_pages: res.spawn_pages,
+        content_truncated: res.content_truncated,
         error_status: match res.error_for_status {
             Some(e) => match e {
                 Ok(_) => None,

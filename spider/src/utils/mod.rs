@@ -381,6 +381,9 @@ pub struct PageResponse {
     /// These are URLs the automation agent requested to open in new tabs.
     /// The caller (website.rs) should create new pages for these using the browser.
     pub spawn_pages: Option<Vec<String>>,
+    /// Whether the response content was truncated due to a stream error,
+    /// chunk idle timeout, or Content-Length mismatch (fewer bytes received than expected).
+    pub content_truncated: bool,
 }
 
 /// wait for event with timeout
@@ -3879,8 +3882,11 @@ pub async fn handle_response_bytes(
         }
     }
 
+    let mut content_truncated = false;
+
     if !block_streaming(&res, only_html) {
-        let mut data = match res.content_length() {
+        let expected_len = res.content_length();
+        let mut data = match expected_len {
             Some(cap) if cap >= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE => {
                 Vec::with_capacity(cap.max(MAX_PRE_ALLOCATED_HTML_PAGE_SIZE) as usize)
             }
@@ -3902,6 +3908,7 @@ pub async fn handle_response_bytes(
                             "chunk idle timeout ({timeout:?}) for {target_url}, returning {} bytes of partial content",
                             data.len()
                         );
+                        content_truncated = true;
                         break;
                     }
                 },
@@ -3928,18 +3935,36 @@ pub async fn handle_response_bytes(
                 }
                 Err(e) => {
                     log::error!("{e} in {}", target_url);
+                    content_truncated = true;
                     break;
                 }
             }
         }
 
-        anti_bot_tech = detect_anti_bot_tech_response(
-            target_url,
-            &HeaderSource::HeaderMap(&headers),
-            &data,
-            None,
-        );
-        content.replace(Box::new(data));
+        // Detect Content-Length mismatch (upstream sent fewer bytes than promised)
+        if !content_truncated {
+            if let Some(expected) = expected_len {
+                let received = data.len() as u64;
+                if received < expected {
+                    log::warn!(
+                        "Content-Length mismatch for {target_url}: expected {expected} bytes, received {received} bytes",
+                    );
+                    content_truncated = true;
+                }
+            }
+        }
+
+        if content_truncated && data.is_empty() {
+            log::warn!("discarding empty truncated response for {target_url}");
+        } else {
+            anti_bot_tech = detect_anti_bot_tech_response(
+                target_url,
+                &HeaderSource::HeaderMap(&headers),
+                &data,
+                None,
+            );
+            content.replace(Box::new(data));
+        }
     }
 
     PageResponse {
@@ -3952,6 +3977,7 @@ pub async fn handle_response_bytes(
         final_url: rd,
         status_code,
         anti_bot_tech,
+        content_truncated,
         ..Default::default()
     }
 }
@@ -3984,11 +4010,13 @@ where
     let mut anti_bot_tech = AntiBotTech::default();
 
     let mut rewrite_error = false;
+    let mut content_truncated = false;
 
     if !block_streaming(&res, only_html) {
+        let expected_len = res.content_length();
         let mut stream = res.bytes_stream();
         let mut first_bytes = true;
-        let mut data_len = 0;
+        let mut data_len = 0usize;
         let chunk_idle_timeout = chunk_idle_timeout();
 
         loop {
@@ -4002,6 +4030,7 @@ where
                         log::warn!(
                             "chunk idle timeout ({timeout:?}) for {target_url}, returning {data_len} bytes of partial content",
                         );
+                        content_truncated = true;
                         break;
                     }
                 },
@@ -4036,7 +4065,20 @@ where
                 }
                 Err(e) => {
                     log::error!("{e} in {}", target_url);
+                    content_truncated = true;
                     break;
+                }
+            }
+        }
+
+        // Detect Content-Length mismatch
+        if !content_truncated {
+            if let Some(expected) = expected_len {
+                if (data_len as u64) < expected {
+                    log::warn!(
+                        "Content-Length mismatch for {target_url}: expected {expected} bytes, received {data_len} bytes",
+                    );
+                    content_truncated = true;
                 }
             }
         }
@@ -4060,6 +4102,7 @@ where
             final_url,
             status_code,
             anti_bot_tech,
+            content_truncated,
             ..Default::default()
         },
         rewrite_error,

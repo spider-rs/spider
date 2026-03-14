@@ -198,7 +198,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43d5b281e737544384e969a5ccad3f1cdd24b48086a0fc1b2a5262a26b8f4f4a"
 dependencies = [
  "anstyle",
- "anstyle-parse",
+ "anstyle-parse 0.2.7",
+ "anstyle-query",
+ "anstyle-wincon",
+ "colorchoice",
+ "is_terminal_polyfill",
+ "utf8parse",
+]
+
+[[package]]
+name = "anstream"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "824a212faf96e9acacdbd09febd34438f8f711fb84e09a8916013cd7815ca28d"
+dependencies = [
+ "anstyle",
+ "anstyle-parse 1.0.0",
  "anstyle-query",
  "anstyle-wincon",
  "colorchoice",
@@ -208,15 +223,24 @@ dependencies = [
 
 [[package]]
 name = "anstyle"
-version = "1.0.13"
+version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5192cca8006f1fd4f7237516f40fa183bb07f8fbdfedaa0036de5ea9b0b45e78"
+checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 
 [[package]]
 name = "anstyle-parse"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7644824f0aa2c7b9384579234ef10eb7efb6a0deb83f9630a49594dd9c15c2"
+dependencies = [
+ "utf8parse",
+]
+
+[[package]]
+name = "anstyle-parse"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52ce7f38b242319f7cabaa6813055467063ecdc9d355bbb4ce0c68908cd8130e"
 dependencies = [
  "utf8parse",
 ]
@@ -381,9 +405,9 @@ dependencies = [
 
 [[package]]
 name = "async-openai"
-version = "0.33.0"
+version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3ef6d66e53b3ec8ed4bae8e6dcdda75c0f5b4f67faba78fac1b09434cb4f2fc"
+checksum = "cc48c3deb4ad9a2ee8c8e364c79eb0f74e69e17ed7e883d55988b90ea44fe986"
 dependencies = [
  "async-openai-macros",
  "backoff",
@@ -1134,8 +1158,8 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.47.18",
- "spider_utils 2.47.18",
+ "spider 2.47.19",
+ "spider_utils 2.47.19",
 ]
 
 [[package]]
@@ -1542,9 +1566,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.56"
+version = "1.2.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aebf35691d1bfb0ac386a69bac2fde4dd276fb618cf8bf4f5318fe285e821bb2"
+checksum = "7a0dd1ca384932ff3641c8718a02769f1698e7563dc6974ffd03346116310423"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -1716,9 +1740,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.60"
+version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2797f34da339ce31042b27d23607e051786132987f595b02ba4f6a6dffb7030a"
+checksum = "b193af5b67834b676abd72466a96c1024e6a6ad978a1f484bd90b85c94041351"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1726,11 +1750,11 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.60"
+version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24a241312cea5059b13574bb9b3861cabf758b879c15190b37b6d6fd63ab6876"
+checksum = "714a53001bf66416adb0e2ef5ac857140e7dc3a0c48fb28b2f10762fc4b5069f"
 dependencies = [
- "anstream",
+ "anstream 1.0.0",
  "anstyle",
  "clap_lex",
  "strsim",
@@ -1738,9 +1762,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.5.55"
+version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a92793da1a46a5f2a02a6f4c46c6496b28c43638adea8306fcb0caa1634f24e5"
+checksum = "1110bd8a634a1ab8cb04345d8d878267d57c3cf1b38d91b71af6686408bbca6a"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -1750,9 +1774,9 @@ dependencies = [
 
 [[package]]
 name = "clap_lex"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a822ea5bc7590f9d40f1ba12c0dc3c2760f3482c6984db1573ad11031420831"
+checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cmake"
@@ -1780,9 +1804,9 @@ checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 
 [[package]]
 name = "colorchoice"
-version = "1.0.4"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
+checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
 name = "combine"
@@ -2659,7 +2683,7 @@ version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2daee4ea451f429a58296525ddf28b45a3b64f1acf6587e2067437bb11e218d"
 dependencies = [
- "anstream",
+ "anstream 0.6.21",
  "anstyle",
  "env_filter",
  "jiff",
@@ -4785,9 +4809,9 @@ dependencies = [
 
 [[package]]
 name = "llm_models_spider"
-version = "0.1.41"
+version = "0.1.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53c6d574833d04bed4d26d488371f497cf6946665742a8109d4a867a71dbad08"
+checksum = "2dff3eaea579ea35091f7899d095d96a03ccae3e72ee5ad7b69b7b38b0fd7694"
 
 [[package]]
 name = "llm_readability"
@@ -7826,9 +7850,9 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.47.10"
+version = "2.47.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b049e8cf5b991b41ea8a41f99ecd3cee3c698a6a8f0981b988f952708009b2e3"
+checksum = "d770e1b23232fa0af8aea8d95043dab6bcd730330042f656afa2a28f9fef6d46"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -7852,7 +7876,7 @@ dependencies = [
  "serde_json",
  "serde_regex",
  "smallvec",
- "spider_agent_types 2.47.10",
+ "spider_agent_types 2.47.18",
  "spider_fingerprint",
  "string-interner",
  "string_concat",
@@ -7865,11 +7889,11 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.47.18"
+version = "2.47.19"
 dependencies = [
  "ahash",
  "aho-corasick",
- "async-openai 0.33.0",
+ "async-openai 0.33.1",
  "async-trait",
  "async_job",
  "auto_encoder",
@@ -7918,7 +7942,7 @@ dependencies = [
  "smallvec",
  "sonic-rs",
  "spider_agent",
- "spider_agent_types 2.47.18",
+ "spider_agent_types 2.47.19",
  "spider_fingerprint",
  "spider_firewall",
  "sqlx",
@@ -7943,10 +7967,10 @@ dependencies = [
 
 [[package]]
 name = "spider_agent"
-version = "2.47.18"
+version = "2.47.19"
 dependencies = [
  "aho-corasick",
- "async-openai 0.33.0",
+ "async-openai 0.33.1",
  "async-trait",
  "aws-config",
  "aws-sdk-s3",
@@ -7966,7 +7990,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spider_agent_html",
- "spider_agent_types 2.47.18",
+ "spider_agent_types 2.47.19",
  "spider_skills",
  "tempfile",
  "thirtyfour",
@@ -7977,20 +8001,20 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_html"
-version = "2.47.18"
+version = "2.47.19"
 dependencies = [
  "aho-corasick",
  "lol_html",
  "serde",
  "serde_json",
- "spider_agent_types 2.47.18",
+ "spider_agent_types 2.47.19",
 ]
 
 [[package]]
 name = "spider_agent_types"
-version = "2.47.10"
+version = "2.47.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38cb0365f6b3f0032fbd0dce6f3eb1af8bec2c71ba3df6eb58f155f91d1fb65d"
+checksum = "7812544c380670f38e7fd78c5f0eb8ceb6c5fb3b291aafbc6173ff4022f8df7f"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8000,7 +8024,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.47.18"
+version = "2.47.19"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8049,7 +8073,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.47.18"
+version = "2.47.19"
 dependencies = [
  "clap",
  "env_logger",
@@ -8057,7 +8081,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.47.18",
+ "spider 2.47.19",
  "tikv-jemallocator",
  "tokio",
  "unicode-normalization",
@@ -8073,9 +8097,9 @@ dependencies = [
  "flexbuffers",
  "htr",
  "serde_json",
- "spider 2.47.18",
+ "spider 2.47.19",
  "spider_transformations",
- "spider_utils 2.47.10",
+ "spider_utils 2.47.18",
 ]
 
 [[package]]
@@ -8158,9 +8182,9 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.37.114"
+version = "2.37.115"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2af23bea81d0dc6f4bc79189bd2dc891fef1e48385ec83285cd3be222d71bcc4"
+checksum = "c23d3c922058c56970357725d8ded379188314cbe99fb1611531542f170dbcb0"
 dependencies = [
  "aho-corasick",
  "auto_encoder",
@@ -8174,7 +8198,7 @@ dependencies = [
  "phf_codegen 0.11.3",
  "regex",
  "serde",
- "spider 2.47.10",
+ "spider 2.47.18",
  "spider_scraper",
  "tendril",
  "thiserror 1.0.69",
@@ -8184,9 +8208,9 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.47.10"
+version = "2.47.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "095f2c66629b6268b1f143eb918b6629f7fdc91fb97ba96b767b86ba33688dab"
+checksum = "8f0f3b2babd77b2232899c20b044111fae13eec6af4445e5b51727a35f9aec75"
 dependencies = [
  "hashbrown 0.16.1",
  "lazy_static",
@@ -8199,7 +8223,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.47.18"
+version = "2.47.19"
 dependencies = [
  "hashbrown 0.16.1",
  "indexmap 2.13.0",
@@ -8215,11 +8239,11 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.47.18"
+version = "2.47.19"
 dependencies = [
  "env_logger",
  "lazy_static",
- "spider 2.47.18",
+ "spider 2.47.19",
  "warp",
 ]
 
@@ -9388,9 +9412,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.3.22"
+version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f30143827ddab0d256fd843b7a66d164e9f271cfa0dde49142c5ca0ca291f1e"
+checksum = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319"
 dependencies = [
  "matchers",
  "once_cell",
