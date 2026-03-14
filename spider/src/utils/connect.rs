@@ -26,30 +26,9 @@ pub(crate) fn background_connect_threading() -> bool {
 }
 
 /// Init a background thread for request connect handling.
-#[cfg(all(target_os = "linux", feature = "io_uring"))]
-pub fn init_background_runtime() {
-    super::uring_fs::init_uring_fs();
-    let _ = CONNECT_THREAD_POOL.set({
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let builder = std::thread::Builder::new();
-
-        if let Err(_) = builder.spawn(move || {
-            tokio_uring::builder().start(async {
-                while let Some(work) = rx.recv().await {
-                    tokio_uring::spawn(work);
-                }
-            })
-        }) {
-            let _ = tx.downgrade();
-            BACKGROUND_THREAD_CONNECT_ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
-        };
-
-        tx
-    });
-}
-
-/// Init a background thread for request connect handling.
-#[cfg(any(not(target_os = "linux"), not(feature = "io_uring")))]
+///
+/// Spawns a dedicated tokio multi-thread runtime for connection processing.
+/// Also initializes io_uring file I/O (if available on this kernel).
 pub fn init_background_runtime() {
     super::uring_fs::init_uring_fs();
     let _ = CONNECT_THREAD_POOL.set({
@@ -127,9 +106,13 @@ impl std::fmt::Debug for BackgroundProcessorLayer {
 
 /// Send to the background runtime.
 fn send_to_background_runtime(future: impl Future<Output = ()> + Send + 'static) {
-    let tx = CONNECT_THREAD_POOL.get().expect(
-        "background runtime should be initialized by calling init_background_runtime before use",
-    );
+    let tx = match CONNECT_THREAD_POOL.get() {
+        Some(tx) => tx,
+        None => {
+            log::error!("Background runtime not initialized — call init_background_runtime first. Abandoning task.");
+            return;
+        }
+    };
 
     if let Err(SendError(_)) = tx.send(Box::pin(future)) {
         log::error!("Failed to send future - background connect runtime channel is closed. Abandoning task.");
