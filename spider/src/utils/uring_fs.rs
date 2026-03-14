@@ -1,9 +1,14 @@
 //! Async file I/O with optional io_uring acceleration.
 //!
 //! On Linux with the `io_uring` feature, file operations are dispatched to a
-//! dedicated io_uring worker thread for true kernel-async I/O. On all other
-//! platforms (or when io_uring initialization fails), operations transparently
-//! fall back to `tokio::fs`.
+//! dedicated worker thread that drives a raw io_uring ring for true
+//! kernel-async I/O. On all other platforms (or when io_uring is unavailable
+//! at runtime — e.g. seccomp-filtered containers, older kernels), operations
+//! transparently fall back to `tokio::fs`.
+//!
+//! **No mutexes. No async runtime on the worker.** The worker thread runs a
+//! tight synchronous loop: `blocking_recv` → io_uring submit → reap CQE →
+//! send result back via oneshot.
 
 use std::io;
 use tokio::sync::{mpsc, oneshot};
@@ -16,21 +21,24 @@ enum StreamOp {
     Close(oneshot::Sender<io::Result<()>>),
 }
 
-// ── io_uring implementation ──────────────────────────────────────────────────
+// ── io_uring implementation (raw io-uring crate) ────────────────────────────
 
 #[cfg(all(target_os = "linux", feature = "io_uring"))]
 mod inner {
+    use std::ffi::CString;
     use std::io;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use tokio::sync::{mpsc, oneshot, OnceCell};
+    use tokio::sync::{mpsc, oneshot};
 
-    /// Whether the io_uring FS worker is running.
+    /// Whether the io_uring FS worker is running and healthy.
     static URING_FS_ENABLED: AtomicBool = AtomicBool::new(false);
 
     /// Channel to the io_uring worker thread.
-    static URING_FS_POOL: OnceCell<mpsc::UnboundedSender<FileIoTask>> = OnceCell::const_new();
+    /// `mpsc::UnboundedSender` is `Send + Sync`, safe for `OnceLock`.
+    static URING_FS_POOL: std::sync::OnceLock<mpsc::UnboundedSender<FileIoTask>> =
+        std::sync::OnceLock::new();
 
-    /// A self-contained file I/O task that can be sent across threads.
+    /// A self-contained file I/O task sent to the worker thread.
     enum FileIoTask {
         WriteFile {
             path: String,
@@ -49,132 +57,296 @@ mod inner {
             path: String,
             tx: oneshot::Sender<io::Result<()>>,
         },
-        /// Open a file for streaming writes. The io_uring worker spawns a
-        /// long-lived sub-task that holds the file handle and processes ops
-        /// from the receiver.
-        CreateStream {
-            path: String,
-            ops_rx: mpsc::UnboundedReceiver<super::StreamOp>,
-            result_tx: oneshot::Sender<io::Result<()>>,
-        },
     }
 
-    /// Initialize the io_uring FS background worker. Returns `true` if
-    /// io_uring file I/O is now active.
-    pub fn init_uring_fs() -> bool {
-        let _ = URING_FS_POOL.set({
-            let (tx, mut rx) = mpsc::unbounded_channel::<FileIoTask>();
-            let builder = std::thread::Builder::new().name("uring-fs-worker".into());
+    // ── Kernel probe ────────────────────────────────────────────────────────
 
-            if builder
-                .spawn(move || {
-                    tokio_uring::builder().start(async move {
-                        while let Some(task) = rx.recv().await {
-                            tokio_uring::spawn(dispatch_task(task));
-                        }
-                    });
-                })
-                .is_err()
-            {
-                log::warn!("Failed to spawn io_uring FS worker thread");
-                let _ = tx.downgrade();
-                return false;
+    /// Try to create a minimal io_uring ring. If the kernel or seccomp policy
+    /// blocks it (ENOSYS, EPERM, etc.), returns `None`.
+    pub(crate) fn probe_io_uring() -> Option<io_uring::IoUring> {
+        match io_uring::IoUring::builder().build(64) {
+            Ok(ring) => {
+                log::info!("io_uring probe succeeded — kernel supports io_uring");
+                Some(ring)
             }
-
-            URING_FS_ENABLED.store(true, Ordering::Release);
-            tx
-        });
-
-        URING_FS_ENABLED.load(Ordering::Acquire)
-    }
-
-    /// Process a single file I/O task on the io_uring thread.
-    async fn dispatch_task(task: FileIoTask) {
-        match task {
-            FileIoTask::WriteFile { path, data, tx } => {
-                let result = async {
-                    let file = tokio_uring::fs::File::create(&path).await?;
-                    let (res, _) = file.write_all_at(data, 0).await;
-                    res?;
-                    file.close().await?;
-                    Ok(())
-                }
-                .await;
-                let _ = tx.send(result);
-            }
-            FileIoTask::ReadFile { path, tx } => {
-                let result = async {
-                    let meta = std::fs::metadata(&path)?;
-                    let len = meta.len() as usize;
-                    let buf = vec![0u8; len];
-                    let file = tokio_uring::fs::File::open(&path).await?;
-                    let (res, buf) = file.read_exact_at(buf, 0).await;
-                    res?;
-                    file.close().await?;
-                    Ok(buf)
-                }
-                .await;
-                let _ = tx.send(result);
-            }
-            FileIoTask::RemoveFile { path, tx } => {
-                // No io_uring unlink in v0.5 — use std::fs
-                let result = std::fs::remove_file(&path);
-                let _ = tx.send(result);
-            }
-            FileIoTask::CreateDirAll { path, tx } => {
-                // mkdir doesn't benefit from io_uring
-                let result = std::fs::create_dir_all(&path);
-                let _ = tx.send(result);
-            }
-            FileIoTask::CreateStream {
-                path,
-                mut ops_rx,
-                result_tx,
-            } => {
-                match tokio_uring::fs::File::create(&path).await {
-                    Ok(file) => {
-                        let _ = result_tx.send(Ok(()));
-                        let mut offset = 0u64;
-                        let mut close_tx: Option<oneshot::Sender<io::Result<()>>> = None;
-
-                        while let Some(op) = ops_rx.recv().await {
-                            match op {
-                                super::StreamOp::Write(data, tx) => {
-                                    let len = data.len() as u64;
-                                    let (res, _) = file.write_all_at(data, offset).await;
-                                    match res {
-                                        Ok(()) => {
-                                            offset += len;
-                                            let _ = tx.send(Ok(()));
-                                        }
-                                        Err(e) => {
-                                            let _ = tx.send(Err(e));
-                                        }
-                                    }
-                                }
-                                super::StreamOp::Close(tx) => {
-                                    close_tx = Some(tx);
-                                    break;
-                                }
-                            }
-                        }
-
-                        // Always close the file (explicit close required for io_uring)
-                        let result = file.close().await;
-                        if let Some(tx) = close_tx {
-                            let _ = tx.send(result);
-                        }
-                    }
-                    Err(e) => {
-                        let _ = result_tx.send(Err(e));
-                    }
-                }
+            Err(e) => {
+                log::info!(
+                    "io_uring unavailable ({}), file I/O will use tokio::fs fallback",
+                    e
+                );
+                None
             }
         }
     }
 
-    /// Check if io_uring FS is enabled, and if so, send the task and await the result.
-    /// Returns `None` if io_uring is not available (caller should fall back to tokio::fs).
+    // ── Worker loop (synchronous, no async runtime) ─────────────────────────
+
+    /// The worker thread's main loop. Receives tasks via blocking channel recv,
+    /// processes each through the io_uring ring, sends results back via oneshot.
+    /// Exits cleanly when the channel sender is dropped.
+    fn worker_loop(mut rx: mpsc::UnboundedReceiver<FileIoTask>, mut ring: io_uring::IoUring) {
+        while let Some(task) = rx.blocking_recv() {
+            match task {
+                FileIoTask::WriteFile { path, data, tx } => {
+                    let _ = tx.send(uring_write_file(&mut ring, &path, &data));
+                }
+                FileIoTask::ReadFile { path, tx } => {
+                    let _ = tx.send(uring_read_file(&mut ring, &path));
+                }
+                FileIoTask::RemoveFile { path, tx } => {
+                    // unlinkat not widely supported in io_uring 0.7 — use std
+                    let _ = tx.send(std::fs::remove_file(&path));
+                }
+                FileIoTask::CreateDirAll { path, tx } => {
+                    // mkdir doesn't benefit from io_uring
+                    let _ = tx.send(std::fs::create_dir_all(&path));
+                }
+            }
+        }
+        // Channel closed — drop ring (closes the io_uring fd)
+        drop(ring);
+    }
+
+    // ── io_uring file operations ────────────────────────────────────────────
+
+    /// Submit one SQE, wait for one CQE, return the result code.
+    fn submit_and_reap(ring: &mut io_uring::IoUring) -> io::Result<i32> {
+        ring.submit_and_wait(1)?;
+        let cqe = ring
+            .completion()
+            .next()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "io_uring: no CQE after wait"))?;
+        Ok(cqe.result())
+    }
+
+    /// Close an fd through io_uring. Best-effort — errors are returned but
+    /// the fd is consumed regardless.
+    fn uring_close(ring: &mut io_uring::IoUring, fd: i32) -> io::Result<()> {
+        let close_e = io_uring::opcode::Close::new(io_uring::types::Fd(fd))
+            .build()
+            .user_data(0xC105E);
+
+        // SAFETY: SQE references only the fd integer, no buffer pointers.
+        unsafe {
+            ring.submission()
+                .push(&close_e)
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "io_uring: SQ full on close"))?;
+        }
+
+        let res = submit_and_reap(ring)?;
+        if res < 0 {
+            return Err(io::Error::from_raw_os_error(-res));
+        }
+        Ok(())
+    }
+
+    /// Write `data` to `path` (create/truncate) using io_uring OpenAt → Write
+    /// loop → Close.
+    fn uring_write_file(ring: &mut io_uring::IoUring, path: &str, data: &[u8]) -> io::Result<()> {
+        let c_path =
+            CString::new(path).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+
+        // ── Open (O_WRONLY | O_CREAT | O_TRUNC) ────────────────────────────
+        let open_e =
+            io_uring::opcode::OpenAt::new(io_uring::types::Fd(libc::AT_FDCWD), c_path.as_ptr())
+                .flags(libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC)
+                .mode(0o644)
+                .build()
+                .user_data(0x0BE4);
+
+        // SAFETY: c_path is alive and pinned on the stack until after
+        // submit_and_reap returns.
+        unsafe {
+            ring.submission()
+                .push(&open_e)
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "io_uring: SQ full on open"))?;
+        }
+
+        let fd = submit_and_reap(ring)?;
+        if fd < 0 {
+            return Err(io::Error::from_raw_os_error(-fd));
+        }
+
+        // ── Write (loop for short writes) ───────────────────────────────────
+        let write_result = uring_write_all(ring, fd, data);
+
+        // ── Close (always, even on write error) ─────────────────────────────
+        let close_result = uring_close(ring, fd);
+
+        // Return first error encountered.
+        write_result?;
+        close_result
+    }
+
+    /// Write all of `data` to `fd` at offset 0, handling short writes.
+    fn uring_write_all(ring: &mut io_uring::IoUring, fd: i32, data: &[u8]) -> io::Result<()> {
+        if data.is_empty() {
+            return Ok(());
+        }
+
+        let mut offset: u64 = 0;
+        while (offset as usize) < data.len() {
+            let remaining = &data[offset as usize..];
+            // io_uring Write len is u32 — cap each submission.
+            let chunk_len = remaining.len().min(u32::MAX as usize) as u32;
+
+            let write_e = io_uring::opcode::Write::new(
+                io_uring::types::Fd(fd),
+                remaining.as_ptr(),
+                chunk_len,
+            )
+            .offset(offset)
+            .build()
+            .user_data(0x1417E);
+
+            // SAFETY: `remaining` (a slice of `data`) is alive on the stack
+            // and won't move before submit_and_reap returns.
+            unsafe {
+                ring.submission().push(&write_e).map_err(|_| {
+                    io::Error::new(io::ErrorKind::Other, "io_uring: SQ full on write")
+                })?;
+            }
+
+            let written = submit_and_reap(ring)?;
+            if written < 0 {
+                return Err(io::Error::from_raw_os_error(-written));
+            }
+            if written == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "io_uring: write returned 0 bytes",
+                ));
+            }
+            offset += written as u64;
+        }
+        Ok(())
+    }
+
+    /// Read the entire file at `path` using io_uring OpenAt → Read loop → Close.
+    fn uring_read_file(ring: &mut io_uring::IoUring, path: &str) -> io::Result<Vec<u8>> {
+        // Get file size via std::fs (fast, synchronous stat).
+        let meta = std::fs::metadata(path)?;
+        let len = meta.len() as usize;
+
+        if len == 0 {
+            return Ok(Vec::new());
+        }
+
+        let c_path =
+            CString::new(path).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+
+        // ── Open (O_RDONLY) ─────────────────────────────────────────────────
+        let open_e =
+            io_uring::opcode::OpenAt::new(io_uring::types::Fd(libc::AT_FDCWD), c_path.as_ptr())
+                .flags(libc::O_RDONLY)
+                .build()
+                .user_data(0x0BE4);
+
+        // SAFETY: c_path alive until after submit_and_reap.
+        unsafe {
+            ring.submission()
+                .push(&open_e)
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "io_uring: SQ full on open"))?;
+        }
+
+        let fd = submit_and_reap(ring)?;
+        if fd < 0 {
+            return Err(io::Error::from_raw_os_error(-fd));
+        }
+
+        // ── Read (loop for short reads) ─────────────────────────────────────
+        let mut buf = vec![0u8; len];
+        let read_result = uring_read_exact(ring, fd, &mut buf);
+
+        // ── Close ───────────────────────────────────────────────────────────
+        let close_result = uring_close(ring, fd);
+
+        read_result?;
+        close_result?;
+        Ok(buf)
+    }
+
+    /// Read exactly `buf.len()` bytes from `fd` at offset 0, handling short reads.
+    fn uring_read_exact(ring: &mut io_uring::IoUring, fd: i32, buf: &mut [u8]) -> io::Result<()> {
+        let mut offset: u64 = 0;
+        while (offset as usize) < buf.len() {
+            let remaining = &mut buf[offset as usize..];
+            let chunk_len = remaining.len().min(u32::MAX as usize) as u32;
+
+            let read_e = io_uring::opcode::Read::new(
+                io_uring::types::Fd(fd),
+                remaining.as_mut_ptr(),
+                chunk_len,
+            )
+            .offset(offset)
+            .build()
+            .user_data(0x4EAD);
+
+            // SAFETY: `remaining` is a mutable slice of `buf` on the heap.
+            // It won't move before submit_and_reap returns.
+            unsafe {
+                ring.submission().push(&read_e).map_err(|_| {
+                    io::Error::new(io::ErrorKind::Other, "io_uring: SQ full on read")
+                })?;
+            }
+
+            let n = submit_and_reap(ring)?;
+            if n < 0 {
+                return Err(io::Error::from_raw_os_error(-n));
+            }
+            if n == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "io_uring: read returned 0 (unexpected EOF)",
+                ));
+            }
+            offset += n as u64;
+        }
+        Ok(())
+    }
+
+    // ── Public API ──────────────────────────────────────────────────────────
+
+    /// Probe the kernel for io_uring support and, if available, spawn the
+    /// worker thread. Returns `true` when io_uring file I/O is active.
+    ///
+    /// Safe to call multiple times — only the first successful call has
+    /// effect. Subsequent calls return the cached status.
+    pub fn init_uring_fs() -> bool {
+        // Fast path: already initialized.
+        if URING_FS_ENABLED.load(Ordering::Acquire) {
+            return true;
+        }
+
+        // Probe: try to create a ring. Fails gracefully on AWS AL2, ECS,
+        // Lambda, seccomp-filtered containers, kernels < 5.1, etc.
+        let ring = match probe_io_uring() {
+            Some(r) => r,
+            None => return false,
+        };
+
+        let (tx, rx) = mpsc::unbounded_channel();
+        let builder = std::thread::Builder::new().name("uring-fs-worker".into());
+
+        match builder.spawn(move || worker_loop(rx, ring)) {
+            Ok(_) => {
+                if URING_FS_POOL.set(tx).is_ok() {
+                    URING_FS_ENABLED.store(true, Ordering::Release);
+                }
+                // If set() failed, another thread won the race. Our worker
+                // will exit when its rx is dropped — no leak.
+            }
+            Err(e) => {
+                log::warn!("Failed to spawn io_uring FS worker thread: {}", e);
+                return false;
+            }
+        }
+
+        URING_FS_ENABLED.load(Ordering::Acquire)
+    }
+
+    /// Send a task to the io_uring worker and await the result.
+    /// Returns `None` if io_uring is not available (caller falls back).
     async fn try_uring<T>(
         make_task: impl FnOnce(oneshot::Sender<io::Result<T>>) -> FileIoTask,
     ) -> Option<io::Result<T>> {
@@ -198,44 +370,12 @@ mod inner {
         }
     }
 
-    /// Try to create a streaming writer on the io_uring worker thread.
-    /// Returns `None` if io_uring is not available.
+    /// Streaming writes always use the tokio::fs fallback.
+    /// io_uring doesn't add value for sequential single-writer streaming.
     pub(super) async fn try_streaming_create(
-        path: String,
+        _path: String,
     ) -> Option<io::Result<mpsc::UnboundedSender<super::StreamOp>>> {
-        if !URING_FS_ENABLED.load(Ordering::Acquire) {
-            return None;
-        }
-        let sender = match URING_FS_POOL.get() {
-            Some(s) => s,
-            None => return None,
-        };
-
-        let (ops_tx, ops_rx) = mpsc::unbounded_channel();
-        let (result_tx, result_rx) = oneshot::channel();
-
-        if sender
-            .send(FileIoTask::CreateStream {
-                path,
-                ops_rx,
-                result_tx,
-            })
-            .is_err()
-        {
-            return Some(Err(io::Error::new(
-                io::ErrorKind::BrokenPipe,
-                "io_uring FS worker channel closed",
-            )));
-        }
-
-        match result_rx.await {
-            Ok(Ok(())) => Some(Ok(ops_tx)),
-            Ok(Err(e)) => Some(Err(e)),
-            Err(_) => Some(Err(io::Error::new(
-                io::ErrorKind::BrokenPipe,
-                "io_uring FS worker dropped the response",
-            ))),
-        }
+        None
     }
 
     /// Write `data` to `path`, creating or truncating the file.
@@ -343,9 +483,9 @@ pub use inner::write_file;
 // ── StreamingWriter ──────────────────────────────────────────────────────────
 
 /// A handle for streaming writes to a file. Writes are dispatched to a
-/// background task — on the io_uring worker thread when available, or a
-/// spawned tokio task as fallback. The file is created on [`create`] and
-/// must be finalized with [`close`].
+/// background task — always via a spawned tokio task (io_uring doesn't help
+/// sequential single-writer streaming). The file is created on [`create`]
+/// and must be finalized with [`close`].
 ///
 /// If the writer is dropped without calling [`close`], the background task
 /// will still close the file (but the caller cannot observe errors).
@@ -356,7 +496,8 @@ pub struct StreamingWriter {
 impl StreamingWriter {
     /// Create a new file at `path` for streaming writes.
     pub async fn create(path: String) -> io::Result<Self> {
-        // Try io_uring path first
+        // Try io_uring path first (currently always returns None —
+        // streaming doesn't benefit from io_uring).
         if let Some(result) = inner::try_streaming_create(path.clone()).await {
             return result.map(|ops_tx| Self { ops_tx });
         }
@@ -397,9 +538,6 @@ impl StreamingWriter {
     }
 
     /// Write a chunk of data at the current offset.
-    ///
-    /// The data is cloned internally for transfer to the background task.
-    /// The caller retains ownership of the source buffer.
     pub async fn write(&self, data: &[u8]) -> io::Result<()> {
         let (tx, rx) = oneshot::channel();
         self.ops_tx
@@ -436,26 +574,12 @@ mod tests {
             .to_string()
     }
 
+    // ── Fallback path tests (run on all platforms) ───────────────────────
+
     #[tokio::test]
     async fn test_write_read_remove_fallback() {
         let path = temp_path("fallback");
         let payload = b"hello uring_fs fallback".to_vec();
-
-        write_file(path.clone(), payload.clone()).await.unwrap();
-
-        let read_back = read_file(path.clone()).await.unwrap();
-        assert_eq!(read_back, payload);
-
-        remove_file(path.clone()).await.unwrap();
-        assert!(read_file(path).await.is_err());
-    }
-
-    #[cfg(all(target_os = "linux", feature = "io_uring"))]
-    #[tokio::test]
-    async fn test_write_read_remove_uring() {
-        let _ = init_uring_fs();
-        let path = temp_path("uring");
-        let payload = vec![0xABu8; 4096]; // 4 KB
 
         write_file(path.clone(), payload.clone()).await.unwrap();
 
@@ -513,27 +637,6 @@ mod tests {
         let _ = remove_file(path).await;
     }
 
-    #[cfg(all(target_os = "linux", feature = "io_uring"))]
-    #[tokio::test]
-    async fn test_streaming_writer_uring() {
-        let _ = init_uring_fs();
-        let path = temp_path("streaming_uring");
-
-        let writer = StreamingWriter::create(path.clone()).await.unwrap();
-        // Write a larger payload in multiple chunks
-        let chunk = vec![0xCDu8; 4096];
-        for _ in 0..4 {
-            writer.write(&chunk).await.unwrap();
-        }
-        writer.close().await.unwrap();
-
-        let content = read_file(path.clone()).await.unwrap();
-        assert_eq!(content.len(), 4096 * 4);
-        assert!(content.iter().all(|&b| b == 0xCD));
-
-        let _ = remove_file(path).await;
-    }
-
     #[tokio::test]
     async fn test_streaming_writer_drop_without_close() {
         let path = temp_path("streaming_drop");
@@ -549,5 +652,202 @@ mod tests {
         assert_eq!(content, b"data before drop");
 
         let _ = remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn test_create_dir_all_fallback() {
+        let base = temp_path("dir_test");
+        let nested = format!("{}/a/b/c", base);
+
+        create_dir_all(nested.clone()).await.unwrap();
+        assert!(std::path::Path::new(&nested).is_dir());
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn test_init_idempotent() {
+        // Calling init multiple times must not panic or deadlock.
+        let r1 = init_uring_fs();
+        let r2 = init_uring_fs();
+        // Both should return the same value (platform-dependent).
+        assert_eq!(r1, r2);
+    }
+
+    #[tokio::test]
+    async fn test_large_write_read() {
+        let path = temp_path("large_file");
+        // 1 MB payload — tests short-write loop handling.
+        let payload = vec![0xABu8; 1024 * 1024];
+
+        write_file(path.clone(), payload.clone()).await.unwrap();
+
+        let read_back = read_file(path.clone()).await.unwrap();
+        assert_eq!(read_back.len(), payload.len());
+        assert_eq!(read_back, payload);
+
+        let _ = remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_writes() {
+        // Spawn 8 concurrent write+read tasks. No deadlocks, no data
+        // corruption.
+        let mut handles = Vec::new();
+
+        for i in 0..8u32 {
+            let path = temp_path(&format!("concurrent_{}", i));
+            handles.push(tokio::spawn(async move {
+                let payload = vec![i as u8; 4096];
+                write_file(path.clone(), payload.clone()).await.unwrap();
+                let read_back = read_file(path.clone()).await.unwrap();
+                assert_eq!(read_back, payload);
+                let _ = remove_file(path).await;
+            }));
+        }
+
+        for h in handles {
+            h.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_overwrite_existing_file() {
+        let path = temp_path("overwrite");
+
+        write_file(path.clone(), b"first content".to_vec())
+            .await
+            .unwrap();
+        write_file(path.clone(), b"second".to_vec()).await.unwrap();
+
+        let content = read_file(path.clone()).await.unwrap();
+        assert_eq!(content, b"second");
+
+        let _ = remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn test_remove_nonexistent() {
+        let path = temp_path("remove_nonexistent_surely");
+        let result = remove_file(path).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_streaming_writer_large_payload() {
+        let path = temp_path("streaming_large");
+
+        let writer = StreamingWriter::create(path.clone()).await.unwrap();
+        let chunk = vec![0xCDu8; 4096];
+        for _ in 0..64 {
+            writer.write(&chunk).await.unwrap();
+        }
+        writer.close().await.unwrap();
+
+        let content = read_file(path.clone()).await.unwrap();
+        assert_eq!(content.len(), 4096 * 64);
+        assert!(content.iter().all(|&b| b == 0xCD));
+
+        let _ = remove_file(path).await;
+    }
+
+    // ── io_uring-specific tests (Linux + feature only) ──────────────────
+
+    #[cfg(all(target_os = "linux", feature = "io_uring"))]
+    #[tokio::test]
+    async fn test_write_read_remove_uring() {
+        let _ = init_uring_fs();
+        let path = temp_path("uring_raw");
+        let payload = vec![0xABu8; 4096]; // 4 KB
+
+        write_file(path.clone(), payload.clone()).await.unwrap();
+
+        let read_back = read_file(path.clone()).await.unwrap();
+        assert_eq!(read_back, payload);
+
+        remove_file(path.clone()).await.unwrap();
+        assert!(read_file(path).await.is_err());
+    }
+
+    #[cfg(all(target_os = "linux", feature = "io_uring"))]
+    #[tokio::test]
+    async fn test_uring_large_write_read() {
+        let _ = init_uring_fs();
+        let path = temp_path("uring_large");
+        // 2 MB — exercises short-write loop through io_uring.
+        let payload = vec![0xFEu8; 2 * 1024 * 1024];
+
+        write_file(path.clone(), payload.clone()).await.unwrap();
+        let read_back = read_file(path.clone()).await.unwrap();
+        assert_eq!(read_back.len(), payload.len());
+        assert_eq!(read_back, payload);
+
+        let _ = remove_file(path).await;
+    }
+
+    #[cfg(all(target_os = "linux", feature = "io_uring"))]
+    #[tokio::test]
+    async fn test_uring_concurrent_ops() {
+        let _ = init_uring_fs();
+        let mut handles = Vec::new();
+
+        for i in 0..16u32 {
+            let path = temp_path(&format!("uring_conc_{}", i));
+            handles.push(tokio::spawn(async move {
+                let payload = vec![i as u8; 8192];
+                write_file(path.clone(), payload.clone()).await.unwrap();
+                let read_back = read_file(path.clone()).await.unwrap();
+                assert_eq!(read_back, payload);
+                let _ = remove_file(path).await;
+            }));
+        }
+
+        for h in handles {
+            h.await.unwrap();
+        }
+    }
+
+    #[cfg(all(target_os = "linux", feature = "io_uring"))]
+    #[tokio::test]
+    async fn test_uring_empty_file() {
+        let _ = init_uring_fs();
+        let path = temp_path("uring_empty");
+
+        write_file(path.clone(), Vec::new()).await.unwrap();
+        let read_back = read_file(path.clone()).await.unwrap();
+        assert!(read_back.is_empty());
+
+        let _ = remove_file(path).await;
+    }
+
+    #[cfg(all(target_os = "linux", feature = "io_uring"))]
+    #[tokio::test]
+    async fn test_uring_overwrite() {
+        let _ = init_uring_fs();
+        let path = temp_path("uring_overwrite");
+
+        write_file(path.clone(), b"original data here".to_vec())
+            .await
+            .unwrap();
+        write_file(path.clone(), b"replaced".to_vec())
+            .await
+            .unwrap();
+
+        let content = read_file(path.clone()).await.unwrap();
+        assert_eq!(content, b"replaced");
+
+        let _ = remove_file(path).await;
+    }
+
+    #[cfg(all(target_os = "linux", feature = "io_uring"))]
+    #[tokio::test]
+    async fn test_probe_io_uring_does_not_panic() {
+        // probe_io_uring must never panic — returns None on unsupported
+        // kernels, Some on supported ones.
+        let result = super::inner::probe_io_uring();
+        // We just verify it didn't panic. The result depends on the
+        // kernel, so we don't assert a specific value.
+        drop(result);
     }
 }
