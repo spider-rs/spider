@@ -120,7 +120,10 @@ async fn forward(
                 _ => (),
             }
         }
-        Ok(response.status(StatusCode::OK).body(extracted).unwrap())
+        Ok(response
+            .status(StatusCode::OK)
+            .body(extracted)
+            .unwrap_or_else(|_| warp::http::Response::new(Vec::new())))
     }
 
     #[cfg(not(feature = "headers"))]
@@ -189,7 +192,7 @@ async fn scrape(path: FullPath, host: String) -> Result<impl warp::Reply, Infall
         Ok(response
             .status(StatusCode::OK)
             .body(data.content.unwrap_or_default().to_vec())
-            .unwrap())
+            .unwrap_or_else(|_| warp::http::Response::new(Vec::new())))
     }
 
     #[cfg(not(feature = "headers"))]

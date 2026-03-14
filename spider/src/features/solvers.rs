@@ -1045,8 +1045,8 @@ async fn solve_with_inpage_helper(
             return result;
         }})()
         "#,
-        tiles = serde_json::to_string(tiles_json).unwrap(),
-        target = serde_json::to_string(target).unwrap(),
+        tiles = serde_json::to_string(tiles_json).unwrap_or_default(),
+        target = serde_json::to_string(target).unwrap_or_default(),
     );
 
     // -----------------------------------------------------------------
@@ -1056,7 +1056,7 @@ async fn solve_with_inpage_helper(
         .expression(&script)
         .await_promise(true)
         .build()
-        .unwrap();
+        .map_err(|e| CdpError::msg(format!("evaluate params: {e}")))?;
 
     let eval_fut = page.evaluate(params);
     let eval_res = tokio::time::timeout(Duration::from_millis(timeout_ms + 5_000), eval_fut)
@@ -1198,7 +1198,7 @@ pub async fn warm_gemini_model(page: &Page) -> Result<(), CdpError> {
         .expression(r#"(async()=>{try{const s=await LanguageModel.create({expectedInputs:[{type:"text",languages:["en"]}],expectedOutputs:[{type:"text",languages:["en"]}]});await s.prompt([{role:"user",content:[{type:"text",value:"ping"}]}])}catch(_){}})()"#)
         .await_promise(true)
         .build()
-        .expect("valid evaluate params");
+        .map_err(|e| CdpError::msg(format!("evaluate params: {e}")))?;
 
     tokio::time::timeout(Duration::from_secs(60), page.evaluate(eval_params))
         .await
@@ -1652,13 +1652,13 @@ async fn solve_lemin_with_inpage_helper(
         }})()"#
     );
 
-    let eval_fut = page.evaluate(
-        EvaluateParams::builder()
-            .expression(&script)
-            .await_promise(true)
-            .build()
-            .unwrap(),
-    );
+    let params = EvaluateParams::builder()
+        .expression(&script)
+        .await_promise(true)
+        .build()
+        .map_err(|e| CdpError::msg(format!("evaluate params: {e}")))?;
+
+    let eval_fut = page.evaluate(params);
 
     let eval_res = tokio::time::timeout(Duration::from_millis(timeout_ms + 5_000), eval_fut)
         .await
@@ -1786,7 +1786,7 @@ pub async fn lemin_handle(
                     )
                     .await_promise(true)
                     .build()
-                    .unwrap();
+                    .map_err(|e| CdpError::msg(format!("call function params: {e}")))?;
 
                 let eval = page.evaluate_function(call).await?;
                 eval.value()
@@ -2257,13 +2257,13 @@ pub async fn solve_geetest_with_inpage_helper(
         }})()"#
     );
 
-    let eval_fut = page.evaluate(
-        EvaluateParams::builder()
-            .expression(&script)
-            .await_promise(true)
-            .build()
-            .unwrap(),
-    );
+    let params = EvaluateParams::builder()
+        .expression(&script)
+        .await_promise(true)
+        .build()
+        .map_err(|e| CdpError::msg(format!("evaluate params: {e}")))?;
+
+    let eval_fut = page.evaluate(params);
 
     let eval_outcome = tokio::time::timeout(Duration::from_millis(timeout_ms + 5_000), eval_fut)
         .await
@@ -2494,7 +2494,7 @@ pub async fn geetest_handle(
                             .function_declaration("(function(){ return this.toDataURL(); })")
                             .await_promise(true)
                             .build()
-                            .unwrap();
+                            .map_err(|e| CdpError::msg(format!("call function params: {e}")))?;
 
                         // `page.evaluate_function` returns an `EvaluationResult`.
                         let eval_res = page.evaluate_function(call).await?;

@@ -4179,7 +4179,18 @@ async fn fetch_page_html_raw_base(
     };
 
     let mut page_response = match attempt_once(target_url, client, only_html).await {
-        Ok(pr) => pr,
+        Ok(pr) => {
+            // Retry once if the response was truncated (stream error or Content-Length mismatch)
+            if pr.content_truncated {
+                log::warn!("Response truncated for {target_url}, retrying once");
+                match attempt_once(target_url, client, only_html).await {
+                    Ok(pr2) => pr2,
+                    Err(_) => pr, // fall back to original truncated response
+                }
+            } else {
+                pr
+            }
+        }
         Err(err) => {
             let should_retry = error_chain_contains_handshake_failure(&err);
             if should_retry {

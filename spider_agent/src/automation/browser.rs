@@ -3406,9 +3406,9 @@ return await s.prompt(msg);
 
         while i < len {
             // Look for "data-" pattern
-            if i + 5 < len && &text[i..i + 5] == "data-" {
+            if i + 5 <= len && text.get(i..i + 5) == Some("data-") {
                 // Don't strip our own data-spider-idx
-                if i + 15 < len && &text[i..i + 15] == "data-spider-idx" {
+                if i + 15 <= len && text.get(i..i + 15) == Some("data-spider-idx") {
                     result.push_str("data-spider-idx");
                     i += 15;
                     continue;
@@ -3451,8 +3451,12 @@ return await s.prompt(msg);
                     continue;
                 }
             }
-            result.push(text[i..].chars().next().unwrap_or(' '));
-            i += text[i..].chars().next().map_or(1, |c| c.len_utf8());
+            if let Some(ch) = text.get(i..).and_then(|s| s.chars().next()) {
+                result.push(ch);
+                i += ch.len_utf8();
+            } else {
+                i += 1;
+            }
         }
 
         result

@@ -463,11 +463,14 @@ impl RobotFileParser {
                 } else if part0.eq_ignore_ascii_case("crawl-delay") {
                     if state != 0 {
                         if let Ok(delay) = part1.parse::<f64>() {
-                            let delay_seconds = delay.trunc();
-                            let delay_nanoseconds = delay.fract() * 10f64.powi(9);
-                            let delay =
-                                Duration::new(delay_seconds as u64, delay_nanoseconds as u32);
-                            entry.set_crawl_delay(delay);
+                            if delay >= 0.0 && delay.is_finite() {
+                                let secs = delay.trunc().min(u64::MAX as f64) as u64;
+                                let nanos = (delay.fract() * 1_000_000_000.0)
+                                    .min(999_999_999.0)
+                                    .max(0.0) as u32;
+                                let delay = Duration::new(secs, nanos);
+                                entry.set_crawl_delay(delay);
+                            }
                         }
                         state = 2;
                     }

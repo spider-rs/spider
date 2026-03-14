@@ -1948,7 +1948,18 @@ impl Page {
 
                 response.0
             }
-            Ok(res) => handle_response_bytes(res, url, only_html).await,
+            Ok(res) => {
+                let pr = handle_response_bytes(res, url, only_html).await;
+                if pr.content_truncated {
+                    log::warn!("Response truncated for {url}, retrying once");
+                    match client.get(url).send().await {
+                        Ok(res2) => handle_response_bytes(res2, url, only_html).await,
+                        Err(_) => pr,
+                    }
+                } else {
+                    pr
+                }
+            }
             Err(err) => {
                 log::info!("error fetching {}", url);
 
