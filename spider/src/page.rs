@@ -1256,11 +1256,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         #[cfg(feature = "time")]
         duration: res.duration,
         status_code: res.status_code,
-        error_status: {
-            let error_status = get_error_status(&mut should_retry, res.error_for_status);
-
-            error_status
-        },
+        error_status: get_error_status(&mut should_retry, res.error_for_status),
         final_redirect_destination: if empty_page { None } else { res.final_url },
         #[cfg(feature = "chrome")]
         chrome_page: None,
