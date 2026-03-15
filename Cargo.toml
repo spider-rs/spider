@@ -9,6 +9,6 @@ members = [
     "spider_agent_html",
     # internal
     "examples",
-    "benches"]
+    "benches", "zhihu_spider"]
 resolver = "2"
 

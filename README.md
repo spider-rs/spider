@@ -28,6 +28,25 @@ cargo install spider_cli
 spider --url https://example.com
 ```
 
+Capture a single authenticated page by reusing a local Chrome/Chromium profile:
+
+```bash
+spider authenticated-page \
+  --prepare-profile \
+  --chrome-bin /usr/bin/chromium \
+  --chrome-user-data-dir ~/.local/share/spider/login-chrome-profile
+```
+
+After logging into the target site in that browser window, capture the page and store HTML, extracted text, and images in one output directory:
+
+```bash
+spider authenticated-page \
+  --url 'https://example.com/protected/page' \
+  --chrome-bin /usr/bin/chromium \
+  --chrome-user-data-dir ~/.local/share/spider/login-chrome-profile \
+  --output-dir run_output
+```
+
 ### Rust
 
 ```toml
