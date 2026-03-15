@@ -122,6 +122,18 @@ fn is_dns_error(err: &crate::client::Error) -> bool {
     DNS_ERROR_AC.is_match(&err.to_string())
 }
 
+/// Whether a status code is retryable (transient server/network errors).
+/// DNS errors (525) are permanent and excluded.
+#[inline]
+pub fn is_retryable_status(status: StatusCode) -> bool {
+    status != *DNS_RESOLVE_ERROR
+        && (status.is_server_error()
+            || matches!(
+                status,
+                StatusCode::TOO_MANY_REQUESTS | StatusCode::REQUEST_TIMEOUT
+            ))
+}
+
 /// Get the HTTP status code of errors.
 
 pub(crate) fn get_error_http_status_code(err: &crate::client::Error) -> StatusCode {
@@ -1247,15 +1259,6 @@ pub fn build(url: &str, res: PageResponse) -> Page {
         error_status: {
             let error_status = get_error_status(&mut should_retry, res.error_for_status);
 
-            if should_retry {
-                if let Some(message) = &error_status {
-                    let msg: &str = message.as_ref();
-                    if msg.starts_with("error sending request for url ") {
-                        should_retry = false;
-                    }
-                }
-            }
-
             error_status
         },
         final_redirect_destination: if empty_page { None } else { res.final_url },
@@ -1491,6 +1494,14 @@ pub(crate) fn metadata_handlers<'h>(
 }
 
 impl Page {
+    /// Whether the page needs a retry based on `should_retry` OR a retryable status code.
+    /// This ensures transient errors (599, 598, 5xx, 429, 408) always get retried
+    /// even when `should_retry` was not set by the error classification path.
+    #[inline]
+    pub fn needs_retry(&self) -> bool {
+        self.should_retry || is_retryable_status(self.status_code)
+    }
+
     /// Instantiate a new page and gather the html repro of standard fetch_page_html.
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn new_page(url: &str, client: &Client) -> Self {

@@ -2591,7 +2591,7 @@ impl Website {
                     self.domain_parsed = domain_parsed_out;
                 }
 
-                if page.should_retry && retry_count > 0 {
+                if page.needs_retry() && retry_count > 0 {
                     retry_count -= 1;
                     if let Some(timeout) = page.get_timeout() {
                         tokio::time::sleep(timeout).await;
@@ -2646,7 +2646,7 @@ impl Website {
         self.initial_status_code = page.status_code;
         self.initial_html_length = page.get_html_bytes_u8().len();
         self.initial_anti_bot_tech = page.anti_bot_tech;
-        self.initial_page_should_retry = page.should_retry;
+        self.initial_page_should_retry = page.needs_retry();
         self.initial_page_waf_check = page.waf_check;
 
         self.set_crawl_initial_status(&page, &links);
@@ -2744,7 +2744,7 @@ impl Website {
             let mut retry_count = self.configuration.retry;
             let domains_caseless = &self.configuration.external_domains_caseless;
 
-            while page.should_retry && retry_count > 0 {
+            while page.needs_retry() && retry_count > 0 {
                 retry_count -= 1;
                 if let Some(timeout) = page.get_timeout() {
                     tokio::time::sleep(timeout).await;
@@ -2824,7 +2824,7 @@ impl Website {
             self.initial_status_code = page.status_code;
             self.initial_html_length = page.get_html_bytes_u8().len();
             self.initial_anti_bot_tech = page.anti_bot_tech;
-            self.initial_page_should_retry = page.should_retry;
+            self.initial_page_should_retry = page.needs_retry();
             self.initial_page_waf_check = page.waf_check;
 
             self.set_crawl_initial_status(&page, &links);
@@ -3310,7 +3310,7 @@ impl Website {
                 }
             }
 
-            while page.should_retry && retry_count > 0 {
+            while page.needs_retry() && retry_count > 0 {
                 retry_count -= 1;
                 if let Some(timeout) = page.get_timeout() {
                     tokio::time::sleep(timeout).await;
@@ -3442,7 +3442,7 @@ impl Website {
             self.initial_status_code = page.status_code;
             self.initial_html_length = page.get_html_bytes_u8().len();
             self.initial_anti_bot_tech = page.anti_bot_tech;
-            self.initial_page_should_retry = page.should_retry;
+            self.initial_page_should_retry = page.needs_retry();
             self.initial_page_waf_check = page.waf_check;
 
             self.set_crawl_initial_status(&page, &links);
@@ -3516,7 +3516,7 @@ impl Website {
                 }
             }
 
-            while page.should_retry && retry_count > 0 {
+            while page.needs_retry() && retry_count > 0 {
                 retry_count -= 1;
                 if let Some(timeout) = page.get_timeout() {
                     tokio::time::sleep(timeout).await;
@@ -3677,7 +3677,7 @@ impl Website {
 
             let mut retry_count = self.configuration.retry;
 
-            while page.should_retry && retry_count > 0 {
+            while page.needs_retry() && retry_count > 0 {
                 retry_count -= 1;
                 if let Some(timeout_duration) = page.get_timeout() {
                     tokio::time::sleep(timeout_duration).await;
@@ -3788,7 +3788,7 @@ impl Website {
             self.initial_status_code = page.status_code;
             self.initial_html_length = page.get_html_bytes_u8().len();
             self.initial_anti_bot_tech = page.anti_bot_tech;
-            self.initial_page_should_retry = page.should_retry;
+            self.initial_page_should_retry = page.needs_retry();
             self.initial_page_waf_check = page.waf_check;
 
             // todo: pass full links to the worker to return.
@@ -4017,7 +4017,7 @@ impl Website {
                 let mut retry_count = self.configuration.retry;
                 let domains_caseless = &self.configuration.external_domains_caseless;
 
-                while page.should_retry && retry_count > 0 {
+                while page.needs_retry() && retry_count > 0 {
                     retry_count -= 1;
                     if let Some(timeout) = page.get_timeout() {
                         tokio::time::sleep(timeout).await;
@@ -4096,7 +4096,7 @@ impl Website {
                 self.initial_status_code = page.status_code;
                 self.initial_html_length = page.get_html_bytes_u8().len();
                 self.initial_anti_bot_tech = page.anti_bot_tech;
-                self.initial_page_should_retry = page.should_retry;
+                self.initial_page_should_retry = page.needs_retry();
                 self.initial_page_waf_check = page.waf_check;
 
                 self.set_crawl_initial_status(&page, &links);
@@ -4148,7 +4148,7 @@ impl Website {
 
             let mut retry_count = self.configuration.retry;
 
-            while page.should_retry && retry_count > 0 {
+            while page.needs_retry() && retry_count > 0 {
                 retry_count -= 1;
                 if let Some(timeout) = page.get_timeout() {
                     tokio::time::sleep(timeout).await;
@@ -4254,7 +4254,7 @@ impl Website {
             self.initial_status_code = page.status_code;
             self.initial_html_length = page.get_html_bytes_u8().len();
             self.initial_anti_bot_tech = page.anti_bot_tech;
-            self.initial_page_should_retry = page.should_retry;
+            self.initial_page_should_retry = page.needs_retry();
             self.initial_page_waf_check = page.waf_check;
 
             self.set_crawl_initial_status(&page, &links);
@@ -5505,7 +5505,7 @@ impl Website {
 
                                     let mut retry_count = shared.5;
 
-                                    while page.should_retry && retry_count > 0 {
+                                    while page.needs_retry() && retry_count > 0 {
                                         retry_count -= 1;
 
                                         if let Some(timeout) = page.get_timeout() {
@@ -5906,7 +5906,7 @@ impl Website {
 
                                                             let mut retry_count = shared.6.retry;
 
-                                                            while page.should_retry && retry_count > 0 {
+                                                            while page.needs_retry() && retry_count > 0 {
                                                                 retry_count -= 1;
                                                                 if let Some(timeout) = page.get_timeout() {
                                                                     tokio::time::sleep(timeout).await;
@@ -6371,7 +6371,7 @@ impl Website {
 
                                     let mut retry_count = shared.5;
 
-                                    while page.should_retry && retry_count > 0 {
+                                    while page.needs_retry() && retry_count > 0 {
                                         retry_count -= 1;
 
                                         if let Some(timeout) = page.get_timeout() {
@@ -6731,7 +6731,7 @@ impl Website {
 
                                                             let mut retry_count = shared.6.retry;
 
-                                                            while page.should_retry && retry_count > 0 {
+                                                            while page.needs_retry() && retry_count > 0 {
                                                                 retry_count -= 1;
                                                                 if let Some(timeout) = page.get_timeout() {
                                                                     tokio::time::sleep(timeout).await;
@@ -7133,7 +7133,7 @@ impl Website {
 
                                             let mut retry_count = shared.6.retry;
 
-                                            while page.should_retry && retry_count > 0 {
+                                            while page.needs_retry() && retry_count > 0 {
                                                 retry_count -= 1;
                                                 if let Some(timeout_duration) = page.get_timeout() {
                                                     tokio::time::sleep(timeout_duration).await;
@@ -7561,7 +7561,7 @@ impl Website {
 
                                     let mut retry_count = shared.4.retry;
 
-                                    while page.should_retry && retry_count > 0 {
+                                    while page.needs_retry() && retry_count > 0 {
                                         retry_count -= 1;
 
                                         if let Some(timeout) = page.get_timeout() {
@@ -8698,7 +8698,7 @@ impl Website {
 
                                     let mut retry_count = retry;
 
-                                    while page.should_retry && retry_count > 0 {
+                                    while page.needs_retry() && retry_count > 0 {
                                         if let Some(timeout) = page.get_timeout() {
                                             tokio::time::sleep(timeout).await;
                                         }
