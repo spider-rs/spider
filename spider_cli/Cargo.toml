@@ -23,6 +23,7 @@ serde_json = "1"
 percent-encoding = "2"
 unicode-normalization = "0.1"
 tokio = { version = "1", features = ["fs", "io-util", "rt-multi-thread", "macros"] }
+spider_utils = { version = "2", path = "../spider_utils" }
 
 [build-dependencies]
 quote = "1"
@@ -31,7 +32,7 @@ failure_derive = "0.1.8"
 [dependencies.spider]
 version = "2"
 path = "../spider"
-features = ["tokio_io_std", "sync", "serde"]
+features = ["tokio_io_std", "sync", "serde", "cookies"]
 
 [[bin]]
 name = "spider"

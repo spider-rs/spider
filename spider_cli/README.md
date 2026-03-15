@@ -59,6 +59,21 @@ Download all html to local destination. Use the option `-t` to pass in the targe
 spider --url https://choosealicense.com download -t _temp_spider_downloads
 ```
 
+Capture a single authenticated page with a reusable local Chrome/Chromium profile.
+
+```sh
+spider authenticated-page --prepare-profile --chrome-user-data-dir ~/.local/share/spider/login-chrome-profile
+```
+
+After logging into the target site in that browser window, capture the page and store HTML, extracted text, and images in one output directory.
+
+```sh
+spider authenticated-page \
+  --url https://example.com/protected/page \
+  --chrome-user-data-dir ~/.local/share/spider/login-chrome-profile \
+  --output-dir authenticated_page_output
+```
+
 Set a crawl budget and only crawl one domain.
 
 ```sh

@@ -12,6 +12,7 @@ extern crate env_logger;
 extern crate serde_json;
 extern crate spider;
 
+pub mod authenticated_page;
 pub mod build_folders;
 pub mod options;
 
@@ -36,6 +37,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::build_folders::build_local_path;
+use crate::authenticated_page::run_authenticated_page;
 
 /// convert the headers to json
 fn headers_to_json(headers: &Option<HeaderMap<HeaderValue>>) -> Value {
@@ -150,10 +152,22 @@ async fn main() {
         env_logger::init_from_env(env);
     }
 
-    let url = if cli.url.starts_with("http") {
-        cli.url
+    if let Some(Commands::AuthenticatedPage(ref args)) = cli.command {
+        if let Err(err) = run_authenticated_page(&cli, args).await {
+            eprintln!("{err}");
+        }
+        return;
+    }
+
+    let Some(raw_url) = cli.url.clone() else {
+        eprintln!("A url is required. Use --url <URL>.");
+        return;
+    };
+
+    let url = if raw_url.starts_with("http") {
+        raw_url
     } else {
-        string_concat!("https://", cli.url)
+        string_concat!("https://", raw_url)
     };
 
     let mut website = Website::new(&url);
@@ -383,6 +397,7 @@ async fn main() {
                         }
                     }
                 }
+                Some(Commands::AuthenticatedPage(_)) => unreachable!(),
                 None => ()
             }
         }

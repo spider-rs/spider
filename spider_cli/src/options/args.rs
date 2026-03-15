@@ -9,9 +9,9 @@ pub struct Cli {
     /// Build main sub commands
     #[clap(subcommand)]
     pub command: Option<Commands>,
-    /// The website URL to crawl.
+    /// The website URL to crawl. Used by crawl/scrape/download and as a fallback for authenticated-page.
     #[clap(short, long)]
-    pub url: String,
+    pub url: Option<String>,
     /// Respect robots.txt file
     #[clap(short, long)]
     pub respect_robots_txt: bool,

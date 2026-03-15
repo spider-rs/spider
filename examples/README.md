@@ -57,9 +57,14 @@ Crawl links with chrome headed rendering [Chrome](./chrome.rs).
 
 - `cargo run --example chrome --features chrome_headed`
 
-Crawl a logged-in page with browser cookies and save rendered HTML plus extracted text [Zhihu Cookie Login](./zhihu_cookie_login.rs).
+Crawl a logged-in page by reusing a dedicated local Chrome/Chromium profile on Ubuntu Desktop, or fall back to cookie injection [Authenticated Page](./authenticated_page.rs).
 
-- `COOKIE='z_c0=...; d_c0=...' cargo run --example zhihu_cookie_login --features="spider/sync spider/cookies spider/chrome" -- https://www.zhihu.com/question/123456789`
+- `PREPARE_PROFILE=1 CHROME_USER_DATA_DIR="$HOME/.local/share/spider/login-chrome-profile" cargo run --example authenticated_page --features="spider/sync spider/cookies spider/chrome"`
+- `CHROME_USER_DATA_DIR="$HOME/.local/share/spider/login-chrome-profile" cargo run --example authenticated_page --features="spider/sync spider/cookies spider/chrome" -- https://example.com/protected/page`
+- `OUTPUT_DIR=authenticated_page_output CHROME_USER_DATA_DIR="$HOME/.local/share/spider/login-chrome-profile" cargo run --example authenticated_page --features="spider/sync spider/cookies spider/chrome" -- https://example.com/protected/page`
+- `COOKIE='sessionid=...; csrftoken=...' cargo run --example authenticated_page --features="spider/sync spider/cookies spider/chrome" -- https://example.com/protected/page`
+
+This example saves rendered HTML, extracted text, and downloaded page images into the output directory.
 
 Crawl links with chrome headless rendering remote connections [Chrome](./chrome.rs).
 
