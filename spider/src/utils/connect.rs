@@ -27,8 +27,9 @@ pub(crate) fn background_connect_threading() -> bool {
 
 /// Init a background thread for request connect handling.
 ///
-/// Spawns a dedicated tokio multi-thread runtime for connection processing.
-/// Also initializes io_uring file I/O (if available on this kernel).
+/// Initializes io_uring (if available on this kernel) for file I/O and TCP
+/// connects. Also spawns a dedicated tokio multi-thread runtime as fallback
+/// for connection processing when io_uring is not available.
 pub fn init_background_runtime() {
     super::uring_fs::init_uring_fs();
     let _ = CONNECT_THREAD_POOL.set({
@@ -37,21 +38,38 @@ pub fn init_background_runtime() {
 
         if builder
             .spawn(move || {
-                match tokio::runtime::Builder::new_multi_thread()
-                    .thread_name("connect-background-pool-thread")
-                    .worker_threads(num_cpus::get())
-                    .on_thread_start(move || {
-                        #[cfg(target_os = "linux")]
-                        unsafe {
-                            if libc::nice(10) == -1 && *libc::__errno_location() != 0 {
-                                let error = std::io::Error::last_os_error();
-                                log::error!("failed to set threadpool niceness: {}", error);
+                // When io_uring is active, use a lightweight current-thread
+                // runtime — the heavy lifting (TCP connects) goes through the
+                // io_uring worker. Only the future plumbing needs a runtime.
+                let rt_result = if super::uring_fs::is_uring_enabled() {
+                    log::info!(
+                        "io_uring active — background runtime using current-thread executor"
+                    );
+                    tokio::runtime::Builder::new_current_thread()
+                        .thread_name("connect-background-uring-thread")
+                        .enable_all()
+                        .build()
+                } else {
+                    tokio::runtime::Builder::new_multi_thread()
+                        .thread_name("connect-background-pool-thread")
+                        .worker_threads(num_cpus::get())
+                        .on_thread_start(move || {
+                            #[cfg(target_os = "linux")]
+                            unsafe {
+                                if libc::nice(10) == -1 && *libc::__errno_location() != 0 {
+                                    let error = std::io::Error::last_os_error();
+                                    log::error!(
+                                        "failed to set threadpool niceness: {}",
+                                        error
+                                    );
+                                }
                             }
-                        }
-                    })
-                    .enable_all()
-                    .build()
-                {
+                        })
+                        .enable_all()
+                        .build()
+                };
+
+                match rt_result {
                     Ok(rt) => {
                         rt.block_on(async move {
                             while let Some(work) = rx.recv().await {

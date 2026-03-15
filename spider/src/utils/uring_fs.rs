@@ -38,7 +38,7 @@ mod inner {
     static URING_FS_POOL: std::sync::OnceLock<mpsc::UnboundedSender<FileIoTask>> =
         std::sync::OnceLock::new();
 
-    /// A self-contained file I/O task sent to the worker thread.
+    /// A self-contained I/O task sent to the worker thread.
     enum FileIoTask {
         WriteFile {
             path: String,
@@ -56,6 +56,11 @@ mod inner {
         CreateDirAll {
             path: String,
             tx: oneshot::Sender<io::Result<()>>,
+        },
+        /// TCP connect via io_uring Socket + Connect opcodes.
+        TcpConnect {
+            addr: std::net::SocketAddr,
+            tx: oneshot::Sender<io::Result<std::net::TcpStream>>,
         },
     }
 
@@ -101,6 +106,9 @@ mod inner {
                     // mkdir doesn't benefit from io_uring
                     let _ = tx.send(std::fs::create_dir_all(&path));
                 }
+                FileIoTask::TcpConnect { addr, tx } => {
+                    let _ = tx.send(uring_tcp_connect(&mut ring, addr));
+                }
             }
         }
         // Channel closed — drop ring (closes the io_uring fd)
@@ -115,7 +123,7 @@ mod inner {
         let cqe = ring
             .completion()
             .next()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "io_uring: no CQE after wait"))?;
+            .ok_or_else(|| io::Error::other("io_uring: no CQE after wait"))?;
         Ok(cqe.result())
     }
 
@@ -130,7 +138,7 @@ mod inner {
         unsafe {
             ring.submission()
                 .push(&close_e)
-                .map_err(|_| io::Error::new(io::ErrorKind::Other, "io_uring: SQ full on close"))?;
+                .map_err(|_| io::Error::other("io_uring: SQ full on close"))?;
         }
 
         let res = submit_and_reap(ring)?;
@@ -159,7 +167,7 @@ mod inner {
         unsafe {
             ring.submission()
                 .push(&open_e)
-                .map_err(|_| io::Error::new(io::ErrorKind::Other, "io_uring: SQ full on open"))?;
+                .map_err(|_| io::Error::other("io_uring: SQ full on open"))?;
         }
 
         let fd = submit_and_reap(ring)?;
@@ -203,7 +211,7 @@ mod inner {
             // and won't move before submit_and_reap returns.
             unsafe {
                 ring.submission().push(&write_e).map_err(|_| {
-                    io::Error::new(io::ErrorKind::Other, "io_uring: SQ full on write")
+                    io::Error::other("io_uring: SQ full on write")
                 })?;
             }
 
@@ -246,7 +254,7 @@ mod inner {
         unsafe {
             ring.submission()
                 .push(&open_e)
-                .map_err(|_| io::Error::new(io::ErrorKind::Other, "io_uring: SQ full on open"))?;
+                .map_err(|_| io::Error::other("io_uring: SQ full on open"))?;
         }
 
         let fd = submit_and_reap(ring)?;
@@ -286,7 +294,7 @@ mod inner {
             // It won't move before submit_and_reap returns.
             unsafe {
                 ring.submission().push(&read_e).map_err(|_| {
-                    io::Error::new(io::ErrorKind::Other, "io_uring: SQ full on read")
+                    io::Error::other("io_uring: SQ full on read")
                 })?;
             }
 
@@ -303,6 +311,103 @@ mod inner {
             offset += n as u64;
         }
         Ok(())
+    }
+
+    // ── io_uring TCP connect ───────────────────────────────────────────────
+
+    /// Create a TCP socket and connect to `addr` using io_uring
+    /// Socket + Connect opcodes. Returns an owned `TcpStream`.
+    fn uring_tcp_connect(
+        ring: &mut io_uring::IoUring,
+        addr: std::net::SocketAddr,
+    ) -> io::Result<std::net::TcpStream> {
+        use std::os::unix::io::FromRawFd;
+
+        let domain = match addr {
+            std::net::SocketAddr::V4(_) => libc::AF_INET,
+            std::net::SocketAddr::V6(_) => libc::AF_INET6,
+        };
+
+        // ── Socket (SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC) ─────────
+        let socket_e = io_uring::opcode::Socket::new(
+            domain,
+            libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
+            0,
+        )
+        .build()
+        .user_data(0x50CE7);
+
+        // SAFETY: no buffer pointers, just integer parameters.
+        unsafe {
+            ring.submission()
+                .push(&socket_e)
+                .map_err(|_| io::Error::other("io_uring: SQ full on socket"))?;
+        }
+
+        let fd = submit_and_reap(ring)?;
+        if fd < 0 {
+            return Err(io::Error::from_raw_os_error(-fd));
+        }
+
+        // ── Connect ─────────────────────────────────────────────────────────
+        // Build sockaddr on the stack — must live until submit_and_reap returns.
+        let (sa_ptr, sa_len) = match addr {
+            std::net::SocketAddr::V4(v4) => {
+                let sa = libc::sockaddr_in {
+                    sin_family: libc::AF_INET as libc::sa_family_t,
+                    sin_port: v4.port().to_be(),
+                    sin_addr: libc::in_addr {
+                        s_addr: u32::from_ne_bytes(v4.ip().octets()),
+                    },
+                    sin_zero: [0; 8],
+                };
+                // SAFETY: sa lives on the stack until after submit_and_reap.
+                let ptr = &sa as *const libc::sockaddr_in as *const libc::sockaddr;
+                (ptr, std::mem::size_of::<libc::sockaddr_in>() as u32)
+            }
+            std::net::SocketAddr::V6(v6) => {
+                let sa = libc::sockaddr_in6 {
+                    sin6_family: libc::AF_INET6 as libc::sa_family_t,
+                    sin6_port: v6.port().to_be(),
+                    sin6_flowinfo: v6.flowinfo(),
+                    sin6_addr: libc::in6_addr {
+                        s6_addr: v6.ip().octets(),
+                    },
+                    sin6_scope_id: v6.scope_id(),
+                };
+                let ptr = &sa as *const libc::sockaddr_in6 as *const libc::sockaddr;
+                (ptr, std::mem::size_of::<libc::sockaddr_in6>() as u32)
+            }
+        };
+
+        let connect_e =
+            io_uring::opcode::Connect::new(io_uring::types::Fd(fd), sa_ptr, sa_len)
+                .build()
+                .user_data(0xC044);
+
+        // SAFETY: sockaddr struct on the stack is alive until submit_and_reap returns.
+        unsafe {
+            ring.submission().push(&connect_e).map_err(|_| {
+                // Close the socket on error.
+                libc::close(fd);
+                io::Error::other("io_uring: SQ full on connect")
+            })?;
+        }
+
+        let res = submit_and_reap(ring)?;
+
+        // EINPROGRESS is normal for non-blocking sockets — io_uring resolves
+        // it before returning the CQE, so res==0 means connected.
+        // Any other negative value is an error.
+        if res < 0 && res != -(libc::EINPROGRESS as i32) {
+            // Close the fd we created.
+            let _ = uring_close(ring, fd);
+            return Err(io::Error::from_raw_os_error(-res));
+        }
+
+        // SAFETY: we own this fd, it's a valid connected TCP socket.
+        let stream = unsafe { std::net::TcpStream::from_raw_fd(fd) };
+        Ok(stream)
     }
 
     // ── Public API ──────────────────────────────────────────────────────────
@@ -430,6 +535,23 @@ mod inner {
         }
         tokio::fs::create_dir_all(&path).await
     }
+
+    /// TCP connect via io_uring. Returns a connected `std::net::TcpStream`.
+    /// Falls back to blocking `TcpStream::connect` if io_uring is unavailable.
+    pub async fn tcp_connect(addr: std::net::SocketAddr) -> io::Result<std::net::TcpStream> {
+        if let Some(result) = try_uring(|tx| FileIoTask::TcpConnect { addr, tx }).await {
+            return result;
+        }
+        // Fallback: blocking connect on a spawn_blocking thread.
+        tokio::task::spawn_blocking(move || std::net::TcpStream::connect(addr))
+            .await
+            .map_err(io::Error::other)?
+    }
+
+    /// Whether io_uring is currently active.
+    pub fn is_uring_enabled() -> bool {
+        URING_FS_ENABLED.load(Ordering::Acquire)
+    }
 }
 
 // ── Fallback implementation (non-Linux or no io_uring feature) ───────────────
@@ -470,14 +592,28 @@ mod inner {
     pub async fn create_dir_all(path: String) -> io::Result<()> {
         tokio::fs::create_dir_all(&path).await
     }
+
+    /// TCP connect — no io_uring, uses blocking fallback.
+    pub async fn tcp_connect(addr: std::net::SocketAddr) -> io::Result<std::net::TcpStream> {
+        tokio::task::spawn_blocking(move || std::net::TcpStream::connect(addr))
+            .await
+            .map_err(io::Error::other)?
+    }
+
+    /// io_uring is never enabled on this platform.
+    pub fn is_uring_enabled() -> bool {
+        false
+    }
 }
 
 // ── Re-exports ───────────────────────────────────────────────────────────────
 
 pub use inner::create_dir_all;
 pub use inner::init_uring_fs;
+pub use inner::is_uring_enabled;
 pub use inner::read_file;
 pub use inner::remove_file;
+pub use inner::tcp_connect;
 pub use inner::write_file;
 
 // ── StreamingWriter ──────────────────────────────────────────────────────────
@@ -849,5 +985,89 @@ mod tests {
         // We just verify it didn't panic. The result depends on the
         // kernel, so we don't assert a specific value.
         drop(result);
+    }
+
+    // ── TCP connect tests ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_tcp_connect_fallback() {
+        // Bind a local listener, then connect via tcp_connect.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let accept_handle = tokio::spawn(async move { listener.accept().await });
+        let connect_handle = tokio::spawn(async move { tcp_connect(addr).await });
+
+        let (accept_result, connect_result) =
+            tokio::join!(accept_handle, connect_handle);
+
+        assert!(accept_result.unwrap().is_ok());
+        assert!(
+            connect_result.unwrap().is_ok(),
+            "tcp_connect should succeed"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_tcp_connect_refused() {
+        // Connect to a port that's (almost certainly) not listening.
+        let addr: std::net::SocketAddr = "127.0.0.1:1".parse().unwrap();
+        let result = tcp_connect(addr).await;
+        assert!(result.is_err(), "connecting to port 1 should fail");
+    }
+
+    #[tokio::test]
+    async fn test_is_uring_enabled_consistent() {
+        let e1 = is_uring_enabled();
+        let e2 = is_uring_enabled();
+        assert_eq!(e1, e2);
+    }
+
+    #[cfg(all(target_os = "linux", feature = "io_uring"))]
+    #[tokio::test]
+    async fn test_tcp_connect_uring() {
+        let _ = init_uring_fs();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let accept_handle = tokio::spawn(async move { listener.accept().await });
+        let connect_handle = tokio::spawn(async move { tcp_connect(addr).await });
+
+        let (accept_result, connect_result) = tokio::join!(accept_handle, connect_handle);
+        assert!(accept_result.unwrap().is_ok());
+        assert!(
+            connect_result.unwrap().is_ok(),
+            "uring tcp_connect should succeed"
+        );
+    }
+
+    #[cfg(all(target_os = "linux", feature = "io_uring"))]
+    #[tokio::test]
+    async fn test_tcp_connect_uring_concurrent() {
+        let _ = init_uring_fs();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let accept_handle = tokio::spawn(async move {
+            let mut streams = Vec::new();
+            for _ in 0..8 {
+                streams.push(listener.accept().await.unwrap());
+            }
+            streams
+        });
+
+        let mut connect_handles = Vec::new();
+        for _ in 0..8 {
+            connect_handles.push(tokio::spawn(async move { tcp_connect(addr).await }));
+        }
+
+        let _ = accept_handle.await.unwrap();
+
+        for h in connect_handles {
+            let result = h.await.unwrap();
+            assert!(result.is_ok());
+        }
     }
 }
