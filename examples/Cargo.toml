@@ -205,6 +205,11 @@ path = "chrome_web_automation.rs"
 required-features = ["spider/sync", "spider/chrome"]
 
 [[example]]
+name = "zhihu_cookie_login"
+path = "zhihu_cookie_login.rs"
+required-features = ["spider/sync", "spider/cookies", "spider/chrome"]
+
+[[example]]
 name = "smart"
 path = "smart.rs"
 required-features = ["spider/sync", "spider/smart"]

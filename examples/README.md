@@ -57,6 +57,10 @@ Crawl links with chrome headed rendering [Chrome](./chrome.rs).
 
 - `cargo run --example chrome --features chrome_headed`
 
+Crawl a logged-in page with browser cookies and save rendered HTML plus extracted text [Zhihu Cookie Login](./zhihu_cookie_login.rs).
+
+- `COOKIE='z_c0=...; d_c0=...' cargo run --example zhihu_cookie_login --features="spider/sync spider/cookies spider/chrome" -- https://www.zhihu.com/question/123456789`
+
 Crawl links with chrome headless rendering remote connections [Chrome](./chrome.rs).
 
 - `cargo run --example chrome_remote --features chrome`
