@@ -41,10 +41,17 @@ impl TempStorage {
         self.dir.path()
     }
 
-    /// Store bytes in a temporary file.
+    /// Store bytes in a temporary file (blocking).
     pub fn store_bytes(&self, name: &str, data: &[u8]) -> io::Result<PathBuf> {
         let path = self.dir.path().join(name);
         std::fs::write(&path, data)?;
+        Ok(path)
+    }
+
+    /// Store bytes in a temporary file — async, uses io_uring when available.
+    pub async fn store_bytes_async(&self, name: &str, data: &[u8]) -> io::Result<PathBuf> {
+        let path = self.dir.path().join(name);
+        tokio::fs::write(&path, data).await?;
         Ok(path)
     }
 
@@ -53,28 +60,57 @@ impl TempStorage {
         self.store_bytes(name, data.as_bytes())
     }
 
-    /// Store JSON data in a temporary file.
+    /// Store JSON data in a temporary file (blocking).
     pub fn store_json(&self, name: &str, data: &serde_json::Value) -> io::Result<PathBuf> {
         let json_str = serde_json::to_string(data)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         self.store_string(name, &json_str)
     }
 
-    /// Read bytes from a stored file.
+    /// Store JSON data — async, uses io_uring when available.
+    pub async fn store_json_async(
+        &self,
+        name: &str,
+        data: &serde_json::Value,
+    ) -> io::Result<PathBuf> {
+        let json_str = serde_json::to_string(data)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        self.store_bytes_async(name, json_str.as_bytes()).await
+    }
+
+    /// Read bytes from a stored file (blocking).
     pub fn read_bytes(&self, name: &str) -> io::Result<Vec<u8>> {
         let path = self.dir.path().join(name);
         std::fs::read(&path)
     }
 
-    /// Read string from a stored file.
+    /// Read bytes from a stored file — async, uses io_uring when available.
+    pub async fn read_bytes_async(&self, name: &str) -> io::Result<Vec<u8>> {
+        let path = self.dir.path().join(name);
+        tokio::fs::read(&path).await
+    }
+
+    /// Read string from a stored file (blocking).
     pub fn read_string(&self, name: &str) -> io::Result<String> {
         let path = self.dir.path().join(name);
         std::fs::read_to_string(&path)
     }
 
-    /// Read JSON from a stored file.
+    /// Read string from a stored file — async, uses io_uring when available.
+    pub async fn read_string_async(&self, name: &str) -> io::Result<String> {
+        let data = self.read_bytes_async(name).await?;
+        String::from_utf8(data).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    }
+
+    /// Read JSON from a stored file (blocking).
     pub fn read_json(&self, name: &str) -> io::Result<serde_json::Value> {
         let content = self.read_string(name)?;
+        serde_json::from_str(&content).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    }
+
+    /// Read JSON — async, uses io_uring when available.
+    pub async fn read_json_async(&self, name: &str) -> io::Result<serde_json::Value> {
+        let content = self.read_string_async(name).await?;
         serde_json::from_str(&content).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
@@ -83,11 +119,20 @@ impl TempStorage {
         self.dir.path().join(name).exists()
     }
 
-    /// Remove a file from storage.
+    /// Remove a file from storage (blocking).
     pub fn remove(&self, name: &str) -> io::Result<()> {
         let path = self.dir.path().join(name);
         if path.exists() {
             std::fs::remove_file(&path)?;
+        }
+        Ok(())
+    }
+
+    /// Remove a file from storage — async, uses io_uring when available.
+    pub async fn remove_async(&self, name: &str) -> io::Result<()> {
+        let path = self.dir.path().join(name);
+        if path.exists() {
+            tokio::fs::remove_file(&path).await?;
         }
         Ok(())
     }

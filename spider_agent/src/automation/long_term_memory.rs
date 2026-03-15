@@ -259,12 +259,11 @@ impl ExperienceMemory {
     ///
     /// Marks the index as dirty so it will be rebuilt on next recall.
     pub async fn store_experience(&mut self, record: &ExperienceRecord) -> std::io::Result<()> {
-        use tokio::io::AsyncWriteExt;
-
         let mut line = serde_json::to_string(record)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         line.push('\n');
 
+        use tokio::io::AsyncWriteExt;
         let mut file = tokio::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -445,20 +444,23 @@ impl ExperienceMemory {
     }
 
     /// Get statistics about the current memory state.
-    pub fn stats(&self) -> MemoryStats {
-        let log_size = std::fs::metadata(&self.log_path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+    ///
+    /// Uses io_uring when available for non-blocking file reads.
+    pub async fn stats(&self) -> MemoryStats {
+        // Read log content asynchronously — also gives us the size.
+        let log_data = tokio::fs::read(&self.log_path).await.unwrap_or_default();
+        let log_size = log_data.len() as u64;
+        let count = String::from_utf8_lossy(&log_data)
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .count();
+
+        // File sizes for video/index — use std::fs::metadata (fast, sync stat).
         let video_size = std::fs::metadata(&self.video_path)
             .map(|m| m.len())
             .unwrap_or(0);
         let index_size = std::fs::metadata(&self.index_path)
             .map(|m| m.len())
-            .unwrap_or(0);
-
-        // Count lines in .jsonl for experience count
-        let count = std::fs::read_to_string(&self.log_path)
-            .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count())
             .unwrap_or(0);
 
         MemoryStats {
@@ -544,8 +546,6 @@ impl ExperienceMemory {
 
     /// Rewrite the .jsonl log with only the given records.
     async fn rewrite_log(&self, records: &[&ExperienceRecord]) -> std::io::Result<()> {
-        use tokio::io::AsyncWriteExt;
-
         let mut content = String::new();
         for record in records {
             let line = serde_json::to_string(record)
@@ -554,11 +554,7 @@ impl ExperienceMemory {
             content.push('\n');
         }
 
-        let mut file = tokio::fs::File::create(&self.log_path).await?;
-        file.write_all(content.as_bytes()).await?;
-        file.flush().await?;
-
-        Ok(())
+        tokio::fs::write(&self.log_path, content.as_bytes()).await
     }
 
     /// Match a search result text back to the most similar experience record.
@@ -732,7 +728,7 @@ mod tests {
 
         mem.store_experience(&record).await.unwrap();
 
-        let stats = mem.stats();
+        let stats = mem.stats().await;
         assert_eq!(stats.experience_count, 1);
         assert!(stats.dirty);
         assert!(stats.log_size_bytes > 0);
@@ -768,7 +764,7 @@ mod tests {
         mem.release_all().await.unwrap();
         assert!(!mem.log_path.exists());
 
-        let stats = mem.stats();
+        let stats = mem.stats().await;
         assert_eq!(stats.experience_count, 0);
         assert!(!stats.dirty);
 
