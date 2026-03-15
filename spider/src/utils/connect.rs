@@ -58,10 +58,7 @@ pub fn init_background_runtime() {
                             unsafe {
                                 if libc::nice(10) == -1 && *libc::__errno_location() != 0 {
                                     let error = std::io::Error::last_os_error();
-                                    log::error!(
-                                        "failed to set threadpool niceness: {}",
-                                        error
-                                    );
+                                    log::error!("failed to set threadpool niceness: {}", error);
                                 }
                             }
                         })

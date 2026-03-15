@@ -210,9 +210,9 @@ mod inner {
             // SAFETY: `remaining` (a slice of `data`) is alive on the stack
             // and won't move before submit_and_reap returns.
             unsafe {
-                ring.submission().push(&write_e).map_err(|_| {
-                    io::Error::other("io_uring: SQ full on write")
-                })?;
+                ring.submission()
+                    .push(&write_e)
+                    .map_err(|_| io::Error::other("io_uring: SQ full on write"))?;
             }
 
             let written = submit_and_reap(ring)?;
@@ -293,9 +293,9 @@ mod inner {
             // SAFETY: `remaining` is a mutable slice of `buf` on the heap.
             // It won't move before submit_and_reap returns.
             unsafe {
-                ring.submission().push(&read_e).map_err(|_| {
-                    io::Error::other("io_uring: SQ full on read")
-                })?;
+                ring.submission()
+                    .push(&read_e)
+                    .map_err(|_| io::Error::other("io_uring: SQ full on read"))?;
             }
 
             let n = submit_and_reap(ring)?;
@@ -380,10 +380,9 @@ mod inner {
             }
         };
 
-        let connect_e =
-            io_uring::opcode::Connect::new(io_uring::types::Fd(fd), sa_ptr, sa_len)
-                .build()
-                .user_data(0xC044);
+        let connect_e = io_uring::opcode::Connect::new(io_uring::types::Fd(fd), sa_ptr, sa_len)
+            .build()
+            .user_data(0xC044);
 
         // SAFETY: sockaddr struct on the stack is alive until submit_and_reap returns.
         unsafe {
@@ -998,8 +997,7 @@ mod tests {
         let accept_handle = tokio::spawn(async move { listener.accept().await });
         let connect_handle = tokio::spawn(async move { tcp_connect(addr).await });
 
-        let (accept_result, connect_result) =
-            tokio::join!(accept_handle, connect_handle);
+        let (accept_result, connect_result) = tokio::join!(accept_handle, connect_handle);
 
         assert!(accept_result.unwrap().is_ok());
         assert!(
