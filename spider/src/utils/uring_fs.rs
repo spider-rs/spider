@@ -399,7 +399,7 @@ mod inner {
         // EINPROGRESS is normal for non-blocking sockets — io_uring resolves
         // it before returning the CQE, so res==0 means connected.
         // Any other negative value is an error.
-        if res < 0 && res != -(libc::EINPROGRESS as i32) {
+        if res < 0 && res != -libc::EINPROGRESS {
             // Close the fd we created.
             let _ = uring_close(ring, fd);
             return Err(io::Error::from_raw_os_error(-res));
