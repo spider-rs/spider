@@ -7,11 +7,28 @@ pub mod css_selectors;
 /// Fragment templates.
 pub mod templates;
 
+#[cfg(feature = "adaptive_concurrency")]
+/// AIMD-based adaptive concurrency controller.
+pub mod adaptive_concurrency;
+/// Exponential backoff with jitter for retry logic.
+pub mod backoff;
+#[cfg(feature = "request_coalesce")]
+/// Request coalescing to dedup concurrent in-flight requests.
+pub mod coalesce;
 #[cfg(feature = "chrome")]
 pub(crate) mod detect_chrome;
 #[cfg(any(feature = "balance", feature = "disk"))]
 /// CPU and Memory detection to balance limitations.
 pub mod detect_system;
+#[cfg(feature = "dns_cache")]
+/// DNS pre-resolution cache with TTL.
+pub mod dns_cache;
+#[cfg(feature = "priority_frontier")]
+/// Prioritized URL frontier with dedup and optional domain round-robin.
+pub mod frontier;
+#[cfg(feature = "h2_multiplex")]
+/// HTTP/2 multiplexing tracker for per-origin stream management.
+pub mod h2_tracker;
 /// Utils to modify the HTTP header.
 pub mod header_utils;
 #[cfg(feature = "hedge")]
@@ -19,6 +36,15 @@ pub mod header_utils;
 pub mod hedge;
 /// String interner.
 pub mod interner;
+#[cfg(feature = "rate_limit")]
+/// Per-domain token bucket rate limiter.
+pub mod rate_limiter;
+#[cfg(feature = "robots_cache")]
+/// Cross-crawl robots.txt cache with TTL-based expiry.
+pub mod robots_cache;
+#[cfg(feature = "chrome")]
+/// Chrome tab pooling for reusing CDP tabs across page visits.
+pub mod tab_pool;
 /// A trie struct.
 pub mod trie;
 /// Async file I/O with optional io_uring acceleration.
@@ -322,7 +348,7 @@ pub fn chunk_idle_timeout() -> Option<Duration> {
 #[derive(Debug, Default)]
 pub struct PageResponse {
     /// The page response resource.
-    pub content: Option<Box<Vec<u8>>>,
+    pub content: Option<Vec<u8>>,
     /// The headers of the response. (Always None if a webdriver protocol is used for fetching.).
     pub headers: Option<reqwest::header::HeaderMap>,
     #[cfg(feature = "remote_addr")]
@@ -1304,7 +1330,7 @@ pub async fn run_openai_request(
 
                 // perform the js script on the page.
                 if !json_res.js.is_empty() {
-                    let html: Option<Box<Vec<u8>>> = match page
+                    let html: Option<Vec<u8>> = match page
                         .evaluate_function(string_concat!(
                             "async function() { ",
                             json_res.js,
@@ -1320,7 +1346,7 @@ pub async fn run_openai_request(
                         page_wait(page, wait_for).await;
                         if json_res.js.len() <= 400 && json_res.js.contains("window.location") {
                             if let Ok(b) = page.outer_html_bytes().await {
-                                page_response.content = Some(b.into());
+                                page_response.content = Some(b);
                             }
                         } else {
                             page_response.content = html;
@@ -2929,8 +2955,8 @@ pub async fn fetch_page_html_chrome_base(
 
             let results = tokio::time::timeout(base_timeout.max(HALF_MAX_PAGE_TIMEOUT), page_fn);
 
-            let mut res: Box<Vec<u8>> = match results.await {
-                Ok(v) => v.map(Box::new).unwrap_or_default(),
+            let mut res: Vec<u8> = match results.await {
+                Ok(v) => v.unwrap_or_default(),
                 _ => Default::default(),
             };
 
@@ -3156,8 +3182,7 @@ pub async fn fetch_page_html_chrome_base(
                         .await
                         .ok()
                         .and_then(Result::ok)
-                        .filter(|b| !b.is_empty())
-                        .map(Box::new);
+                        .filter(|b| !b.is_empty());
 
                     if next_content.is_some() {
                         page_response.content = next_content;
@@ -3202,7 +3227,7 @@ pub async fn fetch_page_html_chrome_base(
                 );
 
                 match results.await {
-                    Ok(v) => v.map(Box::new).unwrap_or_default(),
+                    Ok(v) => v.unwrap_or_default(),
                     _ => Default::default(),
                 }
             } else {
@@ -3250,7 +3275,7 @@ pub async fn fetch_page_html_chrome_base(
         page_response
     };
 
-    let mut content: Option<Box<Vec<u8>>> = None;
+    let mut content: Option<Vec<u8>> = None;
 
     let page_response = match rx1 {
         Some(rx1) => {
@@ -3276,7 +3301,7 @@ pub async fn fetch_page_html_chrome_base(
                               };
 
                               if !media_file.is_empty() {
-                                  content = Some(media_file.into());
+                                  content = Some(media_file);
                               }
                           }
                         }
@@ -3545,7 +3570,7 @@ pub(crate) fn set_page_response_duration(
 #[cfg(feature = "chrome")]
 fn set_page_response(
     ok: bool,
-    res: Box<Vec<u8>>,
+    res: Vec<u8>,
     status_code: StatusCode,
     final_url: Option<String>,
 ) -> PageResponse {
@@ -3840,7 +3865,7 @@ pub async fn handle_response_bytes(
     #[cfg(feature = "cookies")]
     let cookies = get_cookies(&res);
 
-    let mut content: Option<Box<Vec<u8>>> = None;
+    let mut content: Option<Vec<u8>> = None;
     let mut anti_bot_tech = AntiBotTech::default();
 
     let limit = *MAX_SIZE_BYTES;
@@ -3963,7 +3988,7 @@ pub async fn handle_response_bytes(
                 &data,
                 None,
             );
-            content.replace(Box::new(data));
+            content.replace(data);
         }
     }
 
@@ -4132,7 +4157,7 @@ fn build_error_page_response(target_url: &str, err: RequestError) -> PageRespons
 /// Build a cached page response from HTML.
 pub(crate) fn build_cached_html_page_response(target_url: &str, html: &str) -> PageResponse {
     PageResponse {
-        content: Some(Box::new(html.as_bytes().to_vec())),
+        content: Some(html.as_bytes().to_vec()),
         status_code: StatusCode::OK,
         final_url: Some(target_url.to_string()),
         ..Default::default()
@@ -4341,7 +4366,7 @@ pub async fn fetch_page_html_spider_cloud(
                                 .map(|s| s.to_string());
 
                             return PageResponse {
-                                content: Some(Box::new(content.as_bytes().to_vec())),
+                                content: Some(content.as_bytes().to_vec()),
                                 status_code: StatusCode::from_u16(item_status)
                                     .unwrap_or(StatusCode::OK),
                                 final_url,
@@ -4352,7 +4377,7 @@ pub async fn fetch_page_html_spider_cloud(
 
                     // Fallback: treat entire body as content
                     PageResponse {
-                        content: Some(Box::new(bytes.to_vec())),
+                        content: Some(bytes.to_vec()),
                         status_code: status,
                         ..Default::default()
                     }
@@ -4553,9 +4578,9 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
                         vec![]
                     };
 
-                    Box::new(buffer.into())
+                    buffer
                 } else {
-                    Box::new(data.into())
+                    data
                 }),
                 status_code,
                 final_url: rd,
@@ -4636,7 +4661,7 @@ pub async fn fetch_page_html(
     if skip_browser {
         if let Some(html) = cached_html {
             return PageResponse {
-                content: Some(Box::new(html.into_bytes())),
+                content: Some(html.into_bytes()),
                 status_code: StatusCode::OK,
                 final_url: Some(target_url.to_string()),
                 #[cfg(feature = "time")]
@@ -4761,9 +4786,9 @@ pub async fn fetch_page_html(
                                         vec![]
                                     };
 
-                                    Box::new(buffer)
+                                    buffer
                                 } else {
-                                    Box::new(data)
+                                    data
                                 }),
                                 status_code,
                                 ..Default::default()
@@ -5152,7 +5177,7 @@ pub async fn fetch_page_html_base(
     if skip_browser {
         if let Some(html) = cached_html {
             return PageResponse {
-                content: Some(Box::new(html.into_bytes())),
+                content: Some(html.into_bytes()),
                 status_code: StatusCode::OK,
                 final_url: Some(target_url.to_string()),
                 ..Default::default()
@@ -5412,7 +5437,7 @@ async fn _fetch_page_html_chrome(
                                 remote_addr,
                                 #[cfg(feature = "cookies")]
                                 cookies,
-                                content: Some(Box::new(data)),
+                                content: Some(data),
                                 status_code,
                                 ..Default::default()
                             }

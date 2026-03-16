@@ -3217,7 +3217,7 @@ impl Website {
                 return None;
             }
             let mut page_response = PageResponse::default();
-            page_response.content = Some(Box::new(seeded_html.as_bytes().to_vec()));
+            page_response.content = Some(seeded_html.as_bytes().to_vec());
             Some(build(self.url.inner(), page_response))
         } else {
             None

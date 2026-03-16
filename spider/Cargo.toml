@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.47.27"
+version = "2.47.28"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -120,11 +120,11 @@ features = ["serde", "headers", "dynamic-versions"]
 
 [dependencies.spider_agent_types]
 path = "../spider_agent_types"
-version = "2.47.27"
+version = "2.47.28"
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.47.27"
+version = "2.47.28"
 optional = true
 default-features = false
 
@@ -180,7 +180,9 @@ __basic = [
     "balance",
     "real_browser",
     "disk_native_tls",
-    "time"
+    "time",
+    "adaptive_concurrency",
+    "priority_frontier"
 ]
 basic_tls = [
     "reqwest_native_tls_native_roots",
@@ -237,7 +239,7 @@ cache_chrome_hybrid_mem = [
     "dep:http-cache",
     "dep:http",
 ]
-chrome = ["dep:chromey", "dep:base64", "dep:rand", "serde", "dep:fastrand", "dep:which", "dep:home", "cookies", "reqwest_json"]
+chrome = ["dep:chromey", "dep:base64", "dep:rand", "serde", "dep:fastrand", "dep:which", "dep:home", "cookies", "reqwest_json", "dep:dashmap"]
 chrome_headed = ["chrome"]
 chrome_cpu = ["chrome"]
 chrome_stealth = ["chrome"]
@@ -277,6 +279,7 @@ gemini = [
 cache_gemini = ["dep:moka"]
 decentralized_headers = ["dep:const_format", "dep:itertools"]
 spoof = ["dep:fastrand"]
+dns_cache = ["dep:dashmap", "dep:fastrand"]
 reqwest_rustls_tls = ["reqwest/rustls"]
 reqwest_native_tls = ["reqwest/native-tls"]
 reqwest_native_tls_alpn = ["reqwest/native-tls"]
@@ -328,11 +331,26 @@ agent_search_bing = ["agent", "spider_agent/search_bing"]
 agent_search_tavily = ["agent", "spider_agent/search_tavily"]
 agent_full = ["agent", "agent_skills", "spider_agent/full"]
 
+# Per-domain token bucket rate limiter.
+rate_limit = ["dep:dashmap"]
+# Request coalescing to dedup concurrent in-flight requests.
+request_coalesce = ["dep:dashmap", "sync"]
+
+# AIMD-based adaptive concurrency control.
+adaptive_concurrency = []
+# Prioritized URL frontier with scoring and optional domain round-robin.
+priority_frontier = []
+
 # Work-stealing / hedged requests for slow crawls.
 hedge = []
 
 # Allows full concurrency.
 cowboy = []
+
+# HTTP/2 multiplexing tracker for per-origin stream management.
+h2_multiplex = ["dep:dashmap", "dep:http"]
+# Cross-crawl robots.txt cache with TTL-based expiry.
+robots_cache = ["dep:dashmap"]
 
 # Enables usage of `#[inline]` on far more functions than by default in this
 # crate. This may lead to a performance increase but often comes at a compile

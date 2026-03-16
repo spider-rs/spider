@@ -1079,7 +1079,7 @@ pub fn get_page_selectors(url: &str, subdomains: bool, tld: bool) -> RelativeSel
 
 #[cfg(not(feature = "decentralized"))]
 /// Is the resource valid?
-pub fn validate_empty(content: &Option<Box<Vec<u8>>>, is_success: bool) -> bool {
+pub fn validate_empty(content: &Option<Vec<u8>>, is_success: bool) -> bool {
     match &content {
         Some(content) => {
             // is_success && content.starts_with(br#"<html style=\"height:100%\"><head><META NAME=\"ROBOTS\" CONTENT=\"NOINDEX, NOFOLLOW\"><meta name=\"format-detection\" content=\"telephone=no\"><meta name=\"viewport\" content=\"initial-scale=1.0\"><meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge,chrome=1\"></head><body style=\"margin:0px;height:100%\"><iframe id=\"main-iframe\" src=\"/_Incapsula_"#)
@@ -1225,7 +1225,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
     let should_retry_antibot_false_403 = res.anti_bot_tech != AntiBotTech::None
         && res.status_code.is_success()
         && is_false_403(
-            res.content.as_deref().map(|v| &**v),
+            res.content.as_deref(),
             res.headers
                 .as_ref()
                 .and_then(|h| h.get(reqwest::header::CONTENT_LANGUAGE))
@@ -1898,12 +1898,10 @@ impl Page {
                     response.0.signature = Some(hash_html(&collected_bytes).await);
                 }
 
-                let response_bytes = Box::new(collected_bytes);
-
-                response.0.content = if response_bytes.is_empty() {
+                response.0.content = if collected_bytes.is_empty() {
                     None
                 } else {
-                    Some(response_bytes)
+                    Some(collected_bytes)
                 };
 
                 if r_settings.ssg_build {
@@ -2215,7 +2213,7 @@ impl Page {
         }
 
         if !collected_bytes.is_empty() {
-            page_response.content = Some(Box::new(collected_bytes));
+            page_response.content = Some(collected_bytes);
         }
 
         let valid_meta = meta_title.is_some()
@@ -4570,7 +4568,7 @@ async fn test_headers() {
     let page = build(
         "https://choosealicense.com/",
         PageResponse {
-            content: Some(Box::new(b"<html></html>".to_vec())),
+            content: Some(b"<html></html>".to_vec()),
             headers: Some(headers),
             status_code: StatusCode::OK,
             ..Default::default()
@@ -4608,7 +4606,7 @@ async fn parse_links() {
     let mut page = build_with_parse(
         link_result,
         PageResponse {
-            content: Some(Box::new(html.to_vec())),
+            content: Some(html.to_vec()),
             status_code: StatusCode::OK,
             ..Default::default()
         },
@@ -4730,7 +4728,7 @@ fn test_metadata_via_build() {
     };
 
     let page_response = PageResponse {
-        content: Some(Box::new(b"<html></html>".to_vec())),
+        content: Some(b"<html></html>".to_vec()),
         status_code: StatusCode::OK,
         metadata: Some(Box::new(metadata)),
         ..Default::default()
@@ -4774,7 +4772,7 @@ fn test_metadata_via_build_with_parse() {
     };
 
     let page_response = PageResponse {
-        content: Some(Box::new(b"<html></html>".to_vec())),
+        content: Some(b"<html></html>".to_vec()),
         status_code: StatusCode::OK,
         metadata: Some(Box::new(metadata)),
         ..Default::default()
@@ -4803,7 +4801,7 @@ fn test_page_without_metadata() {
     use crate::utils::PageResponse;
 
     let page_response = PageResponse {
-        content: Some(Box::new(b"<html></html>".to_vec())),
+        content: Some(b"<html></html>".to_vec()),
         status_code: StatusCode::OK,
         metadata: None,
         ..Default::default()
@@ -5330,7 +5328,7 @@ async fn test_metadata_chrome_real_page() {
     let page = build(
         "https://example.com",
         PageResponse {
-            content: Some(Box::new(b"<html></html>".to_vec())),
+            content: Some(b"<html></html>".to_vec()),
             status_code: StatusCode::OK,
             metadata: Some(Box::new(metadata)),
             ..Default::default()
@@ -5374,7 +5372,7 @@ fn test_encoding_page_get_html_encoded() {
 
     let html_content = "Hello World - テスト";
     let page_response = PageResponse {
-        content: Some(Box::new(html_content.as_bytes().to_vec())),
+        content: Some(html_content.as_bytes().to_vec()),
         status_code: StatusCode::OK,
         ..Default::default()
     };
@@ -5400,7 +5398,7 @@ fn test_remote_addr_field() {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     let page_response = PageResponse {
-        content: Some(Box::new(b"<html></html>".to_vec())),
+        content: Some(b"<html></html>".to_vec()),
         status_code: StatusCode::OK,
         remote_addr: Some(SocketAddr::new(
             IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
@@ -5469,7 +5467,7 @@ fn test_cookies_field() {
     use crate::utils::PageResponse;
 
     let page_response = PageResponse {
-        content: Some(Box::new(b"<html></html>".to_vec())),
+        content: Some(b"<html></html>".to_vec()),
         status_code: StatusCode::OK,
         ..Default::default()
     };
@@ -5489,7 +5487,7 @@ fn test_chrome_screenshot_bytes_field() {
     let screenshot_data = vec![0x89, 0x50, 0x4E, 0x47]; // PNG header bytes
 
     let page_response = PageResponse {
-        content: Some(Box::new(b"<html></html>".to_vec())),
+        content: Some(b"<html></html>".to_vec()),
         status_code: StatusCode::OK,
         screenshot_bytes: Some(screenshot_data.clone()),
         ..Default::default()
@@ -5515,7 +5513,7 @@ fn test_time_duration_field() {
     use crate::utils::PageResponse;
 
     let page_response = PageResponse {
-        content: Some(Box::new(b"<html></html>".to_vec())),
+        content: Some(b"<html></html>".to_vec()),
         status_code: StatusCode::OK,
         duration: Some(tokio::time::Instant::now()),
         ..Default::default()
@@ -5539,7 +5537,7 @@ fn test_openai_fields() {
     use crate::utils::PageResponse;
 
     let page_response = PageResponse {
-        content: Some(Box::new(b"<html></html>".to_vec())),
+        content: Some(b"<html></html>".to_vec()),
         status_code: StatusCode::OK,
         ..Default::default()
     };
@@ -5578,7 +5576,7 @@ fn test_gemini_fields() {
     use crate::utils::PageResponse;
 
     let page_response = PageResponse {
-        content: Some(Box::new(b"<html></html>".to_vec())),
+        content: Some(b"<html></html>".to_vec()),
         status_code: StatusCode::OK,
         ..Default::default()
     };
@@ -5706,7 +5704,7 @@ fn test_smart_feature() {
     use crate::utils::PageResponse;
 
     let page_response = PageResponse {
-        content: Some(Box::new(b"<html></html>".to_vec())),
+        content: Some(b"<html></html>".to_vec()),
         status_code: StatusCode::OK,
         ..Default::default()
     };
@@ -5785,7 +5783,7 @@ fn test_page_links_field() {
     use crate::utils::PageResponse;
 
     let page_response = PageResponse {
-        content: Some(Box::new(b"<html></html>".to_vec())),
+        content: Some(b"<html></html>".to_vec()),
         status_code: StatusCode::OK,
         ..Default::default()
     };
@@ -5818,7 +5816,7 @@ fn test_bytes_transferred_field() {
     use crate::utils::PageResponse;
 
     let page_response = PageResponse {
-        content: Some(Box::new(b"<html></html>".to_vec())),
+        content: Some(b"<html></html>".to_vec()),
         status_code: StatusCode::OK,
         ..Default::default()
     };
@@ -5847,7 +5845,7 @@ fn test_waf_and_retry_fields() {
     use crate::utils::PageResponse;
 
     let page_response = PageResponse {
-        content: Some(Box::new(b"<html></html>".to_vec())),
+        content: Some(b"<html></html>".to_vec()),
         status_code: StatusCode::OK,
         ..Default::default()
     };
@@ -5874,7 +5872,7 @@ fn test_blocked_crawl_field() {
     use crate::utils::PageResponse;
 
     let page_response = PageResponse {
-        content: Some(Box::new(b"<html></html>".to_vec())),
+        content: Some(b"<html></html>".to_vec()),
         status_code: StatusCode::OK,
         ..Default::default()
     };
@@ -6077,7 +6075,7 @@ async fn test_subdomain_page_links_resolution() {
     let mut page = build_with_parse(
         "https://sub.example.com/page",
         PageResponse {
-            content: Some(Box::new(html.to_vec())),
+            content: Some(html.to_vec()),
             status_code: reqwest::StatusCode::OK,
             ..Default::default()
         },
@@ -6134,7 +6132,7 @@ async fn test_same_domain_page_links_resolution() {
     let mut page = build_with_parse(
         "https://www.example.com/page",
         PageResponse {
-            content: Some(Box::new(html.to_vec())),
+            content: Some(html.to_vec()),
             status_code: reqwest::StatusCode::OK,
             ..Default::default()
         },
