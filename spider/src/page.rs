@@ -1151,6 +1151,15 @@ fn get_error_status_base(
                         *should_retry = true;
                     }
                 }
+                // Ensure errors that map to retryable status codes (599, 598, 5xx,
+                // 429, 408) always set should_retry, even when the error type
+                // didn't match is_status/is_connect/is_timeout above.
+                if !*should_retry {
+                    let mapped = get_error_http_status_code(&er);
+                    if is_retryable_status(mapped) {
+                        *should_retry = true;
+                    }
+                }
                 Some(er)
             }
         },
