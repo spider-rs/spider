@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.47.32"
+version = "2.47.33"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -120,11 +120,11 @@ features = ["serde", "headers", "dynamic-versions"]
 
 [dependencies.spider_agent_types]
 path = "../spider_agent_types"
-version = "2.47.32"
+version = "2.47.33"
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.47.32"
+version = "2.47.33"
 optional = true
 default-features = false
 
@@ -170,7 +170,7 @@ serde_json = "1"
 env_logger = "0.11"
 
 [features]
-default = ["basic", "io_uring"]
+default = ["basic", "io_uring", "tcp_fastopen", "splice"]
 __basic = [
     "sync",
     "cookies",
@@ -208,6 +208,8 @@ control = []
 time = []
 cmd = ["tokio/process"]
 io_uring = ["dep:io-uring"]
+tcp_fastopen = []
+splice = []
 sync = ["tokio/sync"]
 flexbuffers = ["dep:flexbuffers"]
 serde = [

@@ -62,6 +62,26 @@ mod inner {
             addr: std::net::SocketAddr,
             tx: oneshot::Sender<io::Result<std::net::TcpStream>>,
         },
+        /// Send data on a raw fd via io_uring Send opcode.
+        TcpSend {
+            fd: i32,
+            data: Vec<u8>,
+            tx: oneshot::Sender<io::Result<usize>>,
+        },
+        /// Receive data from a raw fd via io_uring Recv opcode.
+        TcpRecv {
+            fd: i32,
+            buf_len: u32,
+            tx: oneshot::Sender<io::Result<Vec<u8>>>,
+        },
+        /// Splice data between two fds via a kernel pipe (zero-copy).
+        #[cfg(feature = "splice")]
+        Splice {
+            fd_in: i32,
+            fd_out: i32,
+            len: usize,
+            tx: oneshot::Sender<io::Result<usize>>,
+        },
     }
 
     // ── Kernel probe ────────────────────────────────────────────────────────
@@ -108,6 +128,21 @@ mod inner {
                 }
                 FileIoTask::TcpConnect { addr, tx } => {
                     let _ = tx.send(uring_tcp_connect(&mut ring, addr));
+                }
+                FileIoTask::TcpSend { fd, data, tx } => {
+                    let _ = tx.send(uring_tcp_send(&mut ring, fd, &data));
+                }
+                FileIoTask::TcpRecv { fd, buf_len, tx } => {
+                    let _ = tx.send(uring_tcp_recv(&mut ring, fd, buf_len));
+                }
+                #[cfg(feature = "splice")]
+                FileIoTask::Splice {
+                    fd_in,
+                    fd_out,
+                    len,
+                    tx,
+                } => {
+                    let _ = tx.send(uring_splice(&mut ring, fd_in, fd_out, len));
                 }
             }
         }
@@ -349,6 +384,24 @@ mod inner {
             return Err(io::Error::from_raw_os_error(-fd));
         }
 
+        // ── TCP Fast Open ────────────────────────────────────────────────────
+        // Set TCP_FASTOPEN_CONNECT before connect — saves 1 RTT for repeat hosts.
+        #[cfg(feature = "tcp_fastopen")]
+        {
+            const TCP_FASTOPEN_CONNECT: libc::c_int = 30;
+            let enable: libc::c_int = 1;
+            // Best-effort — if the kernel doesn't support it, we just proceed normally.
+            unsafe {
+                libc::setsockopt(
+                    fd,
+                    libc::IPPROTO_TCP,
+                    TCP_FASTOPEN_CONNECT,
+                    &enable as *const _ as *const libc::c_void,
+                    std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+                );
+            }
+        }
+
         // ── Connect ─────────────────────────────────────────────────────────
         // Build sockaddr on the stack — must live until submit_and_reap returns.
         let (sa_ptr, sa_len) = match addr {
@@ -407,6 +460,161 @@ mod inner {
         // SAFETY: we own this fd, it's a valid connected TCP socket.
         let stream = unsafe { std::net::TcpStream::from_raw_fd(fd) };
         Ok(stream)
+    }
+
+    // ── io_uring TCP send/recv ────────────────────────────────────────────
+
+    /// Send `data` on a connected socket fd via io_uring Send opcode.
+    /// Returns the number of bytes sent.
+    fn uring_tcp_send(ring: &mut io_uring::IoUring, fd: i32, data: &[u8]) -> io::Result<usize> {
+        if data.is_empty() {
+            return Ok(0);
+        }
+
+        let mut total: usize = 0;
+        while total < data.len() {
+            let remaining = &data[total..];
+            let chunk_len = remaining.len().min(u32::MAX as usize) as u32;
+
+            let send_e =
+                io_uring::opcode::Send::new(io_uring::types::Fd(fd), remaining.as_ptr(), chunk_len)
+                    .build()
+                    .user_data(0x5E4D);
+
+            // SAFETY: `remaining` is a slice of `data` alive until submit_and_reap.
+            unsafe {
+                ring.submission()
+                    .push(&send_e)
+                    .map_err(|_| io::Error::other("io_uring: SQ full on send"))?;
+            }
+
+            let n = submit_and_reap(ring)?;
+            if n < 0 {
+                return Err(io::Error::from_raw_os_error(-n));
+            }
+            if n == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "io_uring: send returned 0 bytes",
+                ));
+            }
+            total += n as usize;
+        }
+        Ok(total)
+    }
+
+    /// Receive up to `buf_len` bytes from a connected socket fd via io_uring
+    /// Recv opcode. Returns the received data.
+    fn uring_tcp_recv(ring: &mut io_uring::IoUring, fd: i32, buf_len: u32) -> io::Result<Vec<u8>> {
+        let mut buf = vec![0u8; buf_len as usize];
+
+        let recv_e =
+            io_uring::opcode::Recv::new(io_uring::types::Fd(fd), buf.as_mut_ptr(), buf_len)
+                .build()
+                .user_data(0x4EC7);
+
+        // SAFETY: `buf` is heap-allocated and alive until submit_and_reap returns.
+        unsafe {
+            ring.submission()
+                .push(&recv_e)
+                .map_err(|_| io::Error::other("io_uring: SQ full on recv"))?;
+        }
+
+        let n = submit_and_reap(ring)?;
+        if n < 0 {
+            return Err(io::Error::from_raw_os_error(-n));
+        }
+
+        buf.truncate(n as usize);
+        Ok(buf)
+    }
+
+    // ── io_uring splice (zero-copy fd-to-fd via kernel pipe) ─────────────
+
+    /// Splice `len` bytes from `fd_in` to `fd_out` via a kernel pipe.
+    /// Both fds must support splice (sockets, files, pipes).
+    /// Returns total bytes spliced.
+    #[cfg(feature = "splice")]
+    fn uring_splice(
+        ring: &mut io_uring::IoUring,
+        fd_in: i32,
+        fd_out: i32,
+        len: usize,
+    ) -> io::Result<usize> {
+        // Create a kernel pipe for the splice bridge.
+        let mut pipe_fds = [0i32; 2];
+        let ret = unsafe { libc::pipe2(pipe_fds.as_mut_ptr(), libc::O_CLOEXEC) };
+        if ret < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let pipe_read = pipe_fds[0];
+        let pipe_write = pipe_fds[1];
+
+        let mut total: usize = 0;
+        let result = (|| -> io::Result<usize> {
+            while total < len {
+                let remaining = (len - total).min(u32::MAX as usize) as u32;
+
+                // Phase 1: splice fd_in → pipe_write
+                let splice_in = io_uring::opcode::Splice::new(
+                    io_uring::types::Fd(fd_in),
+                    -1i64,
+                    io_uring::types::Fd(pipe_write),
+                    -1i64,
+                    remaining,
+                )
+                .flags(libc::SPLICE_F_MOVE as u32 | libc::SPLICE_F_NONBLOCK as u32)
+                .build()
+                .user_data(0x5B1C_E14);
+
+                unsafe {
+                    ring.submission()
+                        .push(&splice_in)
+                        .map_err(|_| io::Error::other("io_uring: SQ full on splice-in"))?;
+                }
+
+                let n_in = submit_and_reap(ring)?;
+                if n_in < 0 {
+                    return Err(io::Error::from_raw_os_error(-n_in));
+                }
+                if n_in == 0 {
+                    break; // EOF on input
+                }
+
+                // Phase 2: splice pipe_read → fd_out
+                let splice_out = io_uring::opcode::Splice::new(
+                    io_uring::types::Fd(pipe_read),
+                    -1i64,
+                    io_uring::types::Fd(fd_out),
+                    -1i64,
+                    n_in as u32,
+                )
+                .flags(libc::SPLICE_F_MOVE as u32)
+                .build()
+                .user_data(0x5B1C_E07);
+
+                unsafe {
+                    ring.submission()
+                        .push(&splice_out)
+                        .map_err(|_| io::Error::other("io_uring: SQ full on splice-out"))?;
+                }
+
+                let n_out = submit_and_reap(ring)?;
+                if n_out < 0 {
+                    return Err(io::Error::from_raw_os_error(-n_out));
+                }
+                total += n_out as usize;
+            }
+            Ok(total)
+        })();
+
+        // Always close the pipe fds.
+        unsafe {
+            libc::close(pipe_read);
+            libc::close(pipe_write);
+        }
+
+        result
     }
 
     // ── Public API ──────────────────────────────────────────────────────────
@@ -547,6 +755,133 @@ mod inner {
             .map_err(io::Error::other)?
     }
 
+    /// Send data on a connected socket fd via io_uring.
+    /// Falls back to blocking `libc::send` if io_uring is unavailable.
+    pub async fn tcp_send(fd: i32, data: Vec<u8>) -> io::Result<usize> {
+        if let Some(result) = try_uring(|tx| FileIoTask::TcpSend {
+            fd,
+            data: data.clone(),
+            tx,
+        })
+        .await
+        {
+            return result;
+        }
+        // Fallback: blocking send.
+        let data_clone = data;
+        tokio::task::spawn_blocking(move || {
+            let n = unsafe {
+                libc::send(
+                    fd,
+                    data_clone.as_ptr() as *const libc::c_void,
+                    data_clone.len(),
+                    0,
+                )
+            };
+            if n < 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(n as usize)
+            }
+        })
+        .await
+        .map_err(io::Error::other)?
+    }
+
+    /// Receive up to `buf_len` bytes from a connected socket fd via io_uring.
+    /// Falls back to blocking `libc::recv` if io_uring is unavailable.
+    pub async fn tcp_recv(fd: i32, buf_len: u32) -> io::Result<Vec<u8>> {
+        if let Some(result) = try_uring(|tx| FileIoTask::TcpRecv { fd, buf_len, tx }).await {
+            return result;
+        }
+        // Fallback: blocking recv.
+        tokio::task::spawn_blocking(move || {
+            let mut buf = vec![0u8; buf_len as usize];
+            let n = unsafe { libc::recv(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0) };
+            if n < 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                buf.truncate(n as usize);
+                Ok(buf)
+            }
+        })
+        .await
+        .map_err(io::Error::other)?
+    }
+
+    /// Splice `len` bytes from `fd_in` to `fd_out` via a kernel pipe (zero-copy).
+    /// Falls back to userspace read+write if io_uring is unavailable.
+    #[cfg(feature = "splice")]
+    pub async fn splice(fd_in: i32, fd_out: i32, len: usize) -> io::Result<usize> {
+        if let Some(result) = try_uring(|tx| FileIoTask::Splice {
+            fd_in,
+            fd_out,
+            len,
+            tx,
+        })
+        .await
+        {
+            return result;
+        }
+        // Fallback: libc::splice (still zero-copy, just synchronous).
+        tokio::task::spawn_blocking(move || {
+            let mut pipe_fds = [0i32; 2];
+            let ret = unsafe { libc::pipe2(pipe_fds.as_mut_ptr(), libc::O_CLOEXEC) };
+            if ret < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let pipe_read = pipe_fds[0];
+            let pipe_write = pipe_fds[1];
+
+            let mut total: usize = 0;
+            let result = (|| -> io::Result<usize> {
+                while total < len {
+                    let remaining = (len - total).min(65536);
+                    let n_in = unsafe {
+                        libc::splice(
+                            fd_in,
+                            std::ptr::null_mut(),
+                            pipe_write,
+                            std::ptr::null_mut(),
+                            remaining,
+                            libc::SPLICE_F_MOVE | libc::SPLICE_F_NONBLOCK,
+                        )
+                    };
+                    if n_in < 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                    if n_in == 0 {
+                        break;
+                    }
+                    let n_out = unsafe {
+                        libc::splice(
+                            pipe_read,
+                            std::ptr::null_mut(),
+                            fd_out,
+                            std::ptr::null_mut(),
+                            n_in as usize,
+                            libc::SPLICE_F_MOVE,
+                        )
+                    };
+                    if n_out < 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                    total += n_out as usize;
+                }
+                Ok(total)
+            })();
+
+            unsafe {
+                libc::close(pipe_read);
+                libc::close(pipe_write);
+            }
+
+            result
+        })
+        .await
+        .map_err(io::Error::other)?
+    }
+
     /// Whether io_uring is currently active.
     pub fn is_uring_enabled() -> bool {
         URING_FS_ENABLED.load(Ordering::Acquire)
@@ -599,6 +934,99 @@ mod inner {
             .map_err(io::Error::other)?
     }
 
+    /// Send data on a socket fd — no io_uring fallback.
+    #[cfg(target_os = "linux")]
+    pub async fn tcp_send(fd: i32, data: Vec<u8>) -> io::Result<usize> {
+        tokio::task::spawn_blocking(move || {
+            let n = unsafe { libc::send(fd, data.as_ptr() as *const libc::c_void, data.len(), 0) };
+            if n < 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(n as usize)
+            }
+        })
+        .await
+        .map_err(io::Error::other)?
+    }
+
+    /// Receive data from a socket fd — no io_uring fallback.
+    #[cfg(target_os = "linux")]
+    pub async fn tcp_recv(fd: i32, buf_len: u32) -> io::Result<Vec<u8>> {
+        tokio::task::spawn_blocking(move || {
+            let mut buf = vec![0u8; buf_len as usize];
+            let n = unsafe { libc::recv(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0) };
+            if n < 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                buf.truncate(n as usize);
+                Ok(buf)
+            }
+        })
+        .await
+        .map_err(io::Error::other)?
+    }
+
+    /// Splice data between fds — no io_uring, uses libc::splice.
+    #[cfg(all(target_os = "linux", feature = "splice"))]
+    pub async fn splice(fd_in: i32, fd_out: i32, len: usize) -> io::Result<usize> {
+        tokio::task::spawn_blocking(move || {
+            let mut pipe_fds = [0i32; 2];
+            let ret = unsafe { libc::pipe2(pipe_fds.as_mut_ptr(), libc::O_CLOEXEC) };
+            if ret < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let pipe_read = pipe_fds[0];
+            let pipe_write = pipe_fds[1];
+
+            let mut total: usize = 0;
+            let result = (|| -> io::Result<usize> {
+                while total < len {
+                    let remaining = (len - total).min(65536);
+                    let n_in = unsafe {
+                        libc::splice(
+                            fd_in,
+                            std::ptr::null_mut(),
+                            pipe_write,
+                            std::ptr::null_mut(),
+                            remaining,
+                            libc::SPLICE_F_MOVE | libc::SPLICE_F_NONBLOCK,
+                        )
+                    };
+                    if n_in < 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                    if n_in == 0 {
+                        break;
+                    }
+                    let n_out = unsafe {
+                        libc::splice(
+                            pipe_read,
+                            std::ptr::null_mut(),
+                            fd_out,
+                            std::ptr::null_mut(),
+                            n_in as usize,
+                            libc::SPLICE_F_MOVE,
+                        )
+                    };
+                    if n_out < 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                    total += n_out as usize;
+                }
+                Ok(total)
+            })();
+
+            unsafe {
+                libc::close(pipe_read);
+                libc::close(pipe_write);
+            }
+
+            result
+        })
+        .await
+        .map_err(io::Error::other)?
+    }
+
     /// io_uring is never enabled on this platform.
     pub fn is_uring_enabled() -> bool {
         false
@@ -614,6 +1042,14 @@ pub use inner::read_file;
 pub use inner::remove_file;
 pub use inner::tcp_connect;
 pub use inner::write_file;
+
+// Linux-only re-exports for network I/O.
+#[cfg(all(target_os = "linux", feature = "splice"))]
+pub use inner::splice;
+#[cfg(target_os = "linux")]
+pub use inner::tcp_recv;
+#[cfg(target_os = "linux")]
+pub use inner::tcp_send;
 
 // ── StreamingWriter ──────────────────────────────────────────────────────────
 
@@ -1067,5 +1503,91 @@ mod tests {
             let result = h.await.unwrap();
             assert!(result.is_ok());
         }
+    }
+
+    // ── TCP send/recv tests ──────────────────────────────────────────────
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn test_tcp_send_recv() {
+        use std::os::unix::io::AsRawFd;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let fd = stream.as_raw_fd();
+            let received = tcp_recv(fd, 1024).await.unwrap();
+            assert_eq!(received, b"hello uring send");
+            // Echo back
+            tcp_send(fd, received).await.unwrap();
+            // Keep stream alive until echo is done
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            drop(stream);
+        });
+
+        let client_stream = tcp_connect(addr).await.unwrap();
+        let fd = client_stream.as_raw_fd();
+        let sent = tcp_send(fd, b"hello uring send".to_vec()).await.unwrap();
+        assert_eq!(sent, 16);
+
+        let echo = tcp_recv(fd, 1024).await.unwrap();
+        assert_eq!(echo, b"hello uring send");
+
+        server.await.unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn test_tcp_send_empty() {
+        let sent = tcp_send(0, Vec::new()).await;
+        // Empty send on fd 0 — either Ok(0) or error, but must not panic.
+        drop(sent);
+    }
+
+    // ── Splice tests ────────────────────────────────────────────────────
+
+    #[cfg(all(target_os = "linux", feature = "splice"))]
+    #[tokio::test]
+    async fn test_splice_socket_to_file() {
+        use std::os::unix::io::AsRawFd;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let path = temp_path("splice_out");
+
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            // Send data that we'll splice on the client side.
+            use std::io::Write;
+            let std_stream = stream.into_std().unwrap();
+            std_stream.set_nonblocking(false).unwrap();
+            let mut s = std_stream;
+            s.write_all(b"splice test data 1234567890").unwrap();
+            drop(s);
+        });
+
+        let client_stream = tcp_connect(addr).await.unwrap();
+        let socket_fd = client_stream.as_raw_fd();
+
+        // Open a file to splice into.
+        let file = std::fs::File::create(&path).unwrap();
+        let file_fd = file.as_raw_fd();
+
+        // Wait for data to arrive.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let spliced = splice(socket_fd, file_fd, 27).await.unwrap();
+        assert_eq!(spliced, 27);
+
+        drop(file);
+        drop(client_stream);
+        server.await.unwrap();
+
+        let content = read_file(path.clone()).await.unwrap();
+        assert_eq!(content, b"splice test data 1234567890");
+
+        let _ = remove_file(path).await;
     }
 }
