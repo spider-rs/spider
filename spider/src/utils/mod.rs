@@ -3368,7 +3368,6 @@ pub async fn fetch_page_html_chrome_base(
                     .ok()
                     .and_then(Result::ok)
                     .filter(|b| !b.is_empty())
-                    .map(Into::into)
             } else {
                 page_response.content
             }
