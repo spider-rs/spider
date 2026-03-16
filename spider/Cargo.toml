@@ -182,7 +182,10 @@ __basic = [
     "disk_native_tls",
     "time",
     "adaptive_concurrency",
-    "priority_frontier"
+    "priority_frontier",
+    "dns_cache",
+    "rate_limit",
+    "request_coalesce"
 ]
 basic_tls = [
     "reqwest_native_tls_native_roots",
