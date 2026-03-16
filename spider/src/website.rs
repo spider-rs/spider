@@ -2644,7 +2644,11 @@ impl Website {
         links.extend(links_ssg);
 
         self.initial_status_code = page.status_code;
-        self.initial_html_length = page.get_html_bytes_u8().len();
+        self.initial_html_length = if page.is_empty() {
+            0
+        } else {
+            page.get_html_bytes_u8().len()
+        };
         self.initial_anti_bot_tech = page.anti_bot_tech;
         self.initial_page_should_retry = page.needs_retry();
         self.initial_page_waf_check = page.waf_check;
@@ -2822,7 +2826,11 @@ impl Website {
             links.extend(links_ssg);
 
             self.initial_status_code = page.status_code;
-            self.initial_html_length = page.get_html_bytes_u8().len();
+            self.initial_html_length = if page.is_empty() {
+                0
+            } else {
+                page.get_html_bytes_u8().len()
+            };
             self.initial_anti_bot_tech = page.anti_bot_tech;
             self.initial_page_should_retry = page.needs_retry();
             self.initial_page_waf_check = page.waf_check;
@@ -3440,7 +3448,11 @@ impl Website {
             }
 
             self.initial_status_code = page.status_code;
-            self.initial_html_length = page.get_html_bytes_u8().len();
+            self.initial_html_length = if page.is_empty() {
+                0
+            } else {
+                page.get_html_bytes_u8().len()
+            };
             self.initial_anti_bot_tech = page.anti_bot_tech;
             self.initial_page_should_retry = page.needs_retry();
             self.initial_page_waf_check = page.waf_check;
@@ -3786,7 +3798,11 @@ impl Website {
             .await;
 
             self.initial_status_code = page.status_code;
-            self.initial_html_length = page.get_html_bytes_u8().len();
+            self.initial_html_length = if page.is_empty() {
+                0
+            } else {
+                page.get_html_bytes_u8().len()
+            };
             self.initial_anti_bot_tech = page.anti_bot_tech;
             self.initial_page_should_retry = page.needs_retry();
             self.initial_page_waf_check = page.waf_check;
@@ -4094,7 +4110,11 @@ impl Website {
                 links.extend(links_ssg);
 
                 self.initial_status_code = page.status_code;
-                self.initial_html_length = page.get_html_bytes_u8().len();
+                self.initial_html_length = if page.is_empty() {
+                    0
+                } else {
+                    page.get_html_bytes_u8().len()
+                };
                 self.initial_anti_bot_tech = page.anti_bot_tech;
                 self.initial_page_should_retry = page.needs_retry();
                 self.initial_page_waf_check = page.waf_check;
@@ -4252,7 +4272,11 @@ impl Website {
             page.bytes_transferred = bytes_transferred;
 
             self.initial_status_code = page.status_code;
-            self.initial_html_length = page.get_html_bytes_u8().len();
+            self.initial_html_length = if page.is_empty() {
+                0
+            } else {
+                page.get_html_bytes_u8().len()
+            };
             self.initial_anti_bot_tech = page.anti_bot_tech;
             self.initial_page_should_retry = page.needs_retry();
             self.initial_page_waf_check = page.waf_check;
@@ -4414,7 +4438,11 @@ impl Website {
             let page_response = crate::utils::build_cached_html_page_response(&target_url, &html);
             let page = build(&target_url, page_response);
             self.initial_status_code = page.status_code;
-            self.initial_html_length = page.get_html_bytes_u8().len();
+            self.initial_html_length = if page.is_empty() {
+                0
+            } else {
+                page.get_html_bytes_u8().len()
+            };
             self.links_visited
                 .insert(CaseInsensitiveString::from(target_url.as_str()));
             channel_send_page(&self.channel, page, &self.channel_guard);
@@ -4501,7 +4529,11 @@ impl Website {
 
         // Set initial metadata
         self.initial_status_code = page.status_code;
-        self.initial_html_length = page.get_html_bytes_u8().len();
+        self.initial_html_length = if page.is_empty() {
+            0
+        } else {
+            page.get_html_bytes_u8().len()
+        };
 
         let url = match &self.on_link_find_callback {
             Some(cb) => cb(*self.url.clone(), None).0,
