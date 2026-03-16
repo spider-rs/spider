@@ -2644,7 +2644,7 @@ impl Website {
         links.extend(links_ssg);
 
         self.initial_status_code = page.status_code;
-        self.initial_html_length = if page.is_empty() {
+        self.initial_html_length = if page.is_empty() || page.needs_retry() {
             0
         } else {
             page.get_html_bytes_u8().len()
@@ -4529,7 +4529,7 @@ impl Website {
 
         // Set initial metadata
         self.initial_status_code = page.status_code;
-        self.initial_html_length = if page.is_empty() {
+        self.initial_html_length = if page.is_empty() || page.needs_retry() {
             0
         } else {
             page.get_html_bytes_u8().len()
