@@ -1222,6 +1222,10 @@ pub fn build(url: &str, res: PageResponse) -> Page {
 
     let should_retry_resource = resource_found && !success;
 
+    // Success status but no usable content — the crawl likely failed silently
+    // (e.g. upstream returned 200 with empty body or blank HTML shell).
+    let should_retry_empty_success = success && !resource_found && !res.content_truncated;
+
     let should_retry_antibot_false_403 = res.anti_bot_tech != AntiBotTech::None
         && res.status_code.is_success()
         && is_false_403(
@@ -1232,8 +1236,10 @@ pub fn build(url: &str, res: PageResponse) -> Page {
                 .and_then(|v| v.to_str().ok()),
         );
 
-    let mut should_retry =
-        should_retry_resource || should_retry_status || should_retry_antibot_false_403;
+    let mut should_retry = should_retry_resource
+        || should_retry_status
+        || should_retry_empty_success
+        || should_retry_antibot_false_403;
 
     let mut empty_page = false;
 
@@ -1499,12 +1505,14 @@ pub(crate) fn metadata_handlers<'h>(
 }
 
 impl Page {
-    /// Whether the page needs a retry based on `should_retry` OR a retryable status code.
-    /// This ensures transient errors (599, 598, 5xx, 429, 408) always get retried
-    /// even when `should_retry` was not set by the error classification path.
+    /// Whether the page needs a retry based on `should_retry`, a retryable status code,
+    /// or a truncated response (upstream stream ended prematurely).
+    /// This ensures transient errors (599, 598, 5xx, 429, 408) and incomplete
+    /// responses always get retried even when `should_retry` was not set by the
+    /// error classification path.
     #[inline]
     pub fn needs_retry(&self) -> bool {
-        self.should_retry || is_retryable_status(self.status_code)
+        self.should_retry || self.content_truncated || is_retryable_status(self.status_code)
     }
 
     /// Instantiate a new page and gather the html repro of standard fetch_page_html.
