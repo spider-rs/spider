@@ -3119,6 +3119,13 @@ pub async fn fetch_page_html_chrome_base(
 
                 base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
 
+                // Use the user-configured automation timeout when available,
+                // otherwise fall back to the remaining page-request budget.
+                let automation_timeout = remote_multimodal
+                    .as_ref()
+                    .and_then(|mm| mm.automation_timeout())
+                    .unwrap_or(base_timeout);
+
                 let multi_modal_request = run_remote_multimodal_if_enabled(
                     remote_multimodal,
                     page,
@@ -3129,7 +3136,7 @@ pub async fn fetch_page_html_chrome_base(
                 );
 
                 let multimodal_success =
-                    match tokio::time::timeout(base_timeout, multi_modal_request).await {
+                    match tokio::time::timeout(automation_timeout, multi_modal_request).await {
                         Ok(Ok(Some(result))) => {
                             let success = result.success;
 

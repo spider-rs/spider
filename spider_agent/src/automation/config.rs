@@ -436,6 +436,22 @@ impl RemoteMultimodalConfigs {
         self.use_chrome_ai || (self.api_url.is_empty() && self.api_key.is_none())
     }
 
+    /// Set the overall automation timeout in milliseconds.
+    ///
+    /// Overrides the default page-request-based timeout for the
+    /// multimodal automation loop. Useful for slow inference hardware.
+    pub fn with_automation_timeout_ms(mut self, ms: u64) -> Self {
+        self.cfg.automation_timeout_ms = Some(ms);
+        self
+    }
+
+    /// Return the configured automation timeout as a `Duration`, if set.
+    pub fn automation_timeout(&self) -> Option<std::time::Duration> {
+        self.cfg
+            .automation_timeout_ms
+            .map(std::time::Duration::from_millis)
+    }
+
     /// Whether dual-model routing is active
     /// (at least one of `vision_model` / `text_model` is configured).
     pub fn has_dual_model_routing(&self) -> bool {

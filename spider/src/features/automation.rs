@@ -251,6 +251,11 @@ impl RemoteMultimodalConfigs {
     pub fn should_use_chrome_ai(&self) -> bool {
         self.use_chrome_ai || (self.api_url.is_empty() && self.api_key.is_none())
     }
+
+    /// Return the configured automation timeout (stub — always None).
+    pub fn automation_timeout(&self) -> Option<std::time::Duration> {
+        None
+    }
 }
 
 // =============================================================================
@@ -979,7 +984,6 @@ impl AutomationResultExt for AutomationResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use case_insensitive_string::CaseInsensitiveString;
 
     #[test]
     fn test_prompt_configuration_default() {

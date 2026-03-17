@@ -818,6 +818,16 @@ pub struct RemoteMultimodalConfig {
     /// If `None`, no throttling is applied.
     pub max_inflight_requests: Option<usize>,
 
+    /// Overall timeout for the remote multimodal automation loop, in milliseconds.
+    ///
+    /// When set, this overrides the default page-request-based timeout that
+    /// gates the `run_remote_multimodal_if_enabled` call. Useful for slow
+    /// inference hardware where the default 5-minute cap is too short.
+    ///
+    /// `None` (default) keeps the existing behaviour (derived from request_timeout).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automation_timeout_ms: Option<u64>,
+
     // -----------------------------------------------------------------
     // Extraction
     // -----------------------------------------------------------------
@@ -939,6 +949,7 @@ impl Default for RemoteMultimodalConfig {
             capture_profiles: Vec::new(),
             post_plan_wait_ms: 350,
             max_inflight_requests: None,
+            automation_timeout_ms: None,
             extra_ai_data: false,
             extraction_prompt: None,
             extraction_schema: None,

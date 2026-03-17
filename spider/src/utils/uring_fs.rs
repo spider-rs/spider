@@ -1515,16 +1515,23 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
-        let server = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let fd = stream.as_raw_fd();
-            let received = tcp_recv(fd, 1024).await.unwrap();
-            assert_eq!(received, b"hello uring send");
+        // Server uses std blocking I/O to avoid deadlocking the single-threaded
+        // io_uring worker (both sides competing for the same sequential worker
+        // can deadlock if recv is processed before send).
+        let std_listener = {
+            let l = listener.into_std().unwrap();
+            l.set_nonblocking(false).unwrap();
+            l
+        };
+
+        let server = std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            let (mut stream, _) = std_listener.accept().unwrap();
+            let mut buf = [0u8; 1024];
+            let n = stream.read(&mut buf).unwrap();
+            assert_eq!(&buf[..n], b"hello uring send");
             // Echo back
-            tcp_send(fd, received).await.unwrap();
-            // Keep stream alive until echo is done
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            drop(stream);
+            stream.write_all(&buf[..n]).unwrap();
         });
 
         let client_stream = tcp_connect(addr).await.unwrap();
@@ -1535,7 +1542,7 @@ mod tests {
         let echo = tcp_recv(fd, 1024).await.unwrap();
         assert_eq!(echo, b"hello uring send");
 
-        server.await.unwrap();
+        server.join().unwrap();
     }
 
     #[cfg(target_os = "linux")]
