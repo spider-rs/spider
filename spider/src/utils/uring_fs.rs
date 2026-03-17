@@ -563,9 +563,9 @@ mod inner {
                     -1i64,
                     remaining,
                 )
-                .flags(libc::SPLICE_F_MOVE as u32 | libc::SPLICE_F_NONBLOCK as u32)
+                .flags(libc::SPLICE_F_MOVE | libc::SPLICE_F_NONBLOCK)
                 .build()
-                .user_data(0x5B1C_E14);
+                .user_data(0x5B1C_0E14);
 
                 unsafe {
                     ring.submission()
@@ -589,9 +589,9 @@ mod inner {
                     -1i64,
                     n_in as u32,
                 )
-                .flags(libc::SPLICE_F_MOVE as u32)
+                .flags(libc::SPLICE_F_MOVE)
                 .build()
-                .user_data(0x5B1C_E07);
+                .user_data(0x5B1C_0E07);
 
                 unsafe {
                     ring.submission()
