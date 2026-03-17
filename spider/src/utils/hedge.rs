@@ -4,6 +4,7 @@
 /// Whichever returns first wins; the loser is cancelled via drop.
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 /// Configuration for hedged (work-stealing) requests.
@@ -25,6 +26,114 @@ impl Default for HedgeConfig {
             max_hedges: 1,
             enabled: true,
         }
+    }
+}
+
+/// Tracks page fetch velocity to decide whether hedging is worthwhile.
+///
+/// Uses an exponential moving average (EMA) of page fetch durations.
+/// Only recommends hedging when a fetch exceeds the EMA by a configurable
+/// multiplier, preventing wasteful duplicate requests on fast pages.
+///
+/// Lock-free: uses atomics only, safe for concurrent access.
+#[derive(Debug)]
+pub struct HedgeTracker {
+    /// EMA of page fetch durations in milliseconds (stored as u64).
+    ema_ms: AtomicU64,
+    /// Number of samples recorded. Used to skip hedging until we have enough data.
+    samples: AtomicU64,
+    /// Multiplier for the EMA threshold (e.g. 2.0 = hedge if fetch takes >2x average).
+    /// Stored as fixed-point: actual * 100 (e.g. 200 = 2.0x).
+    threshold_pct: u64,
+    /// Minimum samples before hedging is considered. Avoids hedging during warmup.
+    min_samples: u64,
+}
+
+impl HedgeTracker {
+    /// Create a new tracker.
+    /// `threshold_multiplier` — hedge fires only when elapsed > EMA * multiplier (e.g. 2.0).
+    /// `min_samples` — number of completed fetches before adaptive hedging activates.
+    pub fn new(threshold_multiplier: f64, min_samples: u64) -> Self {
+        Self {
+            ema_ms: AtomicU64::new(0),
+            samples: AtomicU64::new(0),
+            threshold_pct: (threshold_multiplier * 100.0) as u64,
+            min_samples,
+        }
+    }
+
+    /// Record a completed page fetch duration. Updates the EMA.
+    pub fn record(&self, duration: Duration) {
+        let ms = duration.as_millis() as u64;
+        let count = self.samples.fetch_add(1, Ordering::Relaxed);
+
+        if count == 0 {
+            self.ema_ms.store(ms, Ordering::Relaxed);
+        } else {
+            // EMA with alpha ≈ 0.2 (using integer math: new = old * 4/5 + sample * 1/5)
+            let old = self.ema_ms.load(Ordering::Relaxed);
+            let new_ema = (old * 4 + ms) / 5;
+            self.ema_ms.store(new_ema, Ordering::Relaxed);
+        }
+    }
+
+    /// Check if hedging should fire given elapsed time since fetch start.
+    /// Returns true only when:
+    /// 1. We have enough samples (past warmup)
+    /// 2. Elapsed exceeds EMA * threshold_multiplier
+    pub fn should_hedge(&self, elapsed: Duration) -> bool {
+        let count = self.samples.load(Ordering::Relaxed);
+        if count < self.min_samples {
+            // During warmup, always allow hedging (fall back to config delay)
+            return true;
+        }
+
+        let ema = self.ema_ms.load(Ordering::Relaxed);
+        let threshold_ms = ema * self.threshold_pct / 100;
+        elapsed.as_millis() as u64 > threshold_ms
+    }
+
+    /// Get the adaptive delay: max(config_delay, EMA * threshold_multiplier).
+    /// Returns a delay that is at least the configured delay but grows with observed latency.
+    pub fn adaptive_delay(&self, base_delay: Duration) -> Duration {
+        let count = self.samples.load(Ordering::Relaxed);
+        if count < self.min_samples {
+            return base_delay;
+        }
+
+        let ema = self.ema_ms.load(Ordering::Relaxed);
+        let adaptive_ms = ema * self.threshold_pct / 100;
+        let adaptive = Duration::from_millis(adaptive_ms);
+
+        // Use the longer of base_delay and adaptive delay to avoid premature hedging
+        base_delay.max(adaptive)
+    }
+
+    /// Get the current EMA in milliseconds.
+    pub fn ema_ms(&self) -> u64 {
+        self.ema_ms.load(Ordering::Relaxed)
+    }
+
+    /// Get the number of samples recorded.
+    pub fn sample_count(&self) -> u64 {
+        self.samples.load(Ordering::Relaxed)
+    }
+}
+
+impl Clone for HedgeTracker {
+    fn clone(&self) -> Self {
+        Self {
+            ema_ms: AtomicU64::new(self.ema_ms.load(Ordering::Relaxed)),
+            samples: AtomicU64::new(self.samples.load(Ordering::Relaxed)),
+            threshold_pct: self.threshold_pct,
+            min_samples: self.min_samples,
+        }
+    }
+}
+
+impl Default for HedgeTracker {
+    fn default() -> Self {
+        Self::new(2.0, 5)
     }
 }
 
@@ -422,5 +531,82 @@ mod tests {
         assert_eq!(result.unwrap(), "hedge");
         // Cleanup should not be called for the winner
         assert_eq!(cleanup_count.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_tracker_warmup_phase() {
+        let tracker = HedgeTracker::new(2.0, 5);
+        // During warmup (< min_samples), should_hedge always returns true
+        assert!(tracker.should_hedge(Duration::from_millis(1)));
+        assert_eq!(tracker.sample_count(), 0);
+    }
+
+    #[test]
+    fn test_tracker_ema_recording() {
+        let tracker = HedgeTracker::new(2.0, 3);
+        tracker.record(Duration::from_millis(100));
+        assert_eq!(tracker.ema_ms(), 100);
+        assert_eq!(tracker.sample_count(), 1);
+
+        // Second sample: EMA = (100 * 4 + 200) / 5 = 120
+        tracker.record(Duration::from_millis(200));
+        assert_eq!(tracker.ema_ms(), 120);
+
+        // Third sample: EMA = (120 * 4 + 100) / 5 = 116
+        tracker.record(Duration::from_millis(100));
+        assert_eq!(tracker.ema_ms(), 116);
+    }
+
+    #[test]
+    fn test_tracker_should_hedge_after_warmup() {
+        let tracker = HedgeTracker::new(2.0, 3);
+        // Record 3 fast fetches (100ms each)
+        for _ in 0..3 {
+            tracker.record(Duration::from_millis(100));
+        }
+        assert_eq!(tracker.sample_count(), 3);
+
+        // Elapsed 150ms — under 2x EMA (~200ms). Should NOT hedge.
+        assert!(!tracker.should_hedge(Duration::from_millis(150)));
+        // Elapsed 250ms — over 2x EMA. Should hedge.
+        assert!(tracker.should_hedge(Duration::from_millis(250)));
+    }
+
+    #[test]
+    fn test_tracker_adaptive_delay() {
+        let tracker = HedgeTracker::new(2.0, 2);
+        let base_delay = Duration::from_secs(3);
+
+        // During warmup, returns base delay
+        assert_eq!(tracker.adaptive_delay(base_delay), base_delay);
+
+        // Record samples with 500ms average
+        tracker.record(Duration::from_millis(500));
+        tracker.record(Duration::from_millis(500));
+
+        // Adaptive = EMA(500) * 2.0 = 1000ms. Base = 3000ms. Max(3000, 1000) = 3000.
+        assert_eq!(tracker.adaptive_delay(base_delay), base_delay);
+
+        // Now with a small base delay
+        let small_delay = Duration::from_millis(500);
+        // Adaptive = 500 * 2.0 = 1000ms > 500ms base
+        assert_eq!(
+            tracker.adaptive_delay(small_delay),
+            Duration::from_millis(1000)
+        );
+    }
+
+    #[test]
+    fn test_tracker_clone_independence() {
+        let tracker = HedgeTracker::new(2.0, 3);
+        tracker.record(Duration::from_millis(100));
+
+        let cloned = tracker.clone();
+        tracker.record(Duration::from_millis(500));
+
+        // Clone should have the snapshot, not see new samples
+        assert_eq!(cloned.sample_count(), 1);
+        assert_eq!(cloned.ema_ms(), 100);
+        assert_eq!(tracker.sample_count(), 2);
     }
 }

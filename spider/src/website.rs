@@ -66,6 +66,176 @@ pub use http_global_cache::CACACHE_MANAGER;
 /// The max backoff duration in seconds.
 const BACKOFF_MAX_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(60);
 
+/// Chrome page fetch with retry. Creates a tab, navigates, retries on failure.
+/// Returns `Option<Page>` — `None` if tab creation fails.
+/// Used by the hedge feature to race a primary fetch against a hedge fetch on a second tab.
+#[cfg(all(feature = "hedge", feature = "chrome", not(feature = "decentralized")))]
+macro_rules! chrome_page_fetch {
+    ($shared:expr, $target_url:expr) => {{
+        match crate::features::chrome::attempt_navigation(
+            "about:blank",
+            &$shared.5,
+            &$shared.6.request_timeout,
+            &$shared.8,
+            &$shared.6.viewport,
+        )
+        .await
+        {
+            Ok(hedge_tab) => {
+                let (_, intercept_handle) = tokio::join!(
+                    crate::features::chrome::setup_chrome_events(&hedge_tab, &$shared.6),
+                    crate::features::chrome::setup_chrome_interception_base(
+                        &hedge_tab,
+                        $shared.6.chrome_intercept.enabled,
+                        &$shared.6.auth_challenge_response,
+                        $shared.6.chrome_intercept.block_visuals,
+                        &$shared.7,
+                    )
+                );
+
+                let mut page = Page::new(
+                    $target_url,
+                    &$shared.0,
+                    &hedge_tab,
+                    &$shared.6.wait_for,
+                    &$shared.6.screenshot,
+                    false,
+                    &$shared.6.openai_config,
+                    &$shared.6.execution_scripts,
+                    &$shared.6.automation_scripts,
+                    &$shared.6.viewport,
+                    &$shared.6.request_timeout,
+                    &$shared.6.track_events,
+                    $shared.6.referer.clone(),
+                    $shared.6.max_page_bytes,
+                    $shared.6.get_cache_options(),
+                    &$shared.6.cache_policy,
+                    &$shared.6.remote_multimodal,
+                )
+                .await;
+
+                let mut retry_count = $shared.6.retry;
+                while page.needs_retry() && retry_count > 0 {
+                    retry_count -= 1;
+                    if let Some(timeout) = page.get_timeout() {
+                        tokio::time::sleep(timeout).await;
+                    }
+                    if page.status_code == StatusCode::GATEWAY_TIMEOUT {
+                        if let Err(elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                            let p = Page::new(
+                                $target_url,
+                                &$shared.0,
+                                &hedge_tab,
+                                &$shared.6.wait_for,
+                                &$shared.6.screenshot,
+                                false,
+                                &$shared.6.openai_config,
+                                &$shared.6.execution_scripts,
+                                &$shared.6.automation_scripts,
+                                &$shared.6.viewport,
+                                &$shared.6.request_timeout,
+                                &$shared.6.track_events,
+                                $shared.6.referer.clone(),
+                                $shared.6.max_page_bytes,
+                                $shared.6.get_cache_options(),
+                                &$shared.6.cache_policy,
+                                &$shared.6.remote_multimodal,
+                            )
+                            .await;
+                            page.clone_from(&p);
+                        })
+                        .await
+                        {
+                            log::info!(
+                                "{} backoff gateway timeout exceeded {}",
+                                $target_url,
+                                elapsed
+                            );
+                        }
+                    } else {
+                        page.clone_from(
+                            &Page::new(
+                                $target_url,
+                                &$shared.0,
+                                &hedge_tab,
+                                &$shared.6.wait_for,
+                                &$shared.6.screenshot,
+                                false,
+                                &$shared.6.openai_config,
+                                &$shared.6.execution_scripts,
+                                &$shared.6.automation_scripts,
+                                &$shared.6.viewport,
+                                &$shared.6.request_timeout,
+                                &$shared.6.track_events,
+                                $shared.6.referer.clone(),
+                                $shared.6.max_page_bytes,
+                                $shared.6.get_cache_options(),
+                                &$shared.6.cache_policy,
+                                &$shared.6.remote_multimodal,
+                            )
+                            .await,
+                        );
+                    }
+                }
+
+                if let Some(h) = intercept_handle {
+                    let abort_handle = h.abort_handle();
+                    if let Err(elapsed) =
+                        tokio::time::timeout(tokio::time::Duration::from_secs(10), h).await
+                    {
+                        log::warn!("Handler timeout exceeded {}", elapsed);
+                        abort_handle.abort();
+                    }
+                }
+
+                Some(page)
+            }
+            _ => None,
+        }
+    }};
+}
+
+/// Inline post-processing for Chrome page fetch results (link extraction, normalization, channel send).
+/// Used by both hedge and non-hedge Chrome crawl paths.
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+macro_rules! chrome_page_post_process {
+    ($page:expr, $shared:expr, $add_external:expr, $full_resources:expr,
+     $return_page_links:expr, $on_should_crawl_callback:expr, $permit:expr) => {{
+        let mut page = $page;
+
+        if $add_external {
+            page.set_external($shared.3.clone());
+        }
+        let prev_domain = page.base.take();
+        page.set_url_parsed_direct();
+        let page_base = page.base.take().map(Box::new);
+        if $return_page_links {
+            page.page_links = Some(Default::default());
+        }
+        let links = if $full_resources {
+            page.links_full(&$shared.1, &page_base).await
+        } else {
+            page.links(&$shared.1, &page_base).await
+        };
+        page.base = prev_domain;
+        if $shared.6.normalize {
+            page.signature
+                .replace(crate::utils::hash_html(page.get_html_bytes_u8()).await);
+        }
+        if let Some(ref cb) = $on_should_crawl_callback {
+            if !cb.call(&page) {
+                page.blocked_crawl = true;
+                channel_send_page(&$shared.2, page, &$shared.4);
+                drop($permit);
+                return Default::default();
+            }
+        }
+        let signature = page.signature;
+        channel_send_page(&$shared.2, page, &$shared.4);
+        (links, signature)
+    }};
+}
+
 /// calculate the base limits
 pub fn calc_limits(multiplier: usize) -> usize {
     let logical = num_cpus::get();
@@ -5405,7 +5575,7 @@ impl Website {
                                     #[cfg(feature = "hedge")]
                                     let (mut page, mut links, mut links_pages) = {
                                         let should_hedge = if let Some(ref hcfg) = hedge_cfg {
-                                            hcfg.enabled && rotator.as_ref().map_or(false, |r| r.len() > 1)
+                                            hcfg.enabled && rotator.as_ref().is_some_and(|r| r.len() > 1)
                                         } else {
                                             false
                                         };
@@ -5731,6 +5901,10 @@ impl Website {
                     Ok(new_page) => {
                         let mut selectors = self.setup_selectors();
                         self.status = CrawlStatus::Active;
+                        #[cfg(feature = "hedge")]
+                        let hedge_config = self.configuration.hedge.clone();
+                        #[cfg(feature = "hedge")]
+                        let hedge_tracker = Arc::new(crate::utils::hedge::HedgeTracker::default());
 
                         if self.single_page() {
                             self.crawl_establish(client, &mut selectors, false, &new_page)
@@ -5848,6 +6022,10 @@ impl Website {
                                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                                 let shared = shared.clone();
                                                 let on_should_crawl_callback = on_should_crawl_callback.clone();
+                                                #[cfg(feature = "hedge")]
+                                                let hedge_cfg = hedge_config.clone();
+                                                #[cfg(feature = "hedge")]
+                                                let hedge_trk = hedge_tracker.clone();
                                                 spawn_set("page_fetch", &mut set, async move {
                                                     let link_result =
                                                         match &shared.10 {
@@ -5900,6 +6078,61 @@ impl Website {
                                                         }
                                                     }
 
+                                                    // Hedge-enabled Chrome path: race primary tab vs hedge tab
+                                                    #[cfg(feature = "hedge")]
+                                                    let results = {
+                                                        let should_hedge = hedge_cfg.as_ref().is_some_and(|h| h.enabled);
+                                                        let target_url = target_url_string.as_str();
+                                                        let fetch_start = Instant::now();
+
+                                                        let page_opt: Option<Page> = if should_hedge {
+                                                            let base_delay = hedge_cfg.as_ref().unwrap().delay;
+                                                            // Use adaptive delay: max(config_delay, EMA * threshold)
+                                                            let delay = hedge_trk.adaptive_delay(base_delay);
+                                                            let primary_fut = async { chrome_page_fetch!(shared, target_url) };
+                                                            tokio::pin!(primary_fut);
+
+                                                            let result = tokio::select! {
+                                                                biased;
+                                                                result = &mut primary_fut => result,
+                                                                _ = tokio::time::sleep(delay) => {
+                                                                    // Only fire hedge if tracker confirms we're actually slow
+                                                                    if !hedge_trk.should_hedge(fetch_start.elapsed()) {
+                                                                        primary_fut.await
+                                                                    } else {
+                                                                        log::info!("[hedge-chrome] fired after {}ms (ema={}ms) url={}", delay.as_millis(), hedge_trk.ema_ms(), target_url);
+                                                                        let hedge_fut = async { chrome_page_fetch!(shared, target_url) };
+                                                                        tokio::pin!(hedge_fut);
+                                                                        tokio::select! {
+                                                                            biased;
+                                                                            result = &mut primary_fut => {
+                                                                                log::info!("[hedge-chrome] winner: primary url={}", target_url);
+                                                                                result
+                                                                            }
+                                                                            result = &mut hedge_fut => {
+                                                                                log::info!("[hedge-chrome] winner: hedge url={}", target_url);
+                                                                                result
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            };
+                                                            hedge_trk.record(fetch_start.elapsed());
+                                                            result
+                                                        } else {
+                                                            let result = chrome_page_fetch!(shared, target_url);
+                                                            hedge_trk.record(fetch_start.elapsed());
+                                                            result
+                                                        };
+
+                                                        match page_opt {
+                                                            Some(page) => chrome_page_post_process!(page, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit),
+                                                            None => Default::default(),
+                                                        }
+                                                    };
+
+                                                    // Non-hedge Chrome path: single tab fetch (unchanged)
+                                                    #[cfg(not(feature = "hedge"))]
                                                     let results = match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
                                                         Ok(new_page) => {
                                                             let (_, intercept_handle) = tokio::join!(
@@ -6003,49 +6236,7 @@ impl Website {
                                                                 }
                                                             }
 
-                                                            if add_external {
-                                                                page.set_external(shared.3.clone());
-                                                            }
-
-                                                            let prev_domain = page.base.take();
-
-                                                            // Use page's own URL for relative link resolution (not original crawl domain).
-                                                            // Fixes subdomain pages resolving e.g. href="/path" against wrong host.
-                                                            page.set_url_parsed_direct();
-                                                            let page_base = page.base.take().map(Box::new);
-
-                                                            if return_page_links {
-                                                                page.page_links = Some(Default::default());
-                                                            }
-
-                                                            let links = if full_resources {
-                                                                page.links_full(&shared.1, &page_base).await
-                                                            } else {
-                                                                page.links(&shared.1, &page_base).await
-                                                            };
-
-                                                            page.base = prev_domain;
-
-                                                            if shared.6.normalize {
-                                                                page.signature.replace(crate::utils::hash_html(page.get_html_bytes_u8()).await);
-                                                            }
-
-                                                            if let Some(ref cb) = on_should_crawl_callback {
-                                                                if !cb.call(&page) {
-                                                                    page.blocked_crawl = true;
-                                                                    channel_send_page(&shared.2, page, &shared.4);
-                                                                    drop(permit);
-                                                                    return Default::default()
-                                                                }
-                                                            }
-
-                                                            let signature = page.signature;
-
-                                                            channel_send_page(
-                                                                &shared.2, page, &shared.4,
-                                                            );
-
-                                                            (links, signature)
+                                                            chrome_page_post_process!(page, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit)
                                                         }
                                                         _ => Default::default(),
                                                     };
@@ -6271,7 +6462,7 @@ impl Website {
                                     #[cfg(feature = "hedge")]
                                     let (mut page, mut links, mut links_pages) = {
                                         let should_hedge = if let Some(ref hcfg) = hedge_cfg {
-                                            hcfg.enabled && rotator.as_ref().map_or(false, |r| r.len() > 1)
+                                            hcfg.enabled && rotator.as_ref().is_some_and(|r| r.len() > 1)
                                         } else {
                                             false
                                         };
@@ -6646,6 +6837,11 @@ impl Website {
                             let on_should_crawl_callback = self.on_should_crawl_callback.clone();
                             let full_resources = self.configuration.full_resources;
                             let return_page_links = self.configuration.return_page_links;
+                            #[cfg(feature = "hedge")]
+                            let hedge_config = self.configuration.hedge.clone();
+                            #[cfg(feature = "hedge")]
+                            let hedge_tracker =
+                                Arc::new(crate::utils::hedge::HedgeTracker::default());
                             let mut exceeded_budget = false;
                             let concurrency = throttle.is_zero();
 
@@ -6718,163 +6914,182 @@ impl Website {
                                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                                 let shared = shared.clone();
                                                 let on_should_crawl_callback = on_should_crawl_callback.clone();
+                                                #[cfg(feature = "hedge")]
+                                                let hedge_cfg = hedge_config.clone();
+                                                #[cfg(feature = "hedge")]
+                                                let hedge_trk = hedge_tracker.clone();
                                                 spawn_set("page_fetch", &mut set, async move {
-                                                    let results = match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
-                                                        Ok(new_page) => {
-                                                            let (_, intercept_handle) = tokio::join!(
-                                                                crate::features::chrome::setup_chrome_events(&new_page, &shared.6),
-                                                                crate::features::chrome::setup_chrome_interception_base(
-                                                                    &new_page,
-                                                                    shared.6.chrome_intercept.enabled,
-                                                                    &shared.6.auth_challenge_response,
-                                                                    shared.6.chrome_intercept.block_visuals,
-                                                                    &shared.7,
-                                                                )
-                                                            );
+                                                    // Resolve target URL before fetch (needed for hedge path)
+                                                    let link_result =
+                                                        match &shared.10 {
+                                                            Some(cb) => cb(link, None),
+                                                            _ => (link, None),
+                                                        };
+                                                    let target_url_string = link_result.0.as_ref().to_string();
 
-                                                            let link_result =
-                                                                match &shared.10 {
-                                                                    Some(cb) => cb(link, None),
-                                                                    _ => (link, None),
-                                                                };
+                                                    // Hedge-enabled Chrome path: race primary tab vs hedge tab
+                                                    #[cfg(feature = "hedge")]
+                                                    let results = {
+                                                        let should_hedge = hedge_cfg.as_ref().is_some_and(|h| h.enabled);
+                                                        let target_url = target_url_string.as_str();
+                                                        let fetch_start = Instant::now();
 
-                                                            let target_url = link_result.0.as_ref();
+                                                        let page_opt: Option<Page> = if should_hedge {
+                                                            let base_delay = hedge_cfg.as_ref().unwrap().delay;
+                                                            // Use adaptive delay: max(config_delay, EMA * threshold)
+                                                            let delay = hedge_trk.adaptive_delay(base_delay);
+                                                            let primary_fut = async { chrome_page_fetch!(shared, target_url) };
+                                                            tokio::pin!(primary_fut);
 
-                                                            let mut page = Page::new(
-                                                                target_url,
-                                                                &shared.0,
-                                                                &new_page,
-                                                                &shared.6.wait_for,
-                                                                &shared.6.screenshot,
-                                                                false,
-                                                                &shared.6.openai_config,
-                                                                &shared.6.execution_scripts,
-                                                                &shared.6.automation_scripts,
-                                                                &shared.6.viewport,
-                                                                &shared.6.request_timeout,
-                                                                &shared.6.track_events,
-                                                                shared.6.referer.clone(),
-                                                                shared.6.max_page_bytes,
-                                                                shared.6.get_cache_options(),
-                                                                &shared.6.cache_policy,
-                                                                &shared.6.remote_multimodal,
-                                                            )
-                                                            .await;
-
-                                                            let mut retry_count = shared.6.retry;
-
-                                                            while page.needs_retry() && retry_count > 0 {
-                                                                retry_count -= 1;
-                                                                if let Some(timeout) = page.get_timeout() {
-                                                                    tokio::time::sleep(timeout).await;
-                                                                }
-                                                                if page.status_code == StatusCode::GATEWAY_TIMEOUT {
-                                                                    if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                                                                        let p = Page::new(
-                                                                            target_url,
-                                                                            &shared.0,
-                                                                            &new_page,
-                                                                            &shared.6.wait_for,
-                                                                            &shared.6.screenshot,
-                                                                            false,
-                                                                            &shared.6.openai_config,
-                                                                            &shared.6.execution_scripts,
-                                                                            &shared.6.automation_scripts,
-                                                                            &shared.6.viewport,
-                                                                            &shared.6.request_timeout,
-                                                                            &shared.6.track_events,
-                                                                            shared.6.referer.clone(),
-                                                                            shared.6.max_page_bytes,
-                                                                            shared.6.get_cache_options(),
-                                                                            &shared.6.cache_policy,
-                                                                            &shared.6.remote_multimodal,
-                                                                        ).await;
-                                                                        page.clone_from(&p);
-
-                                                                    }).await {
-                                                                        log::info!("{target_url} backoff gateway timeout exceeded {elasped}");
+                                                            let result = tokio::select! {
+                                                                biased;
+                                                                result = &mut primary_fut => result,
+                                                                _ = tokio::time::sleep(delay) => {
+                                                                    // Only fire hedge if tracker confirms we're actually slow
+                                                                    if !hedge_trk.should_hedge(fetch_start.elapsed()) {
+                                                                        primary_fut.await
+                                                                    } else {
+                                                                        log::info!("[hedge-chrome] fired after {}ms (ema={}ms) url={}", delay.as_millis(), hedge_trk.ema_ms(), target_url);
+                                                                        let hedge_fut = async { chrome_page_fetch!(shared, target_url) };
+                                                                        tokio::pin!(hedge_fut);
+                                                                        tokio::select! {
+                                                                            biased;
+                                                                            result = &mut primary_fut => {
+                                                                                log::info!("[hedge-chrome] winner: primary url={}", target_url);
+                                                                                result
+                                                                            }
+                                                                            result = &mut hedge_fut => {
+                                                                                log::info!("[hedge-chrome] winner: hedge url={}", target_url);
+                                                                                result
+                                                                            }
+                                                                        }
                                                                     }
-                                                                } else {
-                                                                    page.clone_from(
-                                                                        &Page::new(
-                                                                            target_url,
-                                                                            &shared.0,
-                                                                            &new_page,
-                                                                            &shared.6.wait_for,
-                                                                            &shared.6.screenshot,
-                                                                            false,
-                                                                            &shared.6.openai_config,
-                                                                            &shared.6.execution_scripts,
-                                                                            &shared.6.automation_scripts,
-                                                                            &shared.6.viewport,
-                                                                            &shared.6.request_timeout,
-                                                                            &shared.6.track_events,
-                                                                            shared.6.referer.clone(),
-                                                                            shared.6.max_page_bytes,
-                                                                            shared.6.get_cache_options(),
-                                                                            &shared.6.cache_policy,
-                                                                            &shared.6.remote_multimodal,
-                                                                        )
-                                                                        .await,
-                                                                    );
                                                                 }
-                                                            }
-
-                                                            if let Some(h) = intercept_handle {
-                                                                let abort_handle = h.abort_handle();
-                                                                if let Err(elasped) = tokio::time::timeout(tokio::time::Duration::from_secs(10), h).await {
-                                                                    log::warn!("Handler timeout exceeded {elasped}");
-                                                                    abort_handle.abort();
-                                                                }
-                                                            }
-
-                                                            if add_external {
-                                                                page.set_external(shared.3.clone());
-                                                            }
-
-                                                            let prev_domain = page.base.take();
-
-                                                            // Use page's own URL for relative link resolution (not original crawl domain).
-                                                            // Fixes subdomain pages resolving e.g. href="/path" against wrong host.
-                                                            page.set_url_parsed_direct();
-                                                            let page_base = page.base.take().map(Box::new);
-
-                                                            if return_page_links {
-                                                                page.page_links = Some(Default::default());
-                                                            }
-
-                                                            let links = if full_resources {
-                                                                page.links_full(&shared.1, &page_base).await
-                                                            } else {
-                                                                page.links(&shared.1, &page_base).await
                                                             };
+                                                            hedge_trk.record(fetch_start.elapsed());
+                                                            result
+                                                        } else {
+                                                            let result = chrome_page_fetch!(shared, target_url);
+                                                            hedge_trk.record(fetch_start.elapsed());
+                                                            result
+                                                        };
 
-                                                            page.base = prev_domain;
-
-                                                            if shared.6.normalize {
-                                                                page.signature.replace(crate::utils::hash_html(page.get_html_bytes_u8()).await);
-                                                            }
-
-                                                            if let Some(ref cb) = on_should_crawl_callback {
-                                                                if !cb.call(&page) {
-                                                                    page.blocked_crawl = true;
-                                                                    channel_send_page(&shared.2, page, &shared.4);
-                                                                    drop(permit);
-                                                                    return Default::default()
-                                                                }
-                                                            }
-
-                                                            let signature = page.signature;
-
-                                                            channel_send_page(
-                                                                &shared.2, page, &shared.4,
-                                                            );
-
-                                                            (links, signature)
+                                                        match page_opt {
+                                                            Some(page) => chrome_page_post_process!(page, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit),
+                                                            None => Default::default(),
                                                         }
-                                                        _ => Default::default(),
                                                     };
 
+                                                    // Non-hedge Chrome path: single tab fetch (unchanged)
+                                                    #[cfg(not(feature = "hedge"))]
+                                                    let results = {
+                                                        let target_url = target_url_string.as_str();
+                                                        match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
+                                                            Ok(new_page) => {
+                                                                let (_, intercept_handle) = tokio::join!(
+                                                                    crate::features::chrome::setup_chrome_events(&new_page, &shared.6),
+                                                                    crate::features::chrome::setup_chrome_interception_base(
+                                                                        &new_page,
+                                                                        shared.6.chrome_intercept.enabled,
+                                                                        &shared.6.auth_challenge_response,
+                                                                        shared.6.chrome_intercept.block_visuals,
+                                                                        &shared.7,
+                                                                    )
+                                                                );
+
+                                                                let mut page = Page::new(
+                                                                    target_url,
+                                                                    &shared.0,
+                                                                    &new_page,
+                                                                    &shared.6.wait_for,
+                                                                    &shared.6.screenshot,
+                                                                    false,
+                                                                    &shared.6.openai_config,
+                                                                    &shared.6.execution_scripts,
+                                                                    &shared.6.automation_scripts,
+                                                                    &shared.6.viewport,
+                                                                    &shared.6.request_timeout,
+                                                                    &shared.6.track_events,
+                                                                    shared.6.referer.clone(),
+                                                                    shared.6.max_page_bytes,
+                                                                    shared.6.get_cache_options(),
+                                                                    &shared.6.cache_policy,
+                                                                    &shared.6.remote_multimodal,
+                                                                )
+                                                                .await;
+
+                                                                let mut retry_count = shared.6.retry;
+
+                                                                while page.needs_retry() && retry_count > 0 {
+                                                                    retry_count -= 1;
+                                                                    if let Some(timeout) = page.get_timeout() {
+                                                                        tokio::time::sleep(timeout).await;
+                                                                    }
+                                                                    if page.status_code == StatusCode::GATEWAY_TIMEOUT {
+                                                                        if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                                                                            let p = Page::new(
+                                                                                target_url,
+                                                                                &shared.0,
+                                                                                &new_page,
+                                                                                &shared.6.wait_for,
+                                                                                &shared.6.screenshot,
+                                                                                false,
+                                                                                &shared.6.openai_config,
+                                                                                &shared.6.execution_scripts,
+                                                                                &shared.6.automation_scripts,
+                                                                                &shared.6.viewport,
+                                                                                &shared.6.request_timeout,
+                                                                                &shared.6.track_events,
+                                                                                shared.6.referer.clone(),
+                                                                                shared.6.max_page_bytes,
+                                                                                shared.6.get_cache_options(),
+                                                                                &shared.6.cache_policy,
+                                                                                &shared.6.remote_multimodal,
+                                                                            ).await;
+                                                                            page.clone_from(&p);
+
+                                                                        }).await {
+                                                                            log::info!("{target_url} backoff gateway timeout exceeded {elasped}");
+                                                                        }
+                                                                    } else {
+                                                                        page.clone_from(
+                                                                            &Page::new(
+                                                                                target_url,
+                                                                                &shared.0,
+                                                                                &new_page,
+                                                                                &shared.6.wait_for,
+                                                                                &shared.6.screenshot,
+                                                                                false,
+                                                                                &shared.6.openai_config,
+                                                                                &shared.6.execution_scripts,
+                                                                                &shared.6.automation_scripts,
+                                                                                &shared.6.viewport,
+                                                                                &shared.6.request_timeout,
+                                                                                &shared.6.track_events,
+                                                                                shared.6.referer.clone(),
+                                                                                shared.6.max_page_bytes,
+                                                                                shared.6.get_cache_options(),
+                                                                                &shared.6.cache_policy,
+                                                                                &shared.6.remote_multimodal,
+                                                                            )
+                                                                            .await,
+                                                                        );
+                                                                    }
+                                                                }
+
+                                                                if let Some(h) = intercept_handle {
+                                                                    let abort_handle = h.abort_handle();
+                                                                    if let Err(elasped) = tokio::time::timeout(tokio::time::Duration::from_secs(10), h).await {
+                                                                        log::warn!("Handler timeout exceeded {elasped}");
+                                                                        abort_handle.abort();
+                                                                    }
+                                                                }
+
+                                                                chrome_page_post_process!(page, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit)
+                                                            }
+                                                            _ => Default::default(),
+                                                        }
+                                                    };
 
                                                     drop(permit);
 
