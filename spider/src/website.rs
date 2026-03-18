@@ -5384,6 +5384,8 @@ impl Website {
         let client_rotator = self.client_rotator.clone();
         #[cfg(feature = "hedge")]
         let hedge_config = self.configuration.hedge.clone();
+        #[cfg(feature = "hedge")]
+        let hedge_tracker = Arc::new(crate::utils::hedge::HedgeTracker::default());
         let mut selector: (
             CompactString,
             smallvec::SmallVec<[CompactString; 2]>,
@@ -5513,6 +5515,8 @@ impl Website {
                                 let rotator = client_rotator.clone();
                                 #[cfg(feature = "hedge")]
                                 let hedge_cfg = hedge_config.clone();
+                                #[cfg(feature = "hedge")]
+                                let hedge_trk = hedge_tracker.clone();
                                 #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
                                 let cache_opts = cache_options_raw.clone();
                                 #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
@@ -5586,7 +5590,8 @@ impl Website {
                                             let (primary_client, hedge_client_opt) = rot.next_pair();
 
                                             if let Some(hedge_client) = hedge_client_opt {
-                                                let delay = hcfg.delay;
+                                                let delay = hedge_trk.adaptive_delay(hcfg.delay);
+                                                let fetch_start = Instant::now();
 
                                                 let primary_fut = async {
                                                     let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
@@ -5605,11 +5610,14 @@ impl Website {
 
                                                 tokio::pin!(primary_fut);
 
-                                                tokio::select! {
+                                                let result = tokio::select! {
                                                     biased;
                                                     result = &mut primary_fut => result,
                                                     _ = tokio::time::sleep(delay) => {
-                                                        log::info!("[hedge] fired after {}ms url={}", delay.as_millis(), target_url);
+                                                        hedge_trk.record_fired();
+                                                        log::info!("[hedge] fired after {}ms (ema={}ms, stddev={}ms, win={}%, errs={}) url={}",
+                                                            delay.as_millis(), hedge_trk.ema_ms(), hedge_trk.stddev_ms(),
+                                                            hedge_trk.hedge_win_rate_pct(), hedge_trk.consecutive_errors(), target_url);
 
                                                         let hedge_fut = async {
                                                             let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
@@ -5632,16 +5640,26 @@ impl Website {
                                                             biased;
                                                             result = &mut primary_fut => {
                                                                 log::info!("[hedge] winner: primary url={}", target_url);
+                                                                hedge_trk.record_outcome(false);
                                                                 result
                                                             }
                                                             result = &mut hedge_fut => {
                                                                 log::info!("[hedge] winner: hedge url={}", target_url);
+                                                                hedge_trk.record_outcome(true);
                                                                 result
                                                             }
                                                         }
                                                     }
+                                                };
+                                                hedge_trk.record(fetch_start.elapsed());
+                                                if result.0.status_code.is_server_error() {
+                                                    hedge_trk.record_error();
+                                                } else {
+                                                    hedge_trk.record_success();
                                                 }
+                                                result
                                             } else {
+                                                let fetch_start = Instant::now();
                                                 let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
                                                 let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
                                                 let mut selectors = shared.1.clone();
@@ -5653,6 +5671,12 @@ impl Website {
                                                     &mut selectors, external_domains_caseless,
                                                     &r_settings, &mut links, None, &shared.8,
                                                     &mut domain_parsed, &mut links_pages).await;
+                                                hedge_trk.record(fetch_start.elapsed());
+                                                if page.status_code.is_server_error() {
+                                                    hedge_trk.record_error();
+                                                } else {
+                                                    hedge_trk.record_success();
+                                                }
                                                 (page, links, links_pages)
                                             }
                                         } else {
@@ -5660,6 +5684,7 @@ impl Website {
                                                 Some(r) => r.next(),
                                                 None => &shared.0,
                                             };
+                                            let fetch_start = Instant::now();
                                             let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
                                             let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
                                             let mut selectors = shared.1.clone();
@@ -5671,6 +5696,12 @@ impl Website {
                                                 &mut selectors, external_domains_caseless,
                                                 &r_settings, &mut links, None, &shared.8,
                                                 &mut domain_parsed, &mut links_pages).await;
+                                            hedge_trk.record(fetch_start.elapsed());
+                                            if page.status_code.is_server_error() {
+                                                hedge_trk.record_error();
+                                            } else {
+                                                hedge_trk.record_success();
+                                            }
                                             (page, links, links_pages)
                                         }
                                     };
@@ -6358,6 +6389,8 @@ impl Website {
             let client_rotator = self.client_rotator.clone();
             #[cfg(feature = "hedge")]
             let hedge_config = self.configuration.hedge.clone();
+            #[cfg(feature = "hedge")]
+            let hedge_tracker = Arc::new(crate::utils::hedge::HedgeTracker::default());
             let on_should_crawl_callback = self.on_should_crawl_callback.clone();
             let full_resources = self.configuration.full_resources;
             let return_page_links = self.configuration.return_page_links;
@@ -6458,6 +6491,8 @@ impl Website {
                                 let rotator = client_rotator.clone();
                                 #[cfg(feature = "hedge")]
                                 let hedge_cfg = hedge_config.clone();
+                                #[cfg(feature = "hedge")]
+                                let hedge_trk = hedge_tracker.clone();
                                 spawn_set("page_fetch", &mut set, async move {
                                     let link_result = match &shared.9 {
                                         Some(cb) => cb(link, None),
@@ -6482,7 +6517,8 @@ impl Website {
                                             let (primary_client, hedge_client_opt) = rot.next_pair();
 
                                             if let Some(hedge_client) = hedge_client_opt {
-                                                let delay = hcfg.delay;
+                                                let delay = hedge_trk.adaptive_delay(hcfg.delay);
+                                                let fetch_start = Instant::now();
 
                                                 let primary_fut = async {
                                                     let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
@@ -6501,11 +6537,14 @@ impl Website {
 
                                                 tokio::pin!(primary_fut);
 
-                                                tokio::select! {
+                                                let result = tokio::select! {
                                                     biased;
                                                     result = &mut primary_fut => result,
                                                     _ = tokio::time::sleep(delay) => {
-                                                        log::info!("[hedge] fired after {}ms url={}", delay.as_millis(), target_url);
+                                                        hedge_trk.record_fired();
+                                                        log::info!("[hedge] fired after {}ms (ema={}ms, stddev={}ms, win={}%, errs={}) url={}",
+                                                            delay.as_millis(), hedge_trk.ema_ms(), hedge_trk.stddev_ms(),
+                                                            hedge_trk.hedge_win_rate_pct(), hedge_trk.consecutive_errors(), target_url);
 
                                                         let hedge_fut = async {
                                                             let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
@@ -6528,16 +6567,26 @@ impl Website {
                                                             biased;
                                                             result = &mut primary_fut => {
                                                                 log::info!("[hedge] winner: primary url={}", target_url);
+                                                                hedge_trk.record_outcome(false);
                                                                 result
                                                             }
                                                             result = &mut hedge_fut => {
                                                                 log::info!("[hedge] winner: hedge url={}", target_url);
+                                                                hedge_trk.record_outcome(true);
                                                                 result
                                                             }
                                                         }
                                                     }
+                                                };
+                                                hedge_trk.record(fetch_start.elapsed());
+                                                if result.0.status_code.is_server_error() {
+                                                    hedge_trk.record_error();
+                                                } else {
+                                                    hedge_trk.record_success();
                                                 }
+                                                result
                                             } else {
+                                                let fetch_start = Instant::now();
                                                 let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
                                                 let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
                                                 let mut selectors = shared.1.clone();
@@ -6549,6 +6598,12 @@ impl Website {
                                                     &mut selectors, external_domains_caseless,
                                                     &r_settings, &mut links, None, &shared.8,
                                                     &mut domain_parsed, &mut links_pages).await;
+                                                hedge_trk.record(fetch_start.elapsed());
+                                                if page.status_code.is_server_error() {
+                                                    hedge_trk.record_error();
+                                                } else {
+                                                    hedge_trk.record_success();
+                                                }
                                                 (page, links, links_pages)
                                             }
                                         } else {
@@ -6556,6 +6611,7 @@ impl Website {
                                                 Some(r) => r.next(),
                                                 None => &shared.0,
                                             };
+                                            let fetch_start = Instant::now();
                                             let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
                                             let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
                                             let mut selectors = shared.1.clone();
@@ -6567,6 +6623,12 @@ impl Website {
                                                 &mut selectors, external_domains_caseless,
                                                 &r_settings, &mut links, None, &shared.8,
                                                 &mut domain_parsed, &mut links_pages).await;
+                                            hedge_trk.record(fetch_start.elapsed());
+                                            if page.status_code.is_server_error() {
+                                                hedge_trk.record_error();
+                                            } else {
+                                                hedge_trk.record_success();
+                                            }
                                             (page, links, links_pages)
                                         }
                                     };
