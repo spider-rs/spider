@@ -29,24 +29,34 @@ impl Default for HedgeConfig {
     }
 }
 
-/// Tracks page fetch velocity to decide whether hedging is worthwhile.
+/// Tracks page fetch velocity and hedge effectiveness to decide whether hedging
+/// is worthwhile and how long to wait before firing.
 ///
-/// Uses an exponential moving average (EMA) of page fetch durations.
-/// Only recommends hedging when a fetch exceeds the EMA by a configurable
-/// multiplier, preventing wasteful duplicate requests on fast pages.
+/// Uses exponential moving averages (EMA) of duration and squared-duration for
+/// variance-aware adaptive delay. Tracks hedge win rate and consecutive errors
+/// to auto-tune aggressiveness.
 ///
-/// Lock-free: uses atomics only, safe for concurrent access.
+/// Fully lock-free: uses atomics only, safe for concurrent access from any
+/// number of tasks. No mutexes, no allocations after construction.
 #[derive(Debug)]
 pub struct HedgeTracker {
-    /// EMA of page fetch durations in milliseconds (stored as u64).
+    /// EMA of page fetch durations in milliseconds.
     ema_ms: AtomicU64,
-    /// Number of samples recorded. Used to skip hedging until we have enough data.
+    /// EMA of squared durations (ms²) for variance/stddev calculation.
+    ema_sq_ms: AtomicU64,
+    /// Number of duration samples recorded.
     samples: AtomicU64,
     /// Multiplier for the EMA threshold (e.g. 2.0 = hedge if fetch takes >2x average).
     /// Stored as fixed-point: actual * 100 (e.g. 200 = 2.0x).
     threshold_pct: u64,
-    /// Minimum samples before hedging is considered. Avoids hedging during warmup.
+    /// Minimum samples before adaptive hedging activates.
     min_samples: u64,
+    /// Total hedge races fired (delay expired, hedge launched).
+    hedge_fires: AtomicU64,
+    /// Hedge races where the hedge tab won.
+    hedge_wins: AtomicU64,
+    /// Consecutive retryable errors (5xx, timeout). Reset to 0 on success.
+    consecutive_errors: AtomicU64,
 }
 
 impl HedgeTracker {
@@ -56,25 +66,58 @@ impl HedgeTracker {
     pub fn new(threshold_multiplier: f64, min_samples: u64) -> Self {
         Self {
             ema_ms: AtomicU64::new(0),
+            ema_sq_ms: AtomicU64::new(0),
             samples: AtomicU64::new(0),
             threshold_pct: (threshold_multiplier * 100.0) as u64,
             min_samples,
+            hedge_fires: AtomicU64::new(0),
+            hedge_wins: AtomicU64::new(0),
+            consecutive_errors: AtomicU64::new(0),
         }
     }
 
-    /// Record a completed page fetch duration. Updates the EMA.
+    /// Record a completed page fetch duration. Updates both the duration EMA
+    /// and the squared-duration EMA (for variance tracking).
     pub fn record(&self, duration: Duration) {
         let ms = duration.as_millis() as u64;
+        let ms_sq = ms.saturating_mul(ms);
         let count = self.samples.fetch_add(1, Ordering::Relaxed);
 
         if count == 0 {
             self.ema_ms.store(ms, Ordering::Relaxed);
+            self.ema_sq_ms.store(ms_sq, Ordering::Relaxed);
         } else {
-            // EMA with alpha ≈ 0.2 (using integer math: new = old * 4/5 + sample * 1/5)
+            // EMA with alpha ≈ 0.2 (integer math: new = old * 4/5 + sample * 1/5)
             let old = self.ema_ms.load(Ordering::Relaxed);
-            let new_ema = (old * 4 + ms) / 5;
-            self.ema_ms.store(new_ema, Ordering::Relaxed);
+            self.ema_ms.store((old * 4 + ms) / 5, Ordering::Relaxed);
+
+            let old_sq = self.ema_sq_ms.load(Ordering::Relaxed);
+            self.ema_sq_ms
+                .store((old_sq * 4 + ms_sq) / 5, Ordering::Relaxed);
         }
+    }
+
+    /// Record that a hedge was fired (delay expired).
+    pub fn record_fired(&self) {
+        self.hedge_fires.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record hedge race outcome. `hedge_won = true` when the hedge tab beat the primary.
+    pub fn record_outcome(&self, hedge_won: bool) {
+        if hedge_won {
+            self.hedge_wins.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Record a retryable error (5xx, timeout, proxy error). Increments consecutive
+    /// error counter, which makes adaptive_delay more aggressive.
+    pub fn record_error(&self) {
+        self.consecutive_errors.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a successful fetch. Resets consecutive error counter.
+    pub fn record_success(&self) {
+        self.consecutive_errors.store(0, Ordering::Relaxed);
     }
 
     /// Check if hedging should fire given elapsed time since fetch start.
@@ -93,10 +136,25 @@ impl HedgeTracker {
         elapsed.as_millis() as u64 > threshold_ms
     }
 
-    /// Get the adaptive delay: max(config_delay, EMA).
-    /// Returns a delay that is at least the configured delay but adapts to observed latency.
-    /// Uses the raw EMA (not multiplied by threshold) so hedging fires as soon as a
-    /// request exceeds typical duration rather than waiting for 2x+ the average.
+    /// Compute the standard deviation of fetch durations in milliseconds.
+    /// Uses variance = E[X²] - E[X]² from the two EMAs.
+    pub fn stddev_ms(&self) -> u64 {
+        let ema = self.ema_ms.load(Ordering::Relaxed);
+        let ema_sq = self.ema_sq_ms.load(Ordering::Relaxed);
+        let variance = ema_sq.saturating_sub(ema.saturating_mul(ema));
+        (variance as f64).sqrt() as u64
+    }
+
+    /// Get the adaptive delay, incorporating multiple signals:
+    ///
+    /// 1. **Variance-aware baseline**: `EMA + stddev` (≈P84) — only hedge genuinely
+    ///    slow pages, not normal variance.
+    /// 2. **Consecutive errors**: 3+ errors in a row halves the delay — the path is
+    ///    flaky, hedge aggressively.
+    /// 3. **Hedge win rate**: if hedges win >50% of races (≥5 samples), reduce delay
+    ///    by 25% — hedging is clearly helping.
+    ///
+    /// Final result is `max(base_delay, computed)` to never go below the configured floor.
     pub fn adaptive_delay(&self, base_delay: Duration) -> Duration {
         let count = self.samples.load(Ordering::Relaxed);
         if count < self.min_samples {
@@ -104,10 +162,25 @@ impl HedgeTracker {
         }
 
         let ema = self.ema_ms.load(Ordering::Relaxed);
-        let adaptive = Duration::from_millis(ema);
+        let stddev = self.stddev_ms();
 
-        // Use the longer of base_delay and EMA to avoid premature hedging
-        base_delay.max(adaptive)
+        // Baseline: EMA + stddev (≈P84 of a normal distribution)
+        let mut adaptive_ms = ema.saturating_add(stddev);
+
+        // Signal: consecutive errors → halve delay (more aggressive hedging)
+        let errors = self.consecutive_errors.load(Ordering::Relaxed);
+        if errors >= 3 {
+            adaptive_ms /= 2;
+        }
+
+        // Signal: high hedge win rate → reduce delay by 25%
+        let fires = self.hedge_fires.load(Ordering::Relaxed);
+        let wins = self.hedge_wins.load(Ordering::Relaxed);
+        if fires >= 5 && wins * 100 / fires > 50 {
+            adaptive_ms = adaptive_ms * 3 / 4;
+        }
+
+        base_delay.max(Duration::from_millis(adaptive_ms))
     }
 
     /// Get the current EMA in milliseconds.
@@ -119,15 +192,33 @@ impl HedgeTracker {
     pub fn sample_count(&self) -> u64 {
         self.samples.load(Ordering::Relaxed)
     }
+
+    /// Get the hedge win rate as a percentage (0–100). Returns 0 if no hedges fired.
+    pub fn hedge_win_rate_pct(&self) -> u64 {
+        let fires = self.hedge_fires.load(Ordering::Relaxed);
+        if fires == 0 {
+            return 0;
+        }
+        self.hedge_wins.load(Ordering::Relaxed) * 100 / fires
+    }
+
+    /// Get consecutive error count.
+    pub fn consecutive_errors(&self) -> u64 {
+        self.consecutive_errors.load(Ordering::Relaxed)
+    }
 }
 
 impl Clone for HedgeTracker {
     fn clone(&self) -> Self {
         Self {
             ema_ms: AtomicU64::new(self.ema_ms.load(Ordering::Relaxed)),
+            ema_sq_ms: AtomicU64::new(self.ema_sq_ms.load(Ordering::Relaxed)),
             samples: AtomicU64::new(self.samples.load(Ordering::Relaxed)),
             threshold_pct: self.threshold_pct,
             min_samples: self.min_samples,
+            hedge_fires: AtomicU64::new(self.hedge_fires.load(Ordering::Relaxed)),
+            hedge_wins: AtomicU64::new(self.hedge_wins.load(Ordering::Relaxed)),
+            consecutive_errors: AtomicU64::new(self.consecutive_errors.load(Ordering::Relaxed)),
         }
     }
 }
@@ -574,27 +665,127 @@ mod tests {
     }
 
     #[test]
-    fn test_tracker_adaptive_delay() {
+    fn test_tracker_adaptive_delay_with_variance() {
         let tracker = HedgeTracker::new(2.0, 2);
         let base_delay = Duration::from_secs(3);
 
         // During warmup, returns base delay
         assert_eq!(tracker.adaptive_delay(base_delay), base_delay);
 
-        // Record samples with 500ms average
+        // Record uniform samples (500ms) — stddev should be ~0
         tracker.record(Duration::from_millis(500));
         tracker.record(Duration::from_millis(500));
 
-        // Adaptive = EMA(500). Base = 3000ms. Max(3000, 500) = 3000.
+        // Adaptive = EMA(500) + stddev(~0) = ~500ms. Base = 3000ms. Max = 3000.
         assert_eq!(tracker.adaptive_delay(base_delay), base_delay);
 
-        // Now with a small base delay
+        // With a small base delay: adaptive = EMA(500) + ~0 = ~500ms > 200ms
         let small_delay = Duration::from_millis(200);
-        // Adaptive = EMA 500ms > 200ms base
-        assert_eq!(
-            tracker.adaptive_delay(small_delay),
-            Duration::from_millis(500)
+        let delay = tracker.adaptive_delay(small_delay);
+        // Should be approximately 500ms (EMA + small stddev from integer rounding)
+        assert!(delay.as_millis() >= 490 && delay.as_millis() <= 510);
+    }
+
+    #[test]
+    fn test_tracker_adaptive_delay_high_variance() {
+        let tracker = HedgeTracker::new(2.0, 2);
+
+        // Record samples with high variance: 100ms and 900ms
+        tracker.record(Duration::from_millis(100));
+        // After first: EMA=100, EMA_sq=10000
+        tracker.record(Duration::from_millis(900));
+        // EMA = (100*4 + 900)/5 = 260
+        // EMA_sq = (10000*4 + 810000)/5 = 170000
+        // variance = 170000 - 260*260 = 170000 - 67600 = 102400
+        // stddev = sqrt(102400) ≈ 320
+
+        let small_delay = Duration::from_millis(100);
+        let delay = tracker.adaptive_delay(small_delay);
+        // Should be EMA(260) + stddev(~320) ≈ 580ms
+        assert!(
+            delay.as_millis() >= 550 && delay.as_millis() <= 610,
+            "expected ~580ms, got {}ms",
+            delay.as_millis()
         );
+    }
+
+    #[test]
+    fn test_tracker_consecutive_errors_reduce_delay() {
+        let tracker = HedgeTracker::new(2.0, 2);
+        tracker.record(Duration::from_millis(1000));
+        tracker.record(Duration::from_millis(1000));
+        // EMA = 1000, stddev ≈ 0. Adaptive ≈ 1000ms.
+
+        let base = Duration::from_millis(100);
+        let normal_delay = tracker.adaptive_delay(base);
+
+        // Simulate 3 consecutive errors
+        tracker.record_error();
+        tracker.record_error();
+        tracker.record_error();
+
+        let error_delay = tracker.adaptive_delay(base);
+        // Should be halved: ~500ms vs ~1000ms
+        assert!(
+            error_delay < normal_delay,
+            "error delay {}ms should be less than normal {}ms",
+            error_delay.as_millis(),
+            normal_delay.as_millis()
+        );
+        assert!(error_delay.as_millis() <= 510);
+    }
+
+    #[test]
+    fn test_tracker_hedge_win_rate_reduces_delay() {
+        let tracker = HedgeTracker::new(2.0, 2);
+        tracker.record(Duration::from_millis(1000));
+        tracker.record(Duration::from_millis(1000));
+
+        let base = Duration::from_millis(100);
+        let normal_delay = tracker.adaptive_delay(base);
+
+        // Simulate 5 hedges where hedge wins 4/5 (80%)
+        for _ in 0..5 {
+            tracker.record_fired();
+        }
+        for _ in 0..4 {
+            tracker.record_outcome(true);
+        }
+        tracker.record_outcome(false);
+
+        assert_eq!(tracker.hedge_win_rate_pct(), 80);
+
+        let tuned_delay = tracker.adaptive_delay(base);
+        // Should be reduced by 25%: ~750ms vs ~1000ms
+        assert!(
+            tuned_delay < normal_delay,
+            "tuned delay {}ms should be less than normal {}ms",
+            tuned_delay.as_millis(),
+            normal_delay.as_millis()
+        );
+        assert!(tuned_delay.as_millis() >= 740 && tuned_delay.as_millis() <= 760);
+    }
+
+    #[test]
+    fn test_tracker_error_reset_on_success() {
+        let tracker = HedgeTracker::default();
+        tracker.record_error();
+        tracker.record_error();
+        tracker.record_error();
+        assert_eq!(tracker.consecutive_errors(), 3);
+
+        tracker.record_success();
+        assert_eq!(tracker.consecutive_errors(), 0);
+    }
+
+    #[test]
+    fn test_tracker_stddev_uniform() {
+        let tracker = HedgeTracker::new(2.0, 1);
+        // All same value → stddev should be 0
+        for _ in 0..10 {
+            tracker.record(Duration::from_millis(500));
+        }
+        assert_eq!(tracker.stddev_ms(), 0);
     }
 
     #[test]
@@ -609,5 +800,33 @@ mod tests {
         assert_eq!(cloned.sample_count(), 1);
         assert_eq!(cloned.ema_ms(), 100);
         assert_eq!(tracker.sample_count(), 2);
+    }
+
+    #[test]
+    fn test_tracker_combined_signals() {
+        let tracker = HedgeTracker::new(2.0, 2);
+        tracker.record(Duration::from_millis(2000));
+        tracker.record(Duration::from_millis(2000));
+
+        let base = Duration::from_millis(100);
+
+        // Both signals active: errors + high win rate
+        for _ in 0..3 {
+            tracker.record_error();
+        }
+        for _ in 0..6 {
+            tracker.record_fired();
+        }
+        for _ in 0..4 {
+            tracker.record_outcome(true);
+        }
+
+        let delay = tracker.adaptive_delay(base);
+        // EMA=2000 + stddev≈0 = 2000 → /2 (errors) = 1000 → *3/4 (win rate) = 750
+        assert!(
+            delay.as_millis() >= 740 && delay.as_millis() <= 760,
+            "expected ~750ms, got {}ms",
+            delay.as_millis()
+        );
     }
 }

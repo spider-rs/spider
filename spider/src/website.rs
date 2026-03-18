@@ -6087,7 +6087,6 @@ impl Website {
 
                                                         let page_opt: Option<Page> = if should_hedge {
                                                             let base_delay = hedge_cfg.as_ref().unwrap().delay;
-                                                            // Use adaptive delay: max(config_delay, EMA * threshold)
                                                             let delay = hedge_trk.adaptive_delay(base_delay);
                                                             let primary_fut = async { chrome_page_fetch!(shared, target_url) };
                                                             tokio::pin!(primary_fut);
@@ -6096,27 +6095,42 @@ impl Website {
                                                                 biased;
                                                                 result = &mut primary_fut => result,
                                                                 _ = tokio::time::sleep(delay) => {
-                                                                    log::info!("[hedge-chrome] fired after {}ms (ema={}ms) url={}", delay.as_millis(), hedge_trk.ema_ms(), target_url);
+                                                                    hedge_trk.record_fired();
+                                                                    log::info!("[hedge-chrome] fired after {}ms (ema={}ms, stddev={}ms, win={}%, errs={}) url={}",
+                                                                        delay.as_millis(), hedge_trk.ema_ms(), hedge_trk.stddev_ms(),
+                                                                        hedge_trk.hedge_win_rate_pct(), hedge_trk.consecutive_errors(), target_url);
                                                                     let hedge_fut = async { chrome_page_fetch!(shared, target_url) };
                                                                     tokio::pin!(hedge_fut);
                                                                     tokio::select! {
                                                                         biased;
                                                                         result = &mut primary_fut => {
                                                                             log::info!("[hedge-chrome] winner: primary url={}", target_url);
+                                                                            hedge_trk.record_outcome(false);
                                                                             result
                                                                         }
                                                                         result = &mut hedge_fut => {
                                                                             log::info!("[hedge-chrome] winner: hedge url={}", target_url);
+                                                                            hedge_trk.record_outcome(true);
                                                                             result
                                                                         }
                                                                     }
                                                                 }
                                                             };
                                                             hedge_trk.record(fetch_start.elapsed());
+                                                            if result.as_ref().is_some_and(|p| p.status_code.is_server_error()) {
+                                                                hedge_trk.record_error();
+                                                            } else if result.is_some() {
+                                                                hedge_trk.record_success();
+                                                            }
                                                             result
                                                         } else {
                                                             let result = chrome_page_fetch!(shared, target_url);
                                                             hedge_trk.record(fetch_start.elapsed());
+                                                            if result.as_ref().is_some_and(|p| p.status_code.is_server_error()) {
+                                                                hedge_trk.record_error();
+                                                            } else if result.is_some() {
+                                                                hedge_trk.record_success();
+                                                            }
                                                             result
                                                         };
 
@@ -6931,7 +6945,6 @@ impl Website {
 
                                                         let page_opt: Option<Page> = if should_hedge {
                                                             let base_delay = hedge_cfg.as_ref().unwrap().delay;
-                                                            // Use adaptive delay: max(config_delay, EMA * threshold)
                                                             let delay = hedge_trk.adaptive_delay(base_delay);
                                                             let primary_fut = async { chrome_page_fetch!(shared, target_url) };
                                                             tokio::pin!(primary_fut);
@@ -6940,27 +6953,42 @@ impl Website {
                                                                 biased;
                                                                 result = &mut primary_fut => result,
                                                                 _ = tokio::time::sleep(delay) => {
-                                                                    log::info!("[hedge-chrome] fired after {}ms (ema={}ms) url={}", delay.as_millis(), hedge_trk.ema_ms(), target_url);
+                                                                    hedge_trk.record_fired();
+                                                                    log::info!("[hedge-chrome] fired after {}ms (ema={}ms, stddev={}ms, win={}%, errs={}) url={}",
+                                                                        delay.as_millis(), hedge_trk.ema_ms(), hedge_trk.stddev_ms(),
+                                                                        hedge_trk.hedge_win_rate_pct(), hedge_trk.consecutive_errors(), target_url);
                                                                     let hedge_fut = async { chrome_page_fetch!(shared, target_url) };
                                                                     tokio::pin!(hedge_fut);
                                                                     tokio::select! {
                                                                         biased;
                                                                         result = &mut primary_fut => {
                                                                             log::info!("[hedge-chrome] winner: primary url={}", target_url);
+                                                                            hedge_trk.record_outcome(false);
                                                                             result
                                                                         }
                                                                         result = &mut hedge_fut => {
                                                                             log::info!("[hedge-chrome] winner: hedge url={}", target_url);
+                                                                            hedge_trk.record_outcome(true);
                                                                             result
                                                                         }
                                                                     }
                                                                 }
                                                             };
                                                             hedge_trk.record(fetch_start.elapsed());
+                                                            if result.as_ref().is_some_and(|p| p.status_code.is_server_error()) {
+                                                                hedge_trk.record_error();
+                                                            } else if result.is_some() {
+                                                                hedge_trk.record_success();
+                                                            }
                                                             result
                                                         } else {
                                                             let result = chrome_page_fetch!(shared, target_url);
                                                             hedge_trk.record(fetch_start.elapsed());
+                                                            if result.as_ref().is_some_and(|p| p.status_code.is_server_error()) {
+                                                                hedge_trk.record_error();
+                                                            } else if result.is_some() {
+                                                                hedge_trk.record_success();
+                                                            }
                                                             result
                                                         };
 
