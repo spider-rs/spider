@@ -8,7 +8,10 @@ use crate::error::{AgentError, AgentResult};
 use crate::llm::TokenUsage;
 use crate::llm::{CompletionOptions, CompletionResponse, LLMProvider, Message};
 use crate::memory::AgentMemory;
-use crate::tools::{CustomTool, CustomToolRegistry, CustomToolResult, SpiderCloudToolConfig};
+use crate::tools::{
+    CustomTool, CustomToolRegistry, CustomToolResult, SpiderBrowserToolConfig,
+    SpiderCloudToolConfig,
+};
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
@@ -496,6 +499,13 @@ impl Agent {
     /// Returns the number of tools registered.
     pub fn register_spider_cloud(&self, config: SpiderCloudToolConfig) -> usize {
         self.custom_tools.register_spider_cloud(&config)
+    }
+
+    /// Register Spider Browser Cloud tools.
+    ///
+    /// Returns the number of tools registered.
+    pub fn register_spider_browser(&self, config: SpiderBrowserToolConfig) -> usize {
+        self.custom_tools.register_spider_browser(&config)
     }
 
     // ==================== Browser Methods ====================
@@ -1028,6 +1038,7 @@ pub struct AgentBuilder {
     config: AgentConfig,
     llm: Option<Box<dyn LLMProvider>>,
     spider_cloud: Option<SpiderCloudToolConfig>,
+    spider_browser: Option<SpiderBrowserToolConfig>,
     proxies: Option<Vec<String>>,
     client: Option<reqwest::Client>,
     #[cfg(feature = "search")]
@@ -1047,6 +1058,7 @@ impl AgentBuilder {
             config: AgentConfig::default(),
             llm: None,
             spider_cloud: None,
+            spider_browser: None,
             proxies: None,
             client: None,
             #[cfg(feature = "search")]
@@ -1147,6 +1159,23 @@ impl AgentBuilder {
     /// Use this when you need custom API URL, route toggles, or AI route gating.
     pub fn with_spider_cloud_config(mut self, config: SpiderCloudToolConfig) -> Self {
         self.spider_cloud = Some(config);
+        self
+    }
+
+    /// Register [Spider Browser Cloud](https://spider.cloud/docs/api#browser) tools.
+    ///
+    /// Connects to a remote browser instance at `wss://browser.spider.cloud/v1/browser`
+    /// via CDP. Registers navigate, html, screenshot, evaluate, click, fill, and wait tools.
+    pub fn with_spider_browser(mut self, api_key: impl Into<String>) -> Self {
+        self.spider_browser = Some(SpiderBrowserToolConfig::new(api_key));
+        self
+    }
+
+    /// Register Spider Browser Cloud tools using a full config.
+    ///
+    /// Use this when you need stealth mode, country targeting, or custom WSS URL.
+    pub fn with_spider_browser_config(mut self, config: SpiderBrowserToolConfig) -> Self {
+        self.spider_browser = Some(config);
         self
     }
 
@@ -1323,6 +1352,9 @@ impl AgentBuilder {
         if let Some(cfg) = self.spider_cloud.as_ref() {
             custom_tools.register_spider_cloud(cfg);
         }
+        if let Some(cfg) = self.spider_browser.as_ref() {
+            custom_tools.register_spider_browser(cfg);
+        }
 
         Ok(Agent {
             llm: self.llm,
@@ -1497,5 +1529,52 @@ mod tests {
         // Ensure we can obtain a shared reference without moving.
         let _c1 = agent.client();
         let _c2 = agent.client();
+    }
+
+    #[test]
+    fn test_builder_registers_spider_browser_default_tools() {
+        let agent = Agent::builder()
+            .with_spider_browser("sk_browser_key")
+            .build()
+            .expect("agent should build");
+
+        let tools = agent.list_custom_tools();
+        assert!(tools.contains(&"spider_browser_navigate".to_string()));
+        assert!(tools.contains(&"spider_browser_html".to_string()));
+        assert!(tools.contains(&"spider_browser_screenshot".to_string()));
+        assert!(tools.contains(&"spider_browser_evaluate".to_string()));
+        assert!(tools.contains(&"spider_browser_click".to_string()));
+        assert!(tools.contains(&"spider_browser_fill".to_string()));
+        assert!(tools.contains(&"spider_browser_wait".to_string()));
+    }
+
+    #[test]
+    fn test_builder_spider_browser_with_stealth_and_country() {
+        let cfg = SpiderBrowserToolConfig::new("sk_key")
+            .with_stealth(true)
+            .with_country("us");
+        assert_eq!(
+            cfg.connection_url(),
+            "wss://browser.spider.cloud/v1/browser?token=sk_key&stealth=true&country=us"
+        );
+
+        let agent = Agent::builder()
+            .with_spider_browser_config(cfg)
+            .build()
+            .expect("agent should build");
+        assert!(agent.has_custom_tool("spider_browser_navigate"));
+    }
+
+    #[test]
+    fn test_builder_spider_cloud_and_browser_together() {
+        let agent = Agent::builder()
+            .with_spider_cloud("cloud-key")
+            .with_spider_browser("browser-key")
+            .build()
+            .expect("agent should build");
+
+        // Both sets of tools registered.
+        assert!(agent.has_custom_tool("spider_cloud_crawl"));
+        assert!(agent.has_custom_tool("spider_browser_navigate"));
     }
 }

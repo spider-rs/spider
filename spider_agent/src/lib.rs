@@ -70,7 +70,7 @@
 //! ## Feature Flags
 //!
 //! - `openai` - OpenAI/OpenAI-compatible LLM provider
-//! - `chrome` - Browser automation via chromiumoxide
+//! - `chrome` - Browser automation via CDP (local or remote via Spider Browser Cloud)
 //! - `search` - Base search functionality
 //! - `search_serper` - Serper.dev search provider
 //! - `search_brave` - Brave Search provider
@@ -112,7 +112,8 @@ pub use llm::{
 };
 pub use memory::AgentMemory;
 pub use tools::{
-    AuthConfig, CustomTool, CustomToolRegistry, CustomToolResult, HttpMethod, SpiderCloudToolConfig,
+    AuthConfig, CustomTool, CustomToolRegistry, CustomToolResult, HttpMethod,
+    SpiderBrowserToolConfig, SpiderCloudToolConfig,
 };
 
 // Automation re-exports - core types

@@ -4416,7 +4416,7 @@ pub async fn fetch_page_html_with_fallback(
 ) -> PageResponse {
     let resp = fetch_page_html_raw_base(target_url, client, only_html).await;
 
-    let body_bytes = resp.content.as_deref().map(|b| b.as_slice());
+    let body_bytes = resp.content.as_deref();
     let should_fallback = spider_cloud.should_fallback(resp.status_code.as_u16(), body_bytes);
 
     if should_fallback {

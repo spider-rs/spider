@@ -343,3 +343,8 @@ required-features = ["spider/sync", "spider/chrome", "spider/chrome_headed", "sp
 name = "not_a_robot_chrome_ai"
 path = "not_a_robot_chrome_ai.rs"
 required-features = ["spider/sync", "spider/chrome", "spider/chrome_headed", "spider/agent_chrome", "spider/agent_skills"]
+
+[[example]]
+name = "spider_browser_cloud"
+path = "spider_browser_cloud.rs"
+required-features = ["spider/sync", "spider/chrome", "spider/spider_cloud"]

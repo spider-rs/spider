@@ -198,6 +198,32 @@ let mut website = Website::new("https://protected-site.com")
 
 > Free credits on signup. [Get started at spider.cloud](https://spider.cloud)
 
+### Spider Browser Cloud
+
+Connect to a remote Rust-based browser via CDP over WebSocket for automation, scraping, and AI extraction:
+
+```rust
+use spider::configuration::SpiderBrowserConfig;
+
+// Simple — just an API key
+let mut website = Website::new("https://example.com")
+    .with_spider_browser("your-api-key")  // features = ["spider_cloud", "chrome"]
+    .build()
+    .unwrap();
+
+// Full config — stealth, country targeting, custom options
+let browser_cfg = SpiderBrowserConfig::new("your-api-key")
+    .with_stealth(true)
+    .with_country("us");
+
+let mut website = Website::new("https://example.com")
+    .with_spider_browser_config(browser_cfg)
+    .build()
+    .unwrap();
+```
+
+WebSocket endpoint: `wss://browser.spider.cloud/v1/browser` — supports CDP and WebDriver BiDi protocols.
+
 ## Get Spider
 
 | Package | Language | Install |

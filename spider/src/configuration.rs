@@ -343,6 +343,9 @@ pub struct Configuration {
     #[cfg(feature = "spider_cloud")]
     /// Spider Cloud config. See <https://spider.cloud>.
     pub spider_cloud: Option<Box<SpiderCloudConfig>>,
+    #[cfg(all(feature = "spider_cloud", feature = "chrome"))]
+    /// Spider Browser Cloud config for remote CDP via `wss://browser.spider.cloud`.
+    pub spider_browser: Option<Box<SpiderBrowserConfig>>,
     #[cfg(feature = "hedge")]
     /// Hedged request configuration for work-stealing on slow requests.
     /// When enabled, fires a duplicate request on a different proxy after a delay.
@@ -1762,6 +1765,39 @@ impl Configuration {
         self
     }
 
+    /// Connect to [Spider Browser Cloud](https://spider.cloud/docs/api#browser)
+    /// via CDP over WebSocket using an API key.
+    ///
+    /// Sets `chrome_connection_url` to `wss://browser.spider.cloud/v1/browser?token=API_KEY`.
+    #[cfg(all(feature = "spider_cloud", feature = "chrome"))]
+    pub fn with_spider_browser(&mut self, api_key: &str) -> &mut Self {
+        let cfg = SpiderBrowserConfig::new(api_key);
+        self.chrome_connection_url = Some(cfg.connection_url());
+        self.spider_browser = Some(Box::new(cfg));
+        self
+    }
+
+    /// Connect to Spider Browser Cloud (no-op without `spider_cloud` + `chrome` features).
+    #[cfg(not(all(feature = "spider_cloud", feature = "chrome")))]
+    pub fn with_spider_browser(&mut self, _api_key: &str) -> &mut Self {
+        self
+    }
+
+    /// Connect to [Spider Browser Cloud](https://spider.cloud/docs/api#browser)
+    /// with full configuration (stealth, country, browser type, etc.).
+    #[cfg(all(feature = "spider_cloud", feature = "chrome"))]
+    pub fn with_spider_browser_config(&mut self, config: SpiderBrowserConfig) -> &mut Self {
+        self.chrome_connection_url = Some(config.connection_url());
+        self.spider_browser = Some(Box::new(config));
+        self
+    }
+
+    /// Connect to Spider Browser Cloud with config (no-op without features).
+    #[cfg(not(all(feature = "spider_cloud", feature = "chrome")))]
+    pub fn with_spider_browser_config(&mut self, _config: ()) -> &mut Self {
+        self
+    }
+
     /// Set the hedged request (work-stealing) configuration.
     #[cfg(feature = "hedge")]
     pub fn with_hedge(&mut self, config: crate::utils::hedge::HedgeConfig) -> &mut Self {
@@ -2064,6 +2100,139 @@ impl SpiderCloudConfig {
     }
 }
 
+// ─── Spider Browser Cloud ────────────────────────────────────────────────────
+
+/// Configuration for [Spider Browser Cloud](https://spider.cloud/docs/api#browser).
+///
+/// Connects to a remote Chromium instance via CDP over WebSocket at
+/// `wss://browser.spider.cloud/v1/browser`.  Authentication is via
+/// `?token=API_KEY` query parameter.
+///
+/// Optional query parameters: `stealth`, `browser`, `country`.
+#[cfg(all(feature = "spider_cloud", feature = "chrome"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SpiderBrowserConfig {
+    /// API key / secret. Sign up at <https://spider.cloud> to get one.
+    pub api_key: String,
+    /// WebSocket base URL (default: `wss://browser.spider.cloud/v1/browser`).
+    #[cfg_attr(
+        feature = "serde",
+        serde(default = "SpiderBrowserConfig::default_wss_url")
+    )]
+    pub wss_url: String,
+    /// Enable stealth mode (anti-fingerprinting). Sent as `stealth=true` query param.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub stealth: bool,
+    /// Browser type to request (e.g. `"chrome"`, `"firefox"`). Sent as `browser=<value>`.
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub browser: Option<String>,
+    /// Country code for geo-targeting (e.g. `"us"`, `"gb"`). Sent as `country=<value>`.
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub country: Option<String>,
+    /// Extra query parameters appended to the WSS URL.
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub extra_params: Option<Vec<(String, String)>>,
+}
+
+#[cfg(all(feature = "spider_cloud", feature = "chrome"))]
+impl Default for SpiderBrowserConfig {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            wss_url: Self::default_wss_url(),
+            stealth: false,
+            browser: None,
+            country: None,
+            extra_params: None,
+        }
+    }
+}
+
+#[cfg(all(feature = "spider_cloud", feature = "chrome"))]
+impl SpiderBrowserConfig {
+    /// Create a new config with the given API key.
+    pub fn new(api_key: impl Into<String>) -> Self {
+        Self {
+            api_key: api_key.into(),
+            ..Default::default()
+        }
+    }
+
+    /// Set a custom WSS base URL.
+    pub fn with_wss_url(mut self, url: impl Into<String>) -> Self {
+        self.wss_url = url.into();
+        self
+    }
+
+    /// Enable or disable stealth mode.
+    pub fn with_stealth(mut self, stealth: bool) -> Self {
+        self.stealth = stealth;
+        self
+    }
+
+    /// Set the browser type to request.
+    pub fn with_browser(mut self, browser: impl Into<String>) -> Self {
+        self.browser = Some(browser.into());
+        self
+    }
+
+    /// Set the country code for geo-targeting.
+    pub fn with_country(mut self, country: impl Into<String>) -> Self {
+        self.country = Some(country.into());
+        self
+    }
+
+    /// Add extra query parameters.
+    pub fn with_extra_params(mut self, params: Vec<(String, String)>) -> Self {
+        self.extra_params = Some(params);
+        self
+    }
+
+    /// Build the full WSS connection URL with authentication and options.
+    ///
+    /// Returns a URL like:
+    /// `wss://browser.spider.cloud/v1/browser?token=KEY&stealth=true&country=us`
+    pub fn connection_url(&self) -> String {
+        let mut url = self.wss_url.clone();
+
+        // Start query string
+        if url.contains('?') {
+            url.push('&');
+        } else {
+            url.push('?');
+        }
+        url.push_str("token=");
+        url.push_str(&self.api_key);
+
+        if self.stealth {
+            url.push_str("&stealth=true");
+        }
+        if let Some(ref browser) = self.browser {
+            url.push_str("&browser=");
+            url.push_str(browser);
+        }
+        if let Some(ref country) = self.country {
+            url.push_str("&country=");
+            url.push_str(country);
+        }
+        if let Some(ref extra) = self.extra_params {
+            for (k, v) in extra {
+                url.push('&');
+                url.push_str(k);
+                url.push('=');
+                url.push_str(v);
+            }
+        }
+
+        url
+    }
+
+    fn default_wss_url() -> String {
+        "wss://browser.spider.cloud/v1/browser".to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2212,5 +2381,78 @@ mod tests {
             Some("text-model")
         );
         assert_eq!(engine.vision_route_mode, VisionRouteMode::TextFirst);
+    }
+
+    #[cfg(all(feature = "spider_cloud", feature = "chrome"))]
+    #[test]
+    fn test_spider_browser_config_defaults() {
+        let cfg = SpiderBrowserConfig::new("test-key");
+        assert_eq!(cfg.api_key, "test-key");
+        assert_eq!(cfg.wss_url, "wss://browser.spider.cloud/v1/browser");
+        assert!(!cfg.stealth);
+        assert!(cfg.browser.is_none());
+        assert!(cfg.country.is_none());
+        assert!(cfg.extra_params.is_none());
+    }
+
+    #[cfg(all(feature = "spider_cloud", feature = "chrome"))]
+    #[test]
+    fn test_spider_browser_connection_url_basic() {
+        let cfg = SpiderBrowserConfig::new("sk-abc123");
+        assert_eq!(
+            cfg.connection_url(),
+            "wss://browser.spider.cloud/v1/browser?token=sk-abc123"
+        );
+    }
+
+    #[cfg(all(feature = "spider_cloud", feature = "chrome"))]
+    #[test]
+    fn test_spider_browser_connection_url_full() {
+        let cfg = SpiderBrowserConfig::new("sk-abc123")
+            .with_stealth(true)
+            .with_browser("chrome")
+            .with_country("us")
+            .with_extra_params(vec![("timeout".into(), "30000".into())]);
+        assert_eq!(
+            cfg.connection_url(),
+            "wss://browser.spider.cloud/v1/browser?token=sk-abc123&stealth=true&browser=chrome&country=us&timeout=30000"
+        );
+    }
+
+    #[cfg(all(feature = "spider_cloud", feature = "chrome"))]
+    #[test]
+    fn test_spider_browser_connection_url_custom_wss() {
+        let cfg = SpiderBrowserConfig::new("key")
+            .with_wss_url("wss://custom.browser.example.com/v1/browser");
+        assert_eq!(
+            cfg.connection_url(),
+            "wss://custom.browser.example.com/v1/browser?token=key"
+        );
+    }
+
+    #[cfg(all(feature = "spider_cloud", feature = "chrome"))]
+    #[test]
+    fn test_with_spider_browser_sets_chrome_connection() {
+        let mut config = Configuration::default();
+        config.with_spider_browser("my-api-key");
+        assert_eq!(
+            config.chrome_connection_url.as_deref(),
+            Some("wss://browser.spider.cloud/v1/browser?token=my-api-key")
+        );
+        assert!(config.spider_browser.is_some());
+    }
+
+    #[cfg(all(feature = "spider_cloud", feature = "chrome"))]
+    #[test]
+    fn test_with_spider_browser_config_stealth() {
+        let mut config = Configuration::default();
+        let browser_cfg = SpiderBrowserConfig::new("key")
+            .with_stealth(true)
+            .with_country("gb");
+        config.with_spider_browser_config(browser_cfg);
+        assert_eq!(
+            config.chrome_connection_url.as_deref(),
+            Some("wss://browser.spider.cloud/v1/browser?token=key&stealth=true&country=gb")
+        );
     }
 }

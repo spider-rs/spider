@@ -9914,6 +9914,37 @@ impl Website {
         self
     }
 
+    /// Connect to [Spider Browser Cloud](https://spider.cloud/docs/api#browser)
+    /// via CDP over WebSocket.
+    #[cfg(all(feature = "spider_cloud", feature = "chrome"))]
+    pub fn with_spider_browser(&mut self, api_key: &str) -> &mut Self {
+        self.configuration.with_spider_browser(api_key);
+        self
+    }
+
+    /// Connect to Spider Browser Cloud (no-op without `spider_cloud` + `chrome` features).
+    #[cfg(not(all(feature = "spider_cloud", feature = "chrome")))]
+    pub fn with_spider_browser(&mut self, _api_key: &str) -> &mut Self {
+        self
+    }
+
+    /// Connect to [Spider Browser Cloud](https://spider.cloud/docs/api#browser)
+    /// with full configuration.
+    #[cfg(all(feature = "spider_cloud", feature = "chrome"))]
+    pub fn with_spider_browser_config(
+        &mut self,
+        config: crate::configuration::SpiderBrowserConfig,
+    ) -> &mut Self {
+        self.configuration.with_spider_browser_config(config);
+        self
+    }
+
+    /// Connect to Spider Browser Cloud with config (no-op without features).
+    #[cfg(not(all(feature = "spider_cloud", feature = "chrome")))]
+    pub fn with_spider_browser_config(&mut self, _config: ()) -> &mut Self {
+        self
+    }
+
     /// Set the hedged request (work-stealing) configuration.
     #[cfg(feature = "hedge")]
     pub fn with_hedge(&mut self, config: crate::utils::hedge::HedgeConfig) -> &mut Self {

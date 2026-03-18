@@ -345,6 +345,225 @@ impl SpiderCloudToolConfig {
     }
 }
 
+// ─── Spider Browser Cloud ────────────────────────────────────────────────────
+
+const DEFAULT_SPIDER_BROWSER_WSS_URL: &str = "wss://browser.spider.cloud/v1/browser";
+const DEFAULT_BROWSER_TOOL_PREFIX: &str = "spider_browser";
+
+/// Configuration for [Spider Browser Cloud](https://spider.cloud/docs/api#browser)
+/// tool registration.
+///
+/// Registers tools that interact with a remote CDP browser session at
+/// `wss://browser.spider.cloud/v1/browser?token=API_KEY`.
+///
+/// Tools registered by default:
+/// - `spider_browser_navigate` — navigate to a URL
+/// - `spider_browser_html` — get page HTML
+/// - `spider_browser_screenshot` — take a screenshot
+/// - `spider_browser_evaluate` — execute JavaScript
+/// - `spider_browser_click` — click a CSS selector
+/// - `spider_browser_fill` — fill an input element
+/// - `spider_browser_wait` — wait for a selector
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SpiderBrowserToolConfig {
+    /// Spider Cloud API key.
+    pub api_key: String,
+    /// WebSocket base URL for the browser endpoint.
+    pub wss_url: String,
+    /// Prefix used for registered tool names (default: `spider_browser`).
+    pub tool_name_prefix: String,
+    /// Enable stealth mode (anti-fingerprinting).
+    pub stealth: bool,
+    /// Browser type (e.g. `"chrome"`, `"firefox"`).
+    pub browser: Option<String>,
+    /// Country code for geo-targeting (e.g. `"us"`, `"gb"`).
+    pub country: Option<String>,
+    /// Request timeout in seconds for each tool call.
+    pub timeout_secs: u64,
+    /// Register navigate tool.
+    pub include_navigate: bool,
+    /// Register HTML extraction tool.
+    pub include_html: bool,
+    /// Register screenshot tool.
+    pub include_screenshot: bool,
+    /// Register JavaScript evaluation tool.
+    pub include_evaluate: bool,
+    /// Register click tool.
+    pub include_click: bool,
+    /// Register fill (type text) tool.
+    pub include_fill: bool,
+    /// Register wait-for-selector tool.
+    pub include_wait: bool,
+}
+
+impl Default for SpiderBrowserToolConfig {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            wss_url: DEFAULT_SPIDER_BROWSER_WSS_URL.to_string(),
+            tool_name_prefix: DEFAULT_BROWSER_TOOL_PREFIX.to_string(),
+            stealth: false,
+            browser: None,
+            country: None,
+            timeout_secs: 60,
+            include_navigate: true,
+            include_html: true,
+            include_screenshot: true,
+            include_evaluate: true,
+            include_click: true,
+            include_fill: true,
+            include_wait: true,
+        }
+    }
+}
+
+impl SpiderBrowserToolConfig {
+    /// Create a config with the given API key.
+    pub fn new(api_key: impl Into<String>) -> Self {
+        Self {
+            api_key: api_key.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Set a custom WSS base URL.
+    pub fn with_wss_url(mut self, url: impl Into<String>) -> Self {
+        self.wss_url = url.into();
+        self
+    }
+
+    /// Set the tool name prefix.
+    pub fn with_tool_name_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.tool_name_prefix = prefix.into();
+        self
+    }
+
+    /// Enable or disable stealth mode.
+    pub fn with_stealth(mut self, stealth: bool) -> Self {
+        self.stealth = stealth;
+        self
+    }
+
+    /// Set the browser type to request.
+    pub fn with_browser(mut self, browser: impl Into<String>) -> Self {
+        self.browser = Some(browser.into());
+        self
+    }
+
+    /// Set the country for geo-targeting.
+    pub fn with_country(mut self, country: impl Into<String>) -> Self {
+        self.country = Some(country.into());
+        self
+    }
+
+    /// Set timeout in seconds for each registered tool.
+    pub fn with_timeout_secs(mut self, timeout_secs: u64) -> Self {
+        self.timeout_secs = timeout_secs.max(1);
+        self
+    }
+
+    /// Build the full WSS connection URL with authentication and options.
+    pub fn connection_url(&self) -> String {
+        let mut url = self.wss_url.clone();
+        if url.contains('?') {
+            url.push('&');
+        } else {
+            url.push('?');
+        }
+        url.push_str("token=");
+        url.push_str(&self.api_key);
+
+        if self.stealth {
+            url.push_str("&stealth=true");
+        }
+        if let Some(ref browser) = self.browser {
+            url.push_str("&browser=");
+            url.push_str(browser);
+        }
+        if let Some(ref country) = self.country {
+            url.push_str("&country=");
+            url.push_str(country);
+        }
+        url
+    }
+
+    fn tool_name(&self, suffix: &str) -> String {
+        let prefix = self.tool_name_prefix.trim().trim_end_matches('_');
+        if prefix.is_empty() {
+            suffix.to_string()
+        } else {
+            format!("{}_{}", prefix, suffix)
+        }
+    }
+
+    /// Build the browser tools as custom tool definitions.
+    ///
+    /// These tools use the Spider Browser Cloud REST-like interface where
+    /// each tool POSTs a JSON action body to the browser endpoint.
+    pub fn to_custom_tools(&self) -> Vec<CustomTool> {
+        let mut tools = Vec::new();
+        let base = self.connection_url();
+
+        let build = |name: &str, desc: &str| -> CustomTool {
+            CustomTool::new(name, &base)
+                .with_description(desc)
+                .with_method(HttpMethod::Post)
+                .with_content_type("application/json")
+                .with_timeout(Duration::from_secs(self.timeout_secs))
+                .with_header(
+                    "User-Agent",
+                    format!("spider_agent/{}", env!("CARGO_PKG_VERSION")),
+                )
+        };
+
+        if self.include_navigate {
+            tools.push(build(
+                &self.tool_name("navigate"),
+                "Spider Browser Cloud: navigate to a URL. Body: {\"url\": \"...\"}",
+            ));
+        }
+        if self.include_html {
+            tools.push(build(
+                &self.tool_name("html"),
+                "Spider Browser Cloud: extract HTML from current page.",
+            ));
+        }
+        if self.include_screenshot {
+            tools.push(build(
+                &self.tool_name("screenshot"),
+                "Spider Browser Cloud: take a screenshot of the current page.",
+            ));
+        }
+        if self.include_evaluate {
+            tools.push(build(
+                &self.tool_name("evaluate"),
+                "Spider Browser Cloud: evaluate JavaScript on the page. Body: {\"script\": \"...\"}",
+            ));
+        }
+        if self.include_click {
+            tools.push(build(
+                &self.tool_name("click"),
+                "Spider Browser Cloud: click an element by CSS selector. Body: {\"selector\": \"...\"}",
+            ));
+        }
+        if self.include_fill {
+            tools.push(build(
+                &self.tool_name("fill"),
+                "Spider Browser Cloud: fill an input element. Body: {\"selector\": \"...\", \"value\": \"...\"}",
+            ));
+        }
+        if self.include_wait {
+            tools.push(build(
+                &self.tool_name("wait"),
+                "Spider Browser Cloud: wait for a CSS selector to appear. Body: {\"selector\": \"...\"}",
+            ));
+        }
+
+        tools
+    }
+}
+
 /// Configuration for a custom tool (external API call).
 #[derive(Debug, Clone)]
 pub struct CustomTool {
@@ -575,6 +794,18 @@ impl CustomToolRegistry {
     ///
     /// Returns the number of tools registered.
     pub fn register_spider_cloud(&self, config: &SpiderCloudToolConfig) -> usize {
+        let tools = config.to_custom_tools();
+        let count = tools.len();
+        for tool in tools {
+            self.register(tool);
+        }
+        count
+    }
+
+    /// Register Spider Browser Cloud tools from a shared config.
+    ///
+    /// Returns the number of tools registered.
+    pub fn register_spider_browser(&self, config: &SpiderBrowserToolConfig) -> usize {
         let tools = config.to_custom_tools();
         let count = tools.len();
         for tool in tools {
@@ -880,5 +1111,109 @@ mod tests {
         assert!(names.contains(&"crawl"));
         assert!(names.contains(&"search"));
         assert!(names.contains(&"transform"));
+    }
+
+    // ─── Spider Browser Cloud Tests ──────────────────────────────────────
+
+    #[test]
+    fn test_spider_browser_config_defaults() {
+        let cfg = SpiderBrowserToolConfig::new("test-key");
+        assert_eq!(cfg.api_key, "test-key");
+        assert_eq!(cfg.wss_url, "wss://browser.spider.cloud/v1/browser");
+        assert!(!cfg.stealth);
+        assert!(cfg.browser.is_none());
+        assert!(cfg.country.is_none());
+        assert_eq!(cfg.timeout_secs, 60);
+        assert!(cfg.include_navigate);
+        assert!(cfg.include_html);
+        assert!(cfg.include_screenshot);
+        assert!(cfg.include_evaluate);
+        assert!(cfg.include_click);
+        assert!(cfg.include_fill);
+        assert!(cfg.include_wait);
+    }
+
+    #[test]
+    fn test_spider_browser_connection_url_basic() {
+        let cfg = SpiderBrowserToolConfig::new("sk-abc");
+        assert_eq!(
+            cfg.connection_url(),
+            "wss://browser.spider.cloud/v1/browser?token=sk-abc"
+        );
+    }
+
+    #[test]
+    fn test_spider_browser_connection_url_with_options() {
+        let cfg = SpiderBrowserToolConfig::new("key")
+            .with_stealth(true)
+            .with_browser("chrome")
+            .with_country("gb");
+        assert_eq!(
+            cfg.connection_url(),
+            "wss://browser.spider.cloud/v1/browser?token=key&stealth=true&browser=chrome&country=gb"
+        );
+    }
+
+    #[test]
+    fn test_spider_browser_custom_wss_url() {
+        let cfg =
+            SpiderBrowserToolConfig::new("key").with_wss_url("wss://custom.example.com/browser");
+        assert_eq!(
+            cfg.connection_url(),
+            "wss://custom.example.com/browser?token=key"
+        );
+    }
+
+    #[test]
+    fn test_spider_browser_to_custom_tools_count() {
+        let cfg = SpiderBrowserToolConfig::new("key");
+        let tools = cfg.to_custom_tools();
+        assert_eq!(tools.len(), 7); // navigate, html, screenshot, evaluate, click, fill, wait
+    }
+
+    #[test]
+    fn test_spider_browser_to_custom_tools_names() {
+        let cfg = SpiderBrowserToolConfig::new("key");
+        let tools = cfg.to_custom_tools();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"spider_browser_navigate"));
+        assert!(names.contains(&"spider_browser_html"));
+        assert!(names.contains(&"spider_browser_screenshot"));
+        assert!(names.contains(&"spider_browser_evaluate"));
+        assert!(names.contains(&"spider_browser_click"));
+        assert!(names.contains(&"spider_browser_fill"));
+        assert!(names.contains(&"spider_browser_wait"));
+    }
+
+    #[test]
+    fn test_spider_browser_custom_prefix() {
+        let cfg = SpiderBrowserToolConfig::new("key").with_tool_name_prefix("remote_browser");
+        let tools = cfg.to_custom_tools();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"remote_browser_navigate"));
+        assert!(names.contains(&"remote_browser_html"));
+    }
+
+    #[test]
+    fn test_spider_browser_tools_use_wss_base_url() {
+        let cfg = SpiderBrowserToolConfig::new("my-key").with_stealth(true);
+        let tools = cfg.to_custom_tools();
+        for tool in &tools {
+            assert!(tool
+                .base_url
+                .starts_with("wss://browser.spider.cloud/v1/browser?token=my-key"));
+            assert!(tool.base_url.contains("stealth=true"));
+            assert_eq!(tool.method, HttpMethod::Post);
+        }
+    }
+
+    #[test]
+    fn test_spider_browser_registry_register() {
+        let registry = CustomToolRegistry::new();
+        let cfg = SpiderBrowserToolConfig::new("key");
+        let count = registry.register_spider_browser(&cfg);
+        assert_eq!(count, 7);
+        assert!(registry.contains("spider_browser_navigate"));
+        assert!(registry.contains("spider_browser_html"));
     }
 }
