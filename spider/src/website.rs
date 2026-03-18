@@ -142,7 +142,7 @@ macro_rules! chrome_page_fetch {
                                 &$shared.6.remote_multimodal,
                             )
                             .await;
-                            page.clone_from(&p);
+                            page = p;
                         })
                         .await
                         {
@@ -153,28 +153,26 @@ macro_rules! chrome_page_fetch {
                             );
                         }
                     } else {
-                        page.clone_from(
-                            &Page::new(
-                                $target_url,
-                                &$shared.0,
-                                &hedge_tab,
-                                &$shared.6.wait_for,
-                                &$shared.6.screenshot,
-                                false,
-                                &$shared.6.openai_config,
-                                &$shared.6.execution_scripts,
-                                &$shared.6.automation_scripts,
-                                &$shared.6.viewport,
-                                &$shared.6.request_timeout,
-                                &$shared.6.track_events,
-                                $shared.6.referer.clone(),
-                                $shared.6.max_page_bytes,
-                                $shared.6.get_cache_options(),
-                                &$shared.6.cache_policy,
-                                &$shared.6.remote_multimodal,
-                            )
-                            .await,
-                        );
+                        page = Page::new(
+                            $target_url,
+                            &$shared.0,
+                            &hedge_tab,
+                            &$shared.6.wait_for,
+                            &$shared.6.screenshot,
+                            false,
+                            &$shared.6.openai_config,
+                            &$shared.6.execution_scripts,
+                            &$shared.6.automation_scripts,
+                            &$shared.6.viewport,
+                            &$shared.6.request_timeout,
+                            &$shared.6.track_events,
+                            $shared.6.referer.clone(),
+                            $shared.6.max_page_bytes,
+                            $shared.6.get_cache_options(),
+                            &$shared.6.cache_policy,
+                            &$shared.6.remote_multimodal,
+                        )
+                        .await;
                     }
                 }
 
@@ -2928,22 +2926,20 @@ impl Website {
                     let mut domain_parsed_clone = self.domain_parsed.clone();
 
                     if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                        page.clone_from(
-                            &Page::new_page_streaming(
-                                url,
-                                client,
-                                false,
-                                base,
-                                domains_caseless,
-                                &page_links_settings,
-                                &mut links,
-                                Some(&mut links_ssg),
-                                &domain_parsed,
-                                &mut domain_parsed_clone,
-                                &mut links_pages,
-                            )
-                            .await,
-                        );
+                        page = Page::new_page_streaming(
+                            url,
+                            client,
+                            false,
+                            base,
+                            domains_caseless,
+                            &page_links_settings,
+                            &mut links,
+                            Some(&mut links_ssg),
+                            &domain_parsed,
+                            &mut domain_parsed_clone,
+                            &mut links_pages,
+                        )
+                        .await;
                     })
                     .await
                     {
@@ -2952,22 +2948,20 @@ impl Website {
 
                     self.domain_parsed = domain_parsed_clone;
                 } else {
-                    page.clone_from(
-                        &Page::new_page_streaming(
-                            url,
-                            client,
-                            false,
-                            base,
-                            &self.configuration.external_domains_caseless,
-                            &page_links_settings,
-                            &mut links,
-                            Some(&mut links_ssg),
-                            &domain_parsed,
-                            &mut self.domain_parsed,
-                            &mut links_pages,
-                        )
-                        .await,
-                    );
+                    page = Page::new_page_streaming(
+                        url,
+                        client,
+                        false,
+                        base,
+                        &self.configuration.external_domains_caseless,
+                        &page_links_settings,
+                        &mut links,
+                        Some(&mut links_ssg),
+                        &domain_parsed,
+                        &mut self.domain_parsed,
+                        &mut links_pages,
+                    )
+                    .await;
                 }
             }
 
@@ -3199,7 +3193,7 @@ impl Website {
             #[cfg(all(feature = "agent", feature = "serde"))]
             self.apply_url_prefilter(&mut links).await;
 
-            let mut stream = tokio_stream::iter(links.drain().collect::<Vec<_>>());
+            let mut stream = tokio_stream::iter(std::mem::take(&mut links));
 
             loop {
                 if !concurrency {
@@ -3515,7 +3509,7 @@ impl Website {
                             &self.configuration.remote_multimodal,
                         )
                         .await;
-                        page.clone_from(&next_page);
+                        page = next_page;
                     })
                     .await
                     {
@@ -3542,7 +3536,7 @@ impl Website {
                         &self.configuration.remote_multimodal,
                     )
                     .await;
-                    page.clone_from(&next_page);
+                    page = next_page;
                 }
 
                 // check the page again for final.
@@ -3725,7 +3719,7 @@ impl Website {
                             &self.configuration.remote_multimodal,
                         )
                         .await;
-                        page.clone_from(&next_page);
+                        page = next_page;
                     })
                     .await
                     {
@@ -3752,7 +3746,7 @@ impl Website {
                         &self.configuration.remote_multimodal,
                     )
                     .await;
-                    page.clone_from(&next_page);
+                    page = next_page;
                 }
 
                 // check the page again for final.
@@ -3868,7 +3862,7 @@ impl Website {
                     if let Err(elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                         let next_page =
                             Page::new_page_webdriver(self.url.inner(), driver, timeout).await;
-                        page.clone_from(&next_page);
+                        page = next_page;
                     })
                     .await
                     {
@@ -3877,7 +3871,7 @@ impl Website {
                 } else {
                     let next_page =
                         Page::new_page_webdriver(self.url.inner(), driver, timeout).await;
-                    page.clone_from(&next_page);
+                    page = next_page;
                 }
             }
 
@@ -4213,22 +4207,20 @@ impl Website {
                         let mut domain_parsed_clone = self.domain_parsed.clone();
 
                         if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                            page.clone_from(
-                                &Page::new_page_streaming(
-                                    &url,
-                                    client,
-                                    false,
-                                    base,
-                                    domains_caseless,
-                                    &page_links_settings,
-                                    &mut links,
-                                    Some(&mut links_ssg),
-                                    &domain_parsed,
-                                    &mut domain_parsed_clone,
-                                    &mut links_pages,
-                                )
-                                .await,
-                            );
+                            page = Page::new_page_streaming(
+                                &url,
+                                client,
+                                false,
+                                base,
+                                domains_caseless,
+                                &page_links_settings,
+                                &mut links,
+                                Some(&mut links_ssg),
+                                &domain_parsed,
+                                &mut domain_parsed_clone,
+                                &mut links_pages,
+                            )
+                            .await;
                         })
                         .await
                         {
@@ -4237,22 +4229,20 @@ impl Website {
 
                         self.domain_parsed = domain_parsed_clone;
                     } else {
-                        page.clone_from(
-                            &Page::new_page_streaming(
-                                &url,
-                                client,
-                                false,
-                                base,
-                                &self.configuration.external_domains_caseless,
-                                &page_links_settings,
-                                &mut links,
-                                Some(&mut links_ssg),
-                                &domain_parsed,
-                                &mut self.domain_parsed,
-                                &mut links_pages,
-                            )
-                            .await,
-                        );
+                        page = Page::new_page_streaming(
+                            &url,
+                            client,
+                            false,
+                            base,
+                            &self.configuration.external_domains_caseless,
+                            &page_links_settings,
+                            &mut links,
+                            Some(&mut links_ssg),
+                            &domain_parsed,
+                            &mut self.domain_parsed,
+                            &mut links_pages,
+                        )
+                        .await;
                     }
                 }
 
@@ -4365,7 +4355,7 @@ impl Website {
                                 &self.configuration.cache_policy,
                             )
                             .await;
-                            page.clone_from(&next_page);
+                            page = next_page;
                         };
                     })
                     .await
@@ -4384,15 +4374,13 @@ impl Website {
                         )
                         .await
                     } else {
-                        page.clone_from(
-                            &Page::new_page_with_cache(
-                                url,
-                                &client,
-                                self.configuration.get_cache_options(),
-                                &self.configuration.cache_policy,
-                            )
-                            .await,
-                        );
+                        page = Page::new_page_with_cache(
+                            url,
+                            &client,
+                            self.configuration.get_cache_options(),
+                            &self.configuration.cache_policy,
+                        )
+                        .await;
                     }
                 }
             }
@@ -4534,7 +4522,7 @@ impl Website {
                 )
                 .await;
 
-                page.clone_from(&next_page);
+                *page = next_page;
 
                 if let Some(h) = intercept_handle {
                     let abort_handle = h.abort_handle();
@@ -5470,7 +5458,7 @@ impl Website {
                 #[cfg(all(feature = "agent", feature = "serde"))]
                 self.apply_url_prefilter(&mut links).await;
 
-                let mut stream = tokio_stream::iter(links.drain().collect::<Vec<_>>());
+                let mut stream = tokio_stream::iter(std::mem::take(&mut links));
 
                 loop {
                     if !concurrency {
@@ -5767,7 +5755,7 @@ impl Website {
                                                     &mut domain_parsed,
                                                     &mut links_pages).await;
 
-                                                page.clone_from(&next_page);
+                                                page = next_page;
 
                                             }).await
                                         {
@@ -5778,7 +5766,7 @@ impl Website {
                                             let mut domain_parsed = None;
                                             let mut retry_r_settings = shared.7;
                                             retry_r_settings.ssg_build = true;
-                                            page.clone_from(&Page::new_page_streaming(
+                                            page = Page::new_page_streaming(
                                                 target_url,
                                                 retry_client,
                                                 only_html,
@@ -5789,7 +5777,7 @@ impl Website {
                                                 None,
                                                 &shared.8,
                                                 &mut domain_parsed,
-                                                &mut links_pages).await);
+                                                &mut links_pages).await;
                                         }
                                     }
 
@@ -6237,14 +6225,13 @@ impl Website {
                                                                             &shared.6.cache_policy,
                                                                             &shared.6.remote_multimodal,
                                                                         ).await;
-                                                                        page.clone_from(&p);
+                                                                        page = p;
 
                                                                     }).await {
                                                                         log::info!("{target_url} backoff gateway timeout exceeded {elasped}");
                                                                     }
                                                                 } else {
-                                                                    page.clone_from(
-                                                                        &Page::new(
+                                                                    page = Page::new(
                                                                             target_url,
                                                                             &shared.0,
                                                                             &new_page,
@@ -6263,8 +6250,7 @@ impl Website {
                                                                             &shared.6.cache_policy,
                                                                             &shared.6.remote_multimodal,
                                                                         )
-                                                                        .await,
-                                                                    );
+                                                                        .await;
                                                                 }
                                                             }
 
@@ -6449,7 +6435,7 @@ impl Website {
                 #[cfg(all(feature = "agent", feature = "serde"))]
                 self.apply_url_prefilter(&mut links).await;
 
-                let mut stream = tokio_stream::iter(links.drain().collect::<Vec<_>>());
+                let mut stream = tokio_stream::iter(std::mem::take(&mut links));
 
                 loop {
                     if !concurrency {
@@ -6694,7 +6680,7 @@ impl Website {
                                                     &mut domain_parsed,
                                                     &mut links_pages).await;
 
-                                                page.clone_from(&next_page);
+                                                page = next_page;
 
                                             }).await
                                         {
@@ -6705,7 +6691,7 @@ impl Website {
                                             let mut domain_parsed = None;
                                             let mut retry_r_settings = shared.7;
                                             retry_r_settings.ssg_build = true;
-                                            page.clone_from(&Page::new_page_streaming(
+                                            page = Page::new_page_streaming(
                                                 target_url,
                                                 retry_client,
                                                 only_html,
@@ -6716,7 +6702,7 @@ impl Website {
                                                 None,
                                                 &shared.8,
                                                 &mut domain_parsed,
-                                                &mut links_pages).await);
+                                                &mut links_pages).await;
                                         }
                                     }
 
@@ -7126,14 +7112,13 @@ impl Website {
                                                                                 &shared.6.cache_policy,
                                                                                 &shared.6.remote_multimodal,
                                                                             ).await;
-                                                                            page.clone_from(&p);
+                                                                            page = p;
 
                                                                         }).await {
                                                                             log::info!("{target_url} backoff gateway timeout exceeded {elasped}");
                                                                         }
                                                                     } else {
-                                                                        page.clone_from(
-                                                                            &Page::new(
+                                                                        page = Page::new(
                                                                                 target_url,
                                                                                 &shared.0,
                                                                                 &new_page,
@@ -7152,8 +7137,7 @@ impl Website {
                                                                                 &shared.6.cache_policy,
                                                                                 &shared.6.remote_multimodal,
                                                                             )
-                                                                            .await,
-                                                                        );
+                                                                            .await;
                                                                     }
                                                                 }
 
@@ -7472,19 +7456,17 @@ impl Website {
                                                             &shared.5,
                                                             shared.10,
                                                         ).await;
-                                                        page.clone_from(&p);
+                                                        page = p;
                                                     }).await {
                                                         log::info!("{target_url} backoff gateway timeout exceeded {elapsed}");
                                                     }
                                                 } else {
-                                                    page.clone_from(
-                                                        &Page::new_page_webdriver(
+                                                    page = Page::new_page_webdriver(
                                                             target_url,
                                                             &shared.5,
                                                             shared.10,
                                                         )
-                                                        .await,
-                                                    );
+                                                        .await;
                                                 }
                                             }
 
@@ -7644,7 +7626,7 @@ impl Website {
             #[cfg(all(feature = "agent", feature = "serde"))]
             self.apply_url_prefilter(&mut links).await;
 
-            let stream = tokio_stream::iter(links.drain().collect::<Vec<_>>()).throttle(*throttle);
+            let stream = tokio_stream::iter(std::mem::take(&mut links)).throttle(*throttle);
             tokio::pin!(stream);
 
             loop {
@@ -7825,7 +7807,7 @@ impl Website {
                 #[cfg(all(feature = "agent", feature = "serde"))]
                 self.apply_url_prefilter(&mut links).await;
 
-                let mut stream = tokio_stream::iter(links.drain().collect::<Vec<_>>());
+                let mut stream = tokio_stream::iter(std::mem::take(&mut links));
 
                 loop {
                     if !concurrency {
@@ -7915,7 +7897,7 @@ impl Website {
                                                     )
                                                     .await;
 
-                                                    page.clone_from(&next_page)
+                                                    page = next_page
                                                 };
 
                                             }).await
@@ -7934,15 +7916,13 @@ impl Website {
                                                 )
                                                 .await;
                                             } else {
-                                                page.clone_from(
-                                                    &Page::new_page_with_cache(
+                                                page = Page::new_page_with_cache(
                                                         url,
                                                         &shared.0,
                                                         shared.4.get_cache_options(),
                                                         &shared.4.cache_policy,
                                                     )
-                                                        .await,
-                                                );
+                                                        .await;
                                             }
                                         }
                                     }
@@ -9029,15 +9009,13 @@ impl Website {
                                         if let Some(timeout) = page.get_timeout() {
                                             tokio::time::sleep(timeout).await;
                                         }
-                                        page.clone_from(
-                                            &Page::new_page_with_cache(
-                                                link.inner(),
-                                                &client,
-                                                cache_options.clone(),
-                                                &cache_policy,
-                                            )
-                                            .await,
-                                        );
+                                        page = Page::new_page_with_cache(
+                                            link.inner(),
+                                            &client,
+                                            cache_options.clone(),
+                                            &cache_policy,
+                                        )
+                                        .await;
                                         retry_count -= 1;
                                     }
 
