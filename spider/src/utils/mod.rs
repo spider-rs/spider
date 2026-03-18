@@ -941,7 +941,10 @@ pub async fn perform_chrome_http_request(
         referrer: Option<String>,
     ) -> Result<ChromeHTTPReqRes, chromiumoxide::error::CdpError> {
         let mut waf_check = false;
-        let mut status_code = StatusCode::OK;
+        // Default to 599 (unknown) — only set 200 when we actually get a
+        // valid HTTP response from Chrome.  This ensures callers see a
+        // non-success status when navigation produces no response.
+        let mut status_code = *crate::page::UNKNOWN_STATUS_ERROR;
         let mut method = String::from("GET");
         let mut response_headers: std::collections::HashMap<String, String> =
             std::collections::HashMap::default();
@@ -1095,7 +1098,7 @@ pub async fn perform_chrome_http_request_cache(
         cache_policy: &Option<BasicCachePolicy>,
     ) -> Result<ChromeHTTPReqRes, chromiumoxide::error::CdpError> {
         let mut waf_check = false;
-        let mut status_code = StatusCode::OK;
+        let mut status_code = *crate::page::UNKNOWN_STATUS_ERROR;
         let mut method = String::from("GET");
         let mut response_headers: std::collections::HashMap<String, String> =
             std::collections::HashMap::default();
@@ -3382,6 +3385,12 @@ pub async fn fetch_page_html_chrome_base(
     };
     if page_response.status_code == *UNKNOWN_STATUS_ERROR && page_response.content.is_some() {
         page_response.status_code = StatusCode::OK;
+    }
+    // If Chrome reported success (200) but produced no content, downgrade to
+    // 204 (No Content) so callers can distinguish real success from empty
+    // responses and trigger retries/hedging appropriately.
+    if page_response.status_code == StatusCode::OK && page_response.content.is_none() {
+        page_response.status_code = StatusCode::NO_CONTENT;
     }
 
     // run initial handling hidden anchors
