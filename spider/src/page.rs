@@ -2820,7 +2820,6 @@ impl Page {
     /// encoding conversion is needed.
     pub fn get_html_cow(&self) -> std::borrow::Cow<'_, str> {
         match self.html.as_deref() {
-            Some(bytes) if bytes.is_empty() => std::borrow::Cow::Borrowed(""),
             Some(bytes) => match std::str::from_utf8(bytes) {
                 Ok(s) => std::borrow::Cow::Borrowed(s),
                 Err(_) => std::borrow::Cow::Owned(auto_encoder::auto_encode_bytes(bytes)),
