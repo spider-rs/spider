@@ -93,8 +93,10 @@ impl HedgeTracker {
         elapsed.as_millis() as u64 > threshold_ms
     }
 
-    /// Get the adaptive delay: max(config_delay, EMA * threshold_multiplier).
-    /// Returns a delay that is at least the configured delay but grows with observed latency.
+    /// Get the adaptive delay: max(config_delay, EMA).
+    /// Returns a delay that is at least the configured delay but adapts to observed latency.
+    /// Uses the raw EMA (not multiplied by threshold) so hedging fires as soon as a
+    /// request exceeds typical duration rather than waiting for 2x+ the average.
     pub fn adaptive_delay(&self, base_delay: Duration) -> Duration {
         let count = self.samples.load(Ordering::Relaxed);
         if count < self.min_samples {
@@ -102,10 +104,9 @@ impl HedgeTracker {
         }
 
         let ema = self.ema_ms.load(Ordering::Relaxed);
-        let adaptive_ms = ema * self.threshold_pct / 100;
-        let adaptive = Duration::from_millis(adaptive_ms);
+        let adaptive = Duration::from_millis(ema);
 
-        // Use the longer of base_delay and adaptive delay to avoid premature hedging
+        // Use the longer of base_delay and EMA to avoid premature hedging
         base_delay.max(adaptive)
     }
 
@@ -584,15 +585,15 @@ mod tests {
         tracker.record(Duration::from_millis(500));
         tracker.record(Duration::from_millis(500));
 
-        // Adaptive = EMA(500) * 2.0 = 1000ms. Base = 3000ms. Max(3000, 1000) = 3000.
+        // Adaptive = EMA(500). Base = 3000ms. Max(3000, 500) = 3000.
         assert_eq!(tracker.adaptive_delay(base_delay), base_delay);
 
         // Now with a small base delay
-        let small_delay = Duration::from_millis(500);
-        // Adaptive = 500 * 2.0 = 1000ms > 500ms base
+        let small_delay = Duration::from_millis(200);
+        // Adaptive = EMA 500ms > 200ms base
         assert_eq!(
             tracker.adaptive_delay(small_delay),
-            Duration::from_millis(1000)
+            Duration::from_millis(500)
         );
     }
 

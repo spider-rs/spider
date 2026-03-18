@@ -6096,23 +6096,18 @@ impl Website {
                                                                 biased;
                                                                 result = &mut primary_fut => result,
                                                                 _ = tokio::time::sleep(delay) => {
-                                                                    // Only fire hedge if tracker confirms we're actually slow
-                                                                    if !hedge_trk.should_hedge(fetch_start.elapsed()) {
-                                                                        primary_fut.await
-                                                                    } else {
-                                                                        log::info!("[hedge-chrome] fired after {}ms (ema={}ms) url={}", delay.as_millis(), hedge_trk.ema_ms(), target_url);
-                                                                        let hedge_fut = async { chrome_page_fetch!(shared, target_url) };
-                                                                        tokio::pin!(hedge_fut);
-                                                                        tokio::select! {
-                                                                            biased;
-                                                                            result = &mut primary_fut => {
-                                                                                log::info!("[hedge-chrome] winner: primary url={}", target_url);
-                                                                                result
-                                                                            }
-                                                                            result = &mut hedge_fut => {
-                                                                                log::info!("[hedge-chrome] winner: hedge url={}", target_url);
-                                                                                result
-                                                                            }
+                                                                    log::info!("[hedge-chrome] fired after {}ms (ema={}ms) url={}", delay.as_millis(), hedge_trk.ema_ms(), target_url);
+                                                                    let hedge_fut = async { chrome_page_fetch!(shared, target_url) };
+                                                                    tokio::pin!(hedge_fut);
+                                                                    tokio::select! {
+                                                                        biased;
+                                                                        result = &mut primary_fut => {
+                                                                            log::info!("[hedge-chrome] winner: primary url={}", target_url);
+                                                                            result
+                                                                        }
+                                                                        result = &mut hedge_fut => {
+                                                                            log::info!("[hedge-chrome] winner: hedge url={}", target_url);
+                                                                            result
                                                                         }
                                                                     }
                                                                 }
@@ -6945,23 +6940,18 @@ impl Website {
                                                                 biased;
                                                                 result = &mut primary_fut => result,
                                                                 _ = tokio::time::sleep(delay) => {
-                                                                    // Only fire hedge if tracker confirms we're actually slow
-                                                                    if !hedge_trk.should_hedge(fetch_start.elapsed()) {
-                                                                        primary_fut.await
-                                                                    } else {
-                                                                        log::info!("[hedge-chrome] fired after {}ms (ema={}ms) url={}", delay.as_millis(), hedge_trk.ema_ms(), target_url);
-                                                                        let hedge_fut = async { chrome_page_fetch!(shared, target_url) };
-                                                                        tokio::pin!(hedge_fut);
-                                                                        tokio::select! {
-                                                                            biased;
-                                                                            result = &mut primary_fut => {
-                                                                                log::info!("[hedge-chrome] winner: primary url={}", target_url);
-                                                                                result
-                                                                            }
-                                                                            result = &mut hedge_fut => {
-                                                                                log::info!("[hedge-chrome] winner: hedge url={}", target_url);
-                                                                                result
-                                                                            }
+                                                                    log::info!("[hedge-chrome] fired after {}ms (ema={}ms) url={}", delay.as_millis(), hedge_trk.ema_ms(), target_url);
+                                                                    let hedge_fut = async { chrome_page_fetch!(shared, target_url) };
+                                                                    tokio::pin!(hedge_fut);
+                                                                    tokio::select! {
+                                                                        biased;
+                                                                        result = &mut primary_fut => {
+                                                                            log::info!("[hedge-chrome] winner: primary url={}", target_url);
+                                                                            result
+                                                                        }
+                                                                        result = &mut hedge_fut => {
+                                                                            log::info!("[hedge-chrome] winner: hedge url={}", target_url);
+                                                                            result
                                                                         }
                                                                     }
                                                                 }
