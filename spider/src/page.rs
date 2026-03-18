@@ -2660,6 +2660,10 @@ impl Page {
             return Some(Duration::from_millis(2_500));
         } else if self.status_code == StatusCode::GATEWAY_TIMEOUT {
             return Some(Duration::from_millis(1_500));
+        } else if self.status_code.as_u16() >= 598 {
+            // Proxy/unknown connection errors (599, 598) - brief backoff before
+            // same-proxy retry to avoid hammering a transiently broken tunnel.
+            return Some(Duration::from_millis(500));
         }
 
         None
@@ -2687,6 +2691,10 @@ impl Page {
             };
         } else if self.status_code == StatusCode::GATEWAY_TIMEOUT {
             return Some(Duration::from_millis(1_500));
+        } else if self.status_code.as_u16() >= 598 {
+            // Proxy/unknown connection errors (599, 598) - brief backoff before
+            // same-proxy retry to avoid hammering a transiently broken tunnel.
+            return Some(Duration::from_millis(500));
         }
 
         None
