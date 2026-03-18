@@ -33,9 +33,9 @@ use lazy_static::lazy_static;
 use tokio_stream::StreamExt;
 use url::Url;
 
-/// Allocate up to 16kb upfront for small pages.
-pub(crate) const MAX_PRE_ALLOCATED_HTML_PAGE_SIZE: u64 = 16 * 1024;
-/// Allocate up to 16kb upfront for small pages.
+/// Allocate up to 128kb upfront for small pages.
+pub(crate) const MAX_PRE_ALLOCATED_HTML_PAGE_SIZE: u64 = 128 * 1024;
+/// Allocate up to 128kb upfront for small pages.
 pub(crate) const MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE: usize =
     MAX_PRE_ALLOCATED_HTML_PAGE_SIZE as usize;
 
@@ -364,7 +364,7 @@ lazy_static! {
 
     /// The chunk size for the rewriter. Can be adjusted using the env var "SPIDER_STREAMING_CHUNK_SIZE".
     pub(crate) static ref STREAMING_CHUNK_SIZE: usize = {
-        let default_streaming_chunk_size: usize = 8192 * num_cpus::get_physical().min(64);
+        let default_streaming_chunk_size: usize = (8192 * num_cpus::get_physical().min(64)).min(65536);
         let min_streaming_chunk_size: usize = default_streaming_chunk_size * 2 / 3;
 
         std::env::var("SPIDER_STREAMING_CHUNK_SIZE")
@@ -2809,10 +2809,24 @@ impl Page {
 
     /// Html getter for bytes on the page as string.
     pub fn get_html(&self) -> String {
-        self.html
-            .as_ref()
-            .map(|v| auto_encoder::auto_encode_bytes(v))
-            .unwrap_or_default()
+        match self.get_html_cow() {
+            std::borrow::Cow::Borrowed(s) => s.to_string(),
+            std::borrow::Cow::Owned(s) => s,
+        }
+    }
+
+    /// Html getter that avoids allocation when the content is already valid UTF-8.
+    /// Returns `Cow::Borrowed` for UTF-8 content (common case), `Cow::Owned` when
+    /// encoding conversion is needed.
+    pub fn get_html_cow(&self) -> std::borrow::Cow<'_, str> {
+        match self.html.as_deref() {
+            Some(bytes) if bytes.is_empty() => std::borrow::Cow::Borrowed(""),
+            Some(bytes) => match std::str::from_utf8(bytes) {
+                Ok(s) => std::borrow::Cow::Borrowed(s),
+                Err(_) => std::borrow::Cow::Owned(auto_encoder::auto_encode_bytes(bytes)),
+            },
+            None => std::borrow::Cow::Borrowed(""),
+        }
     }
 
     /// Html getter for page to u8.

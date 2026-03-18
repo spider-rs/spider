@@ -646,7 +646,10 @@ pub(crate) async fn prefilter_urls(
             }
         };
 
-        // Update cache and build relevant set
+        // Update cache and build relevant set (cap at 50k entries to bound memory)
+        if cfgs.url_prefilter_cache.len() >= 50_000 {
+            cfgs.url_prefilter_cache.clear();
+        }
         for (url, &is_relevant) in batch.iter().zip(classifications.iter()) {
             let path = url_to_cache_key(url.inner().as_str());
             cfgs.url_prefilter_cache.insert(path, is_relevant);

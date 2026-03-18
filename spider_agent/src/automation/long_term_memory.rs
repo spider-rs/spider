@@ -341,7 +341,10 @@ impl ExperienceMemory {
             }
         }
 
-        // Cache results
+        // Cache results (cap at 256 entries to bound memory)
+        if self.recall_cache.len() >= 256 {
+            self.recall_cache.clear();
+        }
         self.recall_cache.insert(query_hash, experiences.clone());
 
         Ok(experiences)

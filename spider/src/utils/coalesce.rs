@@ -12,8 +12,9 @@ mod inner {
     use std::time::{Duration, Instant};
     use tokio::sync::broadcast;
 
-    /// Broadcast channel capacity — supports up to 64 concurrent waiters per URL.
-    const CHANNEL_CAPACITY: usize = 64;
+    /// Broadcast channel capacity — only one completion signal is sent per URL;
+    /// a small buffer suffices for all subscribers.
+    const CHANNEL_CAPACITY: usize = 4;
 
     /// Maximum time a guard can be held before it is considered stale (seconds).
     const STALE_TIMEOUT_SECS: u64 = 120;

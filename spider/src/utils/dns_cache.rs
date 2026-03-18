@@ -2,6 +2,9 @@ use dashmap::DashMap;
 use std::net::{IpAddr, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
+/// Maximum number of cached entries before eviction on overflow.
+const MAX_ENTRIES: usize = 5_000;
+
 /// Cached DNS entry with TTL tracking.
 struct DnsEntry {
     addrs: Vec<IpAddr>,
@@ -12,7 +15,8 @@ struct DnsEntry {
 ///
 /// Resolves hostnames via the system resolver and caches results
 /// for up to `ttl`. Expired entries are served as misses and
-/// re-resolved on next access.
+/// re-resolved on next access. Capped at [`MAX_ENTRIES`]; overflow
+/// triggers expired-entry eviction followed by LRU-style trimming.
 pub struct DnsCache {
     cache: DashMap<String, DnsEntry>,
     ttl: Duration,
@@ -53,6 +57,24 @@ impl DnsCache {
 
         match result {
             Some(ips) if !ips.is_empty() => {
+                // Evict overflow before inserting.
+                if self.cache.len() >= MAX_ENTRIES {
+                    self.evict_expired();
+                    // If still over capacity after eviction, remove oldest entries.
+                    if self.cache.len() >= MAX_ENTRIES {
+                        let to_remove = MAX_ENTRIES / 10;
+                        let keys_to_remove: Vec<String> = self
+                            .cache
+                            .iter()
+                            .take(to_remove)
+                            .map(|entry| entry.key().clone())
+                            .collect();
+                        for k in keys_to_remove {
+                            self.cache.remove(&k);
+                        }
+                    }
+                }
+
                 self.cache.insert(
                     host.to_string(),
                     DnsEntry {

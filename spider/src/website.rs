@@ -5788,7 +5788,7 @@ impl Website {
                                     // Run remote multimodal extraction if configured (HTTP-only path)
                                     #[cfg(all(feature = "agent", feature = "serde"))]
                                     if shared.10.is_some() {
-                                        let html = page.get_html();
+                                        let html = page.get_html_cow();
                                         if !html.is_empty() {
                                             use crate::features::automation::{run_remote_multimodal_extraction, AutomationResultExt};
                                             let title = page.metadata.as_ref().and_then(|m| m.title.as_ref()).map(|t| t.as_str());
@@ -6713,7 +6713,7 @@ impl Website {
                                     // Run remote multimodal extraction if configured (HTTP-only path)
                                     #[cfg(all(feature = "agent", feature = "serde"))]
                                     if shared.10.is_some() {
-                                        let html = page.get_html();
+                                        let html = page.get_html_cow();
                                         if !html.is_empty() {
                                             use crate::features::automation::{run_remote_multimodal_extraction, AutomationResultExt};
                                             let title = page.metadata.as_ref().and_then(|m| m.title.as_ref()).map(|t| t.as_str());
@@ -7963,7 +7963,7 @@ impl Website {
                                     // Run remote multimodal extraction if configured (smart HTTP path)
                                     #[cfg(all(feature = "agent", feature = "serde"))]
                                     if shared.4.remote_multimodal.is_some() {
-                                        let html = page.get_html();
+                                        let html = page.get_html_cow();
                                         if !html.is_empty() {
                                             use crate::features::automation::{run_remote_multimodal_extraction, AutomationResultExt};
                                             let title = page.metadata.as_ref().and_then(|m| m.title.as_ref()).map(|t| t.as_str());
