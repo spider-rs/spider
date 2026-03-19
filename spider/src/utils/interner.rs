@@ -130,7 +130,7 @@ where
     pub fn insert(&mut self, link: K) {
         #[cfg(feature = "bloom")]
         {
-            self.bloom.insert(&link.as_ref());
+            self.bloom.insert(link.as_ref());
         }
 
         #[cfg(any(
@@ -164,7 +164,7 @@ where
         #[cfg(feature = "bloom")]
         {
             // Bloom filter says "definitely not present" → skip HashSet.
-            if !self.bloom.contains(&link.as_ref()) {
+            if !self.bloom.contains(link.as_ref()) {
                 return false;
             }
         }
@@ -274,17 +274,23 @@ where
             for link in msg {
                 // Bloom pre-check: skip HashSet lookup when definitely absent.
                 #[cfg(feature = "bloom")]
-                if self.bloom.contains(&link.as_ref()) {
-                    let symbol = self.interner.get_or_intern(link.as_ref());
-                    if self.links_visited.contains(&symbol) {
-                        continue;
+                {
+                    if self.bloom.contains(link.as_ref()) {
+                        // Use read-only `get` — no allocation if already interned.
+                        if let Some(symbol) = self.interner.get(link.as_ref()) {
+                            if self.links_visited.contains(&symbol) {
+                                continue;
+                            }
+                        }
                     }
                 }
                 #[cfg(not(feature = "bloom"))]
                 {
-                    let symbol = self.interner.get_or_intern(link.as_ref());
-                    if self.links_visited.contains(&symbol) {
-                        continue;
+                    // Use read-only `get` — avoids interning strings we'll never visit.
+                    if let Some(symbol) = self.interner.get(link.as_ref()) {
+                        if self.links_visited.contains(&symbol) {
+                            continue;
+                        }
                     }
                 }
                 links.insert(link);
@@ -300,14 +306,19 @@ where
             #[cfg(feature = "bloom")]
             {
                 for link in msg {
-                    if !self.bloom.contains(&link.as_ref()) || !self.links_visited.contains(&link) {
+                    if !self.bloom.contains(link.as_ref()) || !self.links_visited.contains(&link) {
                         links.insert(link);
                     }
                 }
             }
             #[cfg(not(feature = "bloom"))]
             {
-                links.extend(msg.difference(&self.links_visited).cloned());
+                // `msg` is owned — iterate by value and move, avoiding `.cloned()`.
+                for link in msg {
+                    if !self.links_visited.contains(&link) {
+                        links.insert(link);
+                    }
+                }
             }
         }
     }
@@ -321,7 +332,7 @@ where
         // Bloom pre-check: if bloom says "not present", skip the HashSet lookup.
         #[cfg(feature = "bloom")]
         {
-            if !self.bloom.contains(&s.as_ref()) {
+            if !self.bloom.contains(s.as_ref()) {
                 links.insert(s);
                 return;
             }
