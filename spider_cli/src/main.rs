@@ -234,6 +234,18 @@ async fn main() {
         )))));
     }
 
+    if let Some(cookie) = &cli.cookie {
+        website.with_cookies(cookie);
+    }
+
+    if let Some(ref chrome_connection_url) = cli.chrome_connection_url {
+        website.with_chrome_connection(Some(chrome_connection_url.clone()));
+    }
+
+    if cli.stealth {
+        website.with_stealth(true);
+    }
+
     let return_headers = cli.return_headers;
     let use_headless = cli.headless && !cli.http;
 

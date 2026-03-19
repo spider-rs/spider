@@ -90,4 +90,13 @@ pub struct Cli {
     /// Wait for a fixed delay in milliseconds.
     #[clap(long)]
     pub wait_for_delay: Option<u64>,
+    /// Connect to an existing Chrome DevTools Protocol endpoint (e.g. ws://127.0.0.1:9222 or http://127.0.0.1:9222/json/version).
+    #[clap(long)]
+    pub chrome_connection_url: Option<String>,
+    /// Cookie string to inject (e.g. "key=value; key2=value2"). Requires the `cookies` feature on spider.
+    #[clap(long)]
+    pub cookie: Option<String>,
+    /// Enable stealth mode to avoid bot detection.
+    #[clap(long)]
+    pub stealth: bool,
 }
