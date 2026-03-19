@@ -5204,8 +5204,12 @@ pub async fn get_cached_url_base(
     }
 
     // Pull from the remote cache server once, then retry local session lookup.
-    chromiumoxide::cache::remote::get_cache_site(target_url, auth_opt.as_deref(), Some("true"))
-        .await;
+    // Timeout prevents blocking the critical path if the cache server is slow/down.
+    let _ = tokio::time::timeout(
+        Duration::from_secs(3),
+        chromiumoxide::cache::remote::get_cache_site(target_url, auth_opt.as_deref(), Some("true")),
+    )
+    .await;
 
     if let Some(body) = try_get(target_url) {
         return Some(body);
