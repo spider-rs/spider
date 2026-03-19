@@ -6,7 +6,7 @@ use std::fmt::Debug;
 /// TrieNode structure to handle clean url path mappings.
 pub struct TrieNode<V: Debug> {
     /// The children for the trie.
-    pub children: HashMap<String, TrieNode<V>>,
+    pub children: HashMap<Box<str>, TrieNode<V>>,
     /// The value for the trie.
     pub value: Option<V>,
 }
@@ -78,29 +78,31 @@ impl<V: Debug> Trie<V> {
         }
     }
 
-    /// Iterate path segments without allocating.
-    #[inline]
-    fn path_segments(path: &str) -> impl Iterator<Item = &str> {
-        let start = Self::path_start(path);
-        let base = if start < path.len() {
-            &path[start..]
-        } else {
-            path
-        };
-        base.split('/')
-            .filter(|s| !s.is_empty() && !s.contains('.'))
-    }
-
     /// Insert a path and its associated value into the trie.
     #[cfg_attr(feature = "inline-more", inline)]
     pub fn insert(&mut self, path: &str, value: V) {
         let mut node = &mut self.root;
 
-        for segment in Self::path_segments(path) {
-            node = node
-                .children
-                .entry_ref(segment)
-                .or_insert_with(TrieNode::new);
+        let start = Self::path_start(path);
+        let bytes = path.as_bytes();
+        let len = bytes.len();
+        let mut i = start;
+
+        while i < len {
+            if bytes[i] == b'/' {
+                i += 1;
+                continue;
+            }
+
+            let seg_start = i;
+            let seg_end = memchr::memchr(b'/', &bytes[i..]).map_or(len, |p| i + p);
+            let segment = &path[seg_start..seg_end];
+
+            if memchr::memchr(b'.', segment.as_bytes()).is_none() {
+                node = node.children.entry_ref(segment).or_default();
+            }
+
+            i = seg_end;
         }
 
         if path == "/" {
@@ -111,7 +113,7 @@ impl<V: Debug> Trie<V> {
     }
 
     /// Search for a path in the trie.
-    #[cfg_attr(feature = "inline-more", inline)]
+    #[inline]
     pub fn search(&self, input: &str) -> Option<&V> {
         let mut node = &self.root;
 
@@ -119,12 +121,30 @@ impl<V: Debug> Trie<V> {
             return None;
         }
 
-        for segment in Self::path_segments(input) {
-            if let Some(child) = node.children.get(segment) {
-                node = child;
-            } else if !self.match_all {
-                return None;
+        let start = Self::path_start(input);
+        let bytes = input.as_bytes();
+        let len = bytes.len();
+        let mut i = start;
+
+        while i < len {
+            if bytes[i] == b'/' {
+                i += 1;
+                continue;
             }
+
+            let seg_start = i;
+            let seg_end = memchr::memchr(b'/', &bytes[i..]).map_or(len, |p| i + p);
+            let segment = &input[seg_start..seg_end];
+
+            if memchr::memchr(b'.', segment.as_bytes()).is_none() {
+                if let Some(child) = node.children.get(segment) {
+                    node = child;
+                } else if !self.match_all {
+                    return None;
+                }
+            }
+
+            i = seg_end;
         }
 
         node.value.as_ref()
