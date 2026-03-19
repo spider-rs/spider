@@ -562,6 +562,7 @@ pub async fn launch_browser_base(
     Browser,
     tokio::task::JoinHandle<()>,
     Option<BrowserContextId>,
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
 )> {
     use chromiumoxide::{
         cdp::browser_protocol::target::CreateBrowserContextParams, error::CdpError,
@@ -574,6 +575,9 @@ pub async fn launch_browser_base(
             let (mut browser, mut handler) = c;
             let mut context_id = None;
 
+            let browser_dead = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let browser_dead_signal = browser_dead.clone();
+
             // Spawn a new task that continuously polls the handler
             // we might need a select with closing in case handler stalls.
             let handle = tokio::task::spawn(async move {
@@ -584,6 +588,9 @@ pub async fn launch_browser_base(
                             | CdpError::LaunchExit(_, _)
                             | CdpError::LaunchTimeout(_)
                             | CdpError::LaunchIo(_, _) => {
+                                browser_dead_signal
+                                    .store(true, std::sync::atomic::Ordering::Release);
+                                log::error!("Browser handler fatal error: {:?}", e);
                                 break;
                             }
                             _ => {
@@ -592,6 +599,8 @@ pub async fn launch_browser_base(
                         }
                     }
                 }
+                // Handler stream ended — browser is gone.
+                browser_dead_signal.store(true, std::sync::atomic::Ordering::Release);
             });
 
             let mut create_content = CreateBrowserContextParams::default();
@@ -651,7 +660,7 @@ pub async fn launch_browser_base(
                 handle.abort();
             }
 
-            Some((browser, handle, context_id))
+            Some((browser, handle, context_id, browser_dead))
         }
         _ => None,
     }
@@ -665,6 +674,7 @@ pub async fn launch_browser(
     Browser,
     tokio::task::JoinHandle<()>,
     Option<BrowserContextId>,
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
 )> {
     launch_browser_base(config, url_parsed, None).await
 }
@@ -678,6 +688,7 @@ pub async fn launch_browser_cookies(
     Browser,
     tokio::task::JoinHandle<()>,
     Option<BrowserContextId>,
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
 )> {
     launch_browser_base(config, url_parsed, jar).await
 }
@@ -1106,14 +1117,22 @@ pub struct BrowserController {
     pub browser: BrowserControl,
     /// Closed browser.
     pub closed: bool,
+    /// Signal set by the handler task when the browser process dies or the
+    /// WebSocket disconnects. Spawned page-fetch tasks should check this
+    /// before creating new tabs to avoid wasting work on a dead browser.
+    pub browser_dead: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl BrowserController {
     /// A new browser controller.
-    pub(crate) fn new(browser: BrowserControl) -> Self {
+    pub(crate) fn new(
+        browser: BrowserControl,
+        browser_dead: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
         BrowserController {
             browser,
             closed: false,
+            browser_dead,
         }
     }
     /// Dispose the browser context and join handler.

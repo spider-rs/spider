@@ -66,6 +66,13 @@ pub use http_global_cache::CACACHE_MANAGER;
 /// The max backoff duration in seconds.
 const BACKOFF_MAX_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(60);
 
+/// Minimum retry count for Chrome requests. Chrome/CDP is inherently less
+/// reliable than plain HTTP (tab crashes, WebSocket flakes, navigation
+/// timeouts) so we always retry at least this many times even when the user
+/// left `config.retry` at 0.
+#[cfg(feature = "chrome")]
+const CHROME_MIN_RETRY: u8 = 2;
+
 /// Chrome page fetch with retry. Creates a tab, navigates, retries on failure.
 /// Returns `Option<Page>` — `None` if tab creation fails.
 /// Used by the hedge feature to race a primary fetch against a hedge fetch on a second tab.
@@ -114,18 +121,42 @@ macro_rules! chrome_page_fetch {
                 )
                 .await;
 
-                let mut retry_count = $shared.6.retry;
+                let mut retry_count = $shared.6.retry.max(CHROME_MIN_RETRY);
+                let mut attempt: u32 = 0;
                 while page.needs_retry() && retry_count > 0 {
                     retry_count -= 1;
-                    if let Some(timeout) = page.get_timeout() {
-                        tokio::time::sleep(timeout).await;
-                    }
-                    if page.status_code == StatusCode::GATEWAY_TIMEOUT {
-                        if let Err(elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                    // Exponential backoff with jitter between retries.
+                    let status_delay = page.get_timeout().unwrap_or_default();
+                    let backoff = crate::utils::backoff::backoff_delay(attempt, 200, 15_000);
+                    tokio::time::sleep(status_delay.max(backoff)).await;
+                    attempt += 1;
+
+                    // Fresh tab for retry — avoids reusing a corrupted tab.
+                    if let Ok(retry_tab) = crate::features::chrome::attempt_navigation(
+                        "about:blank",
+                        &$shared.5,
+                        &$shared.6.request_timeout,
+                        &$shared.8,
+                        &$shared.6.viewport,
+                    )
+                    .await
+                    {
+                        let _ = tokio::join!(
+                            crate::features::chrome::setup_chrome_events(&retry_tab, &$shared.6),
+                            crate::features::chrome::setup_chrome_interception_base(
+                                &retry_tab,
+                                $shared.6.chrome_intercept.enabled,
+                                &$shared.6.auth_challenge_response,
+                                $shared.6.chrome_intercept.block_visuals,
+                                &$shared.7,
+                            )
+                        );
+
+                        if let Err(_elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                             let p = Page::new(
                                 $target_url,
                                 &$shared.0,
-                                &hedge_tab,
+                                &retry_tab,
                                 &$shared.6.wait_for,
                                 &$shared.6.screenshot,
                                 false,
@@ -147,32 +178,17 @@ macro_rules! chrome_page_fetch {
                         .await
                         {
                             log::info!(
-                                "{} backoff gateway timeout exceeded {}",
+                                "{} chrome retry backoff timeout exceeded {}",
                                 $target_url,
-                                elapsed
+                                _elapsed
                             );
                         }
                     } else {
-                        page = Page::new(
+                        log::warn!(
+                            "{} chrome retry tab creation failed, attempt {}",
                             $target_url,
-                            &$shared.0,
-                            &hedge_tab,
-                            &$shared.6.wait_for,
-                            &$shared.6.screenshot,
-                            false,
-                            &$shared.6.openai_config,
-                            &$shared.6.execution_scripts,
-                            &$shared.6.automation_scripts,
-                            &$shared.6.viewport,
-                            &$shared.6.request_timeout,
-                            &$shared.6.track_events,
-                            $shared.6.referer.clone(),
-                            $shared.6.max_page_bytes,
-                            $shared.6.get_cache_options(),
-                            &$shared.6.cache_policy,
-                            &$shared.6.remote_multimodal,
-                        )
-                        .await;
+                            attempt
+                        );
                     }
                 }
 
@@ -5965,6 +5981,7 @@ impl Website {
                                 b.browser.2.clone(),
                                 self.domain_parsed.clone(),
                                 self.on_link_find_callback.clone(),
+                                b.browser_dead.clone(),
                             ));
 
                             let add_external = !shared.3.is_empty();
@@ -6099,6 +6116,12 @@ impl Website {
 
                                                     // Hedge-enabled Chrome path: race primary tab vs hedge tab
                                                     #[cfg(feature = "hedge")]
+                                                    if shared.11.load(std::sync::atomic::Ordering::Acquire) {
+                                                        log::warn!("{target_url_string} skipping fetch: browser is dead");
+                                                        drop(permit);
+                                                        return Default::default();
+                                                    }
+                                                    #[cfg(feature = "hedge")]
                                                     let results = {
                                                         let should_hedge = hedge_cfg.as_ref().is_some_and(|h| h.enabled);
                                                         let target_url = target_url_string.as_str();
@@ -6159,9 +6182,16 @@ impl Website {
                                                         }
                                                     };
 
-                                                    // Non-hedge Chrome path: single tab fetch (unchanged)
+                                                    // Non-hedge Chrome path: single tab fetch with robust retry
+                                                    // Early-out if browser process died (WebSocket closed,
+                                                    // crash, etc.) — avoids wasting time on doomed tabs.
                                                     #[cfg(not(feature = "hedge"))]
-                                                    let results = match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
+                                                    let results = if shared.11.load(std::sync::atomic::Ordering::Acquire) {
+                                                        log::warn!("{target_url_string} skipping fetch: browser is dead");
+                                                        drop(permit);
+                                                        return Default::default();
+                                                    } else {
+                                                        match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
                                                         Ok(new_page) => {
                                                             let (_, intercept_handle) = tokio::join!(
                                                                 crate::features::chrome::setup_chrome_events(&new_page, &shared.6),
@@ -6197,19 +6227,42 @@ impl Website {
                                                             )
                                                             .await;
 
-                                                            let mut retry_count = shared.6.retry;
+                                                            // Chrome requests are prone to transient tab/CDP failures.
+                                                            // Ensure at least 2 retries even when the user left retry at 0.
+                                                            let mut retry_count = shared.6.retry.max(CHROME_MIN_RETRY);
+                                                            let mut attempt: u32 = 0;
 
                                                             while page.needs_retry() && retry_count > 0 {
                                                                 retry_count -= 1;
-                                                                if let Some(timeout) = page.get_timeout() {
-                                                                    tokio::time::sleep(timeout).await;
-                                                                }
-                                                                if page.status_code == StatusCode::GATEWAY_TIMEOUT {
-                                                                    if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+
+                                                                // Exponential backoff with jitter between retries.
+                                                                // get_timeout() covers 429/504/598-599 specific delays;
+                                                                // backoff_delay covers everything else with increasing waits.
+                                                                let status_delay = page.get_timeout().unwrap_or_default();
+                                                                let backoff = crate::utils::backoff::backoff_delay(attempt, 200, 15_000);
+                                                                tokio::time::sleep(status_delay.max(backoff)).await;
+                                                                attempt += 1;
+
+                                                                // Create a fresh tab for the retry to avoid reusing a
+                                                                // potentially corrupted tab (stale CDP session, bloated
+                                                                // memory, stuck navigation).
+                                                                if let Ok(retry_page) = attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
+                                                                    let _ = tokio::join!(
+                                                                        crate::features::chrome::setup_chrome_events(&retry_page, &shared.6),
+                                                                        crate::features::chrome::setup_chrome_interception_base(
+                                                                            &retry_page,
+                                                                            shared.6.chrome_intercept.enabled,
+                                                                            &shared.6.auth_challenge_response,
+                                                                            shared.6.chrome_intercept.block_visuals,
+                                                                            &shared.7,
+                                                                        )
+                                                                    );
+
+                                                                    if let Err(_elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                                                                         let p = Page::new(
                                                                             target_url,
                                                                             &shared.0,
-                                                                            &new_page,
+                                                                            &retry_page,
                                                                             &shared.6.wait_for,
                                                                             &shared.6.screenshot,
                                                                             false,
@@ -6226,31 +6279,11 @@ impl Website {
                                                                             &shared.6.remote_multimodal,
                                                                         ).await;
                                                                         page = p;
-
                                                                     }).await {
-                                                                        log::info!("{target_url} backoff gateway timeout exceeded {elasped}");
+                                                                        log::info!("{target_url} chrome retry backoff timeout exceeded {_elapsed}");
                                                                     }
                                                                 } else {
-                                                                    page = Page::new(
-                                                                            target_url,
-                                                                            &shared.0,
-                                                                            &new_page,
-                                                                            &shared.6.wait_for,
-                                                                            &shared.6.screenshot,
-                                                                            false,
-                                                                            &shared.6.openai_config,
-                                                                            &shared.6.execution_scripts,
-                                                                            &shared.6.automation_scripts,
-                                                                            &shared.6.viewport,
-                                                                            &shared.6.request_timeout,
-                                                                            &shared.6.track_events,
-                                                                            shared.6.referer.clone(),
-                                                                            shared.6.max_page_bytes,
-                                                                            shared.6.get_cache_options(),
-                                                                            &shared.6.cache_policy,
-                                                                            &shared.6.remote_multimodal,
-                                                                        )
-                                                                        .await;
+                                                                    log::warn!("{target_url} chrome retry tab creation failed, attempt {attempt}");
                                                                 }
                                                             }
 
@@ -6265,6 +6298,7 @@ impl Website {
                                                             chrome_page_post_process!(page, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit)
                                                         }
                                                         _ => Default::default(),
+                                                    }
                                                     };
 
 
@@ -6888,6 +6922,7 @@ impl Website {
                                 b.browser.2.clone(),
                                 self.domain_parsed.clone(),
                                 self.on_link_find_callback.clone(),
+                                b.browser_dead.clone(),
                             ));
 
                             let add_external = !shared.3.is_empty();
@@ -6986,6 +7021,12 @@ impl Website {
 
                                                     // Hedge-enabled Chrome path: race primary tab vs hedge tab
                                                     #[cfg(feature = "hedge")]
+                                                    if shared.11.load(std::sync::atomic::Ordering::Acquire) {
+                                                        log::warn!("{target_url_string} skipping fetch: browser is dead");
+                                                        drop(permit);
+                                                        return Default::default();
+                                                    }
+                                                    #[cfg(feature = "hedge")]
                                                     let results = {
                                                         let should_hedge = hedge_cfg.as_ref().is_some_and(|h| h.enabled);
                                                         let target_url = target_url_string.as_str();
@@ -7046,7 +7087,13 @@ impl Website {
                                                         }
                                                     };
 
-                                                    // Non-hedge Chrome path: single tab fetch (unchanged)
+                                                    // Non-hedge Chrome path: single tab fetch with robust retry
+                                                    #[cfg(not(feature = "hedge"))]
+                                                    if shared.11.load(std::sync::atomic::Ordering::Acquire) {
+                                                        log::warn!("{target_url_string} skipping fetch: browser is dead");
+                                                        drop(permit);
+                                                        return Default::default();
+                                                    }
                                                     #[cfg(not(feature = "hedge"))]
                                                     let results = {
                                                         let target_url = target_url_string.as_str();
@@ -7084,19 +7131,33 @@ impl Website {
                                                                 )
                                                                 .await;
 
-                                                                let mut retry_count = shared.6.retry;
+                                                                let mut retry_count = shared.6.retry.max(CHROME_MIN_RETRY);
+                                                                let mut attempt: u32 = 0;
 
                                                                 while page.needs_retry() && retry_count > 0 {
                                                                     retry_count -= 1;
-                                                                    if let Some(timeout) = page.get_timeout() {
-                                                                        tokio::time::sleep(timeout).await;
-                                                                    }
-                                                                    if page.status_code == StatusCode::GATEWAY_TIMEOUT {
-                                                                        if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                                                                    let status_delay = page.get_timeout().unwrap_or_default();
+                                                                    let backoff = crate::utils::backoff::backoff_delay(attempt, 200, 15_000);
+                                                                    tokio::time::sleep(status_delay.max(backoff)).await;
+                                                                    attempt += 1;
+
+                                                                    if let Ok(retry_page) = attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
+                                                                        let _ = tokio::join!(
+                                                                            crate::features::chrome::setup_chrome_events(&retry_page, &shared.6),
+                                                                            crate::features::chrome::setup_chrome_interception_base(
+                                                                                &retry_page,
+                                                                                shared.6.chrome_intercept.enabled,
+                                                                                &shared.6.auth_challenge_response,
+                                                                                shared.6.chrome_intercept.block_visuals,
+                                                                                &shared.7,
+                                                                            )
+                                                                        );
+
+                                                                        if let Err(_elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                                                                             let p = Page::new(
                                                                                 target_url,
                                                                                 &shared.0,
-                                                                                &new_page,
+                                                                                &retry_page,
                                                                                 &shared.6.wait_for,
                                                                                 &shared.6.screenshot,
                                                                                 false,
@@ -7113,31 +7174,11 @@ impl Website {
                                                                                 &shared.6.remote_multimodal,
                                                                             ).await;
                                                                             page = p;
-
                                                                         }).await {
-                                                                            log::info!("{target_url} backoff gateway timeout exceeded {elasped}");
+                                                                            log::info!("{target_url} chrome retry backoff timeout exceeded {_elapsed}");
                                                                         }
                                                                     } else {
-                                                                        page = Page::new(
-                                                                                target_url,
-                                                                                &shared.0,
-                                                                                &new_page,
-                                                                                &shared.6.wait_for,
-                                                                                &shared.6.screenshot,
-                                                                                false,
-                                                                                &shared.6.openai_config,
-                                                                                &shared.6.execution_scripts,
-                                                                                &shared.6.automation_scripts,
-                                                                                &shared.6.viewport,
-                                                                                &shared.6.request_timeout,
-                                                                                &shared.6.track_events,
-                                                                                shared.6.referer.clone(),
-                                                                                shared.6.max_page_bytes,
-                                                                                shared.6.get_cache_options(),
-                                                                                &shared.6.cache_policy,
-                                                                                &shared.6.remote_multimodal,
-                                                                            )
-                                                                            .await;
+                                                                        log::warn!("{target_url} chrome retry tab creation failed, attempt {attempt}");
                                                                     }
                                                                 }
 
@@ -9076,11 +9117,14 @@ impl Website {
         jar: Option<&Arc<crate::client::cookie::Jar>>,
     ) -> Option<crate::features::chrome::BrowserController> {
         match crate::features::chrome::launch_browser_cookies(config, url_parsed, jar).await {
-            Some((browser, browser_handle, context_id)) => {
+            Some((browser, browser_handle, context_id, browser_dead)) => {
                 let browser: Arc<chromiumoxide::Browser> = Arc::new(browser);
                 let b = (browser, Some(browser_handle), context_id);
 
-                Some(crate::features::chrome::BrowserController::new(b))
+                Some(crate::features::chrome::BrowserController::new(
+                    b,
+                    browser_dead,
+                ))
             }
             _ => None,
         }

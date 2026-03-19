@@ -3386,11 +3386,17 @@ pub async fn fetch_page_html_chrome_base(
     if page_response.status_code == *UNKNOWN_STATUS_ERROR && page_response.content.is_some() {
         page_response.status_code = StatusCode::OK;
     }
+    // If the request was cancelled (timeout or net::ERR_ABORTED) and we ended
+    // up with no usable content, upgrade to a retryable 504 so the outer crawl
+    // loop will retry instead of silently accepting an empty page.
+    if request_cancelled && page_response.content.is_none() {
+        page_response.status_code = StatusCode::GATEWAY_TIMEOUT;
+    }
     // If Chrome reported success (200) but produced no content, downgrade to
-    // 204 (No Content) so callers can distinguish real success from empty
-    // responses and trigger retries/hedging appropriately.
-    if page_response.status_code == StatusCode::OK && page_response.content.is_none() {
-        page_response.status_code = StatusCode::NO_CONTENT;
+    // a retryable 504 so callers can distinguish real success from empty
+    // responses and trigger retries appropriately.
+    else if page_response.status_code == StatusCode::OK && page_response.content.is_none() {
+        page_response.status_code = StatusCode::GATEWAY_TIMEOUT;
     }
 
     // run initial handling hidden anchors

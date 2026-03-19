@@ -753,6 +753,10 @@ pub fn page_assign(page: &mut Page, new_page: Page) {
         if new_page.html.is_some() {
             page.html = new_page.html;
         }
+    } else {
+        // Chrome returned 200 with no content — mark for retry so the outer
+        // loop re-fetches instead of silently accepting an empty page.
+        page.should_retry = true;
     }
 
     #[cfg(feature = "remote_addr")]
