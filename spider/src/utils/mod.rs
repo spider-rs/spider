@@ -1914,6 +1914,13 @@ struct ResponseBase {
     #[cfg(feature = "cache_request")]
     /// Is the main document cached?
     main_doc_from_cache: bool,
+    #[cfg(feature = "remote_addr")]
+    /// The remote IP address of the main document response (from CDP Network.responseReceived).
+    /// Provides parity with the HTTP-mode `remote_addr` field.
+    remote_ip_address: Option<String>,
+    #[cfg(feature = "remote_addr")]
+    /// The remote port of the main document response.
+    remote_port: Option<i64>,
 }
 
 #[cfg(feature = "chrome")]
@@ -2639,6 +2646,10 @@ pub async fn fetch_page_html_chrome_base(
 
             let mut status_code = None;
             let mut headers = None;
+            #[cfg(feature = "remote_addr")]
+            let mut remote_ip_address = None;
+            #[cfg(feature = "remote_addr")]
+            let mut remote_port = None;
             #[cfg(feature = "cache_request")]
             let mut main_doc_request_id: Option<RequestId> = None;
             #[cfg(feature = "cache_request")]
@@ -2662,6 +2673,11 @@ pub async fn fetch_page_html_chrome_base(
                             intial_request = true;
                             status_code = Some(event.response.status);
                             headers = Some(event.response.headers.clone());
+                            #[cfg(feature = "remote_addr")]
+                            {
+                                remote_ip_address = event.response.remote_ip_address.clone();
+                                remote_port = event.response.remote_port;
+                            }
                             #[cfg(feature = "cache_request")]
                             {
                                 main_doc_request_id = Some(event.request_id.clone());
@@ -2736,6 +2752,10 @@ pub async fn fetch_page_html_chrome_base(
                 headers,
                 #[cfg(feature = "cache_request")]
                 main_doc_from_cache,
+                #[cfg(feature = "remote_addr")]
+                remote_ip_address,
+                #[cfg(feature = "remote_addr")]
+                remote_port,
             }
         };
 
@@ -3600,6 +3620,16 @@ pub async fn fetch_page_html_chrome_base(
             }
             if request_map.is_some() {
                 page_response.request_map = request_map;
+            }
+
+            // Set remote address from CDP Network.responseReceived for parity
+            // with HTTP-mode remote_addr.
+            #[cfg(feature = "remote_addr")]
+            if let Some(ref ip_str) = rs.remote_ip_address {
+                let port = rs.remote_port.unwrap_or(0) as u16;
+                if let Ok(ip) = ip_str.parse::<core::net::IpAddr>() {
+                    page_response.remote_addr = Some(core::net::SocketAddr::new(ip, port));
+                }
             }
 
             page_response.bytes_transferred = Some(transferred);
