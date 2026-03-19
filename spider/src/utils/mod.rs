@@ -12,6 +12,9 @@ pub mod templates;
 pub mod adaptive_concurrency;
 /// Exponential backoff with jitter for retry logic.
 pub mod backoff;
+#[cfg(feature = "bloom")]
+/// mmap-backed bloom filter with hugepage support for URL deduplication.
+pub mod bloom;
 #[cfg(feature = "request_coalesce")]
 /// Request coalescing to dedup concurrent in-flight requests.
 pub mod coalesce;

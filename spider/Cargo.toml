@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.47.49"
+version = "2.47.50"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -120,17 +120,20 @@ features = ["serde", "headers", "dynamic-versions"]
 
 [dependencies.spider_agent_types]
 path = "../spider_agent_types"
-version = "2.47.49"
+version = "2.47.50"
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.47.49"
+version = "2.47.50"
 optional = true
 default-features = false
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = { version = "0.7", optional = true }
 libc = "0.2"
+
+[target.'cfg(all(unix, not(target_os = "linux")))'.dependencies]
+libc = { version = "0.2", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", default-features = false, features = [
@@ -356,6 +359,9 @@ cowboy = []
 h2_multiplex = ["dep:dashmap", "dep:http"]
 # Cross-crawl robots.txt cache with TTL-based expiry.
 robots_cache = ["dep:dashmap"]
+
+# mmap-backed bloom filter for URL deduplication with hugepage support.
+bloom = ["dep:libc"]
 
 # Enables usage of `#[inline]` on far more functions than by default in this
 # crate. This may lead to a performance increase but often comes at a compile

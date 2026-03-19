@@ -2,6 +2,9 @@ use crate::CaseInsensitiveString;
 use hashbrown::HashSet;
 use std::hash::Hash;
 
+#[cfg(feature = "bloom")]
+use crate::utils::bloom::MmapBloom;
+
 #[cfg(any(
     feature = "string_interner_bucket_backend",
     feature = "string_interner_string_backend",
@@ -53,6 +56,9 @@ where
     pub(crate) links_visited: HashSet<SymbolUsize>,
     pub(crate) interner: StringInterner<Backend>,
     _marker: PhantomData<K>,
+    /// mmap-backed bloom filter pre-check for O(1) membership queries.
+    #[cfg(feature = "bloom")]
+    pub(crate) bloom: MmapBloom,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +73,9 @@ where
     K: Eq + Hash + Clone + AsRef<str>,
 {
     pub(crate) links_visited: HashSet<K>,
+    /// mmap-backed bloom filter pre-check for O(1) membership queries.
+    #[cfg(feature = "bloom")]
+    pub(crate) bloom: MmapBloom,
 }
 
 #[cfg(not(any(
@@ -81,6 +90,8 @@ where
     fn default() -> Self {
         Self {
             links_visited: HashSet::new(),
+            #[cfg(feature = "bloom")]
+            bloom: MmapBloom::with_default_capacity(),
         }
     }
 }
@@ -99,6 +110,8 @@ where
             links_visited: HashSet::new(),
             interner: StringInterner::new(),
             _marker: PhantomData,
+            #[cfg(feature = "bloom")]
+            bloom: MmapBloom::with_default_capacity(),
         }
     }
 }
@@ -115,6 +128,11 @@ where
     /// Add a new link to the bucket.
     #[inline(always)]
     pub fn insert(&mut self, link: K) {
+        #[cfg(feature = "bloom")]
+        {
+            self.bloom.insert(&link.as_ref());
+        }
+
         #[cfg(any(
             feature = "string_interner_bucket_backend",
             feature = "string_interner_string_backend",
@@ -136,8 +154,21 @@ where
     }
 
     /// Does the bucket contain the link.
+    ///
+    /// When the `bloom` feature is enabled, the mmap-backed bloom filter is
+    /// checked first.  A negative result is authoritative (no false negatives),
+    /// so the HashSet lookup is skipped entirely — this is the fast path for
+    /// the vast majority of unseen URLs.
     #[inline(always)]
     pub fn contains(&self, link: &K) -> bool {
+        #[cfg(feature = "bloom")]
+        {
+            // Bloom filter says "definitely not present" → skip HashSet.
+            if !self.bloom.contains(&link.as_ref()) {
+                return false;
+            }
+        }
+
         #[cfg(any(
             feature = "string_interner_bucket_backend",
             feature = "string_interner_string_backend",
@@ -193,7 +224,11 @@ where
 
     /// Clear the bucket.
     pub fn clear(&mut self) {
-        self.links_visited.clear()
+        self.links_visited.clear();
+        #[cfg(feature = "bloom")]
+        {
+            self.bloom.clear();
+        }
     }
 
     /// Get a vector of all the inner values of the links in the bucket.
@@ -237,10 +272,22 @@ where
         ))]
         {
             for link in msg {
-                let symbol = self.interner.get_or_intern(link.as_ref());
-                if !self.links_visited.contains(&symbol) {
-                    links.insert(link);
+                // Bloom pre-check: skip HashSet lookup when definitely absent.
+                #[cfg(feature = "bloom")]
+                if self.bloom.contains(&link.as_ref()) {
+                    let symbol = self.interner.get_or_intern(link.as_ref());
+                    if self.links_visited.contains(&symbol) {
+                        continue;
+                    }
                 }
+                #[cfg(not(feature = "bloom"))]
+                {
+                    let symbol = self.interner.get_or_intern(link.as_ref());
+                    if self.links_visited.contains(&symbol) {
+                        continue;
+                    }
+                }
+                links.insert(link);
             }
         }
 
@@ -250,7 +297,18 @@ where
             feature = "string_interner_buffer_backend",
         )))]
         {
-            links.extend(msg.difference(&self.links_visited).cloned());
+            #[cfg(feature = "bloom")]
+            {
+                for link in msg {
+                    if !self.bloom.contains(&link.as_ref()) || !self.links_visited.contains(&link) {
+                        links.insert(link);
+                    }
+                }
+            }
+            #[cfg(not(feature = "bloom"))]
+            {
+                links.extend(msg.difference(&self.links_visited).cloned());
+            }
         }
     }
 
@@ -260,6 +318,15 @@ where
     where
         K: Clone,
     {
+        // Bloom pre-check: if bloom says "not present", skip the HashSet lookup.
+        #[cfg(feature = "bloom")]
+        {
+            if !self.bloom.contains(&s.as_ref()) {
+                links.insert(s);
+                return;
+            }
+        }
+
         #[cfg(any(
             feature = "string_interner_bucket_backend",
             feature = "string_interner_string_backend",

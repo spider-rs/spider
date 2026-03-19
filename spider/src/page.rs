@@ -563,7 +563,7 @@ pub enum AntiBotTech {
 #[cfg(not(feature = "decentralized"))]
 pub struct Page {
     /// The bytes of the resource.
-    pub(crate) html: Option<Box<[u8]>>,
+    pub(crate) html: Option<bytes::Bytes>,
     /// Base absolute url for page.
     pub(crate) base: Option<Url>,
     /// The raw url for the page. Useful since Url::parse adds a trailing slash.
@@ -649,7 +649,7 @@ pub struct Page {
 #[derive(Debug, Clone, Default)]
 pub struct Page {
     /// The bytes of the resource.
-    html: Option<Box<[u8]>>,
+    html: Option<bytes::Bytes>,
     /// Base absolute url for page.
     pub(crate) base: Option<Url>,
     /// The raw url for the page. Useful since Url::parse adds a trailing slash.
@@ -1265,7 +1265,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
     }
 
     Page {
-        html: res.content.map(|v| v.into_boxed_slice()),
+        html: res.content.map(bytes::Bytes::from),
         headers: res.headers,
         #[cfg(feature = "remote_addr")]
         remote_addr: res.remote_addr,
@@ -1312,7 +1312,7 @@ pub fn build(url: &str, res: PageResponse) -> Page {
 #[cfg(feature = "decentralized")]
 pub fn build(_: &str, res: PageResponse) -> Page {
     Page {
-        html: res.content.map(|v| v.into_boxed_slice()),
+        html: res.content.map(bytes::Bytes::from),
         headers: res.headers,
         #[cfg(feature = "remote_addr")]
         remote_addr: res.remote_addr,
@@ -1547,7 +1547,7 @@ impl Page {
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub fn new_webdriver(url: &str, html: String, status_code: StatusCode) -> Self {
         Page {
-            html: Some(html.into_bytes().into_boxed_slice()),
+            html: Some(bytes::Bytes::from(html.into_bytes())),
             url: url.into(),
             status_code,
             ..Default::default()
@@ -1582,7 +1582,7 @@ impl Page {
         // Get page content
         match get_page_content(driver).await {
             Ok(content) => Page {
-                html: Some(content.into_bytes().into_boxed_slice()),
+                html: Some(bytes::Bytes::from(content.into_bytes())),
                 url: url.into(),
                 status_code: StatusCode::OK,
                 final_redirect_destination: final_url,
@@ -1668,7 +1668,7 @@ impl Page {
         // Get page content
         match get_page_content(driver).await {
             Ok(content) => Page {
-                html: Some(content.into_bytes().into_boxed_slice()),
+                html: Some(bytes::Bytes::from(content.into_bytes())),
                 url: url.into(),
                 status_code: StatusCode::OK,
                 final_redirect_destination: final_url,
@@ -2720,7 +2720,7 @@ impl Page {
 
     /// Set the html directly of the page
     pub fn set_html_bytes(&mut self, html: Option<Vec<u8>>) {
-        self.html = html.map(Vec::into_boxed_slice);
+        self.html = html.map(bytes::Bytes::from);
     }
 
     /// Set the url directly of the page. Useful for transforming the content and rewriting the url.
@@ -2861,7 +2861,7 @@ impl Page {
                 xml.to_vec()
             };
 
-            self.html = Some(stripped.into_boxed_slice());
+            self.html = Some(bytes::Bytes::from(stripped));
         }
 
         self.html.as_deref().unwrap_or_default()
@@ -4557,7 +4557,7 @@ pub fn encode_bytes(html: &[u8], label: &str) -> String {
 
 /// Get the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS.
 #[cfg(feature = "encoding")]
-pub fn get_html_encoded(html: &Option<Box<[u8]>>, label: &str) -> String {
+pub fn get_html_encoded(html: &Option<bytes::Bytes>, label: &str) -> String {
     match html.as_ref() {
         Some(html) => encode_bytes(html, label),
         _ => Default::default(),
@@ -4566,7 +4566,7 @@ pub fn get_html_encoded(html: &Option<Box<[u8]>>, label: &str) -> String {
 
 #[cfg(not(feature = "encoding"))]
 /// Get the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS.
-pub fn get_html_encoded(html: &Option<Box<[u8]>>, _label: &str) -> String {
+pub fn get_html_encoded(html: &Option<bytes::Bytes>, _label: &str) -> String {
     match html {
         Some(b) => String::from_utf8_lossy(b).to_string(),
         _ => Default::default(),
