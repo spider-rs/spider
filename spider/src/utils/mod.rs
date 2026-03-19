@@ -5060,6 +5060,78 @@ pub async fn get_cached_url_base(
         }
     }
 
+    // Fallback: query remote hybrid_cache_server when chrome_remote_cache is enabled.
+    // The local CACACHE_MANAGER is in-memory (per-process), so it misses on first
+    // request or after restart. The remote cache persists across processes and has
+    // data populated by browser_server's CDP interception.
+    #[cfg(feature = "chrome_remote_cache")]
+    {
+        let cache_site =
+            chromiumoxide::cache::manager::site_key_for_target_url(target_url, auth_opt.as_deref());
+        let make_session_key = |url: &str| format!("GET:{}", url);
+
+        let try_session_get = |url: &str| {
+            chromiumoxide::cache::remote::get_session_cache_item(
+                &cache_site,
+                &make_session_key(url),
+            )
+            .and_then(|(http_response, stored_policy)| {
+                if allow_stale || !stored_policy.is_stale(now) {
+                    let accept_lang = http_response
+                        .headers
+                        .get("accept-language")
+                        .or_else(|| http_response.headers.get("Accept-Language"))
+                        .map(|h| h.as_str());
+                    decode_cached_html_bytes(&http_response.body, accept_lang)
+                } else {
+                    None
+                }
+            })
+        };
+
+        // Check chromiumoxide session cache (may have been seeded by a prior navigation).
+        if let Some(body) = try_session_get(target_url) {
+            return Some(body);
+        }
+
+        // Pull from the remote cache server, seed local session cache, then retry.
+        // Timeout prevents blocking the critical path if the cache server is slow/down.
+        let _ = tokio::time::timeout(
+            Duration::from_secs(3),
+            chromiumoxide::cache::remote::get_cache_site(
+                target_url,
+                auth_opt.as_deref(),
+                Some("true"),
+            ),
+        )
+        .await;
+
+        if let Some(body) = try_session_get(target_url) {
+            return Some(body);
+        }
+
+        // Try alternate URL (with/without trailing slash).
+        let alt_url: Option<String> = if target_url.ends_with('/') {
+            let trimmed = target_url.trim_end_matches('/');
+            if trimmed.is_empty() || trimmed == target_url {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        } else {
+            let mut s = String::with_capacity(target_url.len() + 1);
+            s.push_str(target_url);
+            s.push('/');
+            Some(s)
+        };
+
+        if let Some(alt) = alt_url {
+            if let Some(body) = try_session_get(&alt) {
+                return Some(body);
+            }
+        }
+    }
+
     None
 }
 
