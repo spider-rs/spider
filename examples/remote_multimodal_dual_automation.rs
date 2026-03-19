@@ -62,23 +62,23 @@ async fn main() {
     .with_vision_route_mode(VisionRouteMode::VisionFirst);
 
     // ── Multi-round automation config ─────────────────────────────────
-    let mut mm_config = mm_config;
-    mm_config.cfg.extra_ai_data = true;
-    mm_config.cfg.include_html = true;
-    mm_config.cfg.include_title = true;
-    mm_config.cfg.include_url = true;
-    mm_config.cfg.max_rounds = 4; // Multi-round: full automation prompt
-    mm_config.cfg.request_json_object = true;
-    mm_config.cfg.extraction_prompt = Some(
-        "Navigate to the first book in the catalog. Extract its title, price, and availability."
-            .to_string(),
-    );
-
-    // Optional: set the user instruction for the automation task
-    mm_config.user_message_extra = Some(
-        "Click on the first book link to navigate to its detail page, then extract the book data."
-            .to_string(),
-    );
+    //
+    // All cfg fields are now available as `with_*` builders on
+    // RemoteMultimodalConfigs, so the entire config can be built
+    // in a single fluent chain.
+    let mm_config = mm_config
+        .with_extra_ai_data(true)
+        .with_include_html(true)
+        .with_include_title(true)
+        .with_include_url(true)
+        .with_max_rounds(4)
+        .with_request_json_object(true)
+        .with_extraction_prompt(
+            "Navigate to the first book in the catalog. Extract its title, price, and availability.",
+        )
+        .with_user_message_extra(
+            "Click on the first book link to navigate to its detail page, then extract the book data.",
+        );
 
     // ── Run ───────────────────────────────────────────────────────────
     let mut website: Website = Website::new(url)

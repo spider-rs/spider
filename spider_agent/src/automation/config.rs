@@ -11,7 +11,9 @@
 use std::sync::{Arc, OnceLock};
 
 use super::{
-    ExtractionSchema, ModelEndpoint, PromptUrlGate, RemoteMultimodalConfig, VisionRouteMode,
+    CaptureProfile, ConfidenceRetryStrategy, ExtractionSchema, HtmlDiffMode, ModelEndpoint,
+    ModelPolicy, PlanningModeConfig, PromptUrlGate, ReasoningEffort, RemoteMultimodalConfig,
+    RetryPolicy, SelfHealingConfig, SynthesisConfig, ToolCallingMode, VisionRouteMode,
 };
 
 /// Default value for `chrome_ai_max_user_chars`.
@@ -442,6 +444,193 @@ impl RemoteMultimodalConfigs {
     /// multimodal automation loop. Useful for slow inference hardware.
     pub fn with_automation_timeout_ms(mut self, ms: u64) -> Self {
         self.cfg.automation_timeout_ms = Some(ms);
+        self
+    }
+
+    // ── own-field builders ───────────────────────────────────────────
+
+    /// Override the API URL after construction.
+    pub fn with_api_url(mut self, url: impl Into<String>) -> Self {
+        self.api_url = url.into();
+        self
+    }
+
+    /// Override the model name after construction.
+    pub fn with_model_name(mut self, name: impl Into<String>) -> Self {
+        self.model_name = name.into();
+        self
+    }
+
+    /// Set the skill registry for dynamic context injection.
+    #[cfg(feature = "skills")]
+    pub fn with_skill_registry(mut self, registry: super::skills::SkillRegistry) -> Self {
+        self.skill_registry = Some(registry);
+        self
+    }
+
+    // ── cfg convenience builders ────────────────────────────────────
+    //
+    // These delegate to common `RemoteMultimodalConfig` fields so
+    // callers can build a complete config in a single chain without
+    // reaching into `cfg` directly.
+
+    /// Set whether to include cleaned HTML in the model input.
+    pub fn with_include_html(mut self, include: bool) -> Self {
+        self.cfg.include_html = include;
+        self
+    }
+
+    /// Set the maximum number of bytes of cleaned HTML to include.
+    pub fn with_html_max_bytes(mut self, bytes: usize) -> Self {
+        self.cfg.html_max_bytes = bytes;
+        self
+    }
+
+    /// Set whether to include the current URL in the model input.
+    pub fn with_include_url(mut self, include: bool) -> Self {
+        self.cfg.include_url = include;
+        self
+    }
+
+    /// Set whether to include the document title in the model input.
+    pub fn with_include_title(mut self, include: bool) -> Self {
+        self.cfg.include_title = include;
+        self
+    }
+
+    /// Set whether to include screenshots in LLM requests.
+    ///
+    /// - `Some(true)`: Always include screenshots.
+    /// - `Some(false)`: Never include screenshots.
+    /// - `None`: Auto-detect based on model name.
+    pub fn with_include_screenshot(mut self, include: Option<bool>) -> Self {
+        self.cfg.include_screenshot = include;
+        self
+    }
+
+    /// Set the sampling temperature used by the model.
+    pub fn with_temperature(mut self, temp: f32) -> Self {
+        self.cfg.temperature = temp;
+        self
+    }
+
+    /// Set the maximum tokens the model is allowed to generate.
+    pub fn with_max_tokens(mut self, tokens: u16) -> Self {
+        self.cfg.max_tokens = tokens;
+        self
+    }
+
+    /// Set whether to request `response_format: {"type":"json_object"}`.
+    pub fn with_request_json_object(mut self, enabled: bool) -> Self {
+        self.cfg.request_json_object = enabled;
+        self
+    }
+
+    /// Enable best-effort JSON extraction (strip fences / extract `{...}`).
+    pub fn with_best_effort_json_extract(mut self, enabled: bool) -> Self {
+        self.cfg.best_effort_json_extract = enabled;
+        self
+    }
+
+    /// Set explicit reasoning effort for supported models.
+    pub fn with_reasoning_effort(mut self, effort: ReasoningEffort) -> Self {
+        self.cfg.reasoning_effort = Some(effort);
+        self
+    }
+
+    /// Set the token budget for Anthropic extended thinking.
+    pub fn with_thinking_budget(mut self, budget: u32) -> Self {
+        self.cfg.thinking_budget = Some(budget);
+        self
+    }
+
+    /// Set the maximum number of plan/execute/re-capture rounds.
+    pub fn with_max_rounds(mut self, rounds: usize) -> Self {
+        self.cfg.max_rounds = rounds;
+        self
+    }
+
+    /// Set the retry policy for model output parsing and execution failures.
+    pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
+        self.cfg.retry = retry;
+        self
+    }
+
+    /// Add a capture profile to the list.
+    pub fn with_capture_profile(mut self, profile: CaptureProfile) -> Self {
+        self.cfg.capture_profiles.push(profile);
+        self
+    }
+
+    /// Set the model selection policy.
+    pub fn with_model_policy(mut self, policy: ModelPolicy) -> Self {
+        self.cfg.model_policy = policy;
+        self
+    }
+
+    /// Set the wait time (ms) after executing a plan before re-capturing state.
+    pub fn with_post_plan_wait_ms(mut self, ms: u64) -> Self {
+        self.cfg.post_plan_wait_ms = ms;
+        self
+    }
+
+    /// Set the maximum number of concurrent LLM HTTP requests.
+    pub fn with_max_inflight_requests(mut self, max: usize) -> Self {
+        self.cfg.max_inflight_requests = Some(max);
+        self
+    }
+
+    /// Set the tool calling mode for structured action output.
+    pub fn with_tool_calling_mode(mut self, mode: ToolCallingMode) -> Self {
+        self.cfg.tool_calling_mode = mode;
+        self
+    }
+
+    /// Set the HTML diff mode for condensed page state.
+    pub fn with_html_diff_mode(mut self, mode: HtmlDiffMode) -> Self {
+        self.cfg.html_diff_mode = mode;
+        self
+    }
+
+    /// Enable planning mode with the given configuration.
+    pub fn with_planning_mode(mut self, config: PlanningModeConfig) -> Self {
+        self.cfg.planning_mode = Some(config);
+        self
+    }
+
+    /// Enable multi-page synthesis with the given configuration.
+    pub fn with_synthesis_config(mut self, config: SynthesisConfig) -> Self {
+        self.cfg.synthesis_config = Some(config);
+        self
+    }
+
+    /// Set the confidence-based retry strategy.
+    pub fn with_confidence_strategy(mut self, strategy: ConfidenceRetryStrategy) -> Self {
+        self.cfg.confidence_strategy = Some(strategy);
+        self
+    }
+
+    /// Enable self-healing with the given configuration.
+    pub fn with_self_healing(mut self, config: SelfHealingConfig) -> Self {
+        self.cfg.self_healing = Some(config);
+        self
+    }
+
+    /// Enable or disable concurrent execution of independent actions.
+    pub fn with_concurrent_execution(mut self, enabled: bool) -> Self {
+        self.cfg.concurrent_execution = enabled;
+        self
+    }
+
+    /// Set the maximum number of skills to inject per round.
+    pub fn with_max_skills_per_round(mut self, max: usize) -> Self {
+        self.cfg.max_skills_per_round = max;
+        self
+    }
+
+    /// Set the maximum characters for skill context injection per round.
+    pub fn with_max_skill_context_chars(mut self, max: usize) -> Self {
+        self.cfg.max_skill_context_chars = max;
         self
     }
 
@@ -1045,6 +1234,57 @@ mod tests {
             !json.contains("model_pool"),
             "empty model_pool should be omitted from JSON"
         );
+    }
+
+    #[test]
+    fn test_cfg_convenience_builders() {
+        use super::super::{ReasoningEffort, ToolCallingMode};
+
+        let cfg = RemoteMultimodalConfigs::new("https://api.example.com", "gpt-4o")
+            .with_api_url("https://other.api.com")
+            .with_model_name("gpt-4o-mini")
+            .with_include_html(true)
+            .with_html_max_bytes(10_000)
+            .with_include_url(true)
+            .with_include_title(true)
+            .with_include_screenshot(Some(false))
+            .with_temperature(0.5)
+            .with_max_tokens(2048)
+            .with_request_json_object(true)
+            .with_best_effort_json_extract(true)
+            .with_reasoning_effort(ReasoningEffort::High)
+            .with_thinking_budget(4096)
+            .with_max_rounds(10)
+            .with_post_plan_wait_ms(500)
+            .with_max_inflight_requests(8)
+            .with_tool_calling_mode(ToolCallingMode::Auto)
+            .with_concurrent_execution(true)
+            .with_max_skills_per_round(5)
+            .with_max_skill_context_chars(8000);
+
+        // Own-field builders
+        assert_eq!(cfg.api_url, "https://other.api.com");
+        assert_eq!(cfg.model_name, "gpt-4o-mini");
+
+        // Cfg convenience builders
+        assert!(cfg.cfg.include_html);
+        assert_eq!(cfg.cfg.html_max_bytes, 10_000);
+        assert!(cfg.cfg.include_url);
+        assert!(cfg.cfg.include_title);
+        assert_eq!(cfg.cfg.include_screenshot, Some(false));
+        assert!((cfg.cfg.temperature - 0.5).abs() < f32::EPSILON);
+        assert_eq!(cfg.cfg.max_tokens, 2048);
+        assert!(cfg.cfg.request_json_object);
+        assert!(cfg.cfg.best_effort_json_extract);
+        assert_eq!(cfg.cfg.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(cfg.cfg.thinking_budget, Some(4096));
+        assert_eq!(cfg.cfg.max_rounds, 10);
+        assert_eq!(cfg.cfg.post_plan_wait_ms, 500);
+        assert_eq!(cfg.cfg.max_inflight_requests, Some(8));
+        assert_eq!(cfg.cfg.tool_calling_mode, ToolCallingMode::Auto);
+        assert!(cfg.cfg.concurrent_execution);
+        assert_eq!(cfg.cfg.max_skills_per_round, 5);
+        assert_eq!(cfg.cfg.max_skill_context_chars, 8000);
     }
 
     #[test]
