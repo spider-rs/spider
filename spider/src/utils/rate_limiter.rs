@@ -87,7 +87,7 @@ mod inner {
         /// - `default_burst`: max burst tokens for new domains (clamped to `[1, 10_000]`).
         pub fn new(default_rate: f64, default_burst: u32) -> Self {
             Self {
-                buckets: DashMap::new(),
+                buckets: DashMap::with_capacity(64),
                 default_rate: default_rate.clamp(0.01, 1_000_000.0),
                 default_burst: default_burst.clamp(1, 10_000),
                 access_counter: AtomicU64::new(0),

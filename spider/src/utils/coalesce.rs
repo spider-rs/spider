@@ -84,7 +84,7 @@ mod inner {
         /// Create a new coalescer.
         pub fn new() -> Self {
             Self {
-                in_flight: Arc::new(DashMap::new()),
+                in_flight: Arc::new(DashMap::with_capacity(64)),
             }
         }
 

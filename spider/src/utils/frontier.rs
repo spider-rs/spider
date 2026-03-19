@@ -9,6 +9,7 @@ use case_insensitive_string::CaseInsensitiveString;
 use hashbrown::HashSet;
 use std::cmp::Ordering as CmpOrdering;
 use std::collections::BinaryHeap;
+use std::collections::VecDeque;
 
 /// A URL annotated with a priority score for heap ordering.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -40,7 +41,7 @@ pub struct UrlFrontier {
     round_robin: bool,
     last_domain: Option<CompactString>,
     /// Temporary buffer used by round-robin logic to hold skipped entries.
-    rr_buf: Vec<ScoredUrl>,
+    rr_buf: VecDeque<ScoredUrl>,
 }
 
 impl UrlFrontier {
@@ -54,7 +55,7 @@ impl UrlFrontier {
             visited: HashSet::new(),
             round_robin,
             last_domain: None,
-            rr_buf: Vec::new(),
+            rr_buf: VecDeque::new(),
         }
     }
 
@@ -93,7 +94,7 @@ impl UrlFrontier {
 
             if same && found.is_none() {
                 // Same domain — stash and keep looking.
-                self.rr_buf.push(entry);
+                self.rr_buf.push_back(entry);
             } else {
                 // Different domain (or we already stashed entries and this is also
                 // same-domain but we've exhausted alternatives — handled below).
@@ -104,11 +105,7 @@ impl UrlFrontier {
 
         // If we couldn't find a different domain, fall back to the first stashed.
         if found.is_none() {
-            found = if self.rr_buf.is_empty() {
-                None
-            } else {
-                Some(self.rr_buf.remove(0))
-            };
+            found = self.rr_buf.pop_front();
         }
 
         // Put stashed items back.
@@ -168,18 +165,18 @@ pub fn score_url(url: &str, depth: u32) -> i32 {
 
     // Extract the path portion (after the authority, before query/fragment).
     let path = url_path(url);
-    let path_lower = path.to_ascii_lowercase();
 
     let mut score = base;
 
     for seg in HIGH_VALUE {
-        if path_lower.contains(seg) {
+        // Case-insensitive substring search without allocating a lowercased copy.
+        if contains_ignore_ascii_case(path, seg) {
             score = score.saturating_add(50);
         }
     }
 
     for seg in LOW_VALUE {
-        if path_lower.contains(seg) {
+        if contains_ignore_ascii_case(path, seg) {
             score = score.saturating_sub(200);
         }
     }
@@ -222,6 +219,26 @@ fn url_path(url: &str) -> &str {
     } else {
         url
     }
+}
+
+/// Case-insensitive ASCII substring search without allocating.
+#[inline]
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    let hb = haystack.as_bytes();
+    let nb = needle.as_bytes();
+    for i in 0..=(hb.len() - nb.len()) {
+        if hb[i..i + nb.len()]
+            .iter()
+            .zip(nb.iter())
+            .all(|(h, n)| h.eq_ignore_ascii_case(n))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]

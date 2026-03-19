@@ -2392,17 +2392,11 @@ impl RemoteMultimodalEngine {
                 }
             }
             if !skill_ctx.is_empty() {
-                // Log which skills matched
-                let matched: Vec<_> = registry
-                    .find_matching(url_now, title_now, html)
-                    .iter()
-                    .map(|s| s.name.as_str())
-                    .collect();
                 log::debug!(
-                    "Injecting {} skills ({} chars): {:?}",
-                    matched.len(),
+                    "Injecting skills ({} chars) for url={} title={}",
                     skill_ctx.len(),
-                    matched
+                    url_now,
+                    title_now,
                 );
                 system_msg.push_str("\n\n---\nACTIVATED SKILLS:\n");
                 system_msg.push_str(&skill_ctx);

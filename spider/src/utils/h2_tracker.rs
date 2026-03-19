@@ -38,7 +38,7 @@ impl H2Tracker {
     /// Create a new empty tracker.
     pub fn new() -> Self {
         Self {
-            origins: DashMap::new(),
+            origins: DashMap::with_capacity(64),
         }
     }
 

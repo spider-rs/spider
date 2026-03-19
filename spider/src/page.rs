@@ -1338,7 +1338,7 @@ pub fn build(_: &str, res: PageResponse) -> Page {
 /// Re build the cookies.
 pub fn build_cookie_header_from_set_cookie(page: &Page) -> Option<reqwest::header::HeaderValue> {
     use reqwest::header::HeaderValue;
-    let mut cookie_pairs = Vec::new();
+    let mut cookie_pairs = Vec::with_capacity(8);
 
     if let Some(headers) = &page.headers {
         for cookie in headers.get_all(crate::client::header::SET_COOKIE).iter() {
@@ -2968,8 +2968,8 @@ impl Page {
         let sub_matcher = &selectors.0;
 
         let mut is_link_tag = false;
-        let mut links_pages = if self.page_links.is_some() {
-            Some(map.clone())
+        let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
+            Some(HashSet::new())
         } else {
             None
         };
@@ -3050,8 +3050,8 @@ impl Page {
         base: &Option<Box<Url>>,
     ) -> HashSet<A> {
         let mut map: HashSet<A> = HashSet::new();
-        let mut links_pages = if self.page_links.is_some() {
-            Some(map.clone())
+        let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
+            Some(HashSet::new())
         } else {
             None
         };
@@ -3208,8 +3208,8 @@ impl Page {
 
         let mut map: HashSet<A> = HashSet::new();
         let mut map_ssg: HashSet<A> = HashSet::new();
-        let mut links_pages = if self.page_links.is_some() {
-            Some(map.clone())
+        let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
+            Some(HashSet::new())
         } else {
             None
         };
@@ -3492,10 +3492,10 @@ impl Page {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let mut bytes_transferred: Option<f64> = None;
-        let mut map = HashSet::new();
-        let mut inner_map: HashSet<A> = map.clone();
-        let mut links_pages = if self.page_links.is_some() {
-            Some(map.clone())
+        let mut map: HashSet<A> = HashSet::new();
+        let mut inner_map: HashSet<A> = HashSet::new();
+        let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
+            Some(HashSet::new())
         } else {
             None
         };
@@ -3909,10 +3909,10 @@ impl Page {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let mut bytes_transferred: Option<f64> = None;
-        let mut map = HashSet::new();
-        let mut inner_map: HashSet<A> = map.clone();
-        let mut links_pages = if self.page_links.is_some() {
-            Some(map.clone())
+        let mut map: HashSet<A> = HashSet::new();
+        let mut inner_map: HashSet<A> = HashSet::new();
+        let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
+            Some(HashSet::new())
         } else {
             None
         };
@@ -4308,9 +4308,9 @@ impl Page {
         selectors: &RelativeSelectors,
         base: &Option<Box<Url>>,
     ) -> HashSet<A> {
-        let mut map = HashSet::new();
-        let mut links_pages = if self.page_links.is_some() {
-            Some(map.clone())
+        let mut map: HashSet<A> = HashSet::new();
+        let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
+            Some(HashSet::new())
         } else {
             None
         };

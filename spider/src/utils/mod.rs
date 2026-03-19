@@ -2340,7 +2340,8 @@ pub fn chrome_fulfill_headers_from_reqwest(
 ) -> Vec<chromiumoxide::cdp::browser_protocol::fetch::HeaderEntry> {
     use chromiumoxide::cdp::browser_protocol::fetch::HeaderEntry;
 
-    let mut out: Vec<HeaderEntry> = Vec::new();
+    let mut out: Vec<HeaderEntry> =
+        Vec::with_capacity(headers.as_ref().map_or(1, |hm| hm.len().min(32) + 1));
 
     // Convert reqwest headers -> CDP HeaderEntry (filter hop-by-hop)
     if let Some(hm) = headers {
@@ -2348,10 +2349,16 @@ pub fn chrome_fulfill_headers_from_reqwest(
             let k = name.as_str();
 
             // Hop-by-hop / unsafe in synthetic fulfill responses
-            match k.to_ascii_lowercase().as_str() {
-                "content-length" | "transfer-encoding" | "connection" | "keep-alive"
-                | "proxy-connection" | "te" | "trailers" | "upgrade" => continue,
-                _ => {}
+            if k.eq_ignore_ascii_case("content-length")
+                || k.eq_ignore_ascii_case("transfer-encoding")
+                || k.eq_ignore_ascii_case("connection")
+                || k.eq_ignore_ascii_case("keep-alive")
+                || k.eq_ignore_ascii_case("proxy-connection")
+                || k.eq_ignore_ascii_case("te")
+                || k.eq_ignore_ascii_case("trailers")
+                || k.eq_ignore_ascii_case("upgrade")
+            {
+                continue;
             }
 
             let v = match value.to_str() {
@@ -6260,8 +6267,13 @@ pub fn clean_html_full(html: &str) -> String {
                     Ok(())
                 }),
                 element!("meta", |el| {
-                    let name = el.get_attribute("name").map(|n| n.to_lowercase());
-                    if !matches!(name.as_deref(), Some("viewport") | Some("charset")) {
+                    let keep = el
+                        .get_attribute("name")
+                        .map(|n| {
+                            n.eq_ignore_ascii_case("viewport") || n.eq_ignore_ascii_case("charset")
+                        })
+                        .unwrap_or(false);
+                    if !keep {
                         el.remove();
                     }
                     Ok(())
@@ -6530,9 +6542,10 @@ pub(crate) async fn normalize_html(html: &[u8]) -> Vec<u8> {
                     Ok(())
                 }),
                 element!("*", |el| {
-                    let mut remove_attr = vec![];
+                    let attrs = el.attributes();
+                    let mut remove_attr = Vec::with_capacity(attrs.len());
 
-                    for attr in el.attributes() {
+                    for attr in attrs {
                         let name = attr.name();
                         let remove =
                             !(name.starts_with("data-") || name == "id" || name == "class");

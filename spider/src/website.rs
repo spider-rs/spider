@@ -3987,12 +3987,14 @@ impl Website {
             self.initial_page_should_retry = page.needs_retry();
             self.initial_page_waf_check = page.waf_check;
 
-            // todo: pass full links to the worker to return.
+            // Move links out to avoid cloning; page.links left empty before send.
+            let links_owned = std::mem::take(&mut page.links);
+
             if self.configuration.return_page_links {
-                page.page_links = Some(page.links.clone().into());
+                page.page_links = Some(Box::new(links_owned.clone()));
             }
 
-            let links = HashSet::from(page.links.clone());
+            let links = links_owned;
 
             self.set_crawl_initial_status(&page, &links);
 

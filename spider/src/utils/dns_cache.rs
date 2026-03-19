@@ -26,7 +26,7 @@ impl DnsCache {
     /// Create a new DNS cache with the given TTL for entries.
     pub fn new(ttl: Duration) -> Self {
         Self {
-            cache: DashMap::new(),
+            cache: DashMap::with_capacity(128),
             ttl,
         }
     }
