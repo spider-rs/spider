@@ -185,6 +185,11 @@ required-features = [
 ]
 
 [[example]]
+name = "chrome_single_page"
+path = "chrome_single_page.rs"
+required-features = ["spider/sync", "spider/chrome"]
+
+[[example]]
 name = "chrome_viewport"
 path = "chrome_viewport.rs"
 required-features = ["spider/sync", "spider/chrome"]

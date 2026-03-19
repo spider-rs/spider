@@ -2575,12 +2575,17 @@ pub async fn fetch_page_html_chrome_base(
 
     let html_source_size = source.len();
 
+    // Shutdown signal for CDP event listeners. Sent after page work is done
+    // so listeners exit deterministically instead of relying on stream closure.
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
     // Listen for network events to track data transfer.
     // Spawning is always required here to collect network metrics in real-time.
     let bytes_collected_handle = tokio::spawn(async move {
         let finished_media: Option<OnceCell<RequestId>> =
             if asset { Some(OnceCell::new()) } else { None };
 
+        let mut shutdown_f1 = shutdown_rx.clone();
         let f1 = async {
             let mut total = 0.0;
 
@@ -2591,7 +2596,15 @@ pub async fn fetch_page_html_chrome_base(
             };
 
             if let Ok(mut listener) = event_loading_listener {
-                while let Some(event) = listener.next().await {
+                loop {
+                    let event = tokio::select! {
+                        biased;
+                        _ = shutdown_f1.changed() => break,
+                        ev = listener.next() => match ev {
+                            Some(ev) => ev,
+                            None => break,
+                        },
+                    };
                     total += event.encoded_data_length;
                     if let Some(response_map) = response_map.as_mut() {
                         response_map
@@ -2617,11 +2630,20 @@ pub async fn fetch_page_html_chrome_base(
             (total, response_map)
         };
 
+        let mut shutdown_f2 = shutdown_rx.clone();
         let f2 = async {
             if let Ok(mut listener) = cancel_listener {
                 let mut net_aborted = false;
 
-                while let Some(event) = listener.next().await {
+                loop {
+                    let event = tokio::select! {
+                        biased;
+                        _ = shutdown_f2.changed() => break,
+                        ev = listener.next() => match ev {
+                            Some(ev) => ev,
+                            None => break,
+                        },
+                    };
                     if event.r#type == ResourceType::Document
                         && event.error_text == "net::ERR_ABORTED"
                         && event.canceled.unwrap_or_default()
@@ -2637,6 +2659,7 @@ pub async fn fetch_page_html_chrome_base(
             }
         };
 
+        let mut shutdown_f3 = shutdown_rx.clone();
         let f3 = async {
             let mut response_map: Option<HashMap<String, ResponseMap>> = if track_responses {
                 Some(HashMap::new())
@@ -2662,7 +2685,15 @@ pub async fn fetch_page_html_chrome_base(
                 let mut allow_download = false;
                 let mut intial_request = false;
 
-                while let Some(event) = listener.next().await {
+                loop {
+                    let event = tokio::select! {
+                        biased;
+                        _ = shutdown_f3.changed() => break,
+                        ev = listener.next() => match ev {
+                            Some(ev) => ev,
+                            None => break,
+                        },
+                    };
                     let document = event.r#type == ResourceType::Document;
 
                     if !intial_request && document {
@@ -2759,6 +2790,7 @@ pub async fn fetch_page_html_chrome_base(
             }
         };
 
+        let mut shutdown_f4 = shutdown_rx.clone();
         let f4 = async {
             let mut request_map: Option<HashMap<String, f64>> = if track_requests {
                 Some(HashMap::new())
@@ -2769,7 +2801,15 @@ pub async fn fetch_page_html_chrome_base(
             if request_map.is_some() {
                 if let Some(response_map) = request_map.as_mut() {
                     if let Ok(mut listener) = event_sent_listener {
-                        while let Some(event) = listener.next().await {
+                        loop {
+                            let event = tokio::select! {
+                                biased;
+                                _ = shutdown_f4.changed() => break,
+                                ev = listener.next() => match ev {
+                                    Some(ev) => ev,
+                                    None => break,
+                                },
+                            };
                             response_map
                                 .insert(event.request.url.clone(), *event.timestamp.inner());
                         }
@@ -2780,6 +2820,7 @@ pub async fn fetch_page_html_chrome_base(
             request_map
         };
 
+        let mut shutdown_f5 = shutdown_rx;
         let f5 = async {
             if let Some(page_clone) = &page_clone {
                 if let Ok(mut listener) = event_data_received {
@@ -2788,26 +2829,37 @@ pub async fn fetch_page_html_chrome_base(
                     let check_max = total_max > 0;
 
                     loop {
-                        let next_event = async { listener.next().await };
-
                         let event = match chunk_idle {
                             Some(timeout) => {
-                                match tokio::time::timeout(timeout, next_event).await {
-                                    Ok(Some(event)) => event,
-                                    Ok(None) => break,
-                                    Err(_elapsed) => {
-                                        log::warn!(
-                                        "chrome network idle timeout ({timeout:?}), force-stopping page"
-                                    );
-                                        let _ = page_clone.force_stop_all().await;
-                                        break;
+                                let next_event = listener.next();
+                                tokio::select! {
+                                    biased;
+                                    _ = shutdown_f5.changed() => break,
+                                    result = tokio::time::timeout(timeout, next_event) => {
+                                        match result {
+                                            Ok(Some(event)) => event,
+                                            Ok(None) => break,
+                                            Err(_elapsed) => {
+                                                log::warn!(
+                                                    "chrome network idle timeout ({timeout:?}), force-stopping page"
+                                                );
+                                                let _ = page_clone.force_stop_all().await;
+                                                break;
+                                            }
+                                        }
                                     }
                                 }
                             }
-                            None => match next_event.await {
-                                Some(event) => event,
-                                None => break,
-                            },
+                            None => {
+                                tokio::select! {
+                                    biased;
+                                    _ = shutdown_f5.changed() => break,
+                                    ev = listener.next() => match ev {
+                                        Some(event) => event,
+                                        None => break,
+                                    },
+                                }
+                            }
                         };
 
                         let encoded = event.encoded_data_length.max(0) as u64;
@@ -3520,8 +3572,20 @@ pub async fn fetch_page_html_chrome_base(
             .send_command(chromiumoxide::cdp::browser_protocol::page::CloseParams::default())
             .await;
 
-        if let Ok((mut transferred, bytes_map, mut rs, request_map)) = bytes_collected_handle.await
-        {
+        // Let CDP streams close naturally after page close. If they don't
+        // drain within the remaining budget (capped at 30s), signal shutdown
+        // so listeners exit deterministically instead of hanging.
+        let collect_timeout = base_timeout.min(Duration::from_secs(30));
+        let collected = tokio::select! {
+            result = bytes_collected_handle => Ok(result),
+            _ = tokio::time::sleep(collect_timeout) => {
+                log::warn!("CDP event listeners did not drain after page close, signaling shutdown");
+                let _ = shutdown_tx.send(true);
+                Err(())
+            }
+        };
+
+        if let Ok(Ok((mut transferred, bytes_map, mut rs, request_map))) = collected {
             let response_map = rs.response_map;
 
             if response_map.is_some() {
@@ -7715,6 +7779,192 @@ mod tests {
         // Real content must still be returned
         assert!(
             decode_cached_html_bytes(b"<html><body><p>Hello</p></body></html>", None).is_some()
+        );
+    }
+
+    /// Verify that the CDP event listener shutdown pattern (watch channel +
+    /// tokio::select!) exits promptly when signaled, even if the underlying
+    /// stream never closes.
+    #[tokio::test]
+    async fn test_cdp_listener_shutdown_exits_promptly() {
+        use std::time::{Duration, Instant};
+
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+
+        // Simulate an event stream that produces items slowly and never closes.
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<u64>(16);
+
+        // Producer: sends one event per 100ms, runs for 60s (effectively forever).
+        let producer = tokio::spawn(async move {
+            for i in 0u64.. {
+                if event_tx.send(i).await.is_err() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        });
+
+        // Consumer: mirrors the real CDP listener loop pattern.
+        let consumer = tokio::spawn(async move {
+            let mut collected = Vec::new();
+            loop {
+                let event = tokio::select! {
+                    biased;
+                    _ = shutdown_rx.changed() => break,
+                    ev = event_rx.recv() => match ev {
+                        Some(ev) => ev,
+                        None => break,
+                    },
+                };
+                collected.push(event);
+            }
+            collected
+        });
+
+        // Let it collect a few events.
+        tokio::time::sleep(Duration::from_millis(350)).await;
+
+        // Signal shutdown and measure how long it takes to exit.
+        let start = Instant::now();
+        let _ = shutdown_tx.send(true);
+        let collected = consumer.await.unwrap();
+        let exit_time = start.elapsed();
+
+        producer.abort();
+
+        // Must have collected some events before shutdown.
+        assert!(
+            !collected.is_empty(),
+            "should have collected events before shutdown"
+        );
+        // Must exit within 50ms of the signal (not waiting for stream to close).
+        assert!(
+            exit_time < Duration::from_millis(50),
+            "listener should exit promptly after shutdown signal, took {:?}",
+            exit_time
+        );
+    }
+
+    /// Verify that without a shutdown signal the listener exits naturally
+    /// when the stream closes (no regression on normal flow).
+    #[tokio::test]
+    async fn test_cdp_listener_exits_on_stream_close() {
+        use std::time::{Duration, Instant};
+
+        let (_shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<u64>(16);
+
+        let consumer = tokio::spawn(async move {
+            let mut collected = Vec::new();
+            loop {
+                let event = tokio::select! {
+                    biased;
+                    _ = shutdown_rx.changed() => break,
+                    ev = event_rx.recv() => match ev {
+                        Some(ev) => ev,
+                        None => break,
+                    },
+                };
+                collected.push(event);
+            }
+            collected
+        });
+
+        // Send 5 events then drop the sender (closes the stream).
+        for i in 0..5 {
+            event_tx.send(i).await.unwrap();
+        }
+        drop(event_tx);
+
+        let start = Instant::now();
+        let collected = consumer.await.unwrap();
+        let exit_time = start.elapsed();
+
+        assert_eq!(
+            collected,
+            vec![0, 1, 2, 3, 4],
+            "all events should be collected"
+        );
+        assert!(
+            exit_time < Duration::from_millis(50),
+            "should exit promptly on stream close, took {:?}",
+            exit_time
+        );
+    }
+
+    /// Verify the tokio::join! pattern with multiple listeners all exit
+    /// when shutdown is signaled, even if only some streams close naturally.
+    #[tokio::test]
+    async fn test_cdp_listener_join_all_exit_on_shutdown() {
+        use std::time::{Duration, Instant};
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+        // 3 streams: first closes naturally, second and third never close.
+        let (tx1, mut rx1) = tokio::sync::mpsc::channel::<u64>(4);
+        let (_tx2, mut rx2) = tokio::sync::mpsc::channel::<u64>(4); // never sends
+        let (_tx3, mut rx3) = tokio::sync::mpsc::channel::<u64>(4); // never sends
+
+        let mut sr1 = shutdown_rx.clone();
+        let mut sr2 = shutdown_rx.clone();
+        let mut sr3 = shutdown_rx;
+
+        let handle = tokio::spawn(async move {
+            let f1 = async {
+                let mut count = 0u64;
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = sr1.changed() => break,
+                        ev = rx1.recv() => match ev {
+                            Some(_) => count += 1,
+                            None => break,
+                        },
+                    }
+                }
+                count
+            };
+            let f2 = async {
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = sr2.changed() => break,
+                        ev = rx2.recv() => if ev.is_none() { break },
+                    }
+                }
+            };
+            let f3 = async {
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = sr3.changed() => break,
+                        ev = rx3.recv() => if ev.is_none() { break },
+                    }
+                }
+            };
+            let (count, _, _) = tokio::join!(f1, f2, f3);
+            count
+        });
+
+        // Send some events to f1, then close it.
+        for i in 0..3 {
+            tx1.send(i).await.unwrap();
+        }
+        drop(tx1);
+
+        // f2 and f3 never get events — they'd hang without shutdown.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let start = Instant::now();
+        let _ = shutdown_tx.send(true);
+        let count = handle.await.unwrap();
+        let exit_time = start.elapsed();
+
+        assert_eq!(count, 3, "f1 should have collected all events");
+        assert!(
+            exit_time < Duration::from_millis(50),
+            "tokio::join! should complete promptly after shutdown, took {:?}",
+            exit_time
         );
     }
 }
