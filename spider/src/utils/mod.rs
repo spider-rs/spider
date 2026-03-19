@@ -39,6 +39,9 @@ pub mod header_utils;
 pub mod hedge;
 /// String interner.
 pub mod interner;
+#[cfg(feature = "numa")]
+/// NUMA-aware thread pinning for multi-socket servers.
+pub mod numa;
 #[cfg(feature = "rate_limit")]
 /// Per-domain token bucket rate limiter.
 pub mod rate_limiter;
@@ -54,6 +57,9 @@ pub mod trie;
 pub mod uring_fs;
 /// Validate html false positives.
 pub mod validation;
+#[cfg(feature = "zero_copy")]
+/// Zero-copy byte-level parsing for HTTP wire formats and protocol structures.
+pub mod zero_copy;
 
 #[cfg(feature = "chrome")]
 use crate::features::automation::RemoteMultimodalConfigs;

@@ -30,8 +30,13 @@ pub(crate) fn background_connect_threading() -> bool {
 /// Initializes io_uring (if available on this kernel) for file I/O and TCP
 /// connects. Also spawns a dedicated tokio multi-thread runtime as fallback
 /// for connection processing when io_uring is not available.
+///
+/// When the `numa` feature is enabled, also initializes NUMA topology detection
+/// and pins worker threads to their local NUMA node.
 pub fn init_background_runtime() {
     super::uring_fs::init_uring_fs();
+    #[cfg(feature = "numa")]
+    super::numa::init_numa();
     let _ = CONNECT_THREAD_POOL.set({
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let builder = std::thread::Builder::new();
@@ -60,6 +65,14 @@ pub fn init_background_runtime() {
                                     let error = std::io::Error::last_os_error();
                                     log::error!("failed to set threadpool niceness: {}", error);
                                 }
+                            }
+                            // Pin this worker to its NUMA-local CPUs.
+                            #[cfg(feature = "numa")]
+                            {
+                                use std::sync::atomic::{AtomicUsize, Ordering};
+                                static WORKER_COUNTER: AtomicUsize = AtomicUsize::new(0);
+                                let idx = WORKER_COUNTER.fetch_add(1, Ordering::Relaxed);
+                                super::numa::pin_worker(idx);
                             }
                         })
                         .enable_all()
