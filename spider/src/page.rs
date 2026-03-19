@@ -900,7 +900,7 @@ pub(crate) fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         if abs.scheme() != parent_host_scheme.as_str() {
             let _ = abs.set_scheme(parent_host_scheme.as_str());
         }
-        map.insert(abs.as_str().to_string().into());
+        map.insert(A::from(abs.into()));
     }
 }
 
@@ -936,7 +936,7 @@ pub(crate) fn push_link_verify<A: PartialEq + Eq + std::hash::Hash + From<String
         if verify {
             push_link_check(&mut abs, map, full_resources, &mut true);
         } else {
-            map.insert(abs.as_str().to_string().into());
+            map.insert(A::from(abs.into()));
         }
     }
 }
@@ -978,7 +978,7 @@ pub(crate) fn push_link_check<A: PartialEq + Eq + std::hash::Hash + From<String>
     }
 
     if *can_process {
-        map.insert(abs.as_str().to_string().into());
+        map.insert(A::from(abs.as_str().to_string()));
     }
 }
 

@@ -6289,8 +6289,9 @@ pub fn clean_html_full(html: &str) -> String {
                 }),
                 element!("*", |el| {
                     // Keep only: id, class, data-*
+                    // SmallVec avoids heap alloc for elements with ≤16 attributes (vast majority).
                     let attrs = el.attributes();
-                    let mut to_remove = Vec::with_capacity(attrs.len());
+                    let mut to_remove: smallvec::SmallVec<[String; 16]> = smallvec::SmallVec::new();
                     for attr in attrs.iter() {
                         let n = attr.name();
                         if n != "id" && n != "class" && !n.starts_with("data-") {
@@ -6537,7 +6538,9 @@ pub fn prepare_url(u: &str) -> String {
 pub(crate) async fn normalize_html(html: &[u8]) -> Vec<u8> {
     use lol_html::{element, send::Settings};
 
-    let mut output = Vec::new();
+    // Pre-allocate: normalized output is typically smaller than input due to
+    // removed elements/attributes, so 3/4 of input is a reasonable estimate.
+    let mut output = Vec::with_capacity(html.len() * 3 / 4);
 
     let mut rewriter = HtmlRewriter::new(
         Settings {
@@ -6552,7 +6555,9 @@ pub(crate) async fn normalize_html(html: &[u8]) -> Vec<u8> {
                 }),
                 element!("*", |el| {
                     let attrs = el.attributes();
-                    let mut remove_attr = Vec::with_capacity(attrs.len());
+                    // SmallVec avoids heap alloc for elements with ≤16 attributes.
+                    let mut remove_attr: smallvec::SmallVec<[String; 16]> =
+                        smallvec::SmallVec::new();
 
                     for attr in attrs {
                         let name = attr.name();

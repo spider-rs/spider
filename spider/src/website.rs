@@ -5720,7 +5720,7 @@ impl Website {
                                         };
                                         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
                                         let mut links_pages = if return_page_links {
-                                            Some(links.clone())
+                                            Some(HashSet::new())
                                         } else {
                                             None
                                         };
@@ -6663,7 +6663,7 @@ impl Website {
                                         };
                                         let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
                                         let mut links_pages = if return_page_links {
-                                            Some(links.clone())
+                                            Some(HashSet::new())
                                         } else {
                                             None
                                         };
