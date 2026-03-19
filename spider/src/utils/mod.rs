@@ -291,16 +291,43 @@ pub fn is_cacheable_body_empty(body: &[u8]) -> bool {
     // Detect pages with HTML structure but empty <body> (< 2KB only for speed).
     // Case-insensitive matching without allocating a lowercase copy.
     if trimmed.len() <= 2048 {
-        if let Some(body_open) = trimmed
-            .windows(5)
-            .position(|w| w.eq_ignore_ascii_case(b"<body"))
-        {
-            if let Some(gt) = trimmed[body_open..].iter().position(|&c| c == b'>') {
-                let content_start = body_open + gt + 1;
-                if let Some(close) = trimmed[content_start..]
-                    .windows(7)
-                    .position(|w| w.eq_ignore_ascii_case(b"</body>"))
+        // Use memchr SIMD scan for '<' then verify tag prefix,
+        // instead of O(n*5) windows scan.
+        let body_open = {
+            let mut found = None;
+            let mut off = 0;
+            while let Some(p) = memchr::memchr(b'<', &trimmed[off..]) {
+                let abs = off + p;
+                if trimmed.len() - abs >= 5 && trimmed[abs..abs + 5].eq_ignore_ascii_case(b"<body")
                 {
+                    found = Some(abs);
+                    break;
+                }
+                off = abs + 1;
+            }
+            found
+        };
+        if let Some(body_open) = body_open {
+            if let Some(gt) = memchr::memchr(b'>', &trimmed[body_open..]) {
+                let content_start = body_open + gt + 1;
+                // Same memchr pattern for </body>.
+                let close = {
+                    let mut found = None;
+                    let mut off = 0;
+                    let region = &trimmed[content_start..];
+                    while let Some(p) = memchr::memchr(b'<', &region[off..]) {
+                        let abs = off + p;
+                        if region.len() - abs >= 7
+                            && region[abs..abs + 7].eq_ignore_ascii_case(b"</body>")
+                        {
+                            found = Some(abs);
+                            break;
+                        }
+                        off = abs + 1;
+                    }
+                    found
+                };
+                if let Some(close) = close {
                     let content_end = content_start + close;
                     if trimmed[content_start..content_end]
                         .iter()
@@ -6668,28 +6695,30 @@ pub fn crawl_duration_expired(crawl_timeout: &Option<Duration>, start: &Option<I
         .unwrap_or(false)
 }
 
-/// is the content html and safe for formatting.
-static HTML_TAGS: phf::Set<&'static [u8]> = phf_set! {
-    b"<!doctype html",
-    b"<html",
-    b"<document",
-};
-
 /// Check if the content is HTML.
+///
+/// Uses `memchr` SIMD-accelerated byte scanning to find `<` candidates, then
+/// verifies the tag prefix with a case-insensitive comparison — O(n) with
+/// SIMD vs the previous O(n*m) `.windows()` approach.
 pub fn is_html_content_check(bytes: &[u8]) -> bool {
+    const TAG_SUFFIXES: &[&[u8]] = &[b"!doctype html", b"html", b"document"];
+
     let check_bytes = if bytes.len() > 1024 {
         &bytes[..1024]
     } else {
         bytes
     };
 
-    for tag in HTML_TAGS.iter() {
-        if check_bytes
-            .windows(tag.len())
-            .any(|window| window.eq_ignore_ascii_case(tag))
-        {
-            return true;
+    let mut offset = 0;
+    while let Some(pos) = memchr::memchr(b'<', &check_bytes[offset..]) {
+        let abs = offset + pos;
+        let after = &check_bytes[abs + 1..]; // slice after '<'
+        for suffix in TAG_SUFFIXES {
+            if after.len() >= suffix.len() && after[..suffix.len()].eq_ignore_ascii_case(suffix) {
+                return true;
+            }
         }
+        offset = abs + 1;
     }
 
     false

@@ -1,6 +1,6 @@
 [package]
 name = "spider_agent_types"
-version = "2.47.53"
+version = "2.47.54"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "Pure data types and constants for spider_agent automation. Zero heavy dependencies."
 repository = "https://github.com/spider-rs/spider"
@@ -18,6 +18,7 @@ maintenance = { status = "actively-developed" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 aho-corasick = "1"
+memchr = "2"
 
 # Model capabilities detection (lightweight)
 llm_models_spider = "0.1.9"

@@ -166,7 +166,8 @@ impl ContentTypeClass {
 #[inline]
 pub fn classify_content_type(raw: &[u8]) -> ContentTypeClass {
     // Strip parameters: take everything before first ';' and trim whitespace.
-    let mime = match raw.iter().position(|&b| b == b';') {
+    // memchr uses SIMD-accelerated byte scanning.
+    let mime = match memchr::memchr(b';', raw) {
         Some(pos) => &raw[..pos],
         None => raw,
     };
@@ -261,15 +262,56 @@ fn classify_application(mime: &[u8]) -> ContentTypeClass {
 }
 
 /// Case-insensitive byte prefix match.
+///
+/// Processes 8 bytes at a time using u64 word loads when possible,
+/// falling back to byte-at-a-time for remainders.
 #[inline]
 fn starts_with_ignore_case(haystack: &[u8], needle: &[u8]) -> bool {
-    if haystack.len() < needle.len() {
+    let len = needle.len();
+    if haystack.len() < len {
         return false;
     }
-    haystack[..needle.len()]
-        .iter()
-        .zip(needle)
-        .all(|(&h, &n)| h | 0x20 == n | 0x20)
+    let h = &haystack[..len];
+
+    // Process 8 bytes at a time via u64 word comparison.
+    let chunks = len / 8;
+    for i in 0..chunks {
+        let off = i * 8;
+        let mut hw = u64::from_ne_bytes([
+            h[off],
+            h[off + 1],
+            h[off + 2],
+            h[off + 3],
+            h[off + 4],
+            h[off + 5],
+            h[off + 6],
+            h[off + 7],
+        ]);
+        let mut nw = u64::from_ne_bytes([
+            needle[off],
+            needle[off + 1],
+            needle[off + 2],
+            needle[off + 3],
+            needle[off + 4],
+            needle[off + 5],
+            needle[off + 6],
+            needle[off + 7],
+        ]);
+        // ASCII lowercase: set bit 5 on every byte.
+        hw |= 0x2020_2020_2020_2020;
+        nw |= 0x2020_2020_2020_2020;
+        if hw != nw {
+            return false;
+        }
+    }
+
+    // Remainder bytes.
+    for j in (chunks * 8)..len {
+        if h[j] | 0x20 != needle[j] | 0x20 {
+            return false;
+        }
+    }
+    true
 }
 
 /// Trim trailing ASCII whitespace from a byte slice.

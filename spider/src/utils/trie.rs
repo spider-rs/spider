@@ -67,11 +67,12 @@ impl<V: Debug> Trie<V> {
         };
 
         if after_scheme < path.len() {
-            // Find the first '/' after the host using memchr (via find on byte slice)
-            path.as_bytes()[after_scheme..]
-                .iter()
-                .position(|&b| b == b'/')
-                .map_or(path.len(), |p| after_scheme + p)
+            // SIMD-accelerated byte scan for first '/' after scheme+host.
+            memchr::memchr(
+                b'/',
+                path.as_bytes().get(after_scheme..).unwrap_or_default(),
+            )
+            .map_or(path.len(), |p| after_scheme + p)
         } else {
             0
         }

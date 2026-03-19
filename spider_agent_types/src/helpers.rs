@@ -225,18 +225,8 @@ pub fn extract_last_json_boundaries(s: &str, open: char, close: char) -> Option<
     let open_byte = open as u8;
     let close_byte = close as u8;
 
-    // Find the last closing brace/bracket
-    let mut end_pos = None;
-    let mut i = bytes.len();
-    while i > 0 {
-        i -= 1;
-        if bytes[i] == close_byte {
-            end_pos = Some(i);
-            break;
-        }
-    }
-
-    let end_pos = end_pos?;
+    // SIMD-accelerated reverse scan for last closing brace/bracket.
+    let end_pos = memchr::memrchr(close_byte, bytes)?;
 
     // Walk backwards from end_pos, counting braces to find the matching opener
     let mut depth = 0i32;
@@ -321,14 +311,47 @@ pub fn truncate_utf8_tail(s: &str, max_bytes: usize) -> String {
 }
 
 /// FNV-1a 64-bit hash function for cheap content hashing.
+///
+/// Processes 8 bytes at a time for long inputs, matching the scalar result
+/// exactly (each byte is still XOR'd and multiplied individually, but the
+/// compiler can auto-vectorize the unrolled loop body).
+#[inline]
 pub fn fnv1a64(bytes: &[u8]) -> u64 {
     const FNV_OFFSET: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x100000001b3;
     let mut h = FNV_OFFSET;
-    for &b in bytes {
-        h ^= b as u64;
+
+    // Process 8 bytes per iteration (unrolled to help auto-vectorization).
+    let chunks = bytes.len() / 8;
+    let mut i = 0;
+    for _ in 0..chunks {
+        // Each byte is still processed individually to preserve FNV-1a semantics.
+        h ^= bytes[i] as u64;
         h = h.wrapping_mul(FNV_PRIME);
+        h ^= bytes[i + 1] as u64;
+        h = h.wrapping_mul(FNV_PRIME);
+        h ^= bytes[i + 2] as u64;
+        h = h.wrapping_mul(FNV_PRIME);
+        h ^= bytes[i + 3] as u64;
+        h = h.wrapping_mul(FNV_PRIME);
+        h ^= bytes[i + 4] as u64;
+        h = h.wrapping_mul(FNV_PRIME);
+        h ^= bytes[i + 5] as u64;
+        h = h.wrapping_mul(FNV_PRIME);
+        h ^= bytes[i + 6] as u64;
+        h = h.wrapping_mul(FNV_PRIME);
+        h ^= bytes[i + 7] as u64;
+        h = h.wrapping_mul(FNV_PRIME);
+        i += 8;
     }
+
+    // Remainder.
+    while i < bytes.len() {
+        h ^= bytes[i] as u64;
+        h = h.wrapping_mul(FNV_PRIME);
+        i += 1;
+    }
+
     h
 }
 
