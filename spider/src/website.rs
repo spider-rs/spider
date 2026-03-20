@@ -1817,11 +1817,7 @@ impl Website {
             client
         };
 
-        let client = if self.configuration.proxies.is_none() {
-            client
-        } else {
-            client.tcp_keepalive(Duration::from_secs(30))
-        };
+        let client = client.tcp_keepalive(Duration::from_secs(30));
 
         // check both casing for user-agent
         let client = if missing_agent {
@@ -1835,6 +1831,9 @@ impl Website {
         } else {
             client
         };
+
+        #[cfg(feature = "dns_cache")]
+        let client = client.dns_resolver(crate::utils::dns_cache::shared_dns_cache());
 
         crate::utils::header_utils::setup_default_headers(client, &self.configuration)
     }
@@ -1887,11 +1886,7 @@ impl Website {
             client
         };
 
-        let client = if self.configuration.proxies.is_none() {
-            client
-        } else {
-            client.tcp_keepalive(Duration::from_secs(30))
-        };
+        let client = client.tcp_keepalive(Duration::from_secs(30));
 
         let client = if missing_agent {
             client.user_agent(user_agent)
@@ -1904,6 +1899,9 @@ impl Website {
         } else {
             client
         };
+
+        #[cfg(feature = "dns_cache")]
+        let client = client.dns_resolver(crate::utils::dns_cache::shared_dns_cache());
 
         crate::utils::header_utils::setup_default_headers(client, &self.configuration)
     }
@@ -2613,7 +2611,12 @@ impl Website {
         } else {
             self.skip_initial = !self.extra_links.is_empty();
         }
-        self.configure_robots_parser(&setup.0).await;
+        // Skip robots.txt fetch for single-page scrapes — no link-following
+        // means no need to check robots rules. is_allowed_robots() returns
+        // true when robot_file_parser is None, so this is safe.
+        if !self.single_page() {
+            self.configure_robots_parser(&setup.0).await;
+        }
         setup
     }
 

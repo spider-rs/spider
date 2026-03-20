@@ -1,12 +1,13 @@
 use dashmap::DashMap;
-use std::net::{IpAddr, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Maximum number of cached entries before eviction on overflow.
 const MAX_ENTRIES: usize = 5_000;
 
 /// Cached DNS entry with TTL tracking.
-struct DnsEntry {
+pub(crate) struct DnsEntry {
     addrs: Vec<IpAddr>,
     expires: Instant,
 }
@@ -18,8 +19,8 @@ struct DnsEntry {
 /// re-resolved on next access. Capped at [`MAX_ENTRIES`]; overflow
 /// triggers expired-entry eviction followed by LRU-style trimming.
 pub struct DnsCache {
-    cache: DashMap<String, DnsEntry>,
-    ttl: Duration,
+    pub(crate) cache: DashMap<String, DnsEntry>,
+    pub(crate) ttl: Duration,
 }
 
 impl DnsCache {
@@ -140,6 +141,73 @@ impl DnsCache {
         let now = Instant::now();
         self.cache.retain(|_, v| v.expires > now);
     }
+}
+
+/// Wrapper that holds an `Arc<DnsCache>` so it can be moved into async
+/// futures returned by [`Resolve::resolve`].
+pub struct DnsCacheResolver(pub Arc<DnsCache>);
+
+impl crate::client::dns::Resolve for DnsCacheResolver {
+    fn resolve(&self, name: crate::client::dns::Name) -> crate::client::dns::Resolving {
+        let host = name.as_str().to_string();
+        let cache = self.0.clone(); // Arc clone — cheap
+
+        Box::pin(async move {
+            let now = Instant::now();
+
+            // Fast path: cache hit.
+            if let Some(entry) = cache.cache.get(&host) {
+                if entry.expires > now {
+                    let addrs: Vec<SocketAddr> =
+                        entry.addrs.iter().map(|ip| SocketAddr::new(*ip, 0)).collect();
+                    let iter: crate::client::dns::Addrs = Box::new(addrs.into_iter());
+                    return Ok(iter);
+                }
+            }
+
+            // Cache miss — resolve on blocking thread.
+            let host_for_resolve = format!("{}:0", host);
+            let result = tokio::task::spawn_blocking(move || {
+                host_for_resolve
+                    .to_socket_addrs()
+                    .ok()
+                    .map(|addrs| addrs.collect::<Vec<SocketAddr>>())
+            })
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?
+            .ok_or_else(|| -> Box<dyn std::error::Error + Send + Sync> {
+                "dns resolution failed".into()
+            })?;
+
+            // Store in cache.
+            let ips: Vec<IpAddr> = result.iter().map(|s| s.ip()).collect();
+            if !ips.is_empty() {
+                cache.cache.insert(
+                    host,
+                    DnsEntry {
+                        addrs: ips,
+                        expires: Instant::now() + cache.ttl,
+                    },
+                );
+            }
+
+            let iter: crate::client::dns::Addrs = Box::new(result.into_iter());
+            Ok(iter)
+        })
+    }
+}
+
+/// Global shared DNS cache with 5-minute TTL, wrapped for reqwest.
+pub fn shared_dns_cache() -> Arc<DnsCacheResolver> {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<Arc<DnsCacheResolver>> = OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            Arc::new(DnsCacheResolver(Arc::new(DnsCache::new(
+                Duration::from_secs(300),
+            ))))
+        })
+        .clone()
 }
 
 #[cfg(test)]

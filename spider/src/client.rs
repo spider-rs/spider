@@ -13,7 +13,7 @@ pub use reqwest as request_client;
 ))]
 pub use reqwest::cookie;
 #[cfg(all(not(feature = "cache_request"), not(feature = "wreq")))]
-pub use reqwest::{header, redirect, Error, Proxy, Response, StatusCode};
+pub use reqwest::{dns, header, redirect, Error, Proxy, Response, StatusCode};
 
 /// The asynchronous Client to make requests with wreq.
 #[cfg(all(not(feature = "cache_request"), feature = "wreq"))]
@@ -26,7 +26,7 @@ pub use wreq as request_client;
 #[cfg(all(feature = "cookies", not(feature = "cache_request"), feature = "wreq"))]
 pub use wreq::cookie;
 #[cfg(all(not(feature = "cache_request"), feature = "wreq"))]
-pub use wreq::{header, redirect, Error, Proxy, Response, StatusCode};
+pub use wreq::{dns, header, redirect, Error, Proxy, Response, StatusCode};
 #[cfg(all(not(feature = "cache_request"), feature = "wreq"))]
 pub use wreq_util;
 
@@ -41,7 +41,7 @@ pub type ClientBuilder = reqwest::ClientBuilder;
 #[cfg(all(feature = "cookies", feature = "cache_request"))]
 pub use reqwest::cookie;
 #[cfg(feature = "cache_request")]
-pub use reqwest::{header, redirect, Proxy, Response, StatusCode};
+pub use reqwest::{dns, header, redirect, Proxy, Response, StatusCode};
 #[cfg(feature = "cache_request")]
 pub use reqwest_middleware as request_client;
 #[cfg(feature = "cache_request")]
