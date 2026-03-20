@@ -6361,7 +6361,10 @@ impl Website {
                     }
                 }
             }
-            _ => log::error!("Chrome initialization failed."),
+            _ => {
+                log::warn!("Chrome initialization failed — falling back to HTTP crawl.");
+                self.crawl_concurrent_raw(client, handle).await;
+            }
         }
     }
 
@@ -7257,8 +7260,8 @@ impl Website {
                 }
             }
             _ => {
-                log::error!("Chrome initialization failed.");
-                self.clone()
+                log::warn!("Chrome initialization failed — falling back to HTTP crawl.");
+                self.crawl_concurrent_raw_send(client, handle, url).await
             }
         }
     }
@@ -7294,7 +7297,7 @@ impl Website {
                 }
             }
             _ => {
-                log::error!("Chrome initialization failed.");
+                log::warn!("Chrome initialization failed — no chrome executable found. Set CHROME_BIN or install Chrome.");
             }
         }
     }
