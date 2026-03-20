@@ -2751,6 +2751,10 @@ impl Page {
         }
     }
 
+    /// Set the url directly parsed url of the page.
+    #[cfg(feature = "decentralized")]
+    pub fn set_url_parsed_direct(&mut self) {}
+
     /// Set the url directly parsed url of the page. Useful for transforming the content and rewriting the url.
     #[cfg(feature = "decentralized")]
     pub fn set_url_parsed_direct_empty(&mut self) {}
@@ -4543,6 +4547,17 @@ impl Page {
     #[cfg(feature = "decentralized")]
     #[inline(always)]
     pub async fn links(
+        &self,
+        _: &RelativeSelectors,
+        _: &Option<Box<Url>>,
+    ) -> HashSet<CaseInsensitiveString> {
+        self.links.to_owned()
+    }
+
+    /// Find all href links and return them using CSS selectors gathering all resources.
+    #[cfg(feature = "decentralized")]
+    #[inline(always)]
+    pub async fn links_full(
         &self,
         _: &RelativeSelectors,
         _: &Option<Box<Url>>,
