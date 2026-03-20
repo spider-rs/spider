@@ -83,7 +83,7 @@ pub fn expand_url(url: &str) -> Vec<CaseInsensitiveString> {
                         let s = start_str.as_bytes()[0];
                         let e = end_str.as_bytes()[0];
                         let items = (s..e + 1)
-                            .map(|char| (String::from_utf8_lossy(&[char]).to_string(), substring))
+                            .map(|b| (String::from(b as char), substring))
                             .collect::<Vec<(String, &str)>>();
 
                         matches.push(items);

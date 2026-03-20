@@ -3428,7 +3428,8 @@ impl Page {
         if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             Default::default()
         } else {
-            self.links_stream_base_ssg(selectors, &Box::new(self.get_html()), client, prior_domain)
+            let html = self.get_html();
+            self.links_stream_base_ssg(selectors, &html, client, prior_domain)
                 .await
         }
     }
@@ -3464,8 +3465,8 @@ impl Page {
         if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             Default::default()
         } else {
-            self.links_stream_base(selectors, &Box::new(self.get_html()), base)
-                .await
+            let html = self.get_html();
+            self.links_stream_base(selectors, &html, base).await
         }
     }
 
@@ -3506,7 +3507,7 @@ impl Page {
         let mut meta_og_image: Option<_> = None;
 
         if !self.is_empty() {
-            let html_resource = Box::new(self.get_html());
+            let html_resource = self.get_html();
 
             if html_resource.starts_with("<?xml") {
                 self.links_stream_xml_links_stream_base(selectors, &html_resource, &mut map, &base)
@@ -3923,7 +3924,7 @@ impl Page {
         let mut meta_og_image: Option<_> = None;
 
         if !self.is_empty() {
-            let html_resource = Box::new(self.get_html());
+            let html_resource = self.get_html();
 
             if html_resource.starts_with("<?xml") {
                 self.links_stream_xml_links_stream_base(selectors, &html_resource, &mut map, &base)
@@ -4321,7 +4322,7 @@ impl Page {
         let mut meta_og_image: Option<_> = None;
 
         if !self.is_empty() {
-            let html = Box::new(self.get_html());
+            let html = self.get_html();
 
             if html.starts_with("<?xml") {
                 self.links_stream_xml_links_stream_base(selectors, &html, &mut map, base)
@@ -4568,7 +4569,7 @@ pub fn get_html_encoded(html: &Option<bytes::Bytes>, label: &str) -> String {
 /// Get the content with proper encoding. Pass in a proper encoding label like SHIFT_JIS.
 pub fn get_html_encoded(html: &Option<bytes::Bytes>, _label: &str) -> String {
     match html {
-        Some(b) => String::from_utf8_lossy(b).to_string(),
+        Some(b) => String::from_utf8_lossy(b).into_owned(),
         _ => Default::default(),
     }
 }

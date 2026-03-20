@@ -11722,7 +11722,7 @@ async fn test_chrome_remote_cache_skip_browser_timing() {
                 if n == 0 {
                     return;
                 }
-                let request = String::from_utf8_lossy(&buf[..n]).to_string();
+                let request = String::from_utf8_lossy(&buf[..n]).into_owned();
                 let first_line = request.lines().next().unwrap_or("");
                 let parts: Vec<&str> = first_line.split_whitespace().collect();
                 if parts.len() < 2 {
