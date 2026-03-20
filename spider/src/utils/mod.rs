@@ -2698,8 +2698,14 @@ pub async fn fetch_page_html_chrome_base(
                     };
                     if event.r#type == ResourceType::Document
                         && event.error_text == "net::ERR_ABORTED"
-                        && event.canceled.unwrap_or_default()
                     {
+                        // canceled=true means Chrome intentionally aborted the
+                        // request (e.g. following a 301/302 redirect). This is
+                        // NOT a real failure — skip it so the navigation
+                        // continues to the redirect target.
+                        if event.canceled.unwrap_or_default() {
+                            continue;
+                        }
                         net_aborted = true;
                         break;
                     }
