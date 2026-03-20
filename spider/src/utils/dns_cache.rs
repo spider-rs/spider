@@ -8,6 +8,9 @@ const MAX_ENTRIES: usize = 5_000;
 
 /// Cached DNS entry with TTL tracking.
 pub(crate) struct DnsEntry {
+    /// Pre-computed socket addresses (port 0) — avoids per-hit IpAddr→SocketAddr conversion.
+    sockaddrs: Arc<[SocketAddr]>,
+    /// Original IP addresses for the public `resolve()` API.
     addrs: Vec<IpAddr>,
     expires: Instant,
 }
@@ -50,14 +53,15 @@ impl DnsCache {
             host_owned
                 .to_socket_addrs()
                 .ok()
-                .map(|addrs| addrs.map(|a| a.ip()).collect::<Vec<IpAddr>>())
+                .map(|addrs| addrs.collect::<Vec<SocketAddr>>())
         })
         .await
         .ok()
         .flatten();
 
         match result {
-            Some(ips) if !ips.is_empty() => {
+            Some(resolved) if !resolved.is_empty() => {
+                let ips: Vec<IpAddr> = resolved.iter().map(|s| s.ip()).collect();
                 // Evict overflow before inserting.
                 if self.cache.len() >= MAX_ENTRIES {
                     self.evict_expired();
@@ -79,6 +83,7 @@ impl DnsCache {
                 self.cache.insert(
                     host.to_string(),
                     DnsEntry {
+                        sockaddrs: resolved.into(),
                         addrs: ips.clone(),
                         expires: Instant::now() + self.ttl,
                     },
@@ -103,7 +108,7 @@ impl DnsCache {
                     addr_str
                         .to_socket_addrs()
                         .ok()
-                        .map(|addrs| addrs.map(|a| a.ip()).collect::<Vec<IpAddr>>())
+                        .map(|addrs| addrs.collect::<Vec<SocketAddr>>())
                 })
                 .await
                 .ok()
@@ -112,11 +117,13 @@ impl DnsCache {
             });
         }
         while let Some(Ok((host, result, ttl))) = set.join_next().await {
-            if let Some(ips) = result {
-                if !ips.is_empty() {
+            if let Some(resolved) = result {
+                if !resolved.is_empty() {
+                    let ips: Vec<IpAddr> = resolved.iter().map(|s| s.ip()).collect();
                     self.cache.insert(
                         host,
                         DnsEntry {
+                            sockaddrs: resolved.into(),
                             addrs: ips,
                             expires: Instant::now() + ttl,
                         },
@@ -150,17 +157,19 @@ pub struct DnsCacheResolver(pub Arc<DnsCache>);
 impl crate::client::dns::Resolve for DnsCacheResolver {
     fn resolve(&self, name: crate::client::dns::Name) -> crate::client::dns::Resolving {
         let host = name.as_str().to_string();
-        let cache = self.0.clone(); // Arc clone — cheap
+        let cache = self.0.clone();
 
         Box::pin(async move {
             let now = Instant::now();
 
-            // Fast path: cache hit.
+            // Fast path: cache hit — Arc clone only, zero alloc for the address list.
             if let Some(entry) = cache.cache.get(&host) {
                 if entry.expires > now {
-                    let addrs: Vec<SocketAddr> =
-                        entry.addrs.iter().map(|ip| SocketAddr::new(*ip, 0)).collect();
-                    let iter: crate::client::dns::Addrs = Box::new(addrs.into_iter());
+                    let addrs = entry.sockaddrs.clone();
+                    let iter: crate::client::dns::Addrs = Box::new(ArcSocketAddrIter {
+                        inner: addrs,
+                        pos: 0,
+                    });
                     return Ok(iter);
                 }
             }
@@ -181,19 +190,43 @@ impl crate::client::dns::Resolve for DnsCacheResolver {
 
             // Store in cache.
             let ips: Vec<IpAddr> = result.iter().map(|s| s.ip()).collect();
+            let sockaddrs: Arc<[SocketAddr]> = result.into();
             if !ips.is_empty() {
                 cache.cache.insert(
                     host,
                     DnsEntry {
+                        sockaddrs: sockaddrs.clone(),
                         addrs: ips,
                         expires: Instant::now() + cache.ttl,
                     },
                 );
             }
 
-            let iter: crate::client::dns::Addrs = Box::new(result.into_iter());
+            let iter: crate::client::dns::Addrs = Box::new(ArcSocketAddrIter {
+                inner: sockaddrs,
+                pos: 0,
+            });
             Ok(iter)
         })
+    }
+}
+
+/// Iterator over `Arc<[SocketAddr]>` that avoids cloning the Vec on every cache hit.
+struct ArcSocketAddrIter {
+    inner: Arc<[SocketAddr]>,
+    pos: usize,
+}
+
+impl Iterator for ArcSocketAddrIter {
+    type Item = SocketAddr;
+    fn next(&mut self) -> Option<SocketAddr> {
+        if self.pos < self.inner.len() {
+            let addr = self.inner[self.pos];
+            self.pos += 1;
+            Some(addr)
+        } else {
+            None
+        }
     }
 }
 
@@ -283,5 +316,21 @@ mod tests {
         let cache = DnsCache::new(Duration::from_secs(60));
         assert!(cache.is_empty());
         assert_eq!(cache.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn resolver_cache_hit_returns_socket_addrs() {
+        let dns = Arc::new(DnsCache::new(Duration::from_secs(60)));
+        // Prime the cache.
+        let _ = dns.resolve("localhost").await;
+        assert_eq!(dns.len(), 1);
+
+        let resolver = DnsCacheResolver(dns);
+        let name = "localhost".parse().expect("valid name");
+        let addrs: Vec<SocketAddr> = crate::client::dns::Resolve::resolve(&resolver, name)
+            .await
+            .expect("should resolve")
+            .collect();
+        assert!(!addrs.is_empty());
     }
 }
