@@ -86,7 +86,7 @@ checksum = "b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0"
 dependencies = [
  "cfg-if",
  "cipher",
- "cpufeatures",
+ "cpufeatures 0.2.17",
 ]
 
 [[package]]
@@ -1158,8 +1158,8 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.47.75",
- "spider_utils 2.47.75",
+ "spider 2.47.76",
+ "spider_utils 2.47.76",
 ]
 
 [[package]]
@@ -1263,7 +1263,7 @@ dependencies = [
  "cc",
  "cfg-if",
  "constant_time_eq",
- "cpufeatures",
+ "cpufeatures 0.2.17",
 ]
 
 [[package]]
@@ -1610,6 +1610,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
+name = "chacha20"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f8d983286843e49675a4b7a2d174efe136dc93a18d69130dd18198a6c167601"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.3.0",
+ "rand_core 0.10.0",
+]
+
+[[package]]
 name = "chardetng"
 version = "0.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1622,9 +1633,9 @@ dependencies = [
 
 [[package]]
 name = "chromey"
-version = "2.42.4"
+version = "2.42.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "675467128db39a02ef4fd75f4f4af47b43733612bab3119aedc7c5705ad372f2"
+checksum = "3582f1969da3838a2feefd565bfbbe1aab9bf305d88ffecf72798df16d6ab518"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -1637,7 +1648,7 @@ dependencies = [
  "fnv",
  "futures",
  "futures-timer",
- "hashbrown 0.15.5",
+ "hashbrown 0.16.1",
  "hex",
  "http-cache",
  "http-cache-reqwest",
@@ -1646,9 +1657,9 @@ dependencies = [
  "lazy_static",
  "libc",
  "lol_html",
- "phf 0.11.3",
+ "phf 0.13.1",
  "pin-project-lite",
- "rand 0.9.2",
+ "rand 0.10.0",
  "reqwest 0.13.2",
  "serde",
  "serde_json",
@@ -1659,13 +1670,13 @@ dependencies = [
  "spider_fingerprint",
  "spider_firewall",
  "spider_network_blocker",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
- "tokio-tungstenite 0.28.0",
+ "tokio-tungstenite 0.29.0",
  "tracing",
  "url",
- "winreg 0.52.0",
+ "winreg 0.56.0",
 ]
 
 [[package]]
@@ -2079,6 +2090,15 @@ name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "cpufeatures"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b2a41393f66f16b0823bb79094d54ac5fbd34ab292ddafb9a0456ac9f87d201"
 dependencies = [
  "libc",
 ]
@@ -3569,6 +3589,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "r-efi 6.0.0",
+ "rand_core 0.10.0",
  "wasip2",
  "wasip3",
 ]
@@ -6546,6 +6567,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc266eb313df6c5c09c1c7b1fbe2510961e5bcd3add930c1e31f7ed9da0feff8"
+dependencies = [
+ "chacha20",
+ "getrandom 0.4.2",
+ "rand_core 0.10.0",
+]
+
+[[package]]
 name = "rand_chacha"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6582,6 +6614,12 @@ checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom 0.3.4",
 ]
+
+[[package]]
+name = "rand_core"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c8d0fd677905edcbeedbf2edb6494d676f0e98d54d5cf9bda0b061cb8fb8aba"
 
 [[package]]
 name = "rand_distr"
@@ -7602,7 +7640,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f5058ada175748e33390e40e872bd0fe59a19f265d0158daa551c5a88a76009c"
 dependencies = [
  "cfg-if",
- "cpufeatures",
+ "cpufeatures 0.2.17",
  "digest",
 ]
 
@@ -7613,7 +7651,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3bf829a2d51ab4a5ddf1352d8470c140cadc8301b2ae1789db023f01cedd6ba"
 dependencies = [
  "cfg-if",
- "cpufeatures",
+ "cpufeatures 0.2.17",
  "digest",
 ]
 
@@ -7624,7 +7662,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
 dependencies = [
  "cfg-if",
- "cpufeatures",
+ "cpufeatures 0.2.17",
  "digest",
 ]
 
@@ -7842,9 +7880,9 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.47.68"
+version = "2.47.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f502bce18c72e45408faef4a0b50cbcd4c426e6582d0fa3e18b1b5154cfd0b60"
+checksum = "9087ff0a48f90ba1cedeee9cf1782303443d338013ee83335445dd1b1f5a5def"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -7860,7 +7898,7 @@ dependencies = [
  "memchr",
  "num_cpus",
  "percent-encoding",
- "phf 0.11.3",
+ "phf 0.13.1",
  "pin-project-lite",
  "quick-xml",
  "regex",
@@ -7869,11 +7907,11 @@ dependencies = [
  "serde_json",
  "serde_regex",
  "smallvec",
- "spider_agent_types 2.47.68",
+ "spider_agent_types 2.47.75",
  "spider_fingerprint",
  "string-interner",
  "string_concat",
- "strum 0.27.2",
+ "strum 0.28.0",
  "tokio",
  "tokio-stream",
  "tower 0.5.3",
@@ -7882,7 +7920,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.47.75"
+version = "2.47.76"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -7937,7 +7975,7 @@ dependencies = [
  "smallvec",
  "sonic-rs",
  "spider_agent",
- "spider_agent_types 2.47.75",
+ "spider_agent_types 2.47.76",
  "spider_fingerprint",
  "spider_firewall",
  "sqlx",
@@ -7962,7 +8000,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent"
-version = "2.47.75"
+version = "2.47.76"
 dependencies = [
  "aho-corasick",
  "async-openai 0.33.1",
@@ -7985,7 +8023,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spider_agent_html",
- "spider_agent_types 2.47.75",
+ "spider_agent_types 2.47.76",
  "spider_skills",
  "tempfile",
  "thirtyfour",
@@ -7996,20 +8034,20 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_html"
-version = "2.47.75"
+version = "2.47.76"
 dependencies = [
  "aho-corasick",
  "lol_html",
  "serde",
  "serde_json",
- "spider_agent_types 2.47.75",
+ "spider_agent_types 2.47.76",
 ]
 
 [[package]]
 name = "spider_agent_types"
-version = "2.47.68"
+version = "2.47.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61ea4b069042f5fc2623f301adb894e0a2dbebfe246a6b24f87f1376a1546df6"
+checksum = "ccf08166eacda3989daa555fce7a04829f563251a4c45bcf93267e9408a12f8c"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8020,7 +8058,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.47.75"
+version = "2.47.76"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8070,7 +8108,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.47.75"
+version = "2.47.76"
 dependencies = [
  "clap",
  "env_logger",
@@ -8078,7 +8116,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.47.75",
+ "spider 2.47.76",
  "tikv-jemallocator",
  "tokio",
  "unicode-normalization",
@@ -8094,9 +8132,9 @@ dependencies = [
  "flexbuffers",
  "htr",
  "serde_json",
- "spider 2.47.75",
+ "spider 2.47.76",
  "spider_transformations",
- "spider_utils 2.47.68",
+ "spider_utils 2.47.75",
 ]
 
 [[package]]
@@ -8120,13 +8158,13 @@ dependencies = [
 
 [[package]]
 name = "spider_firewall"
-version = "2.35.6"
+version = "2.35.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2933f56f4ed70a2a119d5070b2d547a02a3d63fa3c0271710677f3540fe2eef"
+checksum = "b054e1e0a153369d38bb4bdb09721e6971ffa455a68194cf8b0d9d39a7798744"
 dependencies = [
  "fst",
  "hashbrown 0.15.5",
- "phf 0.11.3",
+ "phf 0.13.1",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -8195,7 +8233,7 @@ dependencies = [
  "phf_codegen 0.11.3",
  "regex",
  "serde",
- "spider 2.47.68",
+ "spider 2.47.75",
  "spider_scraper",
  "tendril",
  "thiserror 1.0.69",
@@ -8205,9 +8243,9 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.47.68"
+version = "2.47.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57795cd566252fcd965a979d1fdc4692dd41dadc49e181561bc59aafe89638f2"
+checksum = "a56b156d0286b4f71bbce13dbf622b396cc6042b64e76212ff23d6ba27446b32"
 dependencies = [
  "hashbrown 0.16.1",
  "lazy_static",
@@ -8220,7 +8258,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.47.75"
+version = "2.47.76"
 dependencies = [
  "hashbrown 0.16.1",
  "indexmap 2.13.0",
@@ -8236,11 +8274,11 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.47.75"
+version = "2.47.76"
 dependencies = [
  "env_logger",
  "lazy_static",
- "spider 2.47.75",
+ "spider 2.47.76",
  "warp",
 ]
 
@@ -9177,16 +9215,16 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
-version = "0.28.0"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d25a406cddcc431a75d3d9afc6a7c0f7428d4891dd973e4d54c56b46127bf857"
+checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
 dependencies = [
  "futures-util",
  "log",
  "native-tls",
  "tokio",
  "tokio-native-tls",
- "tungstenite 0.28.0",
+ "tungstenite 0.29.0",
 ]
 
 [[package]]
@@ -9462,9 +9500,9 @@ dependencies = [
 
 [[package]]
 name = "tungstenite"
-version = "0.28.0"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8628dcc84e5a09eb3d8423d6cb682965dea9133204e8fb3efee74c2a0c259442"
+checksum = "6c01152af293afb9c7c2a57e4b559c5620b421f6d133261c60dd2d0cdb38e6b8"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -9475,7 +9513,6 @@ dependencies = [
  "rand 0.9.2",
  "sha1",
  "thiserror 2.0.18",
- "utf-8",
 ]
 
 [[package]]
@@ -10587,12 +10624,12 @@ dependencies = [
 
 [[package]]
 name = "winreg"
-version = "0.52.0"
+version = "0.56.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a277a57398d4bfa075df44f501a17cfdf8542d224f0d36095a2adc7aee4ef0a5"
+checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
 dependencies = [
  "cfg-if",
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
