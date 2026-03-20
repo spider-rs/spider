@@ -11617,7 +11617,8 @@ async fn test_cache_phase_multi_page_all_cached() {
 }
 
 /// Verify cache_mem auto-enables skip_browser: cached pages return without
-/// needing an explicit `with_cache_skip_browser(true)` call.
+/// needing an explicit `with_cache_skip_browser(true)` call, and the crawl
+/// completes in under 100ms (proving Chrome was never launched).
 #[tokio::test]
 #[cfg(all(
     not(feature = "decentralized"),
@@ -11666,7 +11667,10 @@ async fn test_cache_mem_auto_skip_browser() {
     }
 
     let mut rx = website.subscribe(16).unwrap();
+
+    let start = tokio::time::Instant::now();
     website.crawl_raw().await;
+    let elapsed = start.elapsed();
 
     let mut pages = Vec::new();
     while let Ok(page) = rx.try_recv() {
@@ -11676,6 +11680,132 @@ async fn test_cache_mem_auto_skip_browser() {
     assert_eq!(pages.len(), 1, "cached page should be served");
     assert_eq!(website.initial_status_code, StatusCode::OK);
     assert!(website.initial_html_length > 0);
+    // Cache hit must return in under 100ms — Chrome startup alone takes 1-3s.
+    assert!(
+        elapsed.as_millis() < 100,
+        "cache_mem skip_browser crawl took {}ms, expected <100ms (Chrome was not skipped)",
+        elapsed.as_millis()
+    );
+}
+
+/// Verify chrome_remote_cache with skip_browser returns cached pages as fast
+/// as HTTP crawls by hitting the in-memory cache directly (no Chrome launch).
+/// Uses a mock hybrid cache server for the remote cache layer.
+#[tokio::test]
+#[cfg(all(
+    not(feature = "decentralized"),
+    feature = "chrome_remote_cache",
+    any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem")
+))]
+async fn test_chrome_remote_cache_skip_browser_timing() {
+    use crate::utils::{create_cache_key_raw, put_hybrid_cache, HttpResponse, HttpVersion};
+    use std::collections::HashMap as StdHashMap;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    // --- Start mock hybrid cache server ---
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mock_addr = listener.local_addr().unwrap();
+    let mock_url = format!("http://{}", mock_addr);
+
+    let server_handle = tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 65536];
+                let n = stream.read(&mut buf).await.unwrap_or(0);
+                if n == 0 {
+                    return;
+                }
+                let request = String::from_utf8_lossy(&buf[..n]).to_string();
+                let first_line = request.lines().next().unwrap_or("");
+                let parts: Vec<&str> = first_line.split_whitespace().collect();
+                if parts.len() < 2 {
+                    return;
+                }
+                let method = parts[0];
+                let path = parts[1];
+
+                if method == "POST" && path == "/cache/index" {
+                    let resp = "HTTP/1.1 201 Created\r\nContent-Length: 7\r\nConnection: close\r\n\r\nIndexed";
+                    let _ = stream.write_all(resp.as_bytes()).await;
+                } else if method == "GET" && path.starts_with("/cache/site/") {
+                    // Return empty array — all data is in local memory cache
+                    let resp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n[]";
+                    let _ = stream.write_all(resp.as_bytes()).await;
+                } else {
+                    let resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nNot Found";
+                    let _ = stream.write_all(resp.as_bytes()).await;
+                }
+            });
+        }
+    });
+
+    // Set the remote cache endpoint
+    std::env::set_var("HYBRID_CACHE_ENDPOINT", &mock_url);
+
+    // --- Populate local in-memory cache ---
+    let target_url = "http://localhost:9/remote-cache-skip-timing";
+    let cache_key = create_cache_key_raw(target_url, None, None);
+
+    let mut response_headers = StdHashMap::new();
+    response_headers.insert("content-type".to_string(), "text/html".to_string());
+    response_headers.insert(
+        "cache-control".to_string(),
+        "public, max-age=3600".to_string(),
+    );
+
+    let body = b"<html><body>Remote Cache Skip Content</body></html>".to_vec();
+    let http_response = HttpResponse {
+        body,
+        headers: response_headers,
+        status: 200,
+        url: Url::parse(target_url).expect("valid url"),
+        version: HttpVersion::Http11,
+    };
+
+    put_hybrid_cache(&cache_key, http_response, "GET", StdHashMap::new()).await;
+
+    // --- Crawl with cache_mem (auto skip_browser) ---
+    let mut website = Website::new(target_url);
+    website.configuration.cache = true;
+    // NOT calling with_cache_skip_browser — cache_mem auto-enables it
+    website.with_budget(Some(HashMap::from([("*", 1)])));
+
+    #[cfg(feature = "cache_mem")]
+    {
+        let cache_options = website.configuration.get_cache_options();
+        assert!(
+            crate::utils::cache_skip_browser(&cache_options),
+            "chrome_remote_cache (implies cache_mem) should auto-enable skip_browser"
+        );
+    }
+
+    let mut rx = website.subscribe(16).unwrap();
+
+    let start = tokio::time::Instant::now();
+    website.crawl_raw().await;
+    let elapsed = start.elapsed();
+
+    let mut pages = Vec::new();
+    while let Ok(page) = rx.try_recv() {
+        pages.push(page.get_url().to_string());
+    }
+
+    assert_eq!(pages.len(), 1, "cached page should be served");
+    assert_eq!(website.initial_status_code, StatusCode::OK);
+    assert!(website.initial_html_length > 0);
+    // Must complete in under 100ms — Chrome startup alone takes 1-3s.
+    assert!(
+        elapsed.as_millis() < 100,
+        "chrome_remote_cache skip_browser crawl took {}ms, expected <100ms (Chrome was not skipped)",
+        elapsed.as_millis()
+    );
+
+    server_handle.abort();
+    std::env::remove_var("HYBRID_CACHE_ENDPOINT");
 }
 
 #[tokio::test]
