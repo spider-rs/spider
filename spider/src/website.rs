@@ -12208,3 +12208,54 @@ async fn test_cache_phase_multi_page_all_cached_mem() {
     assert_eq!(website.initial_status_code, StatusCode::OK);
     assert!(website.initial_html_length > 0);
 }
+
+// ---------------------------------------------------------------------------
+// Trait implementations
+// ---------------------------------------------------------------------------
+
+impl crate::traits::Crawler for Website {
+    type Page = Page;
+
+    #[inline]
+    fn url(&self) -> &str {
+        self.get_url().as_ref()
+    }
+
+    #[inline]
+    fn status(&self) -> &CrawlStatus {
+        self.get_status()
+    }
+
+    #[inline]
+    fn links(&self) -> hashbrown::HashSet<CaseInsensitiveString> {
+        self.get_links()
+    }
+
+    #[inline]
+    fn pages(&self) -> Option<&[Page]> {
+        self.get_pages().map(|v| v.as_slice())
+    }
+
+    #[inline]
+    fn client(&self) -> &Option<Client> {
+        self.get_client()
+    }
+
+    async fn crawl(&mut self) {
+        Website::crawl(self).await
+    }
+
+    async fn crawl_raw(&mut self) {
+        Website::crawl_raw(self).await
+    }
+}
+
+#[cfg(feature = "sync")]
+impl crate::traits::CrawlerSubscription for Website {
+    fn subscribe(
+        &mut self,
+        capacity: usize,
+    ) -> Option<tokio::sync::broadcast::Receiver<Page>> {
+        Website::subscribe(self, capacity)
+    }
+}

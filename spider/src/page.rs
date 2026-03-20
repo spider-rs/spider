@@ -6232,3 +6232,73 @@ fn test_server_error_still_retries() {
     let page = build("https://example.com", res);
     assert!(page.should_retry, "500 errors should still be retried");
 }
+
+// ---------------------------------------------------------------------------
+// Trait implementations
+// ---------------------------------------------------------------------------
+
+impl crate::traits::PageData for Page {
+    #[inline]
+    fn url(&self) -> &str {
+        self.get_url()
+    }
+
+    #[inline]
+    fn url_final(&self) -> &str {
+        match self.final_redirect_destination.as_deref() {
+            Some(u) => u,
+            _ => &self.url,
+        }
+    }
+
+    #[inline]
+    fn bytes(&self) -> Option<&[u8]> {
+        self.get_bytes()
+    }
+
+    #[inline]
+    fn html(&self) -> String {
+        self.get_html()
+    }
+
+    #[inline]
+    fn html_bytes_u8(&self) -> &[u8] {
+        self.get_html_bytes_u8()
+    }
+
+    #[inline]
+    fn status_code(&self) -> StatusCode {
+        self.status_code
+    }
+
+    #[inline]
+    fn headers(&self) -> Option<&reqwest::header::HeaderMap> {
+        self.headers.as_ref()
+    }
+
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+}
+
+#[cfg(feature = "time")]
+impl crate::traits::PageTimingExt for Page {
+    #[inline]
+    fn duration_elapsed(&self) -> tokio::time::Duration {
+        self.get_duration_elapsed()
+    }
+}
+
+#[cfg(feature = "chrome")]
+impl crate::traits::PageChromeExt for Page {
+    #[inline]
+    fn chrome_page(&self) -> Option<&chromiumoxide::Page> {
+        self.get_chrome_page()
+    }
+
+    #[inline]
+    fn screenshot_bytes(&self) -> Option<&[u8]> {
+        self.screenshot_bytes.as_deref()
+    }
+}
