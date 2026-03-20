@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.47.74"
+version = "2.47.75"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -122,11 +122,11 @@ features = ["serde", "headers", "dynamic-versions"]
 
 [dependencies.spider_agent_types]
 path = "../spider_agent_types"
-version = "2.47.74"
+version = "2.47.75"
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.47.74"
+version = "2.47.75"
 optional = true
 default-features = false
 
@@ -378,4 +378,6 @@ zero_copy = ["dep:zerocopy"]
 inline-more = []
 
 [package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]

@@ -33,6 +33,7 @@ pub trait PageData {
 
 /// Timing information for a crawled page. Requires the `time` feature.
 #[cfg(feature = "time")]
+#[cfg_attr(docsrs, doc(cfg(feature = "time")))]
 pub trait PageTimingExt: PageData {
     /// How long since the page request started.
     fn duration_elapsed(&self) -> tokio::time::Duration;
@@ -40,6 +41,7 @@ pub trait PageTimingExt: PageData {
 
 /// Chrome-specific page data. Requires the `chrome` feature.
 #[cfg(feature = "chrome")]
+#[cfg_attr(docsrs, doc(cfg(feature = "chrome")))]
 pub trait PageChromeExt: PageData {
     /// The underlying Chrome DevTools Protocol page handle, if available.
     fn chrome_page(&self) -> Option<&chromiumoxide::Page>;
@@ -71,6 +73,7 @@ pub trait Crawler {
 
 /// Subscribe to page events during a crawl. Requires the `sync` feature.
 #[cfg(feature = "sync")]
+#[cfg_attr(docsrs, doc(cfg(feature = "sync")))]
 pub trait CrawlerSubscription: Crawler {
     /// Subscribe to receive pages as they are crawled.
     fn subscribe(
