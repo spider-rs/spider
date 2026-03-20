@@ -140,6 +140,13 @@ pub struct RemoteMultimodalConfigs {
     /// Cache of URL path → relevant classification to avoid re-classifying.
     #[serde(skip)]
     pub url_prefilter_cache: Arc<dashmap::DashMap<String, bool>>,
+    /// Optional HTTP proxy URLs for LLM API requests.
+    ///
+    /// When set, the engine routes all outbound LLM HTTP calls through these
+    /// proxies (e.g. `["http://localhost:8080"]`). Useful for debugging
+    /// request/response payloads with an intercepting proxy like mitmproxy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxies: Option<Vec<String>>,
 }
 
 impl PartialEq for RemoteMultimodalConfigs {
@@ -159,6 +166,7 @@ impl PartialEq for RemoteMultimodalConfigs {
             && self.model_pool == other.model_pool
             && self.use_chrome_ai == other.use_chrome_ai
             && self.chrome_ai_max_user_chars == other.chrome_ai_max_user_chars
+            && self.proxies == other.proxies
         // NOTE: intentionally ignoring `semaphore` and `skill_registry`
     }
 }
@@ -190,6 +198,7 @@ impl Default for RemoteMultimodalConfigs {
             semaphore: Self::default_semaphore(),
             relevance_credits: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             url_prefilter_cache: Arc::new(dashmap::DashMap::new()),
+            proxies: None,
         }
     }
 }
@@ -289,6 +298,26 @@ impl RemoteMultimodalConfigs {
     /// Set an optional concurrency limit for remote inference calls.
     pub fn with_concurrency_limit(mut self, limit: usize) -> Self {
         self.concurrency_limit = Some(limit);
+        self
+    }
+
+    /// Set HTTP proxy URLs for LLM API requests.
+    ///
+    /// All outbound LLM HTTP calls will be routed through these proxies.
+    /// Useful for debugging with an intercepting proxy (e.g. mitmproxy).
+    ///
+    /// # Example
+    /// ```rust
+    /// use spider_agent::automation::RemoteMultimodalConfigs;
+    ///
+    /// let mm = RemoteMultimodalConfigs::new(
+    ///     "http://localhost:11434/v1/chat/completions",
+    ///     "qwen2.5-vl",
+    /// )
+    /// .with_proxies(Some(vec!["http://localhost:8080".to_string()]));
+    /// ```
+    pub fn with_proxies(mut self, proxies: Option<Vec<String>>) -> Self {
+        self.proxies = proxies;
         self
     }
 

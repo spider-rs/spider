@@ -228,6 +228,12 @@ pub struct RemoteMultimodalConfigs {
     /// Use Chrome built-in AI (Gemini Nano) instead of a remote API.
     #[cfg_attr(feature = "serde", serde(default))]
     pub use_chrome_ai: bool,
+    /// Optional HTTP proxy URLs for LLM API requests.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub proxies: Option<Vec<String>>,
 }
 
 #[cfg(not(feature = "agent"))]
@@ -244,6 +250,12 @@ impl RemoteMultimodalConfigs {
     /// Set the API key (stub - does nothing without agent feature).
     pub fn with_api_key(mut self, api_key: Option<impl Into<String>>) -> Self {
         self.api_key = api_key.map(|k| k.into());
+        self
+    }
+
+    /// Set HTTP proxy URLs for LLM API requests (stub).
+    pub fn with_proxies(mut self, proxies: Option<Vec<String>>) -> Self {
+        self.proxies = proxies;
         self
     }
 

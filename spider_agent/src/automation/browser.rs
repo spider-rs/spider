@@ -2592,15 +2592,7 @@ impl RemoteMultimodalEngine {
         // Acquire semaphore if configured
         let _permit = self.acquire_llm_permit().await;
 
-        // Make HTTP request with 2 minute timeout for LLM calls
-        static CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
-            reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(120))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new())
-        });
-
-        let mut req = CLIENT.post(resolved_api_url).json(&request);
+        let mut req = self.http_client().post(resolved_api_url).json(&request);
         if let Some(key) = resolved_api_key {
             req = req.bearer_auth(key);
         }
@@ -4501,14 +4493,12 @@ return await s.prompt(msg);
                         .get("width")
                         .and_then(|v| v.as_i64())
                         .unwrap_or(1280)
-                        .max(1)
-                        .min(MAX_VIEWPORT_DIM);
+                        .clamp(1, MAX_VIEWPORT_DIM);
                     let height = obj
                         .get("height")
                         .and_then(|v| v.as_i64())
                         .unwrap_or(960)
-                        .max(1)
-                        .min(MAX_VIEWPORT_DIM);
+                        .clamp(1, MAX_VIEWPORT_DIM);
                     let device_scale_factor = obj
                         .get("device_scale_factor")
                         .and_then(|v| v.as_f64())
@@ -4650,14 +4640,7 @@ Only return the JSON object, no other text."#;
         // Acquire semaphore if configured
         let _permit = self.acquire_llm_permit().await;
 
-        static CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
-            reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(120))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new())
-        });
-
-        let mut req = CLIENT.post(&self.api_url).json(&request);
+        let mut req = self.http_client().post(&self.api_url).json(&request);
         if let Some(ref key) = self.api_key {
             req = req.bearer_auth(key);
         }
@@ -4828,14 +4811,7 @@ Only return the JSON object."#;
         // Acquire semaphore if configured
         let _permit = self.acquire_llm_permit().await;
 
-        static CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
-            reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(120))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new())
-        });
-
-        let mut req = CLIENT.post(&self.api_url).json(&request);
+        let mut req = self.http_client().post(&self.api_url).json(&request);
         if let Some(ref key) = self.api_key {
             req = req.bearer_auth(key);
         }
@@ -4949,6 +4925,7 @@ pub async fn run_remote_multimodal_with_page(
     engine.with_vision_route_mode(cfgs.vision_route_mode);
     engine.with_chrome_ai(cfgs.use_chrome_ai);
     engine.with_chrome_ai_max_user_chars(cfgs.chrome_ai_max_user_chars);
+    engine.with_proxies(cfgs.proxies.as_deref());
     #[cfg(feature = "skills")]
     if let Some(ref registry) = cfgs.skill_registry {
         engine.with_skill_registry(Some(registry.clone()));

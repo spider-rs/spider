@@ -102,6 +102,9 @@ pub struct RemoteMultimodalEngine {
     /// Each entry can have its own API URL and key. The router selects
     /// which model to use and this pool resolves the connection details.
     pub model_pool: Vec<super::ModelEndpoint>,
+    /// Optional pre-built HTTP client (e.g. with proxy configuration).
+    /// When `None`, uses the default static client.
+    pub client: Option<Client>,
 }
 
 impl RemoteMultimodalEngine {
@@ -133,6 +136,7 @@ impl RemoteMultimodalEngine {
             chrome_ai_max_user_chars: 6000,
             model_router: None,
             model_pool: Vec::new(),
+            client: None,
         }
     }
 
@@ -230,6 +234,40 @@ impl RemoteMultimodalEngine {
         self.use_chrome_ai || (self.api_url.is_empty() && self.api_key.is_none())
     }
 
+    /// Set a pre-built HTTP client (e.g. with proxy configuration).
+    pub fn with_client(&mut self, client: Option<Client>) -> &mut Self {
+        self.client = client;
+        self
+    }
+
+    /// Set HTTP proxy URLs for LLM API requests.
+    ///
+    /// Builds a `reqwest::Client` with the given proxies and a 120s timeout.
+    /// Invalid proxy URLs are silently skipped.
+    pub fn with_proxies(&mut self, proxies: Option<&[String]>) -> &mut Self {
+        self.client = proxies.and_then(|urls| {
+            if urls.is_empty() {
+                return None;
+            }
+            let mut builder = Client::builder().timeout(std::time::Duration::from_secs(120));
+            for url in urls {
+                if let Ok(proxy) = reqwest::Proxy::all(url) {
+                    builder = builder.proxy(proxy);
+                }
+            }
+            builder.build().ok()
+        });
+        self
+    }
+
+    /// Get the HTTP client for LLM requests.
+    ///
+    /// Returns the custom client if set (e.g. with proxies), otherwise
+    /// falls back to the shared static client.
+    pub(crate) fn http_client(&self) -> &Client {
+        self.client.as_ref().unwrap_or(&CLIENT)
+    }
+
     /// Set the full runtime configuration.
     pub fn with_remote_multimodal_config(&mut self, cfg: RemoteMultimodalConfig) -> &mut Self {
         self.cfg = cfg;
@@ -293,6 +331,7 @@ impl RemoteMultimodalEngine {
             chrome_ai_max_user_chars: self.chrome_ai_max_user_chars,
             model_router: self.model_router.clone(),
             model_pool: self.model_pool.clone(),
+            client: self.client.clone(),
         }
     }
 
@@ -889,7 +928,7 @@ impl RemoteMultimodalEngine {
         // Acquire permit before sending
         let _permit = self.acquire_llm_permit().await;
 
-        let mut req = CLIENT.post(&self.api_url).json(&request_body);
+        let mut req = self.http_client().post(&self.api_url).json(&request_body);
         if let Some(key) = &self.api_key {
             req = req.bearer_auth(key);
         }
@@ -1247,7 +1286,7 @@ impl RemoteMultimodalEngine {
 
         let _permit = self.acquire_llm_permit().await;
 
-        let mut req = CLIENT.post(&self.api_url).json(&request_body);
+        let mut req = self.http_client().post(&self.api_url).json(&request_body);
         if let Some(key) = &self.api_key {
             req = req.bearer_auth(key);
         }
@@ -1479,7 +1518,7 @@ impl RemoteMultimodalEngine {
 
         let _permit = self.acquire_llm_permit().await;
 
-        let mut req = CLIENT.post(&self.api_url).json(&request_body);
+        let mut req = self.http_client().post(&self.api_url).json(&request_body);
         if let Some(key) = &self.api_key {
             req = req.bearer_auth(key);
         }
@@ -1614,7 +1653,7 @@ impl RemoteMultimodalEngine {
 
         let _permit = self.acquire_llm_permit().await;
 
-        let mut req = CLIENT.post(api_url).json(&request_body);
+        let mut req = self.http_client().post(api_url).json(&request_body);
         if let Some(key) = api_key {
             req = req.bearer_auth(key);
         }
