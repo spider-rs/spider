@@ -1675,14 +1675,13 @@ impl Configuration {
             })
             .map(|s| s.to_owned());
 
-        // When using in-memory cache (cache_mem) without chrome_remote_cache,
-        // auto-enable skip_browser since the cached HTML was already rendered
-        // by a prior Chrome crawl and re-rendering is redundant.
-        // chrome_remote_cache users may still want Chrome to re-render cached
-        // content, so they must explicitly set cache_skip_browser.
-        #[cfg(all(feature = "cache_mem", not(feature = "chrome_remote_cache")))]
+        // When using in-memory cache (cache_mem), auto-enable skip_browser
+        // since the cached HTML was already rendered by a prior Chrome crawl
+        // and re-rendering through Chrome is redundant. The browser only
+        // launches when the cache has no hit for the requested page.
+        #[cfg(feature = "cache_mem")]
         let skip_browser = true;
-        #[cfg(not(all(feature = "cache_mem", not(feature = "chrome_remote_cache"))))]
+        #[cfg(not(feature = "cache_mem"))]
         let skip_browser = self.cache_skip_browser;
 
         match auth_token {
