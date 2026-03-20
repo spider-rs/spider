@@ -11616,6 +11616,68 @@ async fn test_cache_phase_multi_page_all_cached() {
     assert!(website.initial_html_length > 0);
 }
 
+/// Verify cache_mem auto-enables skip_browser: cached pages return without
+/// needing an explicit `with_cache_skip_browser(true)` call.
+#[tokio::test]
+#[cfg(all(
+    not(feature = "decentralized"),
+    any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem")
+))]
+async fn test_cache_mem_auto_skip_browser() {
+    use crate::utils::{create_cache_key_raw, put_hybrid_cache, HttpResponse, HttpVersion};
+    use std::collections::HashMap as StdHashMap;
+
+    let target_url = "http://localhost:9/cache-mem-auto-skip";
+    let cache_key = create_cache_key_raw(target_url, None, None);
+
+    let mut response_headers = StdHashMap::new();
+    response_headers.insert("content-type".to_string(), "text/html".to_string());
+    response_headers.insert(
+        "cache-control".to_string(),
+        "public, max-age=3600".to_string(),
+    );
+
+    let body = b"<html><body>Auto Skip Content</body></html>".to_vec();
+    let http_response = HttpResponse {
+        body,
+        headers: response_headers,
+        status: 200,
+        url: Url::parse(target_url).expect("valid url"),
+        version: HttpVersion::Http11,
+    };
+
+    let request_headers = StdHashMap::new();
+    put_hybrid_cache(&cache_key, http_response, "GET", request_headers).await;
+
+    let mut website = Website::new(target_url);
+    website.configuration.cache = true;
+    // Deliberately NOT calling with_cache_skip_browser(true) —
+    // cache_mem should auto-enable it.
+    website.with_budget(Some(HashMap::from([("*", 1)])));
+
+    // With cache_mem, get_cache_options should return SkipBrowser variant
+    #[cfg(feature = "cache_mem")]
+    {
+        let cache_options = website.configuration.get_cache_options();
+        assert!(
+            crate::utils::cache_skip_browser(&cache_options),
+            "cache_mem should auto-enable skip_browser"
+        );
+    }
+
+    let mut rx = website.subscribe(16).unwrap();
+    website.crawl_raw().await;
+
+    let mut pages = Vec::new();
+    while let Ok(page) = rx.try_recv() {
+        pages.push(page.get_url().to_string());
+    }
+
+    assert_eq!(pages.len(), 1, "cached page should be served");
+    assert_eq!(website.initial_status_code, StatusCode::OK);
+    assert!(website.initial_html_length > 0);
+}
+
 #[tokio::test]
 #[cfg(all(not(feature = "decentralized"), feature = "cache_chrome_hybrid"))]
 async fn test_cache_phase_partial_miss() {
