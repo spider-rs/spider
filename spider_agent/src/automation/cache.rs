@@ -219,17 +219,16 @@ impl<V: CacheValue> SmartCache<V> {
                 .fetch_sub(old.size_bytes, Ordering::Relaxed);
         }
 
-        // Enforce entry count and size limits while holding the write lock.
-        while entries.len() >= self.max_entries {
-            if !self.evict_lru_locked(&mut entries) {
-                break;
-            }
-        }
+        // Batch eviction: compute how many entries to evict in a single pass
+        // instead of scanning the entire map per eviction.
+        let over_count = entries
+            .len()
+            .saturating_sub(self.max_entries.saturating_sub(1));
+        let over_bytes =
+            (self.current_size.load(Ordering::Relaxed) + size).saturating_sub(self.max_size_bytes);
 
-        while self.current_size.load(Ordering::Relaxed) + size > self.max_size_bytes {
-            if !self.evict_lru_locked(&mut entries) {
-                break;
-            }
+        if over_count > 0 || over_bytes > 0 {
+            self.batch_evict_locked(&mut entries, over_count, over_bytes);
         }
 
         let entry = CacheEntry {
@@ -284,22 +283,43 @@ impl<V: CacheValue> SmartCache<V> {
         &self.stats
     }
 
-    fn evict_lru_locked(&self, entries: &mut HashMap<String, CacheEntry<V>>) -> bool {
-        let Some(lru_key) = entries
-            .iter()
-            .min_by_key(|(_, e)| e.last_accessed)
-            .map(|(k, _)| k.clone())
-        else {
-            return false;
-        };
+    /// Evict enough entries to free `min_count` slots and `min_bytes` bytes.
+    ///
+    /// Sorts candidates by `last_accessed` once (O(n log n)) rather than
+    /// scanning the full map per eviction (O(n * k)).
+    fn batch_evict_locked(
+        &self,
+        entries: &mut HashMap<String, CacheEntry<V>>,
+        min_count: usize,
+        min_bytes: usize,
+    ) {
+        if entries.is_empty() {
+            return;
+        }
 
-        if let Some(entry) = entries.remove(&lru_key) {
-            self.current_size
-                .fetch_sub(entry.size_bytes, Ordering::Relaxed);
-            self.stats.evictions.fetch_add(1, Ordering::Relaxed);
-            true
-        } else {
-            false
+        // Single pass: collect (key, last_accessed, size) for all entries.
+        let mut candidates: Vec<(String, Instant, usize)> = entries
+            .iter()
+            .map(|(k, e)| (k.clone(), e.last_accessed, e.size_bytes))
+            .collect();
+
+        // Sort oldest-accessed first (eviction order).
+        candidates.sort_unstable_by_key(|(_, accessed, _)| *accessed);
+
+        let mut freed_count = 0usize;
+        let mut freed_bytes = 0usize;
+
+        for (key, _, _) in &candidates {
+            if freed_count >= min_count && freed_bytes >= min_bytes {
+                break;
+            }
+            if let Some(entry) = entries.remove(key) {
+                freed_bytes += entry.size_bytes;
+                freed_count += 1;
+                self.current_size
+                    .fetch_sub(entry.size_bytes, Ordering::Relaxed);
+                self.stats.evictions.fetch_add(1, Ordering::Relaxed);
+            }
         }
     }
 
