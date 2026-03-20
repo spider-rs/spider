@@ -1750,18 +1750,19 @@ pub async fn cache_chrome_response(
     };
 
     if let Ok(u) = url::Url::parse(target_url) {
+        let chromey_version = match chrome_http_req_res.protocol.as_str() {
+            "http/0.9" => HttpVersion::Http09,
+            "http/1" | "http/1.0" => HttpVersion::Http10,
+            "http/1.1" => HttpVersion::Http11,
+            "http/2.0" | "http/2" => HttpVersion::H2,
+            "http/3.0" | "http/3" => HttpVersion::H3,
+            _ => HttpVersion::Http11,
+        };
         let http_response = HttpResponse {
             url: u,
             body,
             status: chrome_http_req_res.status_code.into(),
-            version: match chrome_http_req_res.protocol.as_str() {
-                "http/0.9" => HttpVersion::Http09,
-                "http/1" | "http/1.0" => HttpVersion::Http10,
-                "http/1.1" => HttpVersion::Http11,
-                "http/2.0" | "http/2" => HttpVersion::H2,
-                "http/3.0" | "http/3" => HttpVersion::H3,
-                _ => HttpVersion::Http11,
-            },
+            version: chromey_version,
             headers: chrome_http_req_res.response_headers,
         };
         let auth_opt = match cache_options {
@@ -1776,6 +1777,23 @@ pub async fn cache_chrome_response(
             auth_opt.map(|token| token.as_ref()),
         );
 
+        // Clone data needed for remote cache dump before put_hybrid_cache consumes them.
+        #[cfg(feature = "chrome_remote_cache")]
+        let remote_dump_data = {
+            let cache_site =
+                chromiumoxide::cache::manager::site_key_for_target_url(target_url, None);
+            Some((
+                cache_key.clone(),
+                cache_site,
+                http_response.body.clone(),
+                http_response.status,
+                chrome_http_req_res.request_headers.clone(),
+                http_response.headers.clone(),
+                chromey_version,
+                chrome_http_req_res.method.clone(),
+            ))
+        };
+
         put_hybrid_cache(
             &cache_key,
             http_response,
@@ -1783,6 +1801,40 @@ pub async fn cache_chrome_response(
             chrome_http_req_res.request_headers,
         )
         .await;
+
+        // Best-effort async dump to the shared remote cache server so other
+        // ECS tasks / processes can serve cache hits without re-rendering.
+        #[cfg(feature = "chrome_remote_cache")]
+        if let Some((key, site, body, status, req_hdrs, resp_hdrs, version, method)) =
+            remote_dump_data
+        {
+            let target = target_url.to_string();
+            let remote_version = match version {
+                HttpVersion::Http09 => chromiumoxide::http::HttpVersion::Http09,
+                HttpVersion::Http10 => chromiumoxide::http::HttpVersion::Http10,
+                HttpVersion::H2 => chromiumoxide::http::HttpVersion::H2,
+                HttpVersion::H3 => chromiumoxide::http::HttpVersion::H3,
+                _ => chromiumoxide::http::HttpVersion::Http11,
+            };
+            tokio::spawn(async move {
+                let _ = tokio::time::timeout(
+                    Duration::from_secs(5),
+                    chromiumoxide::cache::remote::dump_to_remote_cache_parts(
+                        &key,
+                        &site,
+                        &target,
+                        &body,
+                        &method,
+                        status,
+                        &req_hdrs,
+                        &resp_hdrs,
+                        &remote_version,
+                        Some("true"),
+                    ),
+                )
+                .await;
+            });
+        }
     }
 }
 
