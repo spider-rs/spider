@@ -380,18 +380,18 @@ pub mod features;
 pub mod packages;
 /// A page scraped.
 pub mod page;
-/// Application utils.
-pub mod utils;
 /// Trait abstractions for core types.
 pub mod traits;
+/// Application utils.
+pub mod utils;
 /// A website to crawl.
 pub mod website;
 
 pub use case_insensitive_string::compact_str;
 pub use case_insensitive_string::CaseInsensitiveString;
 pub use client::{Client, ClientBuilder};
-pub use traits::PageData;
 pub use traits::Crawler;
+pub use traits::PageData;
 
 #[cfg(feature = "chrome")]
 pub use chromiumoxide;

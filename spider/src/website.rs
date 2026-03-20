@@ -12252,10 +12252,7 @@ impl crate::traits::Crawler for Website {
 
 #[cfg(feature = "sync")]
 impl crate::traits::CrawlerSubscription for Website {
-    fn subscribe(
-        &mut self,
-        capacity: usize,
-    ) -> Option<tokio::sync::broadcast::Receiver<Page>> {
+    fn subscribe(&mut self, capacity: usize) -> Option<tokio::sync::broadcast::Receiver<Page>> {
         Website::subscribe(self, capacity)
     }
 }
