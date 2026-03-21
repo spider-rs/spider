@@ -79,15 +79,24 @@ fn estimate_json_size(v: &serde_json::Value) -> usize {
         serde_json::Value::Bool(_) => 5,
         serde_json::Value::Number(n) => {
             // Avoid format! allocation; integer digits ≤ 20, float ≤ 24
-            if n.is_f64() { 24 } else { 20 }
+            if n.is_f64() {
+                24
+            } else {
+                20
+            }
         }
         serde_json::Value::String(s) => s.len() + 2 + std::mem::size_of::<String>(),
         serde_json::Value::Array(arr) => {
             let inner: usize = arr.iter().map(estimate_json_size).sum();
-            inner + arr.len() * std::mem::size_of::<serde_json::Value>() + std::mem::size_of::<Vec<serde_json::Value>>()
+            inner
+                + arr.len() * std::mem::size_of::<serde_json::Value>()
+                + std::mem::size_of::<Vec<serde_json::Value>>()
         }
         serde_json::Value::Object(map) => {
-            let inner: usize = map.iter().map(|(k, v)| k.len() + std::mem::size_of::<String>() + estimate_json_size(v)).sum();
+            let inner: usize = map
+                .iter()
+                .map(|(k, v)| k.len() + std::mem::size_of::<String>() + estimate_json_size(v))
+                .sum();
             inner + std::mem::size_of::<serde_json::Map<String, serde_json::Value>>()
         }
     }

@@ -1788,8 +1788,7 @@ pub async fn cache_chrome_response(
     // Use the same body/headers — remote dump spawns a task that takes ownership.
     #[cfg(feature = "chrome_remote_cache")]
     let remote_dump_data = {
-        let cache_site =
-            chromiumoxide::cache::manager::site_key_for_target_url(target_url, None);
+        let cache_site = chromiumoxide::cache::manager::site_key_for_target_url(target_url, None);
         let remote_version = match chromey_version {
             HttpVersion::Http09 => chromiumoxide::http::HttpVersion::Http09,
             HttpVersion::Http10 => chromiumoxide::http::HttpVersion::Http10,
