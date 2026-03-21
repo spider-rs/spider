@@ -17,6 +17,96 @@ lazy_static! {
     };
 }
 
+use hyper_util::service::TowerToHyperService;
+use std::net::SocketAddr;
+
+/// Serve warp routes on a TCP listener using hyper-util.
+async fn serve_plain(
+    routes: warp::filters::BoxedFilter<(impl warp::Reply + 'static,)>,
+    port: u16,
+) {
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("failed to bind");
+    let svc = TowerToHyperService::new(warp::service(routes));
+
+    loop {
+        let (stream, _) = match listener.accept().await {
+            Ok(conn) => conn,
+            Err(_) => continue,
+        };
+        let svc = svc.clone();
+        tokio::spawn(async move {
+            let io = hyper_util::rt::TokioIo::new(stream);
+            let _ = hyper_util::server::conn::auto::Builder::new(
+                hyper_util::rt::TokioExecutor::new(),
+            )
+            .serve_connection(io, svc)
+            .await;
+        });
+    }
+}
+
+/// Serve warp routes over TLS using tokio-rustls.
+#[cfg(feature = "tls")]
+async fn serve_tls(
+    routes: warp::filters::BoxedFilter<(impl warp::Reply + 'static,)>,
+    port: u16,
+    cert_path: &str,
+    key_path: &str,
+) {
+    use std::sync::Arc;
+    use tokio_rustls::TlsAcceptor;
+
+    let certs = {
+        let file = std::fs::File::open(cert_path).expect("failed to open cert file");
+        let mut reader = std::io::BufReader::new(file);
+        rustls_pemfile::certs(&mut reader)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("failed to read certs")
+    };
+
+    let key = {
+        let file = std::fs::File::open(key_path).expect("failed to open key file");
+        let mut reader = std::io::BufReader::new(file);
+        rustls_pemfile::private_key(&mut reader)
+            .expect("failed to read private key")
+            .expect("no private key found")
+    };
+
+    let tls_config = tokio_rustls::rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .expect("invalid TLS config");
+
+    let tls_acceptor = TlsAcceptor::from(Arc::new(tls_config));
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("failed to bind");
+    let svc = TowerToHyperService::new(warp::service(routes));
+
+    loop {
+        let (stream, _) = match listener.accept().await {
+            Ok(conn) => conn,
+            Err(_) => continue,
+        };
+        let acceptor = tls_acceptor.clone();
+        let svc = svc.clone();
+        tokio::spawn(async move {
+            if let Ok(tls_stream) = acceptor.accept(stream).await {
+                let io = hyper_util::rt::TokioIo::new(tls_stream);
+                let _ = hyper_util::server::conn::auto::Builder::new(
+                    hyper_util::rt::TokioExecutor::new(),
+                )
+                .serve_connection(io, svc)
+                .await;
+            }
+        });
+    }
+}
+
 /// forward request to get resources
 #[cfg(not(feature = "scrape"))]
 async fn forward(
@@ -228,7 +318,7 @@ async fn main() {
 
     utils::log("Spider_Worker starting at 0.0.0.0:", port.to_string());
 
-    warp::serve(routes).run(([0, 0, 0, 0], port)).await;
+    serve_plain(routes, port).await;
 }
 
 #[tokio::main]
@@ -244,7 +334,7 @@ async fn main() {
 
     utils::log("Spider_Worker starting at 0.0.0.0:", &port.to_string());
 
-    warp::serve(routes).run(([0, 0, 0, 0], port)).await;
+    serve_plain(routes, port).await;
 }
 
 #[tokio::main]
@@ -276,7 +366,7 @@ async fn main() {
             &port.to_string(),
         );
 
-        warp::serve(routes).run(([0, 0, 0, 0], port)).await;
+        serve_plain(routes, port).await;
     });
 
     let port: u16 = std::env::var("SPIDER_WORKER_PORT")
@@ -285,7 +375,7 @@ async fn main() {
         .unwrap_or_else(|_| 3030);
     utils::log("Spider_Worker starting at 0.0.0.0:", &port.to_string());
 
-    warp::serve(routes).run(([0, 0, 0, 0], port)).await;
+    serve_plain(routes, port).await;
 }
 
 // tls handling
@@ -320,12 +410,7 @@ async fn main() {
     let rsa_key: String =
         std::env::var("SPIDER_WORKER_KEY_PATH").unwrap_or_else(|_| "/key.rsa".into());
 
-    warp::serve(routes)
-        .tls()
-        .cert_path(pem_cert)
-        .key_path(rsa_key)
-        .run(([0, 0, 0, 0], port))
-        .await;
+    serve_tls(routes, port, &pem_cert, &rsa_key).await;
 }
 
 #[tokio::main]
@@ -346,12 +431,7 @@ async fn main() {
     let rsa_key: String =
         std::env::var("SPIDER_WORKER_KEY_PATH").unwrap_or_else(|_| "/key.rsa".into());
 
-    warp::serve(routes)
-        .tls()
-        .cert_path(pem_cert)
-        .key_path(rsa_key)
-        .run(([0, 0, 0, 0], port))
-        .await;
+    serve_tls(routes, port, &pem_cert, &rsa_key).await;
 }
 
 #[tokio::main]
@@ -379,7 +459,7 @@ async fn main() {
             &port.to_string(),
         );
 
-        warp::serve(routes).run(([0, 0, 0, 0], port)).await;
+        serve_plain(routes, port).await;
     });
 
     let port: u16 = std::env::var("SPIDER_WORKER_PORT")
@@ -394,10 +474,5 @@ async fn main() {
     let rsa_key: String =
         std::env::var("SPIDER_WORKER_KEY_PATH").unwrap_or_else(|_| "/key.rsa".into());
 
-    warp::serve(routes)
-        .tls()
-        .cert_path(pem_cert)
-        .key_path(rsa_key)
-        .run(([0, 0, 0, 0], port))
-        .await;
+    serve_tls(routes, port, &pem_cert, &rsa_key).await;
 }

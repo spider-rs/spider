@@ -1633,9 +1633,9 @@ dependencies = [
 
 [[package]]
 name = "chromey"
-version = "2.42.6"
+version = "2.42.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c52fcf96208a4a44151bf2351c9efb3cb021758ae9996e89705f60b5ccdc61c"
+checksum = "594ae5bbdab92af050d9e19a608917facaa72273439d6aade1f826260c41a339"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -1646,8 +1646,7 @@ dependencies = [
  "dashmap",
  "dunce",
  "fnv",
- "futures",
- "futures-timer",
+ "futures-util",
  "hashbrown 0.16.1",
  "hex",
  "http-cache",
@@ -1673,7 +1672,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
- "tokio-tungstenite 0.29.0",
+ "tokio-tungstenite",
  "tracing",
  "url",
  "winreg 0.56.0",
@@ -3752,14 +3751,14 @@ dependencies = [
 
 [[package]]
 name = "headers"
-version = "0.3.9"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06683b93020a07e3dbcf5f8c0f6d40080d725bea7936fc01ad345c01b97dc270"
+checksum = "b3314d5adb5d94bcdf56771f2e50dbbc80bb4bdf88967526706205ac9eff24eb"
 dependencies = [
- "base64 0.21.7",
+ "base64 0.22.1",
  "bytes",
  "headers-core",
- "http 0.2.12",
+ "http 1.4.0",
  "httpdate",
  "mime",
  "sha1",
@@ -3767,11 +3766,11 @@ dependencies = [
 
 [[package]]
 name = "headers-core"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7f66481bfee273957b1f20485a4ff3362987f85b2c236580d81b4eb7a326429"
+checksum = "54b4a22553d4242c49fddb9ba998a99962b5cc6f22cb5a3482bec22522403ce4"
 dependencies = [
- "http 0.2.12",
+ "http 1.4.0",
 ]
 
 [[package]]
@@ -5305,24 +5304,6 @@ checksum = "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
 dependencies = [
  "num-traits",
  "pxfm",
-]
-
-[[package]]
-name = "multer"
-version = "2.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01acbdc23469fd8fe07ab135923371d5f5a422fbf9c522158677c8eb15bc51c2"
-dependencies = [
- "bytes",
- "encoding_rs",
- "futures-util",
- "http 0.2.12",
- "httparse",
- "log",
- "memchr",
- "mime",
- "spin",
- "version_check",
 ]
 
 [[package]]
@@ -7170,20 +7151,6 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.22.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf4ef73721ac7bcd79b2b315da7779d8fc09718c6b3d2d1b2d94850eb8c18432"
-dependencies = [
- "log",
- "ring",
- "rustls-pki-types",
- "rustls-webpki 0.102.8",
- "subtle",
- "zeroize",
-]
-
-[[package]]
-name = "rustls"
 version = "0.23.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "758025cb5fccfd3bc2fd74708fd4682be41d99e5dff73c377c0646c6012c73a4"
@@ -7263,17 +7230,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b6275d1ee7a1cd780b64aca7726599a1dbc893b1e64144529e55c3c2f745765"
 dependencies = [
  "ring",
- "untrusted",
-]
-
-[[package]]
-name = "rustls-webpki"
-version = "0.102.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64ca1bc8749bd4cf37b5ce386cc146580777b4e8572c7b97baf22c83f444bee9"
-dependencies = [
- "ring",
- "rustls-pki-types",
  "untrusted",
 ]
 
@@ -7880,46 +7836,6 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.47.76"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f3ead180629f75cdc294dde2f0f72e96c7a9f3b7bf799b9bfbb598909bfb89f"
-dependencies = [
- "ahash",
- "aho-corasick",
- "auto_encoder",
- "bytes",
- "case_insensitive_string",
- "h2 0.4.13",
- "hashbrown 0.16.1",
- "lazy_static",
- "libc",
- "log",
- "lol_html",
- "memchr",
- "num_cpus",
- "percent-encoding",
- "phf 0.13.1",
- "pin-project-lite",
- "quick-xml",
- "regex",
- "reqwest 0.13.2",
- "serde",
- "serde_json",
- "serde_regex",
- "smallvec",
- "spider_agent_types 2.47.76",
- "spider_fingerprint",
- "string-interner",
- "string_concat",
- "strum 0.28.0",
- "tokio",
- "tokio-stream",
- "tower 0.5.3",
- "url",
-]
-
-[[package]]
-name = "spider"
 version = "2.47.77"
 dependencies = [
  "ahash",
@@ -7999,6 +7915,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "spider"
+version = "2.47.77"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df82ec743de56d758baae2b9394c115b3ee2abb35d2943244db786bd9d0e4e1e"
+dependencies = [
+ "ahash",
+ "aho-corasick",
+ "auto_encoder",
+ "bytes",
+ "case_insensitive_string",
+ "h2 0.4.13",
+ "hashbrown 0.16.1",
+ "lazy_static",
+ "libc",
+ "log",
+ "lol_html",
+ "memchr",
+ "num_cpus",
+ "percent-encoding",
+ "phf 0.13.1",
+ "pin-project-lite",
+ "quick-xml",
+ "regex",
+ "reqwest 0.13.2",
+ "serde",
+ "serde_json",
+ "serde_regex",
+ "smallvec",
+ "spider_agent_types 2.47.77 (registry+https://github.com/rust-lang/crates.io-index)",
+ "spider_fingerprint",
+ "string-interner",
+ "string_concat",
+ "strum 0.28.0",
+ "tokio",
+ "tokio-stream",
+ "tower 0.5.3",
+ "url",
+]
+
+[[package]]
 name = "spider_agent"
 version = "2.47.77"
 dependencies = [
@@ -8045,9 +8001,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.47.76"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10c398e89475112d5a6c595e35b9055b1fd116147f183603704785e0d6e0fc48"
+version = "2.47.77"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8059,6 +8013,8 @@ dependencies = [
 [[package]]
 name = "spider_agent_types"
 version = "2.47.77"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52cda0c20c6e2e687fb0cb584521b93c337aa01a38c43cadbe285b1a035671ef"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8134,7 +8090,7 @@ dependencies = [
  "serde_json",
  "spider 2.47.77",
  "spider_transformations",
- "spider_utils 2.47.76",
+ "spider_utils 2.47.77 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -8233,27 +8189,12 @@ dependencies = [
  "phf_codegen 0.11.3",
  "regex",
  "serde",
- "spider 2.47.76",
+ "spider 2.47.77 (registry+https://github.com/rust-lang/crates.io-index)",
  "spider_scraper",
  "tendril",
  "thiserror 1.0.69",
  "unicode-width 0.2.2",
  "url",
-]
-
-[[package]]
-name = "spider_utils"
-version = "2.47.76"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4c411bf9f6e59a78b5e90a6372843491b6e49714aca8a82095a1f55854456f8"
-dependencies = [
- "hashbrown 0.16.1",
- "lazy_static",
- "log",
- "spider_scraper",
- "sxd-document",
- "sxd-xpath",
- "tokio-stream",
 ]
 
 [[package]]
@@ -8273,12 +8214,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "spider_utils"
+version = "2.47.77"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e319cfee3ab8a1ab4bffdfb8842b5731c289506882409ffdcdd053cb08e8458"
+dependencies = [
+ "hashbrown 0.16.1",
+ "lazy_static",
+ "log",
+ "spider_scraper",
+ "sxd-document",
+ "sxd-xpath",
+ "tokio-stream",
+]
+
+[[package]]
 name = "spider_worker"
 version = "2.47.77"
 dependencies = [
  "env_logger",
+ "hyper 1.8.1",
+ "hyper-util",
  "lazy_static",
+ "rustls-pemfile",
  "spider 2.47.77",
+ "tokio-rustls 0.26.4",
  "warp",
 ]
 
@@ -9159,17 +9119,6 @@ dependencies = [
 
 [[package]]
 name = "tokio-rustls"
-version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "775e0c0f0adb3a2f22a00c4745d728b479985fc15ee7ca6a2608388c5569860f"
-dependencies = [
- "rustls 0.22.4",
- "rustls-pki-types",
- "tokio",
-]
-
-[[package]]
-name = "tokio-rustls"
 version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
@@ -9203,18 +9152,6 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c83b561d025642014097b66e6c1bb422783339e0909e4429cde4749d1990bc38"
-dependencies = [
- "futures-util",
- "log",
- "tokio",
- "tungstenite 0.21.0",
-]
-
-[[package]]
-name = "tokio-tungstenite"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
@@ -9224,7 +9161,7 @@ dependencies = [
  "native-tls",
  "tokio",
  "tokio-native-tls",
- "tungstenite 0.29.0",
+ "tungstenite",
 ]
 
 [[package]]
@@ -9478,25 +9415,6 @@ name = "ttf-parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
-
-[[package]]
-name = "tungstenite"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ef1a641ea34f399a848dea702823bbecfb4c486f911735368f1f137cb8257e1"
-dependencies = [
- "byteorder",
- "bytes",
- "data-encoding",
- "http 1.4.0",
- "httparse",
- "log",
- "rand 0.8.5",
- "sha1",
- "thiserror 1.0.69",
- "url",
- "utf-8",
-]
 
 [[package]]
 name = "tungstenite"
@@ -9808,30 +9726,26 @@ dependencies = [
 
 [[package]]
 name = "warp"
-version = "0.3.7"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4378d202ff965b011c64817db11d5829506d3404edeadb61f190d111da3f231c"
+checksum = "51d06d9202adc1f15d709c4f4a2069be5428aa912cc025d6f268ac441ab066b0"
 dependencies = [
  "bytes",
- "futures-channel",
  "futures-util",
  "headers",
- "http 0.2.12",
- "hyper 0.14.32",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
  "log",
  "mime",
  "mime_guess",
- "multer",
  "percent-encoding",
  "pin-project",
- "rustls-pemfile",
  "scoped-tls",
  "serde",
  "serde_json",
  "serde_urlencoded",
  "tokio",
- "tokio-rustls 0.25.0",
- "tokio-tungstenite 0.21.0",
  "tokio-util",
  "tower-service",
  "tracing",
