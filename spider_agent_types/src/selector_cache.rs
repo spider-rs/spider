@@ -75,10 +75,11 @@ impl SelectorCache {
     /// Look up a cached selector for an element description.
     ///
     /// Optionally filter by domain for site-specific selectors.
+    /// Updates `last_used_ms` on hit so LRU eviction reflects actual access patterns.
     pub fn get(&mut self, description: &str, domain: Option<&str>) -> Option<&str> {
         let key = Self::normalize_key(description);
 
-        if let Some(entry) = self.entries.get(&key) {
+        if let Some(entry) = self.entries.get_mut(&key) {
             // Check domain match if specified
             if let Some(d) = domain {
                 if let Some(ref cached_domain) = entry.domain {
@@ -88,6 +89,7 @@ impl SelectorCache {
                     }
                 }
             }
+            entry.last_used_ms = Self::now_ms();
             self.hits += 1;
             Some(&entry.selector)
         } else {
@@ -150,15 +152,26 @@ impl SelectorCache {
         self.misses = 0;
     }
 
-    /// Evict the least recently used entry.
+    /// Evict least recently used entries.
+    ///
+    /// Evicts ~12.5% of capacity in one pass to amortize the O(n) scan cost
+    /// instead of scanning on every single insertion at capacity.
     fn evict_lru(&mut self) {
-        if let Some(lru_key) = self
+        let evict_count = (self.max_entries / 8).max(1);
+        if self.entries.len() <= evict_count {
+            self.entries.clear();
+            return;
+        }
+        let mut candidates: Vec<(String, u64)> = self
             .entries
             .iter()
-            .min_by_key(|(_, v)| v.last_used_ms)
-            .map(|(k, _)| k.clone())
-        {
-            self.entries.remove(&lru_key);
+            .map(|(k, v)| (k.clone(), v.last_used_ms))
+            .collect();
+        // Partial sort: partition around the Nth oldest element.
+        let pivot = evict_count.min(candidates.len()) - 1;
+        candidates.select_nth_unstable_by_key(pivot, |(_, ts)| *ts);
+        for (key, _) in &candidates[..=pivot] {
+            self.entries.remove(key);
         }
     }
 

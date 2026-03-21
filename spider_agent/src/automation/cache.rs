@@ -68,9 +68,28 @@ impl CacheValue for Vec<u8> {
 
 impl CacheValue for serde_json::Value {
     fn estimated_size(&self) -> usize {
-        // Rough estimate based on JSON serialization
-        serde_json::to_string(self).map(|s| s.len()).unwrap_or(100)
-            + std::mem::size_of::<serde_json::Value>()
+        estimate_json_size(self) + std::mem::size_of::<serde_json::Value>()
+    }
+}
+
+/// Recursive size estimate for JSON values without serialization.
+fn estimate_json_size(v: &serde_json::Value) -> usize {
+    match v {
+        serde_json::Value::Null => 4,
+        serde_json::Value::Bool(_) => 5,
+        serde_json::Value::Number(n) => {
+            // Avoid format! allocation; integer digits ≤ 20, float ≤ 24
+            if n.is_f64() { 24 } else { 20 }
+        }
+        serde_json::Value::String(s) => s.len() + 2 + std::mem::size_of::<String>(),
+        serde_json::Value::Array(arr) => {
+            let inner: usize = arr.iter().map(estimate_json_size).sum();
+            inner + arr.len() * std::mem::size_of::<serde_json::Value>() + std::mem::size_of::<Vec<serde_json::Value>>()
+        }
+        serde_json::Value::Object(map) => {
+            let inner: usize = map.iter().map(|(k, v)| k.len() + std::mem::size_of::<String>() + estimate_json_size(v)).sum();
+            inner + std::mem::size_of::<serde_json::Map<String, serde_json::Value>>()
+        }
     }
 }
 
@@ -231,10 +250,11 @@ impl<V: CacheValue> SmartCache<V> {
             self.batch_evict_locked(&mut entries, over_count, over_bytes);
         }
 
+        let now = Instant::now();
         let entry = CacheEntry {
             value,
-            created_at: Instant::now(),
-            last_accessed: Instant::now(),
+            created_at: now,
+            last_accessed: now,
             size_bytes: size,
             ttl,
             access_count: 1,
@@ -285,8 +305,9 @@ impl<V: CacheValue> SmartCache<V> {
 
     /// Evict enough entries to free `min_count` slots and `min_bytes` bytes.
     ///
-    /// Sorts candidates by `last_accessed` once (O(n log n)) rather than
-    /// scanning the full map per eviction (O(n * k)).
+    /// First sweeps expired entries (free evictions), then uses partial sort
+    /// (`select_nth_unstable`) to find the oldest-accessed candidates without
+    /// sorting the entire Vec.
     fn batch_evict_locked(
         &self,
         entries: &mut HashMap<String, CacheEntry<V>>,
@@ -297,17 +318,52 @@ impl<V: CacheValue> SmartCache<V> {
             return;
         }
 
-        // Single pass: collect (key, last_accessed, size) for all entries.
+        let now = Instant::now();
+        let mut freed_count = 0usize;
+        let mut freed_bytes = 0usize;
+
+        // Phase 1: sweep expired entries first (free evictions, no sort needed).
+        let expired_keys: Vec<String> = entries
+            .iter()
+            .filter(|(_, e)| now.duration_since(e.created_at) > e.ttl)
+            .map(|(k, _)| k.clone())
+            .collect();
+
+        for key in &expired_keys {
+            if let Some(entry) = entries.remove(key) {
+                freed_bytes += entry.size_bytes;
+                freed_count += 1;
+                self.current_size
+                    .fetch_sub(entry.size_bytes, Ordering::Relaxed);
+                self.stats.expirations.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        if freed_count >= min_count && freed_bytes >= min_bytes {
+            return;
+        }
+
+        // Phase 2: evict by LRU using partial sort.
+        let remaining_count = min_count.saturating_sub(freed_count);
+        let remaining_bytes = min_bytes.saturating_sub(freed_bytes);
+
+        if remaining_count == 0 && remaining_bytes == 0 {
+            return;
+        }
+
         let mut candidates: Vec<(String, Instant, usize)> = entries
             .iter()
             .map(|(k, e)| (k.clone(), e.last_accessed, e.size_bytes))
             .collect();
 
-        // Sort oldest-accessed first (eviction order).
-        candidates.sort_unstable_by_key(|(_, accessed, _)| *accessed);
+        if candidates.is_empty() {
+            return;
+        }
 
-        let mut freed_count = 0usize;
-        let mut freed_bytes = 0usize;
+        // Partial sort: only partition around the Nth oldest element.
+        // O(n) average vs O(n log n) for full sort.
+        let pivot = remaining_count.min(candidates.len()).max(1) - 1;
+        candidates.select_nth_unstable_by_key(pivot, |(_, accessed, _)| *accessed);
 
         for (key, _, _) in &candidates {
             if freed_count >= min_count && freed_bytes >= min_bytes {
@@ -328,19 +384,18 @@ impl<V: CacheValue> SmartCache<V> {
         let mut entries = self.entries.write().await;
         let now = Instant::now();
 
-        let expired: Vec<String> = entries
-            .iter()
-            .filter(|(_, e)| now.duration_since(e.created_at) > e.ttl)
-            .map(|(k, _)| k.clone())
-            .collect();
-
-        for key in expired {
-            if let Some(entry) = entries.remove(&key) {
-                self.current_size
-                    .fetch_sub(entry.size_bytes, Ordering::Relaxed);
-                self.stats.expirations.fetch_add(1, Ordering::Relaxed);
+        // retain() does a single pass — no intermediate Vec allocation.
+        let current_size = &self.current_size;
+        let stats = &self.stats;
+        entries.retain(|_, entry| {
+            if now.duration_since(entry.created_at) > entry.ttl {
+                current_size.fetch_sub(entry.size_bytes, Ordering::Relaxed);
+                stats.expirations.fetch_add(1, Ordering::Relaxed);
+                false
+            } else {
+                true
             }
-        }
+        });
     }
 
     /// Start a background cleanup task.

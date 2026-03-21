@@ -1749,92 +1749,102 @@ pub async fn cache_chrome_response(
         _ => return,
     };
 
-    if let Ok(u) = url::Url::parse(target_url) {
-        let chromey_version = match chrome_http_req_res.protocol.as_str() {
-            "http/0.9" => HttpVersion::Http09,
-            "http/1" | "http/1.0" => HttpVersion::Http10,
-            "http/1.1" => HttpVersion::Http11,
-            "http/2.0" | "http/2" => HttpVersion::H2,
-            "http/3.0" | "http/3" => HttpVersion::H3,
-            _ => HttpVersion::Http11,
-        };
-        let http_response = HttpResponse {
-            url: u,
-            body,
-            status: chrome_http_req_res.status_code.into(),
-            version: chromey_version,
-            headers: chrome_http_req_res.response_headers,
-        };
-        let auth_opt = match cache_options {
-            Some(CacheOptions::Yes) | Some(CacheOptions::SkipBrowser) => None,
-            Some(CacheOptions::Authorized(token))
-            | Some(CacheOptions::SkipBrowserAuthorized(token)) => Some(token),
-            Some(CacheOptions::No) | None => None,
-        };
-        let cache_key = create_cache_key_raw(
-            target_url,
-            Some(&chrome_http_req_res.method),
-            auth_opt.map(|token| token.as_ref()),
-        );
+    let u = match url::Url::parse(target_url) {
+        Ok(u) => u,
+        Err(_) => return,
+    };
 
-        // Clone data needed for remote cache dump before put_hybrid_cache consumes them.
-        #[cfg(feature = "chrome_remote_cache")]
-        let remote_dump_data = {
-            let cache_site =
-                chromiumoxide::cache::manager::site_key_for_target_url(target_url, None);
-            Some((
-                cache_key.clone(),
-                cache_site,
-                http_response.body.clone(),
-                http_response.status,
-                chrome_http_req_res.request_headers.clone(),
-                http_response.headers.clone(),
-                chromey_version,
-                chrome_http_req_res.method.clone(),
-            ))
+    let chromey_version = match chrome_http_req_res.protocol.as_str() {
+        "http/0.9" => HttpVersion::Http09,
+        "http/1" | "http/1.0" => HttpVersion::Http10,
+        "http/1.1" => HttpVersion::Http11,
+        "http/2.0" | "http/2" => HttpVersion::H2,
+        "http/3.0" | "http/3" => HttpVersion::H3,
+        _ => HttpVersion::Http11,
+    };
+
+    let auth_opt = match cache_options {
+        Some(CacheOptions::Yes) | Some(CacheOptions::SkipBrowser) => None,
+        Some(CacheOptions::Authorized(token))
+        | Some(CacheOptions::SkipBrowserAuthorized(token)) => Some(token),
+        Some(CacheOptions::No) | None => None,
+    };
+    let cache_key = create_cache_key_raw(
+        target_url,
+        Some(&chrome_http_req_res.method),
+        auth_opt.map(|token| token.as_ref()),
+    );
+
+    // Destructure chrome_http_req_res to avoid cloning fields consumed by both paths.
+    let ChromeHTTPReqRes {
+        method,
+        response_headers,
+        request_headers,
+        status_code,
+        ..
+    } = chrome_http_req_res;
+
+    // Prepare remote dump data BEFORE put_hybrid_cache consumes the HttpResponse.
+    // Use the same body/headers — remote dump spawns a task that takes ownership.
+    #[cfg(feature = "chrome_remote_cache")]
+    let remote_dump_data = {
+        let cache_site =
+            chromiumoxide::cache::manager::site_key_for_target_url(target_url, None);
+        let remote_version = match chromey_version {
+            HttpVersion::Http09 => chromiumoxide::http::HttpVersion::Http09,
+            HttpVersion::Http10 => chromiumoxide::http::HttpVersion::Http10,
+            HttpVersion::H2 => chromiumoxide::http::HttpVersion::H2,
+            HttpVersion::H3 => chromiumoxide::http::HttpVersion::H3,
+            _ => chromiumoxide::http::HttpVersion::Http11,
         };
+        // Clone only what the spawned task needs; body is cloned once (not twice).
+        Some((
+            cache_key.clone(),
+            cache_site,
+            body.clone(),
+            status_code,
+            request_headers.clone(),
+            response_headers.clone(),
+            remote_version,
+            method.clone(),
+            target_url.to_string(),
+        ))
+    };
 
-        put_hybrid_cache(
-            &cache_key,
-            http_response,
-            &chrome_http_req_res.method,
-            chrome_http_req_res.request_headers,
-        )
-        .await;
+    let http_response = HttpResponse {
+        url: u,
+        body,
+        status: status_code.into(),
+        version: chromey_version,
+        headers: response_headers,
+    };
 
-        // Best-effort async dump to the shared remote cache server so other
-        // ECS tasks / processes can serve cache hits without re-rendering.
-        #[cfg(feature = "chrome_remote_cache")]
-        if let Some((key, site, body, status, req_hdrs, resp_hdrs, version, method)) =
-            remote_dump_data
-        {
-            let target = target_url.to_string();
-            let remote_version = match version {
-                HttpVersion::Http09 => chromiumoxide::http::HttpVersion::Http09,
-                HttpVersion::Http10 => chromiumoxide::http::HttpVersion::Http10,
-                HttpVersion::H2 => chromiumoxide::http::HttpVersion::H2,
-                HttpVersion::H3 => chromiumoxide::http::HttpVersion::H3,
-                _ => chromiumoxide::http::HttpVersion::Http11,
-            };
-            tokio::spawn(async move {
-                let _ = tokio::time::timeout(
-                    Duration::from_secs(5),
-                    chromiumoxide::cache::remote::dump_to_remote_cache_parts(
-                        &key,
-                        &site,
-                        &target,
-                        &body,
-                        &method,
-                        status,
-                        &req_hdrs,
-                        &resp_hdrs,
-                        &remote_version,
-                        Some("true"),
-                    ),
-                )
-                .await;
-            });
-        }
+    put_hybrid_cache(&cache_key, http_response, &method, request_headers).await;
+
+    // Best-effort async dump to the shared remote cache server so other
+    // ECS tasks / processes can serve cache hits without re-rendering.
+    #[cfg(feature = "chrome_remote_cache")]
+    if let Some((key, site, body, _status, req_hdrs, resp_hdrs, remote_version, method, target)) =
+        remote_dump_data
+    {
+        tokio::spawn(async move {
+            let _ = tokio::time::timeout(
+                Duration::from_secs(5),
+                chromiumoxide::cache::remote::dump_to_remote_cache_parts(
+                    &key,
+                    &site,
+                    &target,
+                    &body,
+                    &method,
+                    _status.into(),
+                    &req_hdrs,
+                    &resp_hdrs,
+                    &remote_version,
+                    Some("true"),
+                ),
+            )
+            .await;
+        });
     }
 }
 
@@ -5183,32 +5193,59 @@ pub async fn get_cached_url_base(
         _ => std::time::SystemTime::now(),
     };
 
-    let cache_url = create_cache_key_raw(target_url, None, auth_opt.as_deref());
+    let auth_str = auth_opt.as_deref();
 
-    let result = tokio::time::timeout(Duration::from_millis(60), async {
-        crate::website::CACACHE_MANAGER.get(&cache_url).await
-    })
-    .await;
-
-    if let Ok(cache_result) = result {
-        if let Ok(Some((http_response, stored_policy))) = cache_result {
-            if allow_stale || !stored_policy.is_stale(now) {
-                let http_cache::HttpHeaders::Modern(ref hdrs) = http_response.headers;
-                return decode_cached_html_bytes(
-                    &http_response.body,
-                    hdrs.get("accept-language").and_then(|vals| {
-                        vals.first().and_then(
-                            |h| {
+    // Helper: attempt CACACHE_MANAGER lookup for a given URL.
+    let try_cacache = |url: &str| {
+        let cache_url = create_cache_key_raw(url, None, auth_str);
+        async move {
+            let result = tokio::time::timeout(Duration::from_millis(60), async {
+                crate::website::CACACHE_MANAGER.get(&cache_url).await
+            })
+            .await;
+            if let Ok(Ok(Some((http_response, stored_policy)))) = result {
+                if allow_stale || !stored_policy.is_stale(now) {
+                    let http_cache::HttpHeaders::Modern(ref hdrs) = http_response.headers;
+                    return decode_cached_html_bytes(
+                        &http_response.body,
+                        hdrs.get("accept-language").and_then(|vals| {
+                            vals.first().and_then(|h| {
                                 if h.is_empty() {
                                     None
                                 } else {
                                     Some(h.as_str())
                                 }
-                            },
-                        )
-                    }),
-                );
+                            })
+                        }),
+                    );
+                }
             }
+            None
+        }
+    };
+
+    if let Some(body) = try_cacache(target_url).await {
+        return Some(body);
+    }
+
+    // Try alternate URL (with/without trailing slash) against local cache.
+    let alt_url: Option<String> = if target_url.ends_with('/') {
+        let trimmed = target_url.trim_end_matches('/');
+        if trimmed.is_empty() || trimmed == target_url {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    } else {
+        let mut s = String::with_capacity(target_url.len() + 1);
+        s.push_str(target_url);
+        s.push('/');
+        Some(s)
+    };
+
+    if let Some(ref alt) = alt_url {
+        if let Some(body) = try_cacache(alt).await {
+            return Some(body);
         }
     }
 
@@ -5262,23 +5299,9 @@ pub async fn get_cached_url_base(
             return Some(body);
         }
 
-        // Try alternate URL (with/without trailing slash).
-        let alt_url: Option<String> = if target_url.ends_with('/') {
-            let trimmed = target_url.trim_end_matches('/');
-            if trimmed.is_empty() || trimmed == target_url {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        } else {
-            let mut s = String::with_capacity(target_url.len() + 1);
-            s.push_str(target_url);
-            s.push('/');
-            Some(s)
-        };
-
-        if let Some(alt) = alt_url {
-            if let Some(body) = try_session_get(&alt) {
+        // Reuse alt_url computed above for the CACACHE path.
+        if let Some(ref alt) = alt_url {
+            if let Some(body) = try_session_get(alt) {
                 return Some(body);
             }
         }
@@ -5387,32 +5410,10 @@ pub async fn get_cached_url(
     cache_options: Option<&CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
 ) -> Option<String> {
-    if let Some(body) = get_cached_url_base(target_url, cache_options.cloned(), cache_policy).await
-    {
-        return Some(body);
-    }
-
-    let alt_url: Option<String> = if target_url.ends_with('/') {
-        let trimmed = target_url.trim_end_matches('/');
-        if trimmed.is_empty() || trimmed == target_url {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    } else {
-        let mut s = String::with_capacity(target_url.len() + 1);
-        s.push_str(target_url);
-        s.push('/');
-        Some(s)
-    };
-
-    if let Some(alt) = alt_url {
-        if let Some(body) = get_cached_url_base(&alt, cache_options.cloned(), cache_policy).await {
-            return Some(body);
-        }
-    }
-
-    None
+    // get_cached_url_base already handles trailing-slash fallback internally
+    // (both in the cache/cache_mem and chrome_remote_cache paths),
+    // so no outer alt-URL retry is needed.
+    get_cached_url_base(target_url, cache_options.cloned(), cache_policy).await
 }
 
 #[cfg(all(
