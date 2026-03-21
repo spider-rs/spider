@@ -19,4 +19,6 @@ ignore = [
     "RUSTSEC-2025-0119",
     # paste unmaintained — transitive dep
     "RUSTSEC-2024-0436",
+    # rustls-webpki CRL matching — transitive via aws-smithy-http-client (no upstream fix)
+    "RUSTSEC-2026-0049",
 ]
