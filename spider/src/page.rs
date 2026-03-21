@@ -1089,10 +1089,30 @@ pub fn validate_empty(content: &Option<Vec<u8>>, is_success: bool) -> bool {
             // is_success && content.starts_with(br#"<html style=\"height:100%\"><head><META NAME=\"ROBOTS\" CONTENT=\"NOINDEX, NOFOLLOW\"><meta name=\"format-detection\" content=\"telephone=no\"><meta name=\"viewport\" content=\"initial-scale=1.0\"><meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge,chrome=1\"></head><body style=\"margin:0px;height:100%\"><iframe id=\"main-iframe\" src=\"/_Incapsula_"#)
             !( content.is_empty() || content.starts_with(b"<html><head></head><body></body></html>") || is_success &&
                      content.starts_with(b"<html>\r\n<head>\r\n<META NAME=\"robots\" CONTENT=\"noindex,nofollow\">\r\n<script src=\"/") &&
-                      content.ends_with(b"\">\r\n</script>\r\n<body>\r\n</body></html>\r\n"))
+                      content.ends_with(b"\">\r\n</script>\r\n<body>\r\n</body></html>\r\n")
+                || is_chrome_error_page(content))
         }
         _ => false,
     }
+}
+
+/// Returns `true` if the HTML content is a Chrome browser error page
+/// (e.g. ERR_TUNNEL_CONNECTION_FAILED, ERR_NAME_NOT_RESOLVED, etc.).
+/// These pages are rendered by Chrome itself when navigation fails but
+/// still arrive with HTTP 200 status and no `chrome-error://` final URL.
+#[cfg(not(feature = "decentralized"))]
+#[inline]
+fn is_chrome_error_page(content: &[u8]) -> bool {
+    const NEEDLE: &[u8] = b"\"errorCode\":\"ERR";
+    // The loadTimeDataRaw JSON containing the errorCode sits in a <script>
+    // tag near the very end of Chrome error pages. Searching only the tail
+    // 4 KB avoids scanning the large CSS/JS preamble (dino game, etc.).
+    let region = if content.len() > 4096 {
+        &content[content.len() - 4096..]
+    } else {
+        content
+    };
+    memchr::memmem::find(region, NEEDLE).is_some()
 }
 
 /// Extract a specific type of error from a chain of errors.
@@ -6231,6 +6251,46 @@ fn test_server_error_still_retries() {
     };
     let page = build("https://example.com", res);
     assert!(page.should_retry, "500 errors should still be retried");
+}
+
+#[test]
+fn test_chrome_error_page_detected_as_empty() {
+    // Simulate a Chrome ERR_TUNNEL_CONNECTION_FAILED error page that arrives
+    // with HTTP 200 status but contains Chrome's internal error HTML.
+    let chrome_error_html = br#"<html><head><title>www.example.com</title></head>
+<body><div id="main-frame-error" class="interstitial-wrapper">
+<h1><span>This site can't be reached</span></h1>
+<div class="error-code">ERR_TUNNEL_CONNECTION_FAILED</div>
+</div></body>
+<script>var loadTimeDataRaw = {"errorCode":"ERR_TUNNEL_CONNECTION_FAILED","heading":{"msg":"This site can't be reached"}};</script></html>"#;
+
+    assert!(
+        is_chrome_error_page(chrome_error_html),
+        "should detect Chrome error page by errorCode in loadTimeDataRaw"
+    );
+    assert!(
+        !validate_empty(&Some(chrome_error_html.to_vec()), true),
+        "Chrome error page should be treated as empty/invalid content"
+    );
+
+    let res = PageResponse {
+        status_code: StatusCode::OK,
+        content: Some(chrome_error_html.to_vec()),
+        ..Default::default()
+    };
+    let page = build("https://www.example.com", res);
+    assert!(
+        page.should_retry,
+        "Chrome error page with 200 status should trigger retry"
+    );
+}
+
+#[test]
+fn test_normal_page_not_detected_as_chrome_error() {
+    let normal_html =
+        b"<html><head><title>My Blog</title></head><body><p>Hello world</p></body></html>";
+    assert!(!is_chrome_error_page(normal_html));
+    assert!(validate_empty(&Some(normal_html.to_vec()), true));
 }
 
 // ---------------------------------------------------------------------------
