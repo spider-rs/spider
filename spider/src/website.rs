@@ -5402,6 +5402,7 @@ impl Website {
         ) = self.setup_selectors();
         if self.single_page() {
             self._crawl_establish(client, &mut selector, false).await;
+            self.subscription_guard().await;
         } else {
             let on_should_crawl_callback = self.on_should_crawl_callback.clone();
             let full_resources = self.configuration.full_resources;
@@ -6412,6 +6413,7 @@ impl Website {
 
         if self.single_page() {
             website._crawl_establish(client, &mut selector, false).await;
+            website.subscription_guard().await;
             website
         } else {
             let client_rotator = self.client_rotator.clone();
@@ -7802,9 +7804,9 @@ impl Website {
         ) = self.setup_selectors();
 
         if self.single_page() {
-            self.subscription_guard().await;
             self.crawl_establish_smart(&client, &mut selectors, &browser)
                 .await;
+            self.subscription_guard().await;
         } else {
             let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
 
@@ -11535,6 +11537,78 @@ mod tests {
         let links = hashbrown::HashSet::new();
         website.set_crawl_initial_status(&page, &links);
         assert_eq!(*website.get_status(), super::CrawlStatus::Empty);
+    }
+
+    #[test]
+    fn test_single_page_with_limit_1() {
+        let mut website = crate::website::Website::new("http://example.com");
+        website.configuration.with_limit(1);
+        website.determine_limits();
+        assert!(
+            website.single_page(),
+            "with_limit(1) must trigger single_page() fast path"
+        );
+    }
+
+    #[test]
+    fn test_single_page_no_limit() {
+        let website = crate::website::Website::new("http://example.com");
+        assert!(
+            !website.single_page(),
+            "No budget set should not trigger single_page()"
+        );
+    }
+
+    #[test]
+    fn test_single_page_with_limit_greater_than_1() {
+        let mut website = crate::website::Website::new("http://example.com");
+        website.configuration.with_limit(5);
+        website.determine_limits();
+        assert!(
+            !website.single_page(),
+            "with_limit(5) must NOT trigger single_page()"
+        );
+    }
+
+    #[test]
+    fn test_single_page_with_limit_0_no_fast_path() {
+        let mut website = crate::website::Website::new("http://example.com");
+        website.configuration.with_limit(0);
+        website.determine_limits();
+        assert!(
+            !website.single_page(),
+            "with_limit(0) (unlimited) must NOT trigger single_page()"
+        );
+    }
+
+    #[cfg(all(not(feature = "decentralized"), feature = "sync"))]
+    #[tokio::test]
+    async fn test_crawl_single_page_subscription_receives_page() {
+        let mut website = crate::website::Website::new("https://example.com");
+        website.configuration.with_limit(1);
+        let mut rx = website
+            .subscribe(10)
+            .expect("sync feature must enable subscribe");
+        let crawl = async {
+            website.crawl_raw().await;
+            website.unsubscribe();
+        };
+        let sub = async {
+            let mut received = Vec::new();
+            while let Ok(page) = rx.recv().await {
+                received.push(page);
+            }
+            received
+        };
+        let (_, received) = tokio::join!(crawl, sub);
+        assert!(
+            !received.is_empty(),
+            "subscriber must receive page from single-page crawl_raw"
+        );
+        assert!(
+            received[0].get_url().contains("example.com"),
+            "received page url must match target"
+        );
     }
 }
 
