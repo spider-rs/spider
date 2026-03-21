@@ -21,10 +21,7 @@ use hyper_util::service::TowerToHyperService;
 use std::net::SocketAddr;
 
 /// Serve warp routes on a TCP listener using hyper-util.
-async fn serve_plain(
-    routes: warp::filters::BoxedFilter<(impl warp::Reply + 'static,)>,
-    port: u16,
-) {
+async fn serve_plain(routes: warp::filters::BoxedFilter<(impl warp::Reply + 'static,)>, port: u16) {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr)
         .await
@@ -39,11 +36,10 @@ async fn serve_plain(
         let svc = svc.clone();
         tokio::spawn(async move {
             let io = hyper_util::rt::TokioIo::new(stream);
-            let _ = hyper_util::server::conn::auto::Builder::new(
-                hyper_util::rt::TokioExecutor::new(),
-            )
-            .serve_connection(io, svc)
-            .await;
+            let _ =
+                hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                    .serve_connection(io, svc)
+                    .await;
         });
     }
 }
