@@ -177,24 +177,21 @@ error was encountered while trying to use an ErrorDocument to handle the request
     pub static ref EMPTY_HTML_BASIC: &'static [u8; 13] = b"<html></html>";
 
     /// Scan for error anti-bot pages.
-    static ref AC_BODY_SCAN: AhoCorasick = AhoCorasick::new([
-        "cf-error-code",                                     // 0 → Cloudflare
-        "Access to this page has been denied",               // 1 → Cloudflare
-        "data-translate=\"block_headline\"",                 // 2 → Cloudflare WAF hard block
-        "DataDome",                                          // 3 → DataDome
-        "perimeterx",                                        // 4 → PerimeterX
-        "funcaptcha",                                        // 5 → ArkoseLabs
-        "Request unsuccessful. Incapsula incident ID",       // 6 → Imperva
-        "_____tmd_____",                                      // 7 → AlibabaTMD
-        "x5secdata",                                         // 8 → AlibabaTMD
-        "ak_bmsc",                                           // 9 → Akamai Bot Manager
-        "challenge-platform",                                // 10 → Cloudflare
-        "cf-challenge",                                      // 11 → Cloudflare
-        "ddos-guard",                                        // 12 → DDoS-Guard
-        "px-captcha",                                        // 13 → PerimeterX
-        "verify you are human",                              // 14 → Generic anti-bot
-        "prove you're not a robot",                          // 15 → Generic anti-bot
-    ]).unwrap();
+    static ref AC_BODY_SCAN: AhoCorasick = AhoCorasick::builder()
+        .match_kind(aho_corasick::MatchKind::LeftmostFirst)
+        .build([
+            "cf-error-code",                                     // 0 → Cloudflare
+            "Access to this page has been denied",               // 1 → Cloudflare
+            "data-translate=\"block_headline\"",                 // 2 → Cloudflare WAF hard block
+            "DataDome",                                          // 3 → DataDome
+            "perimeterx",                                        // 4 → PerimeterX
+            "funcaptcha",                                        // 5 → ArkoseLabs
+            "Request unsuccessful. Incapsula incident ID",       // 6 → Imperva
+            "_____tmd_____",                                      // 7 → AlibabaTMD
+            "x5secdata",                                         // 8 → AlibabaTMD
+            "ak_bmsc",                                           // 9 → Akamai Bot Manager
+        ])
+        .unwrap();
 
     static ref AC_URL_SCAN: AhoCorasick = AhoCorasick::builder()
         .match_kind(aho_corasick::MatchKind::LeftmostFirst) // optional: stops at first match
@@ -727,8 +724,8 @@ pub enum HeaderSource<'a> {
     Map(&'a std::collections::HashMap<String, String>),
 }
 
-#[inline(always)]
 /// Has the header value.
+#[inline(always)]
 fn header_value<'a>(headers: &'a HeaderSource, key: &str) -> Option<&'a str> {
     match headers {
         HeaderSource::HeaderMap(hm) => hm.get(key).and_then(|v| v.to_str().ok()),
@@ -792,24 +789,22 @@ pub fn detect_anti_bot_from_headers(headers: &HeaderSource) -> Option<AntiBotTec
 }
 
 /// Detect the anti-bot technology.
+#[inline]
 pub fn detect_anti_bot_from_body(body: &[u8]) -> Option<AntiBotTech> {
     // Scan body for anti-bot fingerprints (only for small pages)
     if body.len() < 30_000 {
-        if let Ok(finder) = AC_BODY_SCAN.try_find_iter(body) {
-            for mat in finder {
-                match mat.pattern().as_usize() {
-                    0..=2 | 10 | 11 => return Some(AntiBotTech::Cloudflare),
-                    3 => return Some(AntiBotTech::DataDome),
-                    4 | 13 => return Some(AntiBotTech::PerimeterX),
-                    5 => return Some(AntiBotTech::ArkoseLabs),
-                    6 => return Some(AntiBotTech::Imperva),
-                    7 | 8 => return Some(AntiBotTech::AlibabaTMD),
-                    9 => return Some(AntiBotTech::AkamaiBotManager),
-                    12 => return Some(AntiBotTech::None), // DDoS-Guard (no specific enum)
-                    14 | 15 => return Some(AntiBotTech::None), // Generic anti-bot
-                    _ => (),
-                }
-            }
+        if let Some(mat) = AC_BODY_SCAN.find(body) {
+            let tech = match mat.pattern().as_usize() {
+                0..=2 => AntiBotTech::Cloudflare,
+                3 => AntiBotTech::DataDome,
+                4 => AntiBotTech::PerimeterX,
+                5 => AntiBotTech::ArkoseLabs,
+                6 => AntiBotTech::Imperva,
+                7 | 8 => AntiBotTech::AlibabaTMD,
+                9 => AntiBotTech::AkamaiBotManager,
+                _ => return None,
+            };
+            return Some(tech);
         }
     }
 
@@ -817,6 +812,7 @@ pub fn detect_anti_bot_from_body(body: &[u8]) -> Option<AntiBotTech> {
 }
 
 /// Detect antibot from url
+#[inline]
 pub fn detect_antibot_from_url(url: &str) -> Option<AntiBotTech> {
     if let Some(mat) = AC_URL_SCAN.find(url) {
         let tech = match mat.pattern().as_usize() {
