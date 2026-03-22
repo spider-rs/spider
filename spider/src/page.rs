@@ -553,6 +553,20 @@ pub enum AntiBotTech {
     Singula,
     /// Alibaba TMD (TMall Defense) - anti-bot system used by Alibaba group sites (Taobao, Tmall, Lazada, Miravia, AliExpress).
     AlibabaTMD,
+    /// Sucuri Website Firewall - cloud-based WAF and DDoS protection.
+    Sucuri,
+    /// DDoS-Guard - DDoS protection and CDN service.
+    DDoSGuard,
+    /// Vercel Firewall - edge protection and security checkpoint for Vercel-hosted sites.
+    Vercel,
+    /// AWS WAF - Amazon Web Services Web Application Firewall, often paired with CloudFront.
+    AwsWaf,
+    /// Wordfence - WordPress security plugin with WAF and bot blocking.
+    Wordfence,
+    /// GeeTest - CAPTCHA provider using slide, click, and behavioral challenges.
+    GeeTest,
+    /// hCaptcha - privacy-focused CAPTCHA service used as reCAPTCHA alternative.
+    HCaptcha,
     /// Fallback value if none match or detection failed.
     #[default]
     None,
