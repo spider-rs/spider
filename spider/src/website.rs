@@ -5573,6 +5573,7 @@ impl Website {
                                 let cache_pol = cache_policy_raw.clone();
                                 #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
                                 let normalize = normalize_raw;
+                                let custom_antibot = self.compiled_custom_antibot.clone();
                                 spawn_set("page_fetch", &mut set, async move {
                                     let link_result = match &shared.9 {
                                         Some(cb) => cb(link, None),
@@ -5588,7 +5589,15 @@ impl Website {
                                         if cache_skip_browser(&cache_opts) {
                                             if let Some(html) = get_cached_url(target_url, cache_opts.as_ref(), &cache_pol).await {
                                                 let mut page_response = build_cached_html_page_response(target_url, &html);
-                                                self.apply_custom_antibot_check(&mut page_response);
+                                                if page_response.anti_bot_tech == AntiBotTech::None {
+                                                    if let Some(ref custom) = custom_antibot {
+                                                        let body = page_response.content.as_deref().unwrap_or(&[]);
+                                                        let url = page_response.final_url.as_deref().unwrap_or("");
+                                                        if custom.detect_body(body) || custom.detect_url(url) {
+                                                            page_response.anti_bot_tech = AntiBotTech::Custom;
+                                                        }
+                                                    }
+                                                }
                                                 let mut page = build(target_url, page_response);
 
                                                 if !shared.3.is_empty() {
