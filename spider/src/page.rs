@@ -1098,19 +1098,45 @@ pub fn validate_empty(content: &Option<Vec<u8>>, is_success: bool) -> bool {
 
 /// Returns `true` if the HTML content is a Chrome browser error page
 /// (e.g. ERR_TUNNEL_CONNECTION_FAILED, ERR_NAME_NOT_RESOLVED, etc.).
-/// These pages are rendered by Chrome itself when navigation fails but
-/// still arrive with HTTP 200 status and no `chrome-error://` final URL.
+///
+/// Chrome renders these pages locally when proxy/network errors occur.
+/// They arrive with HTTP 200 and ~157KB of content (CSS, dino game JS,
+/// base64 error images). Detection uses the structural tail: Chrome error
+/// pages always end with `};</script></html>` (no `</body>` tag) and
+/// contain `"errorCode":"ERR` in the `loadTimeDataRaw` JSON blob.
+///
+/// Two checks, both on the last 4KB only — O(1) for all non-error pages:
+/// 1. `ends_with(b"};</script></html>")` — Chrome error page structure
+/// 2. `"errorCode":"ERR` present — Chrome-internal JSON key
+///
+/// Zero false positives: real websites always have `</body>` before
+/// `</html>`, and never contain `loadTimeDataRaw` with `errorCode`.
 #[cfg(not(feature = "decentralized"))]
 #[inline]
-fn is_chrome_error_page(content: &[u8]) -> bool {
+pub fn is_chrome_error_page(content: &[u8]) -> bool {
+    const TAIL: &[u8] = b"};</script></html>";
     const NEEDLE: &[u8] = b"\"errorCode\":\"ERR";
-    // The loadTimeDataRaw JSON containing the errorCode sits in a <script>
-    // tag near the very end of Chrome error pages. Searching only the tail
-    // 4 KB avoids scanning the large CSS/JS preamble (dino game, etc.).
-    let region = if content.len() > 4096 {
-        &content[content.len() - 4096..]
+
+    if content.len() < 500 {
+        return false;
+    }
+
+    // Trim trailing whitespace for ends_with
+    let mut end = content.len();
+    while end > 0 && content[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    let trimmed = &content[..end];
+
+    if !trimmed.ends_with(TAIL) {
+        return false;
+    }
+
+    // Confirm errorCode in the last 4KB
+    let region = if trimmed.len() > 4096 {
+        &trimmed[trimmed.len() - 4096..]
     } else {
-        content
+        trimmed
     };
     memchr::memmem::find(region, NEEDLE).is_some()
 }
@@ -1228,8 +1254,21 @@ pub fn build_with_parse(url: &str, res: PageResponse) -> Page {
 
 /// Instantiate a new page without scraping it (used for testing purposes).
 #[cfg(not(feature = "decentralized"))]
-pub fn build(url: &str, res: PageResponse) -> Page {
+pub fn build(url: &str, mut res: PageResponse) -> Page {
     use crate::utils::validation::is_false_403;
+
+    // Chrome error pages (ERR_CONNECTION_RESET, ERR_TUNNEL_CONNECTION_FAILED, etc.)
+    // return HTTP 200 with ~157KB of error page content. Reclassify to 599
+    // (spider internal error) so all retry paths treat it as a failed crawl.
+    // Content is preserved for debugging but status signals failure.
+    let chrome_error = res.status_code.is_success()
+        && res
+            .content
+            .as_deref()
+            .is_some_and(is_chrome_error_page);
+    if chrome_error {
+        res.status_code = StatusCode::from_u16(599).unwrap_or(StatusCode::BAD_GATEWAY);
+    }
 
     let success = res.status_code.is_success() || res.status_code == StatusCode::NOT_FOUND;
     let resource_found = validate_empty(&res.content, success);
@@ -6255,18 +6294,25 @@ fn test_server_error_still_retries() {
 
 #[test]
 fn test_chrome_error_page_detected_as_empty() {
-    // Simulate a Chrome ERR_TUNNEL_CONNECTION_FAILED error page that arrives
-    // with HTTP 200 status but contains Chrome's internal error HTML.
-    let chrome_error_html = br#"<html><head><title>www.example.com</title></head>
-<body><div id="main-frame-error" class="interstitial-wrapper">
-<h1><span>This site can't be reached</span></h1>
-<div class="error-code">ERR_TUNNEL_CONNECTION_FAILED</div>
-</div></body>
-<script>var loadTimeDataRaw = {"errorCode":"ERR_TUNNEL_CONNECTION_FAILED","heading":{"msg":"This site can't be reached"}};</script></html>"#;
+    // Realistic Chrome error page: ~157KB with dino game CSS/JS, no </body>,
+    // ends with loadTimeDataRaw JSON blob containing errorCode.
+    let padding = "x".repeat(1000); // enough to exceed 500 byte minimum
+    let chrome_error_html_str = format!(
+        "<html lang=\"en\" dir=\"ltr\">\n\
+         <style>{padding}</style>\n\
+         <div id=\"main-frame-error\" class=\"interstitial-wrapper\">\n\
+         <h1><span>This site can\u{2019}t be reached</span></h1>\n\
+         <div class=\"error-code\">ERR_TUNNEL_CONNECTION_FAILED</div>\n\
+         </div>\n\
+         <script>var loadTimeDataRaw = {{\"errorCode\":\"ERR_TUNNEL_CONNECTION_FAILED\",\
+         \"heading\":{{\"msg\":\"This site can't be reached\"}},\
+         \"title\":\"www.example.com\"}};</script></html>"
+    );
+    let chrome_error_html = chrome_error_html_str.as_bytes();
 
     assert!(
         is_chrome_error_page(chrome_error_html),
-        "should detect Chrome error page by errorCode in loadTimeDataRaw"
+        "should detect Chrome error page by structural tail match"
     );
     assert!(
         !validate_empty(&Some(chrome_error_html.to_vec()), true),
@@ -6282,6 +6328,15 @@ fn test_chrome_error_page_detected_as_empty() {
     assert!(
         page.should_retry,
         "Chrome error page with 200 status should trigger retry"
+    );
+    assert_eq!(
+        page.status_code,
+        StatusCode::from_u16(599).unwrap(),
+        "Chrome error page should be reclassified to 599"
+    );
+    assert!(
+        !page.get_html().is_empty(),
+        "Chrome error page content should be preserved for debugging"
     );
 }
 
