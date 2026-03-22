@@ -4,6 +4,7 @@
 mod openai;
 
 #[cfg(feature = "openai")]
+#[allow(unused_imports)]
 pub use openai::{OpenAIProvider, OpenAiApiMode};
 
 use crate::error::AgentResult;

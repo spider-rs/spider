@@ -1117,6 +1117,7 @@ mod tests {
     #[cfg(all(feature = "agent", feature = "serde"))]
     #[tokio::test]
     async fn test_prefilter_urls_returns_cached_relevance_without_network() {
+        use crate::CaseInsensitiveString;
         use hashbrown::HashSet;
 
         let mut cfgs = RemoteMultimodalConfigs::new("http://localhost:65535", "test-model");
@@ -1150,6 +1151,7 @@ mod tests {
     #[cfg(all(feature = "agent", feature = "serde"))]
     #[tokio::test]
     async fn test_prefilter_urls_concurrent_cached_reads_are_stable() {
+        use crate::CaseInsensitiveString;
         use hashbrown::HashSet;
         use std::sync::Arc;
 

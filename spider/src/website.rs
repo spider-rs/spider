@@ -70,7 +70,7 @@ const BACKOFF_MAX_DURATION: tokio::time::Duration = tokio::time::Duration::from_
 /// reliable than plain HTTP (tab crashes, WebSocket flakes, navigation
 /// timeouts) so we always retry at least this many times even when the user
 /// left `config.retry` at 0.
-#[cfg(feature = "chrome")]
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 const CHROME_MIN_RETRY: u8 = 2;
 
 /// Chrome page fetch with retry. Creates a tab, navigates, retries on failure.
@@ -11456,9 +11456,7 @@ mod tests {
     fn test_crawl_status_598_with_error_status_and_content_is_server_error() {
         let mut website = crate::website::Website::new("http://example.com");
         let mut page = make_page(*crate::page::CHROME_UNKNOWN_STATUS_ERROR);
-        page.html = Some(bytes::Bytes::from_static(
-            b"<html><body>some content</body></html>",
-        ));
+        page.set_html_bytes(Some(b"<html><body>some content</body></html>".to_vec()));
         page.error_status = Some("Invalid proxy configuration.".into());
         let links = hashbrown::HashSet::new();
         website.set_crawl_initial_status(&page, &links);
@@ -11479,8 +11477,8 @@ mod tests {
     fn test_crawl_status_599_with_content_and_error_status_is_server_error() {
         let mut website = crate::website::Website::new("http://example.com");
         let mut page = make_page(*crate::page::UNKNOWN_STATUS_ERROR);
-        page.html = Some(bytes::Bytes::from_static(
-            b"<html><body>real server content</body></html>",
+        page.set_html_bytes(Some(
+            b"<html><body>real server content</body></html>".to_vec(),
         ));
         page.error_status = Some("599 Server Error".into());
         let links = hashbrown::HashSet::new();
@@ -11492,8 +11490,8 @@ mod tests {
     fn test_crawl_status_598_with_content_no_error_is_server_error() {
         let mut website = crate::website::Website::new("http://example.com");
         let mut page = make_page(*crate::page::CHROME_UNKNOWN_STATUS_ERROR);
-        page.html = Some(bytes::Bytes::from_static(
-            b"<html><body>real server content</body></html>",
+        page.set_html_bytes(Some(
+            b"<html><body>real server content</body></html>".to_vec(),
         ));
         let links = hashbrown::HashSet::new();
         website.set_crawl_initial_status(&page, &links);
@@ -11504,8 +11502,8 @@ mod tests {
     fn test_crawl_status_599_with_content_no_error_is_server_error() {
         let mut website = crate::website::Website::new("http://example.com");
         let mut page = make_page(*crate::page::UNKNOWN_STATUS_ERROR);
-        page.html = Some(bytes::Bytes::from_static(
-            b"<html><body>real server content</body></html>",
+        page.set_html_bytes(Some(
+            b"<html><body>real server content</body></html>".to_vec(),
         ));
         let links = hashbrown::HashSet::new();
         website.set_crawl_initial_status(&page, &links);

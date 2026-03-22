@@ -1,5 +1,3 @@
-#![cfg(feature = "h2_multiplex")]
-
 use case_insensitive_string::compact_str::CompactString;
 use dashmap::DashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};

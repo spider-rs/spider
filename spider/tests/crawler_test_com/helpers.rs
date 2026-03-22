@@ -19,25 +19,41 @@ pub fn run_live_tests() -> bool {
     )
 }
 
+/// Build the appropriate client type from a raw reqwest client.
+#[cfg(feature = "cache_request")]
+fn wrap_client(client: spider::reqwest::Client) -> spider::Client {
+    reqwest_middleware::ClientBuilder::new(client).build()
+}
+
+/// Build the appropriate client type from a raw reqwest client.
+#[cfg(not(feature = "cache_request"))]
+fn wrap_client(client: spider::reqwest::Client) -> spider::Client {
+    client
+}
+
 /// Fetch a single page via HTTP (no browser).
 pub async fn fetch_page_http(path: &str) -> Page {
     let url = format!("{}{}", BASE, path);
-    let client = spider::reqwest::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
-        .redirect(spider::reqwest::redirect::Policy::limited(10))
-        .build()
-        .expect("build http client");
+    let client = wrap_client(
+        spider::reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .redirect(spider::reqwest::redirect::Policy::limited(10))
+            .build()
+            .expect("build http client"),
+    );
     Page::new_page(&url, &client).await
 }
 
 /// Fetch a single page via HTTP with no redirect following.
 pub async fn fetch_page_http_no_redirect(path: &str) -> Page {
     let url = format!("{}{}", BASE, path);
-    let client = spider::reqwest::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
-        .redirect(spider::reqwest::redirect::Policy::none())
-        .build()
-        .expect("build http client (no redirect)");
+    let client = wrap_client(
+        spider::reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .redirect(spider::reqwest::redirect::Policy::none())
+            .build()
+            .expect("build http client (no redirect)"),
+    );
     Page::new_page(&url, &client).await
 }
 

@@ -1,5 +1,3 @@
-#![cfg(feature = "robots_cache")]
-
 use case_insensitive_string::compact_str::CompactString;
 use dashmap::DashMap;
 use std::sync::OnceLock;
@@ -91,7 +89,6 @@ pub async fn prefetch(domains: &[&str], client: &Client, ttl: Duration) {
 
     for domain in domains {
         let client = client.clone();
-        let ttl = ttl;
         let domain = domain.to_string();
         set.spawn(async move {
             get_or_fetch(&domain, &client, ttl).await;
