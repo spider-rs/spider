@@ -567,6 +567,8 @@ pub enum AntiBotTech {
     GeeTest,
     /// hCaptcha - privacy-focused CAPTCHA service used as reCAPTCHA alternative.
     HCaptcha,
+    /// Custom user-supplied antibot pattern matched (no specific provider identified).
+    Custom,
     /// Fallback value if none match or detection failed.
     #[default]
     None,

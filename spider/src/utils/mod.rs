@@ -924,6 +924,90 @@ pub fn flip_http_https(url: &str) -> Option<String> {
     }
 }
 
+/// Compiled custom antibot patterns for runtime matching.
+/// Built from [`CustomAntibotPatterns`](crate::configuration::CustomAntibotPatterns) at crawl start.
+#[derive(Clone)]
+pub struct CompiledCustomAntibot {
+    body_ac: Option<AhoCorasick>,
+    url_ac: Option<AhoCorasick>,
+    header_keys: Vec<crate::compact_str::CompactString>,
+}
+
+impl CompiledCustomAntibot {
+    /// Compile user-supplied patterns into Aho-Corasick automatons.
+    /// Returns `None` if all pattern lists are empty.
+    pub fn compile(
+        config: &crate::configuration::CustomAntibotPatterns,
+    ) -> Option<CompiledCustomAntibot> {
+        if config.body.is_empty() && config.url.is_empty() && config.header_keys.is_empty() {
+            return None;
+        }
+        let body_ac = if config.body.is_empty() {
+            None
+        } else {
+            AhoCorasick::builder()
+                .match_kind(aho_corasick::MatchKind::LeftmostFirst)
+                .build(&config.body)
+                .ok()
+        };
+        let url_ac = if config.url.is_empty() {
+            None
+        } else {
+            AhoCorasick::builder()
+                .match_kind(aho_corasick::MatchKind::LeftmostFirst)
+                .build(&config.url)
+                .ok()
+        };
+        Some(CompiledCustomAntibot {
+            body_ac,
+            url_ac,
+            header_keys: config.header_keys.clone(),
+        })
+    }
+
+    /// Check body content for custom patterns (respects 30KB limit).
+    #[inline]
+    pub fn detect_body(&self, body: &[u8]) -> bool {
+        if body.len() < 30_000 {
+            if let Some(ref ac) = self.body_ac {
+                return ac.is_match(body);
+            }
+        }
+        false
+    }
+
+    /// Check URL for custom patterns.
+    #[inline]
+    pub fn detect_url(&self, url: &str) -> bool {
+        if let Some(ref ac) = self.url_ac {
+            return ac.is_match(url);
+        }
+        false
+    }
+
+    /// Check headers for custom key presence.
+    #[inline]
+    pub fn detect_headers(&self, headers: &HeaderSource) -> bool {
+        self.header_keys.iter().any(|k| has_key(headers, k))
+    }
+
+    /// Check all custom patterns (body, URL, headers). Returns true if any match.
+    #[inline]
+    pub fn detect_any(&self, url: &str, headers: &HeaderSource, body: &[u8]) -> bool {
+        self.detect_headers(headers) || self.detect_url(url) || self.detect_body(body)
+    }
+}
+
+impl std::fmt::Debug for CompiledCustomAntibot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompiledCustomAntibot")
+            .field("body_ac", &self.body_ac.is_some())
+            .field("url_ac", &self.url_ac.is_some())
+            .field("header_keys", &self.header_keys)
+            .finish()
+    }
+}
+
 /// Detect the anti-bot used from the request.
 pub fn detect_anti_bot_tech_response(
     url: &str,
@@ -948,6 +1032,28 @@ pub fn detect_anti_bot_tech_response(
 
     if let Some(anti_bot) = detect_anti_bot_from_body(body) {
         return anti_bot;
+    }
+
+    AntiBotTech::None
+}
+
+/// Detect the anti-bot used from the request, including custom user-supplied patterns.
+pub fn detect_anti_bot_tech_response_custom(
+    url: &str,
+    headers: &HeaderSource,
+    body: &[u8],
+    subject_name: Option<&str>,
+    custom: Option<&CompiledCustomAntibot>,
+) -> AntiBotTech {
+    let tech = detect_anti_bot_tech_response(url, headers, body, subject_name);
+    if tech != AntiBotTech::None {
+        return tech;
+    }
+
+    if let Some(custom) = custom {
+        if custom.detect_any(url, headers, body) {
+            return AntiBotTech::Custom;
+        }
     }
 
     AntiBotTech::None
@@ -7499,6 +7605,93 @@ mod tests {
         let mut h = HashMap::new();
         h.insert("server".to_string(), "nginx/1.24".to_string());
         assert!(detect_anti_bot_from_headers(&HeaderSource::Map(&h)).is_none());
+    }
+
+    #[test]
+    fn test_compiled_custom_antibot() {
+        use crate::configuration::CustomAntibotPatterns;
+        use crate::page::AntiBotTech;
+
+        // Empty config → None
+        let empty = CustomAntibotPatterns::default();
+        assert!(CompiledCustomAntibot::compile(&empty).is_none());
+
+        // Body pattern
+        let cfg = CustomAntibotPatterns {
+            body: vec!["my-custom-waf".into()],
+            url: vec![],
+            header_keys: vec![],
+        };
+        let compiled = CompiledCustomAntibot::compile(&cfg).unwrap();
+        assert!(compiled.detect_body(b"<p>Blocked by my-custom-waf</p>"));
+        assert!(!compiled.detect_body(b"<p>Normal page</p>"));
+        // Body > 30KB skipped
+        assert!(!compiled.detect_body(&vec![b'x'; 40_000]));
+
+        // URL pattern
+        let cfg = CustomAntibotPatterns {
+            body: vec![],
+            url: vec!["waf.example.com".into()],
+            header_keys: vec![],
+        };
+        let compiled = CompiledCustomAntibot::compile(&cfg).unwrap();
+        assert!(compiled.detect_url("https://waf.example.com/challenge"));
+        assert!(!compiled.detect_url("https://example.com/page"));
+
+        // Header key
+        let cfg = CustomAntibotPatterns {
+            body: vec![],
+            url: vec![],
+            header_keys: vec!["x-my-waf".into()],
+        };
+        let compiled = CompiledCustomAntibot::compile(&cfg).unwrap();
+        let mut h = std::collections::HashMap::new();
+        h.insert("x-my-waf".to_string(), "1".to_string());
+        assert!(compiled.detect_headers(&HeaderSource::Map(&h)));
+        let empty_h: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        assert!(!compiled.detect_headers(&HeaderSource::Map(&empty_h)));
+
+        // detect_anti_bot_tech_response_custom
+        let cfg = CustomAntibotPatterns {
+            body: vec!["my-proprietary-bot-wall".into()],
+            url: vec![],
+            header_keys: vec![],
+        };
+        let compiled = CompiledCustomAntibot::compile(&cfg).unwrap();
+        let empty_headers: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        assert_eq!(
+            detect_anti_bot_tech_response_custom(
+                "https://example.com",
+                &HeaderSource::Map(&empty_headers),
+                b"<p>Blocked by my-proprietary-bot-wall</p>",
+                None,
+                Some(&compiled),
+            ),
+            AntiBotTech::Custom
+        );
+        // Built-in match takes precedence over custom
+        assert_eq!(
+            detect_anti_bot_tech_response_custom(
+                "https://example.com",
+                &HeaderSource::Map(&empty_headers),
+                b"<span class=\"cf-error-code\">1020</span>",
+                None,
+                Some(&compiled),
+            ),
+            AntiBotTech::Cloudflare
+        );
+        // No match → None
+        assert_eq!(
+            detect_anti_bot_tech_response_custom(
+                "https://example.com",
+                &HeaderSource::Map(&empty_headers),
+                b"<p>Normal page</p>",
+                None,
+                Some(&compiled),
+            ),
+            AntiBotTech::None
+        );
     }
 
     #[test]

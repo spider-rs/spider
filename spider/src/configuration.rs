@@ -128,6 +128,19 @@ pub struct RequestProxy {
     pub ignore: ProxyIgnore,
 }
 
+/// User-configurable antibot detection patterns. Any match triggers `AntiBotTech::Custom`.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct CustomAntibotPatterns {
+    /// Body substring patterns (matched against response bodies < 30KB).
+    pub body: Vec<CompactString>,
+    /// URL substring patterns.
+    pub url: Vec<CompactString>,
+    /// Header keys whose presence triggers antibot detection.
+    pub header_keys: Vec<CompactString>,
+}
+
 /// Structure to configure `Website` crawler
 /// ```rust
 /// use spider::website::Website;
@@ -233,6 +246,9 @@ pub struct Configuration {
     pub return_page_links: bool,
     /// Retry count to attempt to swap proxies etc.
     pub retry: u8,
+    /// Custom antibot detection patterns. When set, these are matched in addition
+    /// to the built-in patterns. Any match triggers `AntiBotTech::Custom`.
+    pub custom_antibot: Option<CustomAntibotPatterns>,
     /// Skip spawning a control thread that can pause, start, and shutdown the crawl.
     pub no_control_thread: bool,
     /// The blacklist urls.

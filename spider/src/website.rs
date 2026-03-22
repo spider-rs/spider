@@ -606,6 +606,8 @@ pub struct Website {
     initial_status_code: StatusCode,
     /// The initial anti-bot tech found.
     initial_anti_bot_tech: AntiBotTech,
+    /// Compiled custom antibot patterns from configuration.
+    compiled_custom_antibot: Option<crate::utils::CompiledCustomAntibot>,
     /// The initial bytes size of the first request.
     initial_html_length: usize,
     /// The initial page had a waf detection.
@@ -668,6 +670,10 @@ impl fmt::Debug for Website {
             .field("initial_status_code", &self.initial_status_code)
             .field("initial_html_length", &self.initial_html_length)
             .field("initial_anti_bot_tech", &self.initial_anti_bot_tech)
+            .field(
+                "compiled_custom_antibot",
+                &self.compiled_custom_antibot.is_some(),
+            )
             .field("initial_page_waf_check", &self.initial_page_waf_check)
             .field("initial_page_should_retry", &self.initial_page_should_retry)
             // misc flags/meta
@@ -1401,6 +1407,28 @@ impl Website {
     /// Get the initial anti-bot tech code used for the intitial request.
     pub fn get_initial_anti_bot_tech(&self) -> &AntiBotTech {
         &self.initial_anti_bot_tech
+    }
+
+    /// Get the compiled custom antibot patterns.
+    pub fn get_compiled_custom_antibot(&self) -> Option<&crate::utils::CompiledCustomAntibot> {
+        self.compiled_custom_antibot.as_ref()
+    }
+
+    /// Check a PageResponse against custom antibot patterns, upgrading
+    /// `anti_bot_tech` from `None` to `Custom` if any pattern matches.
+    pub(crate) fn apply_custom_antibot_check(
+        &self,
+        page_response: &mut crate::utils::PageResponse,
+    ) {
+        if page_response.anti_bot_tech == AntiBotTech::None {
+            if let Some(ref custom) = self.compiled_custom_antibot {
+                let body = page_response.content.as_deref().unwrap_or(&[]);
+                let url = page_response.final_url.as_deref().unwrap_or("");
+                if custom.detect_body(body) || custom.detect_url(url) {
+                    page_response.anti_bot_tech = AntiBotTech::Custom;
+                }
+            }
+        }
     }
 
     /// Set the initial waf detected used for the intitial request
@@ -2586,6 +2614,13 @@ impl Website {
         self.setup_disk();
         self.configure_headers();
 
+        // Compile user-supplied antibot patterns from configuration.
+        self.compiled_custom_antibot = self
+            .configuration
+            .custom_antibot
+            .as_ref()
+            .and_then(crate::utils::CompiledCustomAntibot::compile);
+
         crate::utils::connect::init_background_runtime();
 
         let client = match self.client.take() {
@@ -3409,6 +3444,7 @@ impl Website {
             }
             let mut page_response = PageResponse::default();
             page_response.content = Some(seeded_html.as_bytes().to_vec());
+            self.apply_custom_antibot_check(&mut page_response);
             Some(build(self.url.inner(), page_response))
         } else {
             None
@@ -4614,7 +4650,9 @@ impl Website {
         .await
         {
             self.status = CrawlStatus::Active;
-            let page_response = crate::utils::build_cached_html_page_response(&target_url, &html);
+            let mut page_response =
+                crate::utils::build_cached_html_page_response(&target_url, &html);
+            self.apply_custom_antibot_check(&mut page_response);
             let page = build(&target_url, page_response);
             self.initial_status_code = page.status_code;
             self.initial_html_length = if page.is_empty() {
@@ -4682,7 +4720,8 @@ impl Website {
         let normalize = self.configuration.normalize;
 
         // Build page from cached HTML
-        let page_response = build_cached_html_page_response(&target_url, &html);
+        let mut page_response = build_cached_html_page_response(&target_url, &html);
+        self.apply_custom_antibot_check(&mut page_response);
         let mut page = build(&target_url, page_response);
 
         if !self.configuration.external_domains_caseless.is_empty() {
@@ -4785,8 +4824,9 @@ impl Website {
                         emit_log(&link_url);
                         self.insert_link(link.clone()).await;
 
-                        let page_response =
+                        let mut page_response =
                             build_cached_html_page_response(&link_url, &cached_html);
+                        self.apply_custom_antibot_check(&mut page_response);
                         let mut page = build(&link_url, page_response);
 
                         if !self.configuration.external_domains_caseless.is_empty() {
@@ -5547,7 +5587,8 @@ impl Website {
                                         use crate::utils::{cache_skip_browser, get_cached_url, build_cached_html_page_response};
                                         if cache_skip_browser(&cache_opts) {
                                             if let Some(html) = get_cached_url(target_url, cache_opts.as_ref(), &cache_pol).await {
-                                                let page_response = build_cached_html_page_response(target_url, &html);
+                                                let mut page_response = build_cached_html_page_response(target_url, &html);
+                                                self.apply_custom_antibot_check(&mut page_response);
                                                 let mut page = build(target_url, page_response);
 
                                                 if !shared.3.is_empty() {
@@ -5994,6 +6035,7 @@ impl Website {
                             let on_should_crawl_callback = self.on_should_crawl_callback.clone();
                             let full_resources = self.configuration.full_resources;
                             let return_page_links = self.configuration.return_page_links;
+                            let compiled_custom_antibot = self.compiled_custom_antibot.clone();
                             let mut exceeded_budget = false;
                             let concurrency = throttle.is_zero();
 
@@ -6064,6 +6106,8 @@ impl Website {
                                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                                 let shared = shared.clone();
                                                 let on_should_crawl_callback = on_should_crawl_callback.clone();
+                                                #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+                                                let compiled_custom_antibot = compiled_custom_antibot.clone();
                                                 #[cfg(feature = "hedge")]
                                                 let hedge_cfg = hedge_config.clone();
                                                 #[cfg(feature = "hedge")]
@@ -6084,7 +6128,15 @@ impl Website {
                                                         let cache_options = shared.6.get_cache_options();
                                                         if cache_skip_browser(&cache_options) {
                                                             if let Some(html) = get_cached_url(&target_url_string, cache_options.as_ref(), &shared.6.cache_policy).await {
-                                                                let page_response = build_cached_html_page_response(&target_url_string, &html);
+                                                                let mut page_response = build_cached_html_page_response(&target_url_string, &html);
+                                                                if page_response.anti_bot_tech == AntiBotTech::None {
+                                                                    if let Some(ref compiled) = compiled_custom_antibot {
+                                                                        let body = page_response.content.as_deref().unwrap_or(&[]);
+                                                                        if compiled.detect_body(body) || compiled.detect_url(&target_url_string) {
+                                                                            page_response.anti_bot_tech = AntiBotTech::Custom;
+                                                                        }
+                                                                    }
+                                                                }
                                                                 let mut page = build(&target_url_string, page_response);
 
                                                                 if add_external {
