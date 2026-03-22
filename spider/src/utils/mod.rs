@@ -190,6 +190,12 @@ error was encountered while trying to use an ErrorDocument to handle the request
             "_____tmd_____",                                      // 7 → AlibabaTMD
             "x5secdata",                                         // 8 → AlibabaTMD
             "ak_bmsc",                                           // 9 → Akamai Bot Manager
+            "challenge-platform",                                // 10 → Cloudflare
+            "cf-challenge",                                      // 11 → Cloudflare
+            "ddos-guard",                                        // 12 → DDoS-Guard
+            "px-captcha",                                        // 13 → PerimeterX
+            "verify you are human",                              // 14 → Generic anti-bot
+            "prove you're not a robot",                          // 15 → Generic anti-bot
         ])
         .unwrap();
 
@@ -795,13 +801,15 @@ pub fn detect_anti_bot_from_body(body: &[u8]) -> Option<AntiBotTech> {
     if body.len() < 30_000 {
         if let Some(mat) = AC_BODY_SCAN.find(body) {
             let tech = match mat.pattern().as_usize() {
-                0..=2 => AntiBotTech::Cloudflare,
+                0..=2 | 10 | 11 => AntiBotTech::Cloudflare,
                 3 => AntiBotTech::DataDome,
-                4 => AntiBotTech::PerimeterX,
+                4 | 13 => AntiBotTech::PerimeterX,
                 5 => AntiBotTech::ArkoseLabs,
                 6 => AntiBotTech::Imperva,
                 7 | 8 => AntiBotTech::AlibabaTMD,
                 9 => AntiBotTech::AkamaiBotManager,
+                12 => AntiBotTech::None, // DDoS-Guard (no specific enum variant)
+                14 | 15 => AntiBotTech::None, // Generic anti-bot signals
                 _ => return None,
             };
             return Some(tech);
