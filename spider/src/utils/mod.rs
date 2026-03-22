@@ -180,12 +180,13 @@ error was encountered while trying to use an ErrorDocument to handle the request
     static ref AC_BODY_SCAN: AhoCorasick = AhoCorasick::new([
         "cf-error-code",                                     // 0 → Cloudflare
         "Access to this page has been denied",               // 1 → Cloudflare
-        "DataDome",                                          // 2 → DataDome
-        "perimeterx",                                        // 3 → PerimeterX
-        "funcaptcha",                                        // 4 → ArkoseLabs
-        "Request unsuccessful. Incapsula incident ID",       // 5 → Imperva
-        "_____tmd_____",                                      // 6 → AlibabaTMD
-        "x5secdata",                                         // 7 → AlibabaTMD
+        "data-translate=\"block_headline\"",                 // 2 → Cloudflare WAF hard block
+        "DataDome",                                          // 3 → DataDome
+        "perimeterx",                                        // 4 → PerimeterX
+        "funcaptcha",                                        // 5 → ArkoseLabs
+        "Request unsuccessful. Incapsula incident ID",       // 6 → Imperva
+        "_____tmd_____",                                      // 7 → AlibabaTMD
+        "x5secdata",                                         // 8 → AlibabaTMD
     ]).unwrap();
 
     static ref AC_URL_SCAN: AhoCorasick = AhoCorasick::builder()
@@ -790,12 +791,12 @@ pub fn detect_anti_bot_from_body(body: &[u8]) -> Option<AntiBotTech> {
         if let Ok(finder) = AC_BODY_SCAN.try_find_iter(body) {
             for mat in finder {
                 match mat.pattern().as_usize() {
-                    0 | 1 => return Some(AntiBotTech::Cloudflare),
-                    2 => return Some(AntiBotTech::DataDome),
-                    3 => return Some(AntiBotTech::PerimeterX),
-                    4 => return Some(AntiBotTech::ArkoseLabs),
-                    5 => return Some(AntiBotTech::Imperva),
-                    6 | 7 => return Some(AntiBotTech::AlibabaTMD),
+                    0..=2 => return Some(AntiBotTech::Cloudflare),
+                    3 => return Some(AntiBotTech::DataDome),
+                    4 => return Some(AntiBotTech::PerimeterX),
+                    5 => return Some(AntiBotTech::ArkoseLabs),
+                    6 => return Some(AntiBotTech::Imperva),
+                    7 | 8 => return Some(AntiBotTech::AlibabaTMD),
                     _ => (),
                 }
             }

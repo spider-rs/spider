@@ -1261,11 +1261,8 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
     // return HTTP 200 with ~157KB of error page content. Reclassify to 599
     // (spider internal error) so all retry paths treat it as a failed crawl.
     // Content is preserved for debugging but status signals failure.
-    let chrome_error = res.status_code.is_success()
-        && res
-            .content
-            .as_deref()
-            .is_some_and(is_chrome_error_page);
+    let chrome_error =
+        res.status_code.is_success() && res.content.as_deref().is_some_and(is_chrome_error_page);
     if chrome_error {
         res.status_code = StatusCode::from_u16(599).unwrap_or(StatusCode::BAD_GATEWAY);
     }
@@ -1315,10 +1312,14 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
         }
     }
 
+    // Cancel retry for legitimate 403s (Apache/nginx access denied) but keep
+    // retrying when antibot tech is detected — proxy/browser rotation can bypass
+    // WAF blocks (Cloudflare Bot Management, DataDome, Imperva, etc.).
     if should_retry
         && !resource_found
         && res.status_code == StatusCode::FORBIDDEN
         && res.headers.is_some()
+        && res.anti_bot_tech == AntiBotTech::None
     {
         should_retry = false;
     }
@@ -6292,6 +6293,7 @@ fn test_server_error_still_retries() {
     assert!(page.should_retry, "500 errors should still be retried");
 }
 
+#[cfg(not(feature = "decentralized"))]
 #[test]
 fn test_chrome_error_page_detected_as_empty() {
     // Realistic Chrome error page: ~157KB with dino game CSS/JS, no </body>,
@@ -6340,6 +6342,7 @@ fn test_chrome_error_page_detected_as_empty() {
     );
 }
 
+#[cfg(not(feature = "decentralized"))]
 #[test]
 fn test_normal_page_not_detected_as_chrome_error() {
     let normal_html =
