@@ -187,6 +187,13 @@ error was encountered while trying to use an ErrorDocument to handle the request
         "Request unsuccessful. Incapsula incident ID",       // 6 → Imperva
         "_____tmd_____",                                      // 7 → AlibabaTMD
         "x5secdata",                                         // 8 → AlibabaTMD
+        "ak_bmsc",                                           // 9 → Akamai Bot Manager
+        "challenge-platform",                                // 10 → Cloudflare
+        "cf-challenge",                                      // 11 → Cloudflare
+        "ddos-guard",                                        // 12 → DDoS-Guard
+        "px-captcha",                                        // 13 → PerimeterX
+        "verify you are human",                              // 14 → Generic anti-bot
+        "prove you're not a robot",                          // 15 → Generic anti-bot
     ]).unwrap();
 
     static ref AC_URL_SCAN: AhoCorasick = AhoCorasick::builder()
@@ -791,12 +798,15 @@ pub fn detect_anti_bot_from_body(body: &[u8]) -> Option<AntiBotTech> {
         if let Ok(finder) = AC_BODY_SCAN.try_find_iter(body) {
             for mat in finder {
                 match mat.pattern().as_usize() {
-                    0..=2 => return Some(AntiBotTech::Cloudflare),
+                    0..=2 | 10 | 11 => return Some(AntiBotTech::Cloudflare),
                     3 => return Some(AntiBotTech::DataDome),
-                    4 => return Some(AntiBotTech::PerimeterX),
+                    4 | 13 => return Some(AntiBotTech::PerimeterX),
                     5 => return Some(AntiBotTech::ArkoseLabs),
                     6 => return Some(AntiBotTech::Imperva),
                     7 | 8 => return Some(AntiBotTech::AlibabaTMD),
+                    9 => return Some(AntiBotTech::AkamaiBotManager),
+                    12 => return Some(AntiBotTech::None), // DDoS-Guard (no specific enum)
+                    14 | 15 => return Some(AntiBotTech::None), // Generic anti-bot
                     _ => (),
                 }
             }
