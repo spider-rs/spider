@@ -353,3 +353,13 @@ required-features = ["spider/sync", "spider/chrome", "spider/chrome_headed", "sp
 name = "spider_browser_cloud"
 path = "spider_browser_cloud.rs"
 required-features = ["spider/sync", "spider/chrome", "spider/spider_cloud"]
+
+[[example]]
+name = "warc"
+path = "warc.rs"
+required-features = ["spider/sync", "spider/warc"]
+
+[[example]]
+name = "warc_chrome"
+path = "warc_chrome.rs"
+required-features = ["spider/sync", "spider/warc", "spider/chrome"]
