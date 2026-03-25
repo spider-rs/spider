@@ -31,6 +31,7 @@ async fn main() {
         enabled: true,
         fast_accept_threshold: 80,
         max_consecutive_errors: 5,
+        connect_timeout_ms: 5000,
     });
 
     // Subscribe to see which backend won each page.

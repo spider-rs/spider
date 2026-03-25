@@ -223,12 +223,29 @@ impl BackendTracker {
     }
 
     /// Record a retryable error for backend `idx`.
-    /// Auto-disables the backend after `max_consecutive_errors`.
+    ///
+    /// The first request to each backend acts as a probe: if the backend
+    /// has never succeeded (zero prior successes / zero wins), the first
+    /// error disables it immediately so a down backend is never retried.
+    /// After at least one success, the normal `max_consecutive_errors`
+    /// threshold applies.
     pub fn record_error(&self, idx: usize) {
         if let Some(s) = self.stats.get(idx) {
             let prev = s.consecutive_errors.fetch_add(1, Ordering::Relaxed);
-            if prev + 1 >= self.max_consecutive_errors {
+
+            // Probe behaviour: backend has never produced a successful
+            // response → treat the very first error as fatal.
+            let never_succeeded =
+                s.wins.load(Ordering::Relaxed) == 0 && s.races.load(Ordering::Relaxed) <= 1;
+
+            if never_succeeded || prev + 1 >= self.max_consecutive_errors {
                 s.disabled.store(true, Ordering::Relaxed);
+                if never_succeeded {
+                    log::info!(
+                        "[parallel_backends] backend {} failed on probe (first request) — auto-disabled",
+                        idx
+                    );
+                }
             }
         }
     }
@@ -606,6 +623,7 @@ pub async fn fetch_lightpanda_cdp(
     endpoint: &str,
     config: &std::sync::Arc<crate::configuration::Configuration>,
     backend_index: usize,
+    connect_timeout: Duration,
 ) -> Option<BackendResponse> {
     let start = Instant::now();
     let timeout = config.request_timeout.unwrap_or(Duration::from_secs(15));
@@ -616,9 +634,9 @@ pub async fn fetch_lightpanda_cdp(
     // whitelist/blacklist patterns, extra headers, viewport, etc.
     let handler_config = crate::features::chrome::create_handler_config(config);
 
-    // Connect with full config — identical behaviour to primary Chrome.
+    // Connect with a short timeout so down backends fail fast.
     let connect_result = tokio::time::timeout(
-        timeout,
+        connect_timeout,
         chromiumoxide::Browser::connect_with_config(endpoint, handler_config),
     )
     .await;
@@ -739,6 +757,7 @@ pub async fn fetch_servo_webdriver(
     endpoint: &str,
     config: &std::sync::Arc<crate::configuration::Configuration>,
     backend_index: usize,
+    connect_timeout: Duration,
 ) -> Option<BackendResponse> {
     use crate::features::webdriver_common::{WebDriverBrowser, WebDriverConfig};
 
@@ -750,7 +769,7 @@ pub async fn fetch_servo_webdriver(
         server_url: endpoint.to_string(),
         browser: WebDriverBrowser::Chrome, // Servo's WebDriver is browser-agnostic
         headless: true,
-        timeout: config.request_timeout,
+        timeout: Some(connect_timeout),
         proxy: None, // Proxy set per-call via ProxyRotator at the call site
         user_agent: config.user_agent.as_ref().map(|ua| ua.to_string()),
         viewport_width: config.viewport.as_ref().map(|v| v.width as u32),
@@ -759,9 +778,9 @@ pub async fn fetch_servo_webdriver(
         ..Default::default()
     };
 
-    // Launch session with timeout.
+    // Launch session with a short connect timeout so down backends fail fast.
     let controller_opt = tokio::time::timeout(
-        timeout,
+        connect_timeout,
         crate::features::webdriver::launch_driver_base(&wd_config, config),
     )
     .await;
@@ -897,6 +916,8 @@ pub fn build_backend_futures(
             hasher.finish() % 5000 + 100 // 100µs – 5100µs (~0.1ms – 5ms)
         };
 
+        let connect_timeout = Duration::from_millis(config.connect_timeout_ms);
+
         match proto {
             #[cfg(feature = "lightpanda")]
             BackendProtocol::Cdp => {
@@ -904,8 +925,14 @@ pub fn build_backend_futures(
                 let cfg = crawl_config.clone(); // Arc clone — cheap
                 futs.push(Box::pin(async move {
                     tokio::time::sleep(Duration::from_micros(jitter_us)).await;
-                    let response =
-                        fetch_lightpanda_cdp(&url, &resolved_endpoint, &cfg, backend_index).await;
+                    let response = fetch_lightpanda_cdp(
+                        &url,
+                        &resolved_endpoint,
+                        &cfg,
+                        backend_index,
+                        connect_timeout,
+                    )
+                    .await;
                     BackendResult {
                         backend_index,
                         response,
@@ -918,8 +945,14 @@ pub fn build_backend_futures(
                 let cfg = crawl_config.clone(); // Arc clone — cheap
                 futs.push(Box::pin(async move {
                     tokio::time::sleep(Duration::from_micros(jitter_us)).await;
-                    let response =
-                        fetch_servo_webdriver(&url, &resolved_endpoint, &cfg, backend_index).await;
+                    let response = fetch_servo_webdriver(
+                        &url,
+                        &resolved_endpoint,
+                        &cfg,
+                        backend_index,
+                        connect_timeout,
+                    )
+                    .await;
                     BackendResult {
                         backend_index,
                         response,
@@ -1076,20 +1109,45 @@ mod tests {
     }
 
     #[test]
+    fn test_tracker_probe_first_error_disables() {
+        // A backend that has never succeeded is disabled on first error
+        // (probe behaviour).
+        let t = BackendTracker::new(1, 10);
+        assert!(!t.is_disabled(0));
+        t.record_race(0);
+        t.record_error(0); // first ever error, no prior wins → probe disable
+        assert!(t.is_disabled(0));
+    }
+
+    #[test]
     fn test_tracker_consecutive_errors_disables() {
+        // After at least one success, max_consecutive_errors threshold applies.
         let t = BackendTracker::new(1, 3);
+        // Simulate a successful first request so probe mode doesn't kick in.
+        t.record_race(0);
+        t.record_win(0);
+        t.record_success(0);
         assert!(!t.is_disabled(0));
+        t.record_race(0);
         t.record_error(0);
+        t.record_race(0);
         t.record_error(0);
         assert!(!t.is_disabled(0));
-        t.record_error(0); // third error
+        t.record_race(0);
+        t.record_error(0); // third consecutive error
         assert!(t.is_disabled(0));
     }
 
     #[test]
     fn test_tracker_success_resets_errors() {
         let t = BackendTracker::new(1, 5);
+        // Give it a prior win so probe mode doesn't trigger.
+        t.record_race(0);
+        t.record_win(0);
+        t.record_success(0);
+        t.record_race(0);
         t.record_error(0);
+        t.record_race(0);
         t.record_error(0);
         assert_eq!(t.consecutive_errors(0), 2);
         t.record_success(0);
@@ -1197,6 +1255,7 @@ mod tests {
             enabled: true,
             fast_accept_threshold: threshold,
             max_consecutive_errors: 10,
+            connect_timeout_ms: 5000,
         }
     }
 

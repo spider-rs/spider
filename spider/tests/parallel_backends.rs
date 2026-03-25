@@ -21,6 +21,7 @@ fn test_config_default_values() {
     assert_eq!(cfg.grace_period_ms, 500);
     assert_eq!(cfg.fast_accept_threshold, 80);
     assert_eq!(cfg.max_consecutive_errors, 10);
+    assert_eq!(cfg.connect_timeout_ms, 5000);
     assert!(cfg.enabled);
     assert!(cfg.backends.is_empty());
 }
@@ -47,6 +48,7 @@ fn test_config_serde_roundtrip() {
         enabled: true,
         fast_accept_threshold: 90,
         max_consecutive_errors: 5,
+        connect_timeout_ms: 3000,
     };
 
     let json = serde_json::to_string(&cfg).unwrap();
@@ -257,6 +259,7 @@ async fn test_race_fast_accept_under_load() {
         enabled: true,
         fast_accept_threshold: 80,
         max_consecutive_errors: 10,
+        connect_timeout_ms: 5000,
     };
 
     // Primary scores above threshold — should return immediately.

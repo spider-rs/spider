@@ -186,6 +186,7 @@ pub struct BackendEndpoint {
 #[cfg(feature = "parallel_backends")]
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct ParallelBackendsConfig {
     /// Alternative backends to race against the primary crawl.
     pub backends: Vec<BackendEndpoint>,
@@ -202,6 +203,10 @@ pub struct ParallelBackendsConfig {
     /// Maximum consecutive errors before auto-disabling a backend for
     /// the remainder of the crawl. Default: 10.
     pub max_consecutive_errors: u16,
+    /// Timeout (ms) for the initial TCP/WebSocket connection to a backend.
+    /// Separate from `request_timeout` so that down backends fail fast
+    /// without affecting navigation/fetch timeouts. Default: 5000 (5s).
+    pub connect_timeout_ms: u64,
 }
 
 #[cfg(feature = "parallel_backends")]
@@ -213,6 +218,7 @@ impl Default for ParallelBackendsConfig {
             enabled: true,
             fast_accept_threshold: 80,
             max_consecutive_errors: 10,
+            connect_timeout_ms: 5000,
         }
     }
 }

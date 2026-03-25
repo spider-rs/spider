@@ -34,6 +34,7 @@ async fn main() {
         enabled: true,
         fast_accept_threshold: 85,
         max_consecutive_errors: 10,
+        connect_timeout_ms: 5000,
     });
 
     let mut rx = website.subscribe(100).unwrap();
