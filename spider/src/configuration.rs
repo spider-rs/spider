@@ -366,6 +366,16 @@ pub struct Configuration {
     /// Hedged request configuration for work-stealing on slow requests.
     /// When enabled, fires a duplicate request on a different proxy after a delay.
     pub hedge: Option<crate::utils::hedge::HedgeConfig>,
+    #[cfg(feature = "auto_throttle")]
+    /// Latency-based auto-throttle configuration. When enabled, dynamically
+    /// adjusts per-domain crawl delay based on measured server response time.
+    pub auto_throttle: Option<crate::utils::auto_throttle::AutoThrottleConfig>,
+    #[cfg(feature = "etag_cache")]
+    /// Enable ETag / conditional request caching. When true, stores ETag and
+    /// Last-Modified headers from responses and sends If-None-Match /
+    /// If-Modified-Since on subsequent requests to the same URL, allowing
+    /// servers to respond with lightweight 304 Not Modified.
+    pub etag_cache: bool,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -1831,6 +1841,35 @@ impl Configuration {
     /// Set the hedged request configuration (no-op without `hedge` feature).
     #[cfg(not(feature = "hedge"))]
     pub fn with_hedge(&mut self, _config: ()) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "auto_throttle")]
+    /// Set the auto-throttle configuration for latency-based adaptive delay.
+    pub fn with_auto_throttle(
+        &mut self,
+        config: crate::utils::auto_throttle::AutoThrottleConfig,
+    ) -> &mut Self {
+        self.auto_throttle = Some(config);
+        self
+    }
+
+    /// Set the auto-throttle configuration (no-op without `auto_throttle` feature).
+    #[cfg(not(feature = "auto_throttle"))]
+    pub fn with_auto_throttle(&mut self, _config: ()) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "etag_cache")]
+    /// Enable or disable ETag / conditional request caching for bandwidth-efficient re-crawls.
+    pub fn with_etag_cache(&mut self, enabled: bool) -> &mut Self {
+        self.etag_cache = enabled;
+        self
+    }
+
+    /// Enable or disable ETag caching (no-op without `etag_cache` feature).
+    #[cfg(not(feature = "etag_cache"))]
+    pub fn with_etag_cache(&mut self, _enabled: bool) -> &mut Self {
         self
     }
 }

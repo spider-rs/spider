@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.47.89"
+version = "2.47.90"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -122,11 +122,11 @@ features = ["serde", "headers", "dynamic-versions"]
 
 [dependencies.spider_agent_types]
 path = "../spider_agent_types"
-version = "2.47.89"
+version = "2.47.90"
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.47.89"
+version = "2.47.90"
 optional = true
 default-features = false
 
@@ -190,8 +190,12 @@ __basic = [
     "priority_frontier",
     "dns_cache",
     "rate_limit",
-    "request_coalesce"
+    "request_coalesce",
+    "auto_throttle",
+    "etag_cache"
 ]
+auto_throttle = ["dep:dashmap", "time"]
+etag_cache = ["dep:dashmap"]
 basic_tls = [
     "reqwest_native_tls_native_roots",
     "disk_native_tls",

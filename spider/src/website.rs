@@ -635,6 +635,12 @@ pub struct Website {
     #[cfg(feature = "cookies")]
     /// Cookie jar between request.
     pub cookie_jar: Arc<crate::client::cookie::Jar>,
+    #[cfg(feature = "auto_throttle")]
+    /// Shared auto-throttle instance for latency-based adaptive delay.
+    auto_throttle: Option<Arc<crate::utils::auto_throttle::AutoThrottle>>,
+    #[cfg(feature = "etag_cache")]
+    /// Shared ETag cache for conditional requests across the crawl.
+    etag_cache: Option<Arc<crate::utils::etag_cache::ETagCache>>,
 }
 
 impl fmt::Debug for Website {
@@ -1592,6 +1598,18 @@ impl Website {
     /// Crawl delay getter.
     pub fn get_delay(&self) -> Duration {
         Duration::from_millis(self.configuration.delay)
+    }
+
+    #[cfg(feature = "auto_throttle")]
+    /// Get the shared auto-throttle instance, if configured.
+    pub fn get_auto_throttle(&self) -> Option<&Arc<crate::utils::auto_throttle::AutoThrottle>> {
+        self.auto_throttle.as_ref()
+    }
+
+    #[cfg(feature = "etag_cache")]
+    /// Get the shared ETag cache instance, if enabled.
+    pub fn get_etag_cache(&self) -> Option<&Arc<crate::utils::etag_cache::ETagCache>> {
+        self.etag_cache.as_ref()
     }
 
     /// Get the active crawl status.
@@ -2620,6 +2638,22 @@ impl Website {
             .custom_antibot
             .as_ref()
             .and_then(crate::utils::CompiledCustomAntibot::compile);
+
+        #[cfg(feature = "auto_throttle")]
+        {
+            self.auto_throttle = self.configuration.auto_throttle.as_ref().map(|config| {
+                Arc::new(crate::utils::auto_throttle::AutoThrottle::new(
+                    config.clone(),
+                ))
+            });
+        }
+
+        #[cfg(feature = "etag_cache")]
+        {
+            if self.configuration.etag_cache && self.etag_cache.is_none() {
+                self.etag_cache = Some(Arc::new(crate::utils::etag_cache::ETagCache::new()));
+            }
+        }
 
         crate::utils::connect::init_background_runtime();
 
@@ -5500,6 +5534,11 @@ impl Website {
 
             let mut set: JoinSet<(HashSet<CaseInsensitiveString>, Option<u64>)> = JoinSet::new();
 
+            #[cfg(feature = "auto_throttle")]
+            let auto_throttle_arc = self.auto_throttle.clone();
+            #[cfg(feature = "etag_cache")]
+            let etag_cache_arc = self.etag_cache.clone();
+
             // track budgeting one time.
             let mut exceeded_budget = false;
             let concurrency = throttle.is_zero();
@@ -5525,6 +5564,18 @@ impl Website {
                 loop {
                     if !concurrency {
                         tokio::time::sleep(*throttle).await;
+                    }
+
+                    // Auto-throttle: apply adaptive per-domain delay on top of static delay.
+                    #[cfg(feature = "auto_throttle")]
+                    if let Some(ref at) = auto_throttle_arc {
+                        let domain = crate::utils::get_domain_from_url(self.url.inner());
+                        if !domain.is_empty() {
+                            let adaptive = at.delay_for(domain);
+                            if adaptive > *throttle {
+                                tokio::time::sleep(adaptive - *throttle).await;
+                            }
+                        }
                     }
 
                     let semaphore =
@@ -5574,6 +5625,10 @@ impl Website {
                                 #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
                                 let normalize = normalize_raw;
                                 let custom_antibot = self.compiled_custom_antibot.clone();
+                                #[cfg(feature = "auto_throttle")]
+                                let auto_throttle_ref = auto_throttle_arc.clone();
+                                #[cfg(feature = "etag_cache")]
+                                let etag_cache_ref = etag_cache_arc.clone();
                                 spawn_set("page_fetch", &mut set, async move {
                                     let link_result = match &shared.9 {
                                         Some(cb) => cb(link, None),
@@ -5581,6 +5636,21 @@ impl Website {
                                     };
 
                                     let target_url = link_result.0.as_ref();
+
+                                    // ETag conditional request: if we have cached validators and
+                                    // the server responds 304 Not Modified, skip the full fetch.
+                                    #[cfg(feature = "etag_cache")]
+                                    if let Some(ref ec) = etag_cache_ref {
+                                        if !ec.conditional_headers(target_url).is_empty() {
+                                            let cond_resp = crate::utils::fetch_page_html_raw_conditional(
+                                                target_url, &shared.0, ec,
+                                            ).await;
+                                            if cond_resp.status_code == StatusCode::NOT_MODIFIED {
+                                                drop(permit);
+                                                return Default::default();
+                                            }
+                                        }
+                                    }
 
                                     // Cache-first: skip HTTP fetch entirely for cached pages
                                     #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
@@ -5850,6 +5920,25 @@ impl Website {
                                                 &shared.8,
                                                 &mut domain_parsed,
                                                 &mut links_pages).await;
+                                        }
+                                    }
+
+                                    // Record latency for auto-throttle.
+                                    #[cfg(feature = "auto_throttle")]
+                                    if let Some(ref at) = auto_throttle_ref {
+                                        let domain = crate::utils::get_domain_from_url(target_url);
+                                        if !domain.is_empty() {
+                                            at.record_latency(domain, page.get_duration_elapsed());
+                                        }
+                                    }
+
+                                    // Store ETag / Last-Modified from response for future conditional requests.
+                                    #[cfg(feature = "etag_cache")]
+                                    if let Some(ref ec) = etag_cache_ref {
+                                        if let Some(ref hdrs) = page.headers {
+                                            let etag = hdrs.get("etag").and_then(|v| v.to_str().ok());
+                                            let last_modified = hdrs.get("last-modified").and_then(|v| v.to_str().ok());
+                                            ec.store(target_url, etag, last_modified);
                                         }
                                     }
 

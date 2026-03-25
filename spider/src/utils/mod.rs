@@ -10,6 +10,9 @@ pub mod templates;
 #[cfg(feature = "adaptive_concurrency")]
 /// AIMD-based adaptive concurrency controller.
 pub mod adaptive_concurrency;
+#[cfg(feature = "auto_throttle")]
+/// Latency-based auto-throttle for adaptive crawl delay per domain.
+pub mod auto_throttle;
 /// Exponential backoff with jitter for retry logic.
 pub mod backoff;
 #[cfg(feature = "bloom")]
@@ -26,6 +29,9 @@ pub mod detect_system;
 #[cfg(feature = "dns_cache")]
 /// DNS pre-resolution cache with TTL.
 pub mod dns_cache;
+#[cfg(feature = "etag_cache")]
+/// ETag / conditional-request cache for bandwidth-efficient re-crawls.
+pub mod etag_cache;
 #[cfg(feature = "priority_frontier")]
 /// Prioritized URL frontier with dedup and optional domain round-robin.
 pub mod frontier;
@@ -4665,6 +4671,75 @@ async fn fetch_page_html_raw_base(
 /// Perform a network request to a resource extracting all content streaming.
 pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageResponse {
     fetch_page_html_raw_base(target_url, client, false).await
+}
+
+#[cfg(feature = "etag_cache")]
+/// Perform a conditional network request using cached ETag / Last-Modified validators.
+///
+/// If the server responds with 304 Not Modified, returns a page response with
+/// the original cached status (200) and empty body. The caller should use the
+/// previously cached content. The `PageResponse.status_code` is set to 304 so
+/// the caller can detect the not-modified case.
+///
+/// Also stores any new ETag / Last-Modified headers from 200 responses.
+pub async fn fetch_page_html_raw_conditional(
+    target_url: &str,
+    client: &Client,
+    etag_cache: &crate::utils::etag_cache::ETagCache,
+) -> PageResponse {
+    use reqwest::header::{HeaderName, HeaderValue};
+
+    let duration = if cfg!(feature = "time") {
+        Some(tokio::time::Instant::now())
+    } else {
+        None
+    };
+
+    // Build the request with conditional headers.
+    let mut req = client.get(target_url);
+
+    let conditional_headers = etag_cache.conditional_headers(target_url);
+    for (name, value) in &conditional_headers {
+        if let (Ok(hn), Ok(hv)) = (
+            HeaderName::from_bytes(name.as_bytes()),
+            HeaderValue::from_str(value.as_str()),
+        ) {
+            req = req.header(hn, hv);
+        }
+    }
+
+    let mut page_response = match req.send().await {
+        Ok(res) => {
+            if res.status() == StatusCode::NOT_MODIFIED {
+                // 304 — content unchanged, no body to process.
+                PageResponse {
+                    status_code: StatusCode::NOT_MODIFIED,
+                    final_url: Some(target_url.to_string()),
+                    ..Default::default()
+                }
+            } else {
+                // Store validators from this response for future conditional requests.
+                let etag = res
+                    .headers()
+                    .get("etag")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+                let last_modified = res
+                    .headers()
+                    .get("last-modified")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+
+                etag_cache.store(target_url, etag.as_deref(), last_modified.as_deref());
+
+                handle_response_bytes(res, target_url, false).await
+            }
+        }
+        Err(err) => build_error_page_response(target_url, err),
+    };
+
+    set_page_response_duration(&mut page_response, duration);
+    page_response
 }
 
 /// Perform a network request to a resource and return a cached response immediately when available.
