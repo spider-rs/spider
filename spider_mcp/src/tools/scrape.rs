@@ -37,6 +37,7 @@ pub async fn run(params: ScrapeParams) -> Result<String, String> {
     };
 
     let mut website = Website::new(&url);
+    super::apply_spider_cloud(&mut website);
 
     if let Some(agent) = &params.user_agent {
         website.with_user_agent(Some(agent));

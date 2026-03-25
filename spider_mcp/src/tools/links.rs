@@ -22,6 +22,7 @@ pub async fn run(params: LinksParams) -> Result<String, String> {
     };
 
     let mut website = Website::new(&url);
+    super::apply_spider_cloud(&mut website);
 
     website
         .with_subdomains(params.subdomains.unwrap_or(false))

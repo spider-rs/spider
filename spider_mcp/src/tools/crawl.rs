@@ -53,6 +53,7 @@ pub async fn run(params: CrawlParams, state: Arc<SharedState>) -> Result<String,
 
     let limit = params.limit.unwrap_or(25);
     let mut website = Website::new(&url);
+    super::apply_spider_cloud(&mut website);
 
     website
         .with_respect_robots_txt(params.respect_robots_txt.unwrap_or(true))

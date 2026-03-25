@@ -38,11 +38,12 @@ path = "src/main.rs"
 doc = false
 
 [features]
-default = ["chrome"]
+default = ["chrome", "spider_cloud"]
 chrome = ["spider/chrome"]
 chrome_screenshot = ["chrome"]
 smart = ["spider/smart"]
+spider_cloud = ["spider/spider_cloud"]
 search = []
 search_serper = ["search", "spider/search_serper"]
 search_brave = ["search", "spider/search_brave"]
-full = ["chrome_screenshot", "smart", "search_serper"]
+full = ["chrome_screenshot", "smart", "spider_cloud", "search_serper"]

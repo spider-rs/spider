@@ -29,3 +29,12 @@ pub fn apply_wait_options(
         ))));
     }
 }
+
+/// Apply Spider Cloud API key if SPIDER_API_KEY env var is set.
+pub fn apply_spider_cloud(website: &mut Website) {
+    if let Ok(api_key) = std::env::var("SPIDER_API_KEY") {
+        if !api_key.is_empty() {
+            website.with_spider_cloud(&api_key);
+        }
+    }
+}
