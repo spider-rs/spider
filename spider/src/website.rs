@@ -5668,6 +5668,7 @@ impl Website {
                                 let cache_pol = cache_policy_raw.clone();
                                 #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
                                 let normalize = normalize_raw;
+                                #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
                                 let custom_antibot = self.compiled_custom_antibot.clone();
                                 #[cfg(feature = "auto_throttle")]
                                 let auto_throttle_ref = auto_throttle_arc.clone();
@@ -6177,6 +6178,7 @@ impl Website {
                             let on_should_crawl_callback = self.on_should_crawl_callback.clone();
                             let full_resources = self.configuration.full_resources;
                             let return_page_links = self.configuration.return_page_links;
+                            #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
                             let compiled_custom_antibot = self.compiled_custom_antibot.clone();
                             let mut exceeded_budget = false;
                             let concurrency = throttle.is_zero();
