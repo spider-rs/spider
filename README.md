@@ -128,8 +128,6 @@ Most crawlers force a choice between fast HTTP-only or slow-but-flexible browser
 
 **Supports HTTP, Chrome, and WebDriver.** Switch rendering modes with a feature flag. Use HTTP for speed, Chrome CDP for JavaScript-heavy pages, and WebDriver for Selenium Grid or cross-browser testing.
 
-**Only compile what you use.** Every optional capability (Chrome, caching, proxies, AI) lives behind a [Cargo feature flag](https://doc.rust-lang.org/cargo/reference/features.html). A minimal `spider = "2"` stays lean.
-
 **Built for production.** Caching (memory, disk, hybrid), proxy rotation, anti-bot fingerprinting, ad blocking, depth budgets, cron scheduling, and distributed workers. All of this has been hardened through [Spider Cloud](https://spider.cloud).
 
 **AI automation included.** [spider_agent](./spider_agent/) adds multimodal LLM-driven automation: navigate pages, fill forms, solve challenges, and extract structured data with OpenAI or any compatible API.
