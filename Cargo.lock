@@ -1609,9 +1609,9 @@ dependencies = [
 
 [[package]]
 name = "chromey"
-version = "2.42.11"
+version = "2.42.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aff4acd9ec86e27ad5fa4a787c138167748c0b9e66c96ba2996402ca19004aef"
+checksum = "494753097b602dab8d22bfdabf6503fd1448365a2b90d1ac13a42c0ff6de0be9"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -7911,9 +7911,9 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.48.2"
+version = "2.48.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ab68fe240d8dd3a07b809d2de38cd3faa638face507862c06cd26df0dfb5dd3"
+checksum = "935de58350e7caaafbb82c7feea6ea9f24e21c749dcad0f0ed9d376778a92623"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -7938,7 +7938,7 @@ dependencies = [
  "serde_json",
  "serde_regex",
  "smallvec",
- "spider_agent_types 2.48.3",
+ "spider_agent_types 2.48.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "spider_fingerprint",
  "string-interner",
  "string_concat",
@@ -8076,9 +8076,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.48.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c9ca13aee8be7ae26e4f0ea752da9a9607c930dfea048c0d0735bb87cc6ba57"
+version = "2.48.4"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8090,6 +8088,8 @@ dependencies = [
 [[package]]
 name = "spider_agent_types"
 version = "2.48.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b47ca40d3239a7e1079d0f577228d51dc2d18373e655f59174dc9aa4b75c394"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8166,7 +8166,7 @@ dependencies = [
  "serde_json",
  "spider 2.48.4",
  "spider_transformations",
- "spider_utils 2.48.2",
+ "spider_utils 2.48.3",
 ]
 
 [[package]]
@@ -8282,7 +8282,7 @@ dependencies = [
  "phf_codegen 0.11.3",
  "regex",
  "serde",
- "spider 2.48.2",
+ "spider 2.48.3",
  "spider_scraper",
  "tendril",
  "thiserror 1.0.69",
@@ -8292,9 +8292,9 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.48.2"
+version = "2.48.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1077d7511eede3927e02f1b024ebbda12eacbdf0b4526b4c4aeca0da3dde2df"
+checksum = "59c4e050252c44c2c063ae870d3b012081f7286c4744b978d372d785c2222d6b"
 dependencies = [
  "hashbrown 0.16.1",
  "lazy_static",
