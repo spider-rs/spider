@@ -6847,6 +6847,7 @@ impl Website {
                                                                     );
                                                                     pb_trk.record_race(0);
                                                                     pb_trk.record_success(0);
+                                                                    log::debug!("[parallel_backends] primary score={} url={}", primary_score, page.get_url());
                                                                     if primary_score < pb_cfg.fast_accept_threshold {
                                                                         let grace = std::time::Duration::from_millis(pb_cfg.grace_period_ms);
                                                                         let deadline = tokio::time::Instant::now() + grace;
@@ -6860,15 +6861,16 @@ impl Website {
                                                                                             let idx = br.backend_index;
                                                                                             match br.response {
                                                                                                 Some(resp) => {
+                                                                                                    log::info!("[parallel_backends] backend {} score={} dur={:?} url={}", idx, resp.quality_score, resp.duration, page.get_url());
                                                                                                     pb_trk.record_race(idx);
                                                                                                     pb_trk.record_duration(idx, resp.duration);
                                                                                                     pb_trk.record_success(idx);
-                                                                                                    if resp.quality_score > primary_score {
-                                                                                                        if best_alt.as_ref().map_or(true, |b| resp.quality_score > b.quality_score) {
-                                                                                                            best_alt = Some(resp);
-                                                                                                        }
+                                                                                                    if resp.quality_score > primary_score
+                                                                                                        && best_alt.as_ref().is_none_or(|b| resp.quality_score > b.quality_score)
+                                                                                                    {
+                                                                                                        best_alt = Some(resp);
                                                                                                     }
-                                                                                                    if best_alt.as_ref().map_or(false, |b| b.quality_score >= pb_cfg.fast_accept_threshold) { break; }
+                                                                                                    if best_alt.as_ref().is_some_and(|b| b.quality_score >= pb_cfg.fast_accept_threshold) { break; }
                                                                                                 }
                                                                                                 None => { pb_trk.record_race(idx); pb_trk.record_error(idx); }
                                                                                             }
