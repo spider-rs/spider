@@ -207,6 +207,18 @@ pub struct ParallelBackendsConfig {
     /// Separate from `request_timeout` so that down backends fail fast
     /// without affecting navigation/fetch timeouts. Default: 5000 (5s).
     pub connect_timeout_ms: u64,
+    /// Skip backend racing when the primary response has a binary
+    /// `Content-Type` (image/*, audio/*, video/*, font/*, application/pdf,
+    /// etc.). There is no HTML quality variance for binary resources.
+    /// Default: `true`.
+    pub skip_binary_content_types: bool,
+    /// Maximum concurrent backend sessions across all URLs. Prevents memory
+    /// spikes on large crawls. `0` means unlimited. Default: 8.
+    pub max_concurrent_sessions: usize,
+    /// Additional URL extensions to skip backend racing for, on top of the
+    /// built-in asset list (images, fonts, videos, etc.). Case-insensitive.
+    /// Example: `["xml", "rss"]`.
+    pub skip_extensions: Vec<CompactString>,
 }
 
 #[cfg(feature = "parallel_backends")]
@@ -219,6 +231,9 @@ impl Default for ParallelBackendsConfig {
             fast_accept_threshold: 80,
             max_consecutive_errors: 10,
             connect_timeout_ms: 5000,
+            skip_binary_content_types: true,
+            max_concurrent_sessions: 8,
+            skip_extensions: Vec::new(),
         }
     }
 }

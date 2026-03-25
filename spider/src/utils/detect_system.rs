@@ -15,6 +15,11 @@ static CPU_STATE: AtomicI8 = AtomicI8::new(0);
 #[cfg(all(feature = "disk", feature = "balance"))]
 static MEMORY_STATE: AtomicI8 = AtomicI8::new(0);
 
+/// The process RSS memory state for the crawl.
+/// 0 = Normal, 1 = Pressure, 2 = Critical.
+#[cfg(feature = "balance")]
+static PROCESS_MEMORY_STATE: AtomicI8 = AtomicI8::new(0);
+
 /// `OnceCell` CPU tracking.
 #[cfg(feature = "balance")]
 static INIT: OnceCell<()> = OnceCell::const_new();
@@ -28,12 +33,15 @@ fn get_cpu_usage(sys: &System) -> f32 {
         .sum::<f32>()
 }
 
-/// The total memory used.
+/// The total memory used as a percentage (0–100).
 #[cfg(all(feature = "disk", feature = "balance"))]
 fn get_memory_limits(sys: &System) -> u64 {
     let total_memory = sys.total_memory();
+    if total_memory == 0 {
+        return 0;
+    }
     let used_memory = sys.used_memory();
-    (used_memory / total_memory) * 100
+    (used_memory * 100) / total_memory
 }
 
 /// The CPU state to determine how to use concurrency and delays.
@@ -42,10 +50,10 @@ fn get_memory_limits(sys: &System) -> u64 {
 /// 2 = Shared Concurrency with delays.
 #[cfg(feature = "balance")]
 fn determine_cpu_state(usage: f32) -> i8 {
-    if usage >= 70.0 {
-        1
-    } else if usage >= 95.0 {
+    if usage >= 95.0 {
         2
+    } else if usage >= 70.0 {
+        1
     } else {
         0
     }
@@ -57,12 +65,67 @@ fn determine_cpu_state(usage: f32) -> i8 {
 /// 2 = Full Disk.
 #[cfg(all(feature = "disk", feature = "balance"))]
 fn determine_memory_state(usage: u64) -> i8 {
-    if usage >= 50 {
-        1
-    } else if usage >= 80 {
+    if usage >= 80 {
         2
+    } else if usage >= 50 {
+        1
     } else {
         0
+    }
+}
+
+/// The pressure threshold percentage for process RSS (default 70%).
+#[cfg(feature = "balance")]
+fn process_memory_pressure_pct() -> u64 {
+    static VAL: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *VAL.get_or_init(|| {
+        std::env::var("SPIDER_MEMORY_PRESSURE_PCT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(70)
+    })
+}
+
+/// The critical threshold percentage for process RSS (default 85%).
+#[cfg(feature = "balance")]
+fn process_memory_critical_pct() -> u64 {
+    static VAL: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *VAL.get_or_init(|| {
+        std::env::var("SPIDER_MEMORY_CRITICAL_PCT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(85)
+    })
+}
+
+/// The process memory state based on RSS as a percentage of system total.
+/// 0 = Normal, 1 = Pressure, 2 = Critical.
+#[cfg(feature = "balance")]
+fn determine_process_memory_state(pct: u64) -> i8 {
+    let critical = process_memory_critical_pct();
+    let pressure = process_memory_pressure_pct();
+    if pct >= critical {
+        2
+    } else if pct >= pressure {
+        1
+    } else {
+        0
+    }
+}
+
+/// Update the process RSS memory state.
+#[cfg(feature = "balance")]
+fn update_process_memory(sys: &mut System) {
+    if let Ok(pid) = sysinfo::get_current_pid() {
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
+        if let Some(process) = sys.process(pid) {
+            let rss = process.memory();
+            let total = sys.total_memory();
+            if total > 0 {
+                let pct = (rss * 100) / total;
+                PROCESS_MEMORY_STATE.store(determine_process_memory_state(pct), Ordering::Relaxed);
+            }
+        }
     }
 }
 
@@ -97,6 +160,7 @@ async fn update_cpu_usage() {
         loop {
             update_cpu(&mut sys);
             update_memory(&mut sys);
+            update_process_memory(&mut sys);
             sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL).await;
         }
     }
@@ -141,4 +205,69 @@ pub async fn get_global_memory_state() -> i8 {
 #[cfg(not(feature = "disk"))]
 pub async fn get_global_memory_state() -> i8 {
     0
+}
+
+/// Get the process RSS memory pressure state.
+/// 0 = Normal, 1 = Pressure, 2 = Critical.
+#[cfg(feature = "balance")]
+pub async fn get_process_memory_state() -> i8 {
+    init_once().await;
+    PROCESS_MEMORY_STATE.load(Ordering::Relaxed)
+}
+
+/// Get the process RSS memory pressure state (no-op without balance).
+#[cfg(not(feature = "balance"))]
+pub async fn get_process_memory_state() -> i8 {
+    0
+}
+
+#[cfg(all(test, feature = "balance"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_determine_cpu_state_all_states() {
+        assert_eq!(determine_cpu_state(0.0), 0);
+        assert_eq!(determine_cpu_state(50.0), 0);
+        assert_eq!(determine_cpu_state(69.9), 0);
+        assert_eq!(determine_cpu_state(70.0), 1);
+        assert_eq!(determine_cpu_state(94.9), 1);
+        assert_eq!(determine_cpu_state(95.0), 2);
+        assert_eq!(determine_cpu_state(100.0), 2);
+    }
+
+    #[test]
+    fn test_determine_process_memory_state_all_states() {
+        // Default thresholds: pressure=70, critical=85
+        assert_eq!(determine_process_memory_state(0), 0);
+        assert_eq!(determine_process_memory_state(69), 0);
+        assert_eq!(determine_process_memory_state(70), 1);
+        assert_eq!(determine_process_memory_state(84), 1);
+        assert_eq!(determine_process_memory_state(85), 2);
+        assert_eq!(determine_process_memory_state(100), 2);
+    }
+
+    #[cfg(feature = "disk")]
+    #[test]
+    fn test_determine_memory_state_all_states() {
+        assert_eq!(determine_memory_state(0), 0);
+        assert_eq!(determine_memory_state(49), 0);
+        assert_eq!(determine_memory_state(50), 1);
+        assert_eq!(determine_memory_state(79), 1);
+        assert_eq!(determine_memory_state(80), 2);
+        assert_eq!(determine_memory_state(100), 2);
+    }
+
+    #[cfg(feature = "disk")]
+    #[test]
+    fn test_get_memory_limits_correct_percentage() {
+        let mut sys = System::new();
+        sys.refresh_memory();
+        let total = sys.total_memory();
+        if total > 0 {
+            let pct = get_memory_limits(&sys);
+            // Should be a reasonable percentage, not 0 from truncation
+            assert!(pct <= 100, "memory percentage should be <= 100, got {pct}");
+        }
+    }
 }

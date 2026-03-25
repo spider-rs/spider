@@ -254,6 +254,28 @@ macro_rules! chrome_page_post_process {
      $pb_backend_set:expr, $pb_config_ref:expr, $pb_tracker_ref:expr) => {{
         let mut page = $page;
 
+        // ── Parallel backends: binary content-type early-out (Chrome path) ──
+        #[cfg(feature = "parallel_backends")]
+        {
+            let mut _cancel_backends = false;
+            if let Some(ref pb_cfg) = $pb_config_ref {
+                if pb_cfg.skip_binary_content_types {
+                    if let Some(ref headers) = page.headers {
+                        if let Some(ct) = headers.get(reqwest::header::CONTENT_TYPE) {
+                            if let Ok(ct_str) = ct.to_str() {
+                                if crate::utils::parallel_backends::is_binary_content_type(ct_str) {
+                                    if let Some(ref mut s) = $pb_backend_set {
+                                        s.abort_all();
+                                    }
+                                    _cancel_backends = true;
+                                    log::debug!("[parallel_backends] cancelled backends for binary content-type (chrome): {}", ct_str);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // ── Parallel backends: collect concurrent results (Chrome path) ──
         #[cfg(feature = "parallel_backends")]
         if let Some(ref mut pb_set) = $pb_backend_set {
@@ -745,6 +767,9 @@ pub struct Website {
     /// Custom quality validator for parallel backend responses. Called after
     /// the built-in scorer. Can override, adjust, or reject scores.
     pub pb_quality_validator: Option<crate::utils::parallel_backends::QualityValidator>,
+    #[cfg(feature = "parallel_backends")]
+    /// Semaphore limiting concurrent backend sessions to prevent memory spikes.
+    pb_semaphore: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 impl fmt::Debug for Website {
@@ -2827,6 +2852,11 @@ impl Website {
                             &self.configuration.proxies,
                         ),
                     ));
+                    if pb.max_concurrent_sessions > 0 {
+                        self.pb_semaphore = Some(Arc::new(tokio::sync::Semaphore::new(
+                            pb.max_concurrent_sessions,
+                        )));
+                    }
                 }
             }
         }
@@ -5381,6 +5411,19 @@ impl Website {
         }
     }
 
+    /// Shed HTML from older pages under critical memory pressure to prevent OOM.
+    /// Keeps the most recent pages intact and preserves all metadata.
+    #[cfg(feature = "balance")]
+    fn shed_page_html(pages: &mut Vec<Page>) {
+        let keep_recent = 100;
+        let len = pages.len();
+        if len > keep_recent {
+            for page in &mut pages[..len - keep_recent] {
+                page.html = None;
+            }
+        }
+    }
+
     /// Start to scrape/download website with async concurrency.
     pub async fn scrape(&mut self) {
         if !self.status.eq(&CrawlStatus::FirewallBlocked) {
@@ -5417,6 +5460,10 @@ impl Website {
                                 self.insert_link(page.get_url().into()).await;
                                 if let Some(p) = self.pages.as_mut() {
                                     p.push(page);
+                                    #[cfg(feature = "balance")]
+                                    if crate::utils::detect_system::get_process_memory_state().await >= 2 {
+                                        Self::shed_page_html(p);
+                                    }
                                 }
                             } else {
                                 break;
@@ -5716,6 +5763,8 @@ impl Website {
             let pb_crawl_config_raw = std::sync::Arc::new((*self.configuration).clone());
             #[cfg(feature = "parallel_backends")]
             let pb_validator_raw = self.pb_quality_validator.clone();
+            #[cfg(feature = "parallel_backends")]
+            let pb_semaphore_raw = self.pb_semaphore.clone();
 
             // track budgeting one time.
             let mut exceeded_budget = false;
@@ -5818,6 +5867,8 @@ impl Website {
                                 let pb_crawl_config_ref = pb_crawl_config_raw.clone();
                                 #[cfg(feature = "parallel_backends")]
                                 let pb_validator_ref = pb_validator_raw.clone();
+                                #[cfg(feature = "parallel_backends")]
+                                let pb_semaphore_ref = pb_semaphore_raw.clone();
                                 spawn_set("page_fetch", &mut set, async move {
                                     let link_result = match &shared.9 {
                                         Some(cb) => cb(link, None),
@@ -5909,6 +5960,7 @@ impl Website {
                                                     &pb_crawl_config_ref,
                                                     pb_trk,
                                                     &pb_proxy_rotator_ref,
+                                                    &pb_semaphore_ref,
                                                 );
                                                 if !alt_futs.is_empty() {
                                                     let mut js = tokio::task::JoinSet::new();
@@ -6144,6 +6196,28 @@ impl Website {
                                                 &shared.8,
                                                 &mut domain_parsed,
                                                 &mut links_pages).await;
+                                        }
+                                    }
+
+                                    // ── Parallel backends: binary content-type early-out ──
+                                    // If primary returned binary, cancel all backends — no
+                                    // HTML quality variance for images/fonts/archives/etc.
+                                    #[cfg(feature = "parallel_backends")]
+                                    if let Some(ref pb_cfg) = pb_config_ref {
+                                        if pb_cfg.skip_binary_content_types {
+                                            if let Some(ref headers) = page.headers {
+                                                if let Some(ct) = headers.get(reqwest::header::CONTENT_TYPE) {
+                                                    if let Ok(ct_str) = ct.to_str() {
+                                                        if crate::utils::parallel_backends::is_binary_content_type(ct_str) {
+                                                            if let Some(ref mut s) = pb_backend_set {
+                                                                s.abort_all();
+                                                            }
+                                                            pb_backend_set = None;
+                                                            log::debug!("[parallel_backends] cancelled backends for binary content-type: {}", ct_str);
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
 
@@ -6476,6 +6550,8 @@ impl Website {
                                 std::sync::Arc::new((*self.configuration).clone());
                             #[cfg(feature = "parallel_backends")]
                             let pb_validator_chrome = self.pb_quality_validator.clone();
+                            #[cfg(feature = "parallel_backends")]
+                            let pb_semaphore_chrome = self.pb_semaphore.clone();
 
                             self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
 
@@ -6560,6 +6636,8 @@ impl Website {
                                                 let pb_crawl_config_ref = pb_crawl_config_chrome.clone();
                                                 #[cfg(feature = "parallel_backends")]
                                                 let pb_validator_ref = pb_validator_chrome.clone();
+                                                #[cfg(feature = "parallel_backends")]
+                                                let pb_semaphore_ref = pb_semaphore_chrome.clone();
                                                 spawn_set("page_fetch", &mut set, async move {
                                                     let link_result =
                                                         match &shared.10 {
@@ -6635,6 +6713,7 @@ impl Website {
                                                                     &pb_crawl_config_ref,
                                                                     pb_trk,
                                                                     &pb_proxy_rotator_ref,
+                                                                    &pb_semaphore_ref,
                                                                 );
                                                                 if !alt_futs.is_empty() {
                                                                     let mut js = tokio::task::JoinSet::new();
@@ -6834,6 +6913,25 @@ impl Website {
                                                                 }
                                                             }
 
+                                                            // ── Parallel backends: binary content-type early-out (Chrome non-hedge) ──
+                                                            #[cfg(feature = "parallel_backends")]
+                                                            if let Some(ref pb_cfg) = pb_config_ref {
+                                                                if pb_cfg.skip_binary_content_types {
+                                                                    if let Some(ref headers) = page.headers {
+                                                                        if let Some(ct) = headers.get(reqwest::header::CONTENT_TYPE) {
+                                                                            if let Ok(ct_str) = ct.to_str() {
+                                                                                if crate::utils::parallel_backends::is_binary_content_type(ct_str) {
+                                                                                    if let Some(ref mut s) = pb_backend_set {
+                                                                                        s.abort_all();
+                                                                                    }
+                                                                                    pb_backend_set = None;
+                                                                                    log::debug!("[parallel_backends] cancelled backends for binary content-type (chrome non-hedge): {}", ct_str);
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
                                                             // ── Parallel backends: collect (Chrome non-hedge) ──
                                                             #[cfg(feature = "parallel_backends")]
                                                             if let Some(ref mut pb_set) = pb_backend_set {
@@ -12960,4 +13058,39 @@ impl crate::traits::CrawlerSubscription for Website {
     fn subscribe(&mut self, capacity: usize) -> Option<tokio::sync::broadcast::Receiver<Page>> {
         Website::subscribe(self, capacity)
     }
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_shed_page_html() {
+    let make_page = |url: &str| {
+        let mut page = Page::default();
+        page.url = url.to_string();
+        page.html = Some(bytes::Bytes::from("hello"));
+        page
+    };
+
+    // Under threshold: nothing shed
+    let mut pages: Vec<Page> = (0..50)
+        .map(|i| make_page(&format!("https://a.com/{i}")))
+        .collect();
+    Website::shed_page_html(&mut pages);
+    assert!(pages.iter().all(|p| p.html.is_some()));
+
+    // Over threshold: older pages shed, recent 100 kept
+    let mut pages: Vec<Page> = (0..200)
+        .map(|i| make_page(&format!("https://a.com/{i}")))
+        .collect();
+    Website::shed_page_html(&mut pages);
+    // First 100 should have html=None
+    for page in &pages[..100] {
+        assert!(page.html.is_none(), "old page should have html shed");
+    }
+    // Last 100 should still have html
+    for page in &pages[100..] {
+        assert!(page.html.is_some(), "recent page should keep html");
+    }
+    // All pages should preserve url
+    assert_eq!(pages[0].url, "https://a.com/0");
+    assert_eq!(pages[199].url, "https://a.com/199");
 }

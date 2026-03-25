@@ -24,6 +24,9 @@ fn test_config_default_values() {
     assert_eq!(cfg.connect_timeout_ms, 5000);
     assert!(cfg.enabled);
     assert!(cfg.backends.is_empty());
+    assert!(cfg.skip_binary_content_types);
+    assert_eq!(cfg.max_concurrent_sessions, 8);
+    assert!(cfg.skip_extensions.is_empty());
 }
 
 #[cfg(feature = "serde")]
@@ -71,6 +74,7 @@ fn test_build_backend_futures_empty_config() {
         &crawl_cfg,
         &tracker,
         &None,
+        &None,
     );
     assert!(futs.is_empty());
 }
@@ -98,6 +102,7 @@ fn test_build_backend_futures_skips_disabled() {
         &crawl_cfg,
         &tracker,
         &None,
+        &None,
     );
     // Backend 1 is disabled → no futures built.
     assert!(futs.is_empty());
@@ -122,6 +127,7 @@ fn test_build_backend_futures_skips_local_stub() {
         &cfg,
         &crawl_cfg,
         &tracker,
+        &None,
         &None,
     );
     // Local mode is a stub → no futures.
@@ -260,6 +266,9 @@ async fn test_race_fast_accept_under_load() {
         fast_accept_threshold: 80,
         max_consecutive_errors: 10,
         connect_timeout_ms: 5000,
+        skip_binary_content_types: true,
+        max_concurrent_sessions: 0,
+        skip_extensions: Vec::new(),
     };
 
     // Primary scores above threshold — should return immediately.

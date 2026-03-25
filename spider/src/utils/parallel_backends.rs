@@ -15,6 +15,61 @@ use crate::page::AntiBotTech;
 use reqwest::StatusCode;
 
 // ---------------------------------------------------------------------------
+// Asset / Binary Content-Type Detection
+// ---------------------------------------------------------------------------
+
+/// Returns `true` for `Content-Type` values where HTML quality racing is
+/// pointless — binary resources (images, fonts, video, archives, etc.)
+/// will be identical across all backends.
+pub fn is_binary_content_type(ct: &str) -> bool {
+    let ct = ct.split(';').next().unwrap_or(ct).trim();
+    ct.starts_with("image/")
+        || ct.starts_with("audio/")
+        || ct.starts_with("video/")
+        || ct.starts_with("font/")
+        || ct == "application/pdf"
+        || ct == "application/zip"
+        || ct == "application/gzip"
+        || ct == "application/x-gzip"
+        || ct == "application/octet-stream"
+        || ct == "application/wasm"
+        || ct == "application/x-tar"
+        || ct == "application/x-bzip2"
+        || ct == "application/x-7z-compressed"
+        || ct == "application/x-rar-compressed"
+        || ct == "application/vnd.ms-fontobject"
+        || ct == "application/x-font-ttf"
+        || ct == "application/x-font-woff"
+}
+
+/// Returns `true` when the URL extension indicates a binary asset or matches
+/// a user-supplied skip extension. Backends should not be spawned for these.
+pub fn should_skip_backend_for_url(
+    url: &str,
+    extra_extensions: &[crate::compact_str::CompactString],
+) -> bool {
+    // Check the built-in asset list first.
+    if crate::page::is_asset_url(url) {
+        return true;
+    }
+    // Check user-supplied extra extensions.
+    if !extra_extensions.is_empty() {
+        if let Some(pos) = url.rfind('.') {
+            let ext = &url[pos + 1..];
+            if ext.len() >= 2 {
+                let ext_lower = ext.to_ascii_lowercase();
+                for skip in extra_extensions {
+                    if skip.eq_ignore_ascii_case(&ext_lower) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+// ---------------------------------------------------------------------------
 // Custom Validator
 // ---------------------------------------------------------------------------
 
@@ -870,7 +925,18 @@ pub fn build_backend_futures(
     crawl_config: &std::sync::Arc<crate::configuration::Configuration>,
     tracker: &BackendTracker,
     proxy_rotator: &Option<std::sync::Arc<ProxyRotator>>,
+    semaphore: &Option<std::sync::Arc<tokio::sync::Semaphore>>,
 ) -> Vec<Pin<Box<dyn Future<Output = BackendResult> + Send>>> {
+    // Fast-path: skip backends for binary/asset URLs. There is no HTML
+    // quality variance for images, fonts, PDFs, etc.
+    if should_skip_backend_for_url(url, &config.skip_extensions) {
+        log::debug!(
+            "[parallel_backends] skipping backends for asset URL: {}",
+            url
+        );
+        return Vec::new();
+    }
+
     #[allow(unused_mut)]
     let mut futs: Vec<Pin<Box<dyn Future<Output = BackendResult> + Send>>> = Vec::new();
 
@@ -918,12 +984,29 @@ pub fn build_backend_futures(
 
         let connect_timeout = Duration::from_millis(config.connect_timeout_ms);
 
+        // Clone semaphore Arc for the spawned future (cheap Arc clone).
+        let sem = semaphore.clone();
+
         match proto {
             #[cfg(feature = "lightpanda")]
             BackendProtocol::Cdp => {
                 let url = url.to_string();
                 let cfg = crawl_config.clone(); // Arc clone — cheap
                 futs.push(Box::pin(async move {
+                    // Acquire semaphore permit before doing any real work.
+                    let _permit = if let Some(ref s) = sem {
+                        match s.acquire().await {
+                            Ok(p) => Some(p),
+                            Err(_) => {
+                                return BackendResult {
+                                    backend_index,
+                                    response: None,
+                                }
+                            }
+                        }
+                    } else {
+                        None
+                    };
                     tokio::time::sleep(Duration::from_micros(jitter_us)).await;
                     let response = fetch_lightpanda_cdp(
                         &url,
@@ -944,6 +1027,20 @@ pub fn build_backend_futures(
                 let url = url.to_string();
                 let cfg = crawl_config.clone(); // Arc clone — cheap
                 futs.push(Box::pin(async move {
+                    // Acquire semaphore permit before doing any real work.
+                    let _permit = if let Some(ref s) = sem {
+                        match s.acquire().await {
+                            Ok(p) => Some(p),
+                            Err(_) => {
+                                return BackendResult {
+                                    backend_index,
+                                    response: None,
+                                }
+                            }
+                        }
+                    } else {
+                        None
+                    };
                     tokio::time::sleep(Duration::from_micros(jitter_us)).await;
                     let response = fetch_servo_webdriver(
                         &url,
@@ -1256,6 +1353,9 @@ mod tests {
             fast_accept_threshold: threshold,
             max_consecutive_errors: 10,
             connect_timeout_ms: 5000,
+            skip_binary_content_types: true,
+            max_concurrent_sessions: 0,
+            skip_extensions: Vec::new(),
         }
     }
 
@@ -1550,5 +1650,136 @@ mod tests {
         for h in handles {
             h.join().unwrap();
         }
+    }
+
+    // ---- Binary Content-Type Detection ----
+
+    #[test]
+    fn test_is_binary_content_type_images() {
+        assert!(is_binary_content_type("image/png"));
+        assert!(is_binary_content_type("image/jpeg"));
+        assert!(is_binary_content_type("image/webp"));
+        assert!(is_binary_content_type("image/svg+xml"));
+        assert!(is_binary_content_type("image/gif"));
+    }
+
+    #[test]
+    fn test_is_binary_content_type_with_charset() {
+        // Content-Type values often include charset or other params.
+        assert!(is_binary_content_type("image/png; charset=utf-8"));
+        assert!(is_binary_content_type(
+            "application/pdf; boundary=something"
+        ));
+        assert!(is_binary_content_type("font/woff2; charset=binary"));
+    }
+
+    #[test]
+    fn test_is_binary_content_type_fonts() {
+        assert!(is_binary_content_type("font/woff"));
+        assert!(is_binary_content_type("font/woff2"));
+        assert!(is_binary_content_type("font/ttf"));
+        assert!(is_binary_content_type("application/vnd.ms-fontobject"));
+        assert!(is_binary_content_type("application/x-font-ttf"));
+        assert!(is_binary_content_type("application/x-font-woff"));
+    }
+
+    #[test]
+    fn test_is_binary_content_type_archives() {
+        assert!(is_binary_content_type("application/pdf"));
+        assert!(is_binary_content_type("application/zip"));
+        assert!(is_binary_content_type("application/gzip"));
+        assert!(is_binary_content_type("application/x-gzip"));
+        assert!(is_binary_content_type("application/octet-stream"));
+        assert!(is_binary_content_type("application/wasm"));
+        assert!(is_binary_content_type("application/x-tar"));
+        assert!(is_binary_content_type("application/x-bzip2"));
+        assert!(is_binary_content_type("application/x-7z-compressed"));
+        assert!(is_binary_content_type("application/x-rar-compressed"));
+    }
+
+    #[test]
+    fn test_is_binary_content_type_audio_video() {
+        assert!(is_binary_content_type("audio/mpeg"));
+        assert!(is_binary_content_type("audio/ogg"));
+        assert!(is_binary_content_type("video/mp4"));
+        assert!(is_binary_content_type("video/webm"));
+    }
+
+    #[test]
+    fn test_is_binary_content_type_html_not_binary() {
+        assert!(!is_binary_content_type("text/html"));
+        assert!(!is_binary_content_type("text/html; charset=utf-8"));
+        assert!(!is_binary_content_type("text/plain"));
+        assert!(!is_binary_content_type("application/json"));
+        assert!(!is_binary_content_type("application/javascript"));
+        assert!(!is_binary_content_type("text/css"));
+        assert!(!is_binary_content_type("application/xml"));
+    }
+
+    // ---- Asset URL Skip ----
+
+    #[test]
+    fn test_should_skip_backend_for_asset_urls() {
+        assert!(should_skip_backend_for_url(
+            "https://example.com/photo.jpg",
+            &[]
+        ));
+        assert!(should_skip_backend_for_url(
+            "https://example.com/photo.png",
+            &[]
+        ));
+        assert!(should_skip_backend_for_url(
+            "https://example.com/font.woff2",
+            &[]
+        ));
+        assert!(should_skip_backend_for_url(
+            "https://example.com/doc.pdf",
+            &[]
+        ));
+        assert!(should_skip_backend_for_url(
+            "https://example.com/video.mp4",
+            &[]
+        ));
+    }
+
+    #[test]
+    fn test_should_not_skip_backend_for_html_urls() {
+        assert!(!should_skip_backend_for_url(
+            "https://example.com/page.html",
+            &[]
+        ));
+        assert!(!should_skip_backend_for_url(
+            "https://example.com/about",
+            &[]
+        ));
+        assert!(!should_skip_backend_for_url(
+            "https://example.com/api/data",
+            &[]
+        ));
+        assert!(!should_skip_backend_for_url("https://example.com/", &[]));
+    }
+
+    #[test]
+    fn test_should_skip_backend_custom_extensions() {
+        let extras = vec![
+            crate::compact_str::CompactString::from("xml"),
+            crate::compact_str::CompactString::from("rss"),
+        ];
+        assert!(should_skip_backend_for_url(
+            "https://example.com/feed.xml",
+            &extras
+        ));
+        assert!(should_skip_backend_for_url(
+            "https://example.com/feed.rss",
+            &extras
+        ));
+        assert!(should_skip_backend_for_url(
+            "https://example.com/feed.RSS",
+            &extras
+        ));
+        assert!(!should_skip_backend_for_url(
+            "https://example.com/page.html",
+            &extras
+        ));
     }
 }

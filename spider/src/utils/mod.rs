@@ -7163,19 +7163,25 @@ where
 const REBALANCE_TIME: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Return the semaphore that should be used.
+/// Takes the worse of CPU and process memory pressure to drive throttling.
 #[cfg(feature = "balance")]
 pub async fn get_semaphore(semaphore: &Arc<Semaphore>, detect: bool) -> &Arc<Semaphore> {
-    let cpu_load = if detect {
-        detect_system::get_global_cpu_state().await
+    let (cpu_load, mem_load) = if detect {
+        (
+            detect_system::get_global_cpu_state().await,
+            detect_system::get_process_memory_state().await,
+        )
     } else {
-        0
+        (0, 0)
     };
 
-    if cpu_load == 2 {
+    let load = cpu_load.max(mem_load);
+
+    if load == 2 {
         tokio::time::sleep(REBALANCE_TIME).await;
     }
 
-    if cpu_load >= 1 {
+    if load >= 1 {
         &*crate::website::SEM_SHARED
     } else {
         semaphore
