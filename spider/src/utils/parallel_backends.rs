@@ -654,12 +654,10 @@ pub async fn fetch_lightpanda_cdp(
         },
     };
 
-    // Apply the same page-level config as the primary Chrome path:
-    // user-agent, stealth/fingerprint, viewport, geolocation, timezone,
-    // locale, cookies, evaluate-on-new-document, dismiss dialogs, etc.
+    // Apply the same page-level config as the primary Chrome path.
     crate::features::chrome::setup_chrome_events(&page, config).await;
 
-    // Set up interception (auth challenges, etc.) if enabled.
+    // Auth challenge interception if enabled.
     let _intercept_handle = crate::features::chrome::setup_chrome_interception_base(
         &page,
         config.chrome_intercept.enabled,
