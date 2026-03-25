@@ -102,4 +102,8 @@ pub struct Cli {
     /// Write crawled pages to a WARC 1.1 archive file at the given path.
     #[clap(short = 'W', long)]
     pub warc: Option<String>,
+    /// Transform output format: raw (default), markdown, commonmark, text, xml.
+    /// Requires the `transformations` feature (enabled by default).
+    #[clap(long, default_value = "raw")]
+    pub return_format: String,
 }

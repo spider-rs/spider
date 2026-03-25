@@ -21,6 +21,10 @@ use tokio::io::AsyncWriteExt;
 
 use serde_json::{json, Value};
 
+use spider_transformations::transformation::content::{
+    transform_content_input, ReturnFormat, TransformConfig, TransformInput,
+};
+
 use spider::client::header::{HeaderMap, HeaderValue};
 use spider::features::chrome_common::{
     RequestInterceptConfiguration, WaitForDelay, WaitForIdleNetwork, WaitForSelector,
@@ -259,6 +263,7 @@ async fn main() {
 
     let return_headers = cli.return_headers;
     let use_headless = cli.headless && !cli.http;
+    let return_format = cli.return_format.clone();
 
     match website
         .build()
@@ -368,19 +373,34 @@ async fn main() {
                         website.configuration.return_page_links = true;
                     }
 
+                    let transform_conf = TransformConfig {
+                        return_format: ReturnFormat::from_str(&return_format),
+                        ..Default::default()
+                    };
+
                     tokio::spawn(async move {
                         crawl_with_mode(&mut website, use_headless).await;
                         log_website_status(&website);
                     });
 
                     while let Ok(res) = rx2.recv().await {
+                        let content = if output_html {
+                            let input = TransformInput {
+                                url: res.get_url_parsed_ref().as_ref(),
+                                content: res.get_html_bytes_u8(),
+                                screenshot_bytes: None,
+                                encoding: None,
+                                selector_config: None,
+                                ignore_tags: None,
+                            };
+                            transform_content_input(input, &transform_conf)
+                        } else {
+                            Default::default()
+                        };
+
                         let page_json = json!({
                             "url": res.get_url(),
-                            "html": if output_html {
-                                res.get_html()
-                            } else {
-                                Default::default()
-                            },
+                            "content": content,
                             "links": match res.page_links {
                                 Some(ref s) => s.iter().map(|i| i.inner().to_string()).collect::<serde_json::Value>(),
                                 _ => Default::default()

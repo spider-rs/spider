@@ -1,6 +1,6 @@
 [package]
 name = "spider_cli"
-version = "2.47.92"
+version = "2.47.93"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "The fastest web crawler CLI written in Rust."
 repository = "https://github.com/spider-rs/spider"
@@ -32,6 +32,9 @@ failure_derive = "0.1.8"
 version = "2"
 path = "../spider"
 features = ["tokio_io_std", "sync", "serde", "cookies"]
+
+[dependencies.spider_transformations]
+version = "2"
 
 [[bin]]
 name = "spider"

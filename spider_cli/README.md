@@ -77,6 +77,18 @@ Get all the resources for the page.
 spider --url https://choosealicense.com --full-resources crawl -o
 ```
 
+Scrape a page and return content as Markdown (great for LLMs and RAG pipelines).
+
+```sh
+spider --url https://choosealicense.com --return-format markdown scrape --output-html
+```
+
+Other supported formats: `raw` (default), `commonmark`, `text`, `xml`.
+
+```sh
+spider --url https://choosealicense.com --return-format text scrape --output-html
+```
+
 ```sh
 The fastest web crawler CLI written in Rust.
 
@@ -143,6 +155,16 @@ Options:
           Wait for a specific CSS selector to appear with a 60s timeout
       --wait-for-delay <WAIT_FOR_DELAY>
           Wait for a fixed delay in milliseconds
+      --chrome-connection-url <CHROME_CONNECTION_URL>
+          Connect to an existing Chrome DevTools Protocol endpoint
+      --cookie <COOKIE>
+          Cookie string to inject (e.g. "key=value; key2=value2")
+      --stealth
+          Enable stealth mode to avoid bot detection
+  -W, --warc <WARC>
+          Write crawled pages to a WARC 1.1 archive file at the given path
+      --return-format <RETURN_FORMAT>
+          Transform output format: raw (default), markdown, commonmark, text, xml [default: raw]
   -h, --help
           Print help
   -V, --version

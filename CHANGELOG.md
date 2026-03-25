@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## v2.47.93
+
+1. feat(cli): add `--return-format` flag for content transformation (markdown, commonmark, text, xml)
 1. chore: fix clippy warnings and formatting across workspace
 1. chore: remove cargo dependabot for Rust (too noisy), keep github-actions only
 1. chore(deps): bump flexbuffers 2 -> 25, async-openai 0.32 -> 0.33
