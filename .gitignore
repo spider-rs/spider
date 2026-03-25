@@ -2,6 +2,7 @@ target
 **/*.rs.bk
 .env
 .DS_Store
+.tools
 _temp_spider_downloads
 storage
 http-cacache

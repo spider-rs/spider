@@ -7,7 +7,7 @@ use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
 async fn main() {
-    let mut website: Website = Website::new("https://rsseau.fr/en/");
+    let mut website: Website = Website::new("https://choosealicense.com");
 
     website.with_blacklist_url(Some(vec!["/books".into(), "/blog".into(), "/tag".into()]));
 

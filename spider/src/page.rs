@@ -658,6 +658,10 @@ pub struct Page {
     /// Whether the response content was truncated due to a stream error,
     /// chunk idle timeout, or Content-Length mismatch.
     pub content_truncated: bool,
+    #[cfg(feature = "parallel_backends")]
+    /// Identifies which backend produced this page (e.g. "primary",
+    /// "lightpanda", "servo"). `None` when parallel backends are not active.
+    pub backend_source: Option<crate::compact_str::CompactString>,
 }
 
 /// Represent a page visited.
@@ -2918,6 +2922,20 @@ impl Page {
             Some(html) => html,
             _ => Default::default(),
         }
+    }
+
+    /// Compute an HTML quality score (0–100) for this page.
+    ///
+    /// Uses status code, content length, structural HTML checks,
+    /// and anti-bot detection to score the response.
+    #[cfg(feature = "parallel_backends")]
+    #[inline]
+    pub fn quality_score(&self) -> u16 {
+        crate::utils::parallel_backends::html_quality_score(
+            self.html.as_deref(),
+            self.status_code,
+            &self.anti_bot_tech,
+        )
     }
 
     /// Modify xml - html.

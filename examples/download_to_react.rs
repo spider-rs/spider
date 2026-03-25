@@ -29,7 +29,7 @@ async fn main() {
 
     env_logger::init_from_env(env);
 
-    let website_name = "https://rsseau.fr/en";
+    let website_name = "https://choosealicense.com";
 
     let mut website: Website = Website::new(website_name);
     website.configuration.respect_robots_txt = true;

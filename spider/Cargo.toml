@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.47.93"
+version = "2.48.0"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -122,11 +122,11 @@ features = ["serde", "headers", "dynamic-versions"]
 
 [dependencies.spider_agent_types]
 path = "../spider_agent_types"
-version = "2.47.93"
+version = "2.48.0"
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.47.93"
+version = "2.48.0"
 optional = true
 default-features = false
 
@@ -359,6 +359,19 @@ priority_frontier = []
 
 # Work-stealing / hedged requests for slow crawls.
 hedge = []
+
+# Parallel crawl backends — race LightPanda / Servo alongside the primary crawl.
+parallel_backends = []
+# LightPanda remote (connect to a running LightPanda instance via CDP).
+lightpanda = ["parallel_backends", "chrome"]
+# LightPanda local (compile lightpanda as a dependency).
+# lightpanda_local = ["lightpanda", "dep:lightpanda"]
+# Servo remote (connect to a running Servo instance via WebDriver).
+servo = ["parallel_backends", "webdriver"]
+# Servo local (compile servo engine as a dependency).
+# servo_local = ["servo", "dep:servo"]
+# All remote backends.
+parallel_backends_full = ["lightpanda", "servo"]
 
 # Allows full concurrency.
 cowboy = []

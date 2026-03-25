@@ -222,6 +222,34 @@ let mut website = Website::new("https://example.com")
 
 WebSocket endpoint: `wss://browser.spider.cloud/v1/browser` — supports CDP and WebDriver BiDi protocols.
 
+### Parallel Backends (LightPanda / Servo)
+
+Race alternative browser engines alongside the primary crawl. The best HTML response wins — higher reliability and coverage for JS-heavy pages.
+
+```rust
+use spider::configuration::{BackendEndpoint, BackendEngine, ParallelBackendsConfig};
+
+let mut website = Website::new("https://example.com");
+
+// Race a remote LightPanda instance alongside the primary crawl.
+website.configuration.parallel_backends = Some(ParallelBackendsConfig {
+    backends: vec![BackendEndpoint {
+        engine: BackendEngine::LightPanda,
+        endpoint: Some("ws://127.0.0.1:9222".to_string()),
+        binary_path: None,
+    }],
+    grace_period_ms: 500,       // wait up to 500ms for a better result
+    fast_accept_threshold: 80,  // accept immediately if quality >= 80
+    ..Default::default()
+});
+
+website.crawl().await;
+```
+
+Features: `lightpanda` (LightPanda via CDP), `servo` (Servo via WebDriver), `parallel_backends_full` (both).
+
+Lock-free, zero overhead when disabled, automatic backend health tracking with auto-disable after consecutive failures.
+
 ## Get Spider
 
 | Package | Language | Install |

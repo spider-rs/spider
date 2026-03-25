@@ -6,8 +6,8 @@ use std::{io::Error, time::Instant};
 
 const CAPACITY: usize = 5;
 const CRAWL_LIST: [&str; CAPACITY] = [
-    "https://rsseau.fr/en",
     "https://choosealicense.com",
+    "https://docs.rs",
     "https://jeffmendez.com",
     "https://spider-rs.github.io/spider-nodejs/",
     "https://spider-rs.github.io/spider-py/",
@@ -17,13 +17,15 @@ const CRAWL_LIST: [&str; CAPACITY] = [
 async fn main() -> Result<(), Error> {
     let config = Configuration::new()
         .with_user_agent(Some("SpiderBot"))
-        .with_blacklist_url(Some(Vec::from(["https://rsseau.fr/resume".into()])))
+        .with_blacklist_url(Some(Vec::from([
+            "https://choosealicense.com/non-software".into()
+        ])))
         .with_subdomains(false)
         .with_tld(false)
         .with_redirect_limit(3)
         .with_respect_robots_txt(true)
         .with_external_domains(Some(
-            Vec::from(["http://loto.rsseau.fr/"].map(|d| d.to_string())).into_iter(),
+            Vec::from(["http://docs.rs/"].map(|d| d.to_string())).into_iter(),
         ))
         .build();
 

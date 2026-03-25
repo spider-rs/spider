@@ -128,6 +128,95 @@ pub struct RequestProxy {
     pub ignore: ProxyIgnore,
 }
 
+/// The protocol used to communicate with a backend.
+#[cfg(feature = "parallel_backends")]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum BackendProtocol {
+    /// Chrome DevTools Protocol over WebSocket.
+    Cdp,
+    /// WebDriver (W3C) over HTTP.
+    WebDriver,
+}
+
+/// The engine type for a parallel crawl backend.
+#[cfg(feature = "parallel_backends")]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum BackendEngine {
+    /// LightPanda — communicates via CDP (same protocol as Chrome).
+    LightPanda,
+    /// Servo — communicates via WebDriver protocol.
+    Servo,
+    /// A custom backend. Set `protocol` on [`BackendEndpoint`] to tell
+    /// spider whether to use CDP or WebDriver to communicate with it.
+    Custom,
+}
+
+/// A parallel crawl backend endpoint.
+///
+/// Each backend can run either **remotely** (connect to a running instance via
+/// `endpoint`) or **locally** (spider manages the engine process via
+/// `binary_path`). Set `endpoint` for remote mode, `binary_path` for local.
+#[cfg(feature = "parallel_backends")]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BackendEndpoint {
+    /// The browser engine to use.
+    pub engine: BackendEngine,
+    /// Remote endpoint URL. For LightPanda: a CDP WebSocket URL
+    /// (e.g. `"ws://127.0.0.1:9222"`). For Servo: a WebDriver HTTP URL
+    /// (e.g. `"http://localhost:4444"`). When set, the engine is assumed to
+    /// be already running at this address.
+    pub endpoint: Option<String>,
+    /// Path to the engine binary for local mode. When set (and `endpoint` is
+    /// `None`), spider will spawn and manage the engine process. Uses PATH
+    /// lookup if empty string.
+    pub binary_path: Option<String>,
+    /// Explicit protocol override. When `None`, inferred from `engine`:
+    /// `LightPanda` → CDP, `Servo` → WebDriver, `Custom` → **required**.
+    /// For custom backends, set this to tell spider how to communicate.
+    pub protocol: Option<BackendProtocol>,
+}
+
+/// Configuration for parallel crawl backends.
+///
+/// When enabled, races alternative browser engines (LightPanda, Servo) alongside
+/// the primary crawl path. The best HTML response wins.
+#[cfg(feature = "parallel_backends")]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ParallelBackendsConfig {
+    /// Alternative backends to race against the primary crawl.
+    pub backends: Vec<BackendEndpoint>,
+    /// Grace period (ms) after first response to wait for better results.
+    /// Allows slower backends to finish if they produce higher quality HTML.
+    /// Default: 500.
+    pub grace_period_ms: u64,
+    /// Master switch. Default: `true` (enabled when config is present).
+    pub enabled: bool,
+    /// Quality score threshold (0–100). If the first response scores at or
+    /// above this value, accept it immediately without waiting for the grace
+    /// period. Default: 80.
+    pub fast_accept_threshold: u16,
+    /// Maximum consecutive errors before auto-disabling a backend for
+    /// the remainder of the crawl. Default: 10.
+    pub max_consecutive_errors: u16,
+}
+
+#[cfg(feature = "parallel_backends")]
+impl Default for ParallelBackendsConfig {
+    fn default() -> Self {
+        Self {
+            backends: Vec::new(),
+            grace_period_ms: 500,
+            enabled: true,
+            fast_accept_threshold: 80,
+            max_consecutive_errors: 10,
+        }
+    }
+}
+
 /// User-configurable antibot detection patterns. Any match triggers `AntiBotTech::Custom`.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -380,6 +469,10 @@ pub struct Configuration {
     /// WARC output configuration. When set, the crawl writes a WARC 1.1 file
     /// containing all fetched pages as `response` records.
     pub warc: Option<crate::utils::warc::WarcConfig>,
+    #[cfg(feature = "parallel_backends")]
+    /// Parallel crawl backend configuration. Race LightPanda / Servo alongside
+    /// the primary crawl path. Requires the `parallel_backends` feature.
+    pub parallel_backends: Option<ParallelBackendsConfig>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]

@@ -7,12 +7,12 @@ use std::time::Instant;
 
 #[tokio::main]
 async fn main() {
-    let mut website: Website = Website::new("https://rsseau.fr/en");
+    let mut website: Website = Website::new("https://choosealicense.com");
     website
         .configuration
         .blacklist_url
         .insert(Default::default())
-        .push("https://rsseau.fr/resume".into());
+        .push("https://choosealicense.com/non-software".into());
     website.configuration.respect_robots_txt = true;
     website.configuration.subdomains = false;
     website.configuration.delay = 0; // Defaults to 0 ms

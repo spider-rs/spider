@@ -30,7 +30,7 @@ async fn main() {
     let mut tracker = spider::configuration::ChromeEventTracker::new(true, true);
     tracker.automation = true;
 
-    let mut website: Website = Website::new("https://rsseau.fr/en/blog")
+    let mut website: Website = Website::new("https://choosealicense.com/licenses")
         .with_chrome_intercept(RequestInterceptConfiguration::new(true))
         .with_wait_for_idle_network(Some(WaitForIdleNetwork::new(Some(Duration::from_secs(30)))))
         .with_limit(1)

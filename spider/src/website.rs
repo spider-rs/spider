@@ -248,6 +248,97 @@ macro_rules! chrome_page_post_process {
         channel_send_page(&$shared.2, page, &$shared.4);
         (links, signature)
     }};
+    // Variant with parallel backends support.
+    ($page:expr, $shared:expr, $add_external:expr, $full_resources:expr,
+     $return_page_links:expr, $on_should_crawl_callback:expr, $permit:expr,
+     $pb_backend_set:expr, $pb_config_ref:expr, $pb_tracker_ref:expr) => {{
+        let mut page = $page;
+
+        // ── Parallel backends: collect concurrent results (Chrome path) ──
+        #[cfg(feature = "parallel_backends")]
+        if let Some(ref mut pb_set) = $pb_backend_set {
+            if let (Some(ref pb_cfg), Some(ref pb_trk)) = (&$pb_config_ref, &$pb_tracker_ref) {
+                let primary_score = page.quality_score();
+                pb_trk.record_race(0);
+                pb_trk.record_success(0);
+
+                if primary_score < pb_cfg.fast_accept_threshold {
+                    let grace = std::time::Duration::from_millis(pb_cfg.grace_period_ms);
+                    let deadline = tokio::time::Instant::now() + grace;
+                    let mut best_alt: Option<crate::utils::parallel_backends::BackendResponse> = None;
+
+                    loop {
+                        tokio::select! {
+                            biased;
+                            res = pb_set.join_next() => {
+                                match res {
+                                    Some(Ok(Some(resp))) => {
+                                        pb_trk.record_race(resp.backend_index);
+                                        pb_trk.record_duration(resp.backend_index, resp.duration);
+                                        pb_trk.record_success(resp.backend_index);
+                                        if resp.quality_score > primary_score {
+                                            let better = match &best_alt {
+                                                Some(b) => resp.quality_score > b.quality_score,
+                                                None => true,
+                                            };
+                                            if better { best_alt = Some(resp); }
+                                        }
+                                        if best_alt.as_ref().map_or(false, |b| b.quality_score >= pb_cfg.fast_accept_threshold) {
+                                            break;
+                                        }
+                                    }
+                                    Some(Ok(None)) | Some(Err(_)) => {}
+                                    None => break,
+                                }
+                            }
+                            _ = tokio::time::sleep_until(deadline) => break,
+                        }
+                    }
+                    pb_set.abort_all();
+                    if let Some(winner) = best_alt {
+                        pb_trk.record_win(winner.backend_index);
+                        page = winner.page;
+                    } else {
+                        pb_trk.record_win(0);
+                    }
+                } else {
+                    pb_set.abort_all();
+                    pb_trk.record_win(0);
+                }
+            }
+        }
+
+        if $add_external {
+            page.set_external($shared.3.clone());
+        }
+        let prev_domain = page.base.take();
+        page.set_url_parsed_direct();
+        let page_base = page.base.take().map(Box::new);
+        if $return_page_links {
+            page.page_links = Some(Default::default());
+        }
+        let links = if $full_resources {
+            page.links_full(&$shared.1, &page_base).await
+        } else {
+            page.links(&$shared.1, &page_base).await
+        };
+        page.base = prev_domain;
+        if $shared.6.normalize {
+            page.signature
+                .replace(crate::utils::hash_html(page.get_html_bytes_u8()).await);
+        }
+        if let Some(ref cb) = $on_should_crawl_callback {
+            if !cb.call(&page) {
+                page.blocked_crawl = true;
+                channel_send_page(&$shared.2, page, &$shared.4);
+                drop($permit);
+                return Default::default();
+            }
+        }
+        let signature = page.signature;
+        channel_send_page(&$shared.2, page, &$shared.4);
+        (links, signature)
+    }};
 }
 
 /// calculate the base limits
@@ -644,6 +735,16 @@ pub struct Website {
     #[cfg(feature = "warc")]
     /// Shared WARC writer for archiving crawled pages. Lock-free via MPSC channel.
     warc_writer: Option<crate::utils::warc::WarcWriter>,
+    #[cfg(feature = "parallel_backends")]
+    /// Per-backend performance tracker for parallel crawl backends.
+    pb_tracker: Option<Arc<crate::utils::parallel_backends::BackendTracker>>,
+    #[cfg(feature = "parallel_backends")]
+    /// Proxy rotator for parallel crawl backends.
+    pb_proxy_rotator: Option<Arc<crate::utils::parallel_backends::ProxyRotator>>,
+    #[cfg(feature = "parallel_backends")]
+    /// Custom quality validator for parallel backend responses. Called after
+    /// the built-in scorer. Can override, adjust, or reject scores.
+    pub pb_quality_validator: Option<crate::utils::parallel_backends::QualityValidator>,
 }
 
 impl fmt::Debug for Website {
@@ -2709,6 +2810,25 @@ impl Website {
         #[cfg(not(feature = "decentralized"))]
         {
             self.client_rotator = self.build_rotated_clients();
+        }
+
+        #[cfg(feature = "parallel_backends")]
+        {
+            if let Some(ref pb) = self.configuration.parallel_backends {
+                if pb.enabled && !pb.backends.is_empty() {
+                    self.pb_tracker = Some(Arc::new(
+                        crate::utils::parallel_backends::BackendTracker::new(
+                            pb.backends.len() + 1,
+                            pb.max_consecutive_errors,
+                        ),
+                    ));
+                    self.pb_proxy_rotator = Some(Arc::new(
+                        crate::utils::parallel_backends::ProxyRotator::new(
+                            &self.configuration.proxies,
+                        ),
+                    ));
+                }
+            }
         }
 
         (client, self.configure_handler())
@@ -5582,6 +5702,20 @@ impl Website {
             let auto_throttle_arc = self.auto_throttle.clone();
             #[cfg(feature = "etag_cache")]
             let etag_cache_arc = self.etag_cache.clone();
+            #[cfg(feature = "parallel_backends")]
+            let pb_config_raw = self
+                .configuration
+                .parallel_backends
+                .as_ref()
+                .map(|c| std::sync::Arc::new(c.clone()));
+            #[cfg(feature = "parallel_backends")]
+            let pb_tracker_raw = self.pb_tracker.clone();
+            #[cfg(feature = "parallel_backends")]
+            let pb_proxy_rotator_raw = self.pb_proxy_rotator.clone();
+            #[cfg(feature = "parallel_backends")]
+            let pb_crawl_config_raw = std::sync::Arc::new((*self.configuration).clone());
+            #[cfg(feature = "parallel_backends")]
+            let pb_validator_raw = self.pb_quality_validator.clone();
 
             // track budgeting one time.
             let mut exceeded_budget = false;
@@ -5674,6 +5808,16 @@ impl Website {
                                 let auto_throttle_ref = auto_throttle_arc.clone();
                                 #[cfg(feature = "etag_cache")]
                                 let etag_cache_ref = etag_cache_arc.clone();
+                                #[cfg(feature = "parallel_backends")]
+                                let pb_config_ref = pb_config_raw.clone();
+                                #[cfg(feature = "parallel_backends")]
+                                let pb_tracker_ref = pb_tracker_raw.clone();
+                                #[cfg(feature = "parallel_backends")]
+                                let pb_proxy_rotator_ref = pb_proxy_rotator_raw.clone();
+                                #[cfg(feature = "parallel_backends")]
+                                let pb_crawl_config_ref = pb_crawl_config_raw.clone();
+                                #[cfg(feature = "parallel_backends")]
+                                let pb_validator_ref = pb_validator_raw.clone();
                                 spawn_set("page_fetch", &mut set, async move {
                                     let link_result = match &shared.9 {
                                         Some(cb) => cb(link, None),
@@ -5747,6 +5891,41 @@ impl Website {
                                             }
                                         }
                                     }
+
+                                    // ── Parallel backends: spawn alternatives NOW ──
+                                    // These run concurrently with the primary fetch below.
+                                    // Results are collected after the primary completes.
+                                    // Fully lock-free: JoinSet + atomics only, no mutexes.
+                                    #[cfg(feature = "parallel_backends")]
+                                    let mut pb_backend_set: Option<tokio::task::JoinSet<crate::utils::parallel_backends::BackendResult>> = {
+                                        if let (Some(ref pb_cfg), Some(ref pb_trk)) =
+                                            (&pb_config_ref, &pb_tracker_ref)
+                                        {
+                                            if pb_cfg.enabled && !pb_cfg.backends.is_empty() {
+                                                log::debug!("[parallel_backends] spawning backends for {}", target_url);
+                                                let alt_futs = crate::utils::parallel_backends::build_backend_futures(
+                                                    target_url,
+                                                    pb_cfg,
+                                                    &pb_crawl_config_ref,
+                                                    pb_trk,
+                                                    &pb_proxy_rotator_ref,
+                                                );
+                                                if !alt_futs.is_empty() {
+                                                    let mut js = tokio::task::JoinSet::new();
+                                                    for fut in alt_futs {
+                                                        js.spawn(fut);
+                                                    }
+                                                    Some(js)
+                                                } else {
+                                                    None
+                                                }
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        }
+                                    };
 
                                     let external_domains_caseless = &shared.3;
 
@@ -5968,6 +6147,102 @@ impl Website {
                                         }
                                     }
 
+                                    // ── Parallel backends: collect concurrent results ──
+                                    //
+                                    // Backend futures were spawned BEFORE the primary fetch
+                                    // (see pb_backend_set above) and ran concurrently. Now
+                                    // we check if any produced a higher-quality result.
+                                    // Fully lock-free: JoinSet + atomics only, zero mutexes.
+                                    #[cfg(feature = "parallel_backends")]
+                                    if let Some(ref mut pb_set) = pb_backend_set {
+                                        if let (Some(ref pb_cfg), Some(ref pb_trk)) =
+                                            (&pb_config_ref, &pb_tracker_ref)
+                                        {
+                                            let primary_score = crate::utils::parallel_backends::html_quality_score_validated(
+                                                page.get_bytes(),
+                                                page.status_code,
+                                                &page.anti_bot_tech,
+                                                target_url,
+                                                "primary",
+                                                pb_validator_ref.as_ref(),
+                                            );
+                                            pb_trk.record_race(0);
+                                            pb_trk.record_success(0);
+
+                                            if primary_score < pb_cfg.fast_accept_threshold {
+                                                let grace = std::time::Duration::from_millis(pb_cfg.grace_period_ms);
+                                                let deadline = tokio::time::Instant::now() + grace;
+                                                let mut best_alt: Option<crate::utils::parallel_backends::BackendResponse> = None;
+
+                                                loop {
+                                                    tokio::select! {
+                                                        biased;
+                                                        res = pb_set.join_next() => {
+                                                            match res {
+                                                                Some(Ok(br)) => {
+                                                                    let idx = br.backend_index;
+                                                                    match br.response {
+                                                                        Some(resp) => {
+                                                                            pb_trk.record_race(idx);
+                                                                            pb_trk.record_duration(idx, resp.duration);
+                                                                            pb_trk.record_success(idx);
+                                                                            if resp.quality_score > primary_score {
+                                                                                let better = match &best_alt {
+                                                                                    Some(b) => resp.quality_score > b.quality_score,
+                                                                                    None => true,
+                                                                                };
+                                                                                if better {
+                                                                                    best_alt = Some(resp);
+                                                                                }
+                                                                            }
+                                                                            if best_alt.as_ref().is_some_and(|b| {
+                                                                                b.quality_score >= pb_cfg.fast_accept_threshold
+                                                                            }) {
+                                                                                break;
+                                                                            }
+                                                                        }
+                                                                        None => {
+                                                                            pb_trk.record_race(idx);
+                                                                            pb_trk.record_error(idx);
+                                                                        }
+                                                                    }
+                                                                }
+                                                                Some(Err(_)) => {}
+                                                                None => break,
+                                                            }
+                                                        }
+                                                        _ = tokio::time::sleep_until(deadline) => break,
+                                                    }
+                                                }
+
+                                                pb_set.abort_all();
+
+                                                if let Some(winner) = best_alt {
+                                                    log::info!("[parallel_backends] backend {} won for {} (score={}, primary_score={})",
+                                                        winner.backend_index, target_url, winner.quality_score, primary_score);
+                                                    pb_trk.record_win(winner.backend_index);
+                                                    page = winner.page;
+                                                    page.set_url_parsed_direct();
+                                                    let page_base = page.base.take().map(Box::new);
+                                                    let new_links = if shared.6 {
+                                                        page.links_full(&shared.1, &page_base).await
+                                                    } else {
+                                                        page.links(&shared.1, &page_base).await
+                                                    };
+                                                    page.base = page_base.map(|b| *b);
+                                                    links = new_links;
+                                                } else {
+                                                    pb_trk.record_win(0);
+                                                    crate::utils::parallel_backends::tag_page_source(&mut page, "primary");
+                                                }
+                                            } else {
+                                                pb_set.abort_all();
+                                                pb_trk.record_win(0);
+                                                crate::utils::parallel_backends::tag_page_source(&mut page, "primary");
+                                            }
+                                        }
+                                    }
+
                                     // Record latency for auto-throttle.
                                     #[cfg(feature = "auto_throttle")]
                                     if let Some(ref at) = auto_throttle_ref {
@@ -6186,6 +6461,21 @@ impl Website {
                             let compiled_custom_antibot = self.compiled_custom_antibot.clone();
                             let mut exceeded_budget = false;
                             let concurrency = throttle.is_zero();
+                            #[cfg(feature = "parallel_backends")]
+                            let pb_config_chrome = self
+                                .configuration
+                                .parallel_backends
+                                .as_ref()
+                                .map(|c| std::sync::Arc::new(c.clone()));
+                            #[cfg(feature = "parallel_backends")]
+                            let pb_tracker_chrome = self.pb_tracker.clone();
+                            #[cfg(feature = "parallel_backends")]
+                            let pb_proxy_rotator_chrome = self.pb_proxy_rotator.clone();
+                            #[cfg(feature = "parallel_backends")]
+                            let pb_crawl_config_chrome =
+                                std::sync::Arc::new((*self.configuration).clone());
+                            #[cfg(feature = "parallel_backends")]
+                            let pb_validator_chrome = self.pb_quality_validator.clone();
 
                             self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
 
@@ -6260,6 +6550,16 @@ impl Website {
                                                 let hedge_cfg = hedge_config.clone();
                                                 #[cfg(feature = "hedge")]
                                                 let hedge_trk = hedge_tracker.clone();
+                                                #[cfg(feature = "parallel_backends")]
+                                                let pb_config_ref = pb_config_chrome.clone();
+                                                #[cfg(feature = "parallel_backends")]
+                                                let pb_tracker_ref = pb_tracker_chrome.clone();
+                                                #[cfg(feature = "parallel_backends")]
+                                                let pb_proxy_rotator_ref = pb_proxy_rotator_chrome.clone();
+                                                #[cfg(feature = "parallel_backends")]
+                                                let pb_crawl_config_ref = pb_crawl_config_chrome.clone();
+                                                #[cfg(feature = "parallel_backends")]
+                                                let pb_validator_ref = pb_validator_chrome.clone();
                                                 spawn_set("page_fetch", &mut set, async move {
                                                     let link_result =
                                                         match &shared.10 {
@@ -6268,6 +6568,38 @@ impl Website {
                                                         };
 
                                                     let target_url_string = link_result.0.as_ref().to_string();
+
+                                                    // ── Parallel backends: spawn alternatives NOW (Chrome path) ──
+                                                    #[cfg(feature = "parallel_backends")]
+                                                    let mut pb_backend_set: Option<tokio::task::JoinSet<crate::utils::parallel_backends::BackendResult>> = {
+                                                        if let (Some(ref pb_cfg), Some(ref pb_trk)) =
+                                                            (&pb_config_ref, &pb_tracker_ref)
+                                                        {
+                                                            if pb_cfg.enabled && !pb_cfg.backends.is_empty() {
+                                                                log::debug!("[parallel_backends] spawning backends for {} (chrome path)", &target_url_string);
+                                                                let alt_futs = crate::utils::parallel_backends::build_backend_futures(
+                                                                    &target_url_string,
+                                                                    pb_cfg,
+                                                                    &pb_crawl_config_ref,
+                                                                    pb_trk,
+                                                                    &pb_proxy_rotator_ref,
+                                                                );
+                                                                if !alt_futs.is_empty() {
+                                                                    let mut js = tokio::task::JoinSet::new();
+                                                                    for fut in alt_futs {
+                                                                        js.spawn(fut);
+                                                                    }
+                                                                    Some(js)
+                                                                } else {
+                                                                    None
+                                                                }
+                                                            } else {
+                                                                None
+                                                            }
+                                                        } else {
+                                                            None
+                                                        }
+                                                    };
 
                                                     // Cache-first: skip tab creation entirely for cached pages
                                                     #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
@@ -6498,6 +6830,70 @@ impl Website {
                                                                 if let Err(elasped) = tokio::time::timeout(tokio::time::Duration::from_secs(10), h).await {
                                                                     log::warn!("Handler timeout exceeded {elasped}");
                                                                     abort_handle.abort();
+                                                                }
+                                                            }
+
+                                                            // ── Parallel backends: collect (Chrome non-hedge) ──
+                                                            #[cfg(feature = "parallel_backends")]
+                                                            if let Some(ref mut pb_set) = pb_backend_set {
+                                                                if let (Some(ref pb_cfg), Some(ref pb_trk)) = (&pb_config_ref, &pb_tracker_ref) {
+                                                                    let primary_score = crate::utils::parallel_backends::html_quality_score_validated(
+                                                                        page.get_bytes(),
+                                                                        page.status_code,
+                                                                        &page.anti_bot_tech,
+                                                                        page.get_url(),
+                                                                        "primary",
+                                                                        pb_validator_ref.as_ref(),
+                                                                    );
+                                                                    pb_trk.record_race(0);
+                                                                    pb_trk.record_success(0);
+                                                                    if primary_score < pb_cfg.fast_accept_threshold {
+                                                                        let grace = std::time::Duration::from_millis(pb_cfg.grace_period_ms);
+                                                                        let deadline = tokio::time::Instant::now() + grace;
+                                                                        let mut best_alt: Option<crate::utils::parallel_backends::BackendResponse> = None;
+                                                                        loop {
+                                                                            tokio::select! {
+                                                                                biased;
+                                                                                res = pb_set.join_next() => {
+                                                                                    match res {
+                                                                                        Some(Ok(br)) => {
+                                                                                            let idx = br.backend_index;
+                                                                                            match br.response {
+                                                                                                Some(resp) => {
+                                                                                                    pb_trk.record_race(idx);
+                                                                                                    pb_trk.record_duration(idx, resp.duration);
+                                                                                                    pb_trk.record_success(idx);
+                                                                                                    if resp.quality_score > primary_score {
+                                                                                                        if best_alt.as_ref().map_or(true, |b| resp.quality_score > b.quality_score) {
+                                                                                                            best_alt = Some(resp);
+                                                                                                        }
+                                                                                                    }
+                                                                                                    if best_alt.as_ref().map_or(false, |b| b.quality_score >= pb_cfg.fast_accept_threshold) { break; }
+                                                                                                }
+                                                                                                None => { pb_trk.record_race(idx); pb_trk.record_error(idx); }
+                                                                                            }
+                                                                                        }
+                                                                                        Some(Err(_)) => {}
+                                                                                        None => break,
+                                                                                    }
+                                                                                }
+                                                                                _ = tokio::time::sleep_until(deadline) => break,
+                                                                            }
+                                                                        }
+                                                                        pb_set.abort_all();
+                                                                        if let Some(winner) = best_alt {
+                                                                            log::info!("[parallel_backends] backend {} won for {} (score={}, primary={})", winner.backend_index, page.get_url(), winner.quality_score, primary_score);
+                                                                            pb_trk.record_win(winner.backend_index);
+                                                                            page = winner.page;
+                                                                        } else {
+                                                                            pb_trk.record_win(0);
+                                                                            crate::utils::parallel_backends::tag_page_source(&mut page, "primary");
+                                                                        }
+                                                                    } else {
+                                                                        pb_set.abort_all();
+                                                                        pb_trk.record_win(0);
+                                                                        crate::utils::parallel_backends::tag_page_source(&mut page, "primary");
+                                                                    }
                                                                 }
                                                             }
 
@@ -10031,6 +10427,40 @@ impl Website {
     /// Set a crawl page limit. If the value is 0 there is no limit.
     pub fn with_limit(&mut self, limit: u32) -> &mut Self {
         self.configuration.with_limit(limit);
+        self
+    }
+
+    /// Set a custom quality validator for parallel backend responses.
+    ///
+    /// The validator is called for every backend response (including the
+    /// primary) after the built-in quality scorer. It can override, adjust,
+    /// or reject scores. This does nothing without the `parallel_backends`
+    /// feature.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use spider::utils::parallel_backends::{QualityValidator, ValidationResult};
+    ///
+    /// website.with_quality_validator(Some(std::sync::Arc::new(|content, status, url, source| {
+    ///     let mut result = ValidationResult::default();
+    ///     // Reject any response under 1KB
+    ///     if content.map_or(true, |b| b.len() < 1024) {
+    ///         result.reject = true;
+    ///     }
+    ///     // Boost LightPanda by 10 points
+    ///     if source == "lightpanda" {
+    ///         result.score_adjust = 10;
+    ///     }
+    ///     result
+    /// })));
+    /// ```
+    #[cfg(feature = "parallel_backends")]
+    pub fn with_quality_validator(
+        &mut self,
+        validator: Option<crate::utils::parallel_backends::QualityValidator>,
+    ) -> &mut Self {
+        self.pb_quality_validator = validator;
         self
     }
 

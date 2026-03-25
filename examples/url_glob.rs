@@ -7,14 +7,13 @@ use std::time::Instant;
 
 #[tokio::main]
 async fn main() {
-    let mut website: Website = Website::new(
-        "https://rsseau.fr/blog/{lazy-load-components,gnu-parallel,migrate-from-jekyll-to-gatsby}",
-    );
+    let mut website: Website =
+        Website::new("https://choosealicense.com/licenses/{mit,apache-2.0,gpl-3.0}");
     website
         .configuration
         .blacklist_url
         .insert(Default::default())
-        .push("https://rsseau.fr/resume".into());
+        .push("https://choosealicense.com/non-software".into());
 
     let start = Instant::now();
     website.crawl().await;

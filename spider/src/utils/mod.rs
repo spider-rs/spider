@@ -48,6 +48,9 @@ pub mod interner;
 #[cfg(feature = "numa")]
 /// NUMA-aware thread pinning for multi-socket servers.
 pub mod numa;
+#[cfg(feature = "parallel_backends")]
+/// Parallel crawl backends — race LightPanda / Servo alongside the primary crawl.
+pub mod parallel_backends;
 #[cfg(feature = "rate_limit")]
 /// Per-domain token bucket rate limiter.
 pub mod rate_limiter;
