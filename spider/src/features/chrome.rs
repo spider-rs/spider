@@ -375,7 +375,7 @@ pub fn get_browser_config(
 }
 
 /// create the browser handler configuration
-fn create_handler_config(config: &Configuration) -> HandlerConfig {
+pub fn create_handler_config(config: &Configuration) -> HandlerConfig {
     HandlerConfig {
         request_timeout: match config.request_timeout.as_ref() {
             Some(timeout) => *timeout,

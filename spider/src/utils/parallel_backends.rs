@@ -596,10 +596,10 @@ impl Clone for ProxyRotator {
 
 /// Fetch a page via a remote LightPanda CDP endpoint.
 ///
-/// Creates a fresh CDP connection per fetch. LightPanda is single-page so
-/// connections cannot be shared across concurrent fetches. Each WebSocket
-/// handshake to a local instance is <1ms — no pooling overhead needed.
-/// Zero mutexes, zero locks, zero panics.
+/// Fresh CDP connection per fetch with the **same handler config** as the
+/// primary Chrome path — network interception, resource blocking, viewport,
+/// timeouts all pass through transparently via `connect_with_config()`.
+/// Fully lock-free: no mutexes, no semaphores, no locks.
 #[cfg(feature = "lightpanda")]
 pub async fn fetch_lightpanda_cdp(
     url: &str,
@@ -608,14 +608,19 @@ pub async fn fetch_lightpanda_cdp(
     backend_index: usize,
 ) -> Option<BackendResponse> {
     let start = Instant::now();
-
     let timeout = config.request_timeout.unwrap_or(Duration::from_secs(15));
 
-    // Fresh connection — LightPanda is single-page per connection.
-    // The jitter in build_backend_futures staggers concurrent connects.
-    let connect_result = tokio::time::timeout(timeout, async {
-        chromiumoxide::Browser::connect(endpoint).await
-    })
+    // Build the same handler config as the primary Chrome crawl path.
+    // This gives LightPanda identical network interception: block_visuals,
+    // block_javascript, block_stylesheets, block_ads, block_analytics,
+    // whitelist/blacklist patterns, extra headers, viewport, etc.
+    let handler_config = crate::features::chrome::create_handler_config(config);
+
+    // Connect with full config — identical behaviour to primary Chrome.
+    let connect_result = tokio::time::timeout(
+        timeout,
+        chromiumoxide::Browser::connect_with_config(endpoint, handler_config),
+    )
     .await;
 
     let (browser, handler_handle) = match connect_result {
@@ -636,42 +641,32 @@ pub async fn fetch_lightpanda_cdp(
         }
     };
 
-    // Navigate directly to the target URL.
-    // Try new_page(url) first; fall back to existing page + goto for
-    // single-page engines that don't support multi-tab.
-    let cdp_page = match browser.new_page(url).await {
-        Ok(p) => p,
-        Err(_) => {
-            let pages = match browser.pages().await {
-                Ok(p) => p,
-                Err(e) => {
-                    log::warn!("LightPanda pages() failed: {:?}", e);
-                    handler_handle.abort();
-                    return None;
-                }
-            };
-            if let Some(p) = pages.into_iter().next() {
-                match tokio::time::timeout(timeout, p.goto(url)).await {
-                    Ok(Ok(_)) => {}
-                    Ok(Err(e)) => {
-                        log::warn!("LightPanda navigate failed for {}: {:?}", url, e);
-                        handler_handle.abort();
-                        return None;
-                    }
-                    Err(_) => {
-                        log::warn!("LightPanda navigate timed out for {}", url);
-                        handler_handle.abort();
-                        return None;
-                    }
-                }
-                p
-            } else {
-                log::warn!("LightPanda has no pages for {}", url);
+    // Get the default page and navigate directly to URL.
+    let page = match browser.pages().await {
+        Ok(mut p) if !p.is_empty() => p.swap_remove(0),
+        _ => match browser.new_page(url).await {
+            Ok(p) => p,
+            Err(e) => {
+                log::warn!("LightPanda page failed: {:?}", e);
                 handler_handle.abort();
                 return None;
             }
-        }
+        },
     };
+
+    match tokio::time::timeout(timeout, page.goto(url)).await {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => {
+            log::warn!("LightPanda navigate failed for {}: {:?}", url, e);
+            handler_handle.abort();
+            return None;
+        }
+        Err(_) => {
+            log::warn!("LightPanda navigate timed out for {}", url);
+            handler_handle.abort();
+            return None;
+        }
+    }
 
     // Wait for load event if configured.
     #[cfg(feature = "chrome")]
@@ -683,11 +678,10 @@ pub async fn fetch_lightpanda_cdp(
         }
     }
 
-    // Get the outer HTML — single CDP round-trip.
-    let html_result =
-        tokio::time::timeout(Duration::from_secs(10), cdp_page.outer_html_bytes()).await;
+    // Get the outer HTML.
+    let html_result = tokio::time::timeout(Duration::from_secs(10), page.outer_html_bytes()).await;
 
-    // Clean up — abort handler (connection closes on drop).
+    // Clean up.
     handler_handle.abort();
 
     let html_bytes: Vec<u8> = match html_result {
