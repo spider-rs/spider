@@ -400,9 +400,24 @@ pub async fn race_backends(
 
     let total = 1 + alternatives.len();
 
-    // Wrap primary into a BackendResult so all futures have the same type.
+    // Randomise launch order: sometimes the primary goes first, sometimes
+    // a backend does. This prevents predictable timing patterns that could
+    // be fingerprinted. The primary gets a random 0–3ms jitter; backends
+    // already have their own jitter from build_backend_futures.
+    let primary_jitter_us = {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut h = DefaultHasher::new();
+        std::time::SystemTime::now().hash(&mut h);
+        0u16.hash(&mut h); // primary marker
+        h.finish() % 3000 // 0–3ms
+    };
+
     let primary_wrapped: Pin<Box<dyn Future<Output = BackendResult> + Send>> =
         Box::pin(async move {
+            if primary_jitter_us > 0 {
+                tokio::time::sleep(Duration::from_micros(primary_jitter_us)).await;
+            }
             let response = primary.await;
             BackendResult {
                 backend_index: 0,
