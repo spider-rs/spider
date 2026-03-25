@@ -259,6 +259,21 @@ Lock-free, zero overhead when disabled, automatic backend health tracking with a
 | [spider-nodejs](https://github.com/spider-rs/spider-nodejs) | Node.js | `npm i @spider-rs/spider-rs` |
 | [spider-py](https://github.com/spider-rs/spider-py) | Python | `pip install spider_rs` |
 | [spider_agent](./spider_agent/) | Rust | `cargo add spider --features agent` |
+| [spider_mcp](./spider_mcp/) | MCP | `cargo install spider_mcp` |
+
+### MCP Server
+
+Use Spider as tools in Claude Code, Claude Desktop, or any MCP client:
+
+```bash
+cargo install spider_mcp
+```
+
+```json
+{ "mcpServers": { "spider": { "command": "spider-mcp" } } }
+```
+
+Then ask: *"Scrape https://example.com as markdown"* or *"Crawl https://example.com up to 5 pages"*
 
 ### Cloud and Remote
 
