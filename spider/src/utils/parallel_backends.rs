@@ -641,7 +641,7 @@ pub async fn fetch_lightpanda_cdp(
         }
     };
 
-    // Get the default page and navigate directly to URL.
+    // Get the default page.
     let page = match browser.pages().await {
         Ok(mut p) if !p.is_empty() => p.swap_remove(0),
         _ => match browser.new_page(url).await {
@@ -654,6 +654,22 @@ pub async fn fetch_lightpanda_cdp(
         },
     };
 
+    // Apply the same page-level config as the primary Chrome path:
+    // user-agent, stealth/fingerprint, viewport, geolocation, timezone,
+    // locale, cookies, evaluate-on-new-document, dismiss dialogs, etc.
+    crate::features::chrome::setup_chrome_events(&page, config).await;
+
+    // Set up interception (auth challenges, etc.) if enabled.
+    let _intercept_handle = crate::features::chrome::setup_chrome_interception_base(
+        &page,
+        config.chrome_intercept.enabled,
+        &config.auth_challenge_response,
+        config.chrome_intercept.block_visuals,
+        "",
+    )
+    .await;
+
+    // Navigate.
     match tokio::time::timeout(timeout, page.goto(url)).await {
         Ok(Ok(_)) => {}
         Ok(Err(e)) => {
