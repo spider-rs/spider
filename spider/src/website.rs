@@ -6569,38 +6569,6 @@ impl Website {
 
                                                     let target_url_string = link_result.0.as_ref().to_string();
 
-                                                    // ── Parallel backends: spawn alternatives NOW (Chrome path) ──
-                                                    #[cfg(feature = "parallel_backends")]
-                                                    let mut pb_backend_set: Option<tokio::task::JoinSet<crate::utils::parallel_backends::BackendResult>> = {
-                                                        if let (Some(ref pb_cfg), Some(ref pb_trk)) =
-                                                            (&pb_config_ref, &pb_tracker_ref)
-                                                        {
-                                                            if pb_cfg.enabled && !pb_cfg.backends.is_empty() {
-                                                                log::debug!("[parallel_backends] spawning backends for {} (chrome path)", &target_url_string);
-                                                                let alt_futs = crate::utils::parallel_backends::build_backend_futures(
-                                                                    &target_url_string,
-                                                                    pb_cfg,
-                                                                    &pb_crawl_config_ref,
-                                                                    pb_trk,
-                                                                    &pb_proxy_rotator_ref,
-                                                                );
-                                                                if !alt_futs.is_empty() {
-                                                                    let mut js = tokio::task::JoinSet::new();
-                                                                    for fut in alt_futs {
-                                                                        js.spawn(fut);
-                                                                    }
-                                                                    Some(js)
-                                                                } else {
-                                                                    None
-                                                                }
-                                                            } else {
-                                                                None
-                                                            }
-                                                        } else {
-                                                            None
-                                                        }
-                                                    };
-
                                                     // Cache-first: skip tab creation entirely for cached pages
                                                     #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
                                                     {
@@ -6651,6 +6619,39 @@ impl Website {
                                                             }
                                                         }
                                                     }
+
+                                                    // ── Parallel backends: spawn alternatives NOW (Chrome path) ──
+                                                    // Only reached on cache miss — avoids redundant backend fetches.
+                                                    #[cfg(feature = "parallel_backends")]
+                                                    let mut pb_backend_set: Option<tokio::task::JoinSet<crate::utils::parallel_backends::BackendResult>> = {
+                                                        if let (Some(ref pb_cfg), Some(ref pb_trk)) =
+                                                            (&pb_config_ref, &pb_tracker_ref)
+                                                        {
+                                                            if pb_cfg.enabled && !pb_cfg.backends.is_empty() {
+                                                                log::debug!("[parallel_backends] spawning backends for {} (chrome path)", &target_url_string);
+                                                                let alt_futs = crate::utils::parallel_backends::build_backend_futures(
+                                                                    &target_url_string,
+                                                                    pb_cfg,
+                                                                    &pb_crawl_config_ref,
+                                                                    pb_trk,
+                                                                    &pb_proxy_rotator_ref,
+                                                                );
+                                                                if !alt_futs.is_empty() {
+                                                                    let mut js = tokio::task::JoinSet::new();
+                                                                    for fut in alt_futs {
+                                                                        js.spawn(fut);
+                                                                    }
+                                                                    Some(js)
+                                                                } else {
+                                                                    None
+                                                                }
+                                                            } else {
+                                                                None
+                                                            }
+                                                        } else {
+                                                            None
+                                                        }
+                                                    };
 
                                                     // Hedge-enabled Chrome path: race primary tab vs hedge tab
                                                     #[cfg(feature = "hedge")]
