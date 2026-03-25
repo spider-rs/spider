@@ -99,4 +99,7 @@ pub struct Cli {
     /// Enable stealth mode to avoid bot detection.
     #[clap(long)]
     pub stealth: bool,
+    /// Write crawled pages to a WARC 1.1 archive file at the given path.
+    #[clap(short = 'W', long)]
+    pub warc: Option<String>,
 }

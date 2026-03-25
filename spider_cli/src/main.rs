@@ -246,6 +246,17 @@ async fn main() {
         website.with_stealth(true);
     }
 
+    #[cfg(feature = "warc")]
+    if let Some(ref warc_path) = cli.warc {
+        website
+            .configuration
+            .with_warc(spider::utils::warc::WarcConfig {
+                path: warc_path.clone(),
+                write_warcinfo: true,
+                ..Default::default()
+            });
+    }
+
     let return_headers = cli.return_headers;
     let use_headless = cli.headless && !cli.http;
 
