@@ -34,9 +34,7 @@ async fn main() {
     website.configuration.respect_robots_txt = true;
 
     // Limit pages for the example.
-    website
-        .configuration
-        .with_limit(10);
+    website.configuration.with_limit(10);
 
     let start = Instant::now();
     website.crawl().await;
