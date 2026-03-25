@@ -192,10 +192,12 @@ __basic = [
     "rate_limit",
     "request_coalesce",
     "auto_throttle",
-    "etag_cache"
+    "etag_cache",
+    "warc"
 ]
 auto_throttle = ["dep:dashmap", "time"]
 etag_cache = ["dep:dashmap"]
+warc = ["sync"]
 basic_tls = [
     "reqwest_native_tls_native_roots",
     "disk_native_tls",

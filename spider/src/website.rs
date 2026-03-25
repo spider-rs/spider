@@ -641,6 +641,9 @@ pub struct Website {
     #[cfg(feature = "etag_cache")]
     /// Shared ETag cache for conditional requests across the crawl.
     etag_cache: Option<Arc<crate::utils::etag_cache::ETagCache>>,
+    #[cfg(feature = "warc")]
+    /// Shared WARC writer for archiving crawled pages. Lock-free via MPSC channel.
+    warc_writer: Option<crate::utils::warc::WarcWriter>,
 }
 
 impl fmt::Debug for Website {
@@ -1610,6 +1613,21 @@ impl Website {
     /// Get the shared ETag cache instance, if enabled.
     pub fn get_etag_cache(&self) -> Option<&Arc<crate::utils::etag_cache::ETagCache>> {
         self.etag_cache.as_ref()
+    }
+
+    #[cfg(feature = "warc")]
+    /// Get the shared WARC writer instance, if configured.
+    pub fn get_warc_writer(&self) -> Option<&crate::utils::warc::WarcWriter> {
+        self.warc_writer.as_ref()
+    }
+
+    #[cfg(feature = "warc")]
+    /// Get the number of WARC records written so far.
+    pub fn warc_record_count(&self) -> u64 {
+        self.warc_writer
+            .as_ref()
+            .map(|w| w.record_count())
+            .unwrap_or(0)
     }
 
     /// Get the active crawl status.
@@ -2652,6 +2670,32 @@ impl Website {
         {
             if self.configuration.etag_cache && self.etag_cache.is_none() {
                 self.etag_cache = Some(Arc::new(crate::utils::etag_cache::ETagCache::new()));
+            }
+        }
+
+        #[cfg(feature = "warc")]
+        {
+            if let Some(ref warc_config) = self.configuration.warc {
+                match crate::utils::warc::WarcWriter::create(warc_config) {
+                    Ok((writer, file_handle)) => {
+                        self.warc_writer = Some(writer.clone());
+                        // Subscribe to the page broadcast channel for lock-free WARC writing.
+                        let rx = self.subscribe(512).unwrap_or_else(|| {
+                            let (_, rx) = tokio::sync::broadcast::channel(1);
+                            rx
+                        });
+                        // Bridge: reads from broadcast, serializes + sends to file writer.
+                        // Already spawns its own task internally.
+                        let _bridge = crate::utils::warc::spawn_warc_writer(writer, rx);
+                        // Detach the file-writer handle — it completes when all writer
+                        // clones are dropped (channel closes → blocking task exits).
+                        drop(file_handle);
+                    }
+                    Err(_e) => {
+                        #[cfg(feature = "tracing")]
+                        tracing::error!("Failed to create WARC writer: {_e}");
+                    }
+                }
             }
         }
 

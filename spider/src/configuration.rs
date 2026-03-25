@@ -376,6 +376,10 @@ pub struct Configuration {
     /// If-Modified-Since on subsequent requests to the same URL, allowing
     /// servers to respond with lightweight 304 Not Modified.
     pub etag_cache: bool,
+    #[cfg(feature = "warc")]
+    /// WARC output configuration. When set, the crawl writes a WARC 1.1 file
+    /// containing all fetched pages as `response` records.
+    pub warc: Option<crate::utils::warc::WarcConfig>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -1870,6 +1874,19 @@ impl Configuration {
     /// Enable or disable ETag caching (no-op without `etag_cache` feature).
     #[cfg(not(feature = "etag_cache"))]
     pub fn with_etag_cache(&mut self, _enabled: bool) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "warc")]
+    /// Configure WARC output for writing a web archive file during crawl.
+    pub fn with_warc(&mut self, config: crate::utils::warc::WarcConfig) -> &mut Self {
+        self.warc = Some(config);
+        self
+    }
+
+    /// Configure WARC output (no-op without `warc` feature).
+    #[cfg(not(feature = "warc"))]
+    pub fn with_warc(&mut self, _config: ()) -> &mut Self {
         self
     }
 }

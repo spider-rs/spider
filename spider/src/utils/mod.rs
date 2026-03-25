@@ -63,6 +63,9 @@ pub mod trie;
 pub mod uring_fs;
 /// Validate html false positives.
 pub mod validation;
+#[cfg(feature = "warc")]
+/// WARC 1.1 file writer for web archive output.
+pub mod warc;
 #[cfg(feature = "zero_copy")]
 /// Zero-copy byte-level parsing for HTTP wire formats and protocol structures.
 pub mod zero_copy;
