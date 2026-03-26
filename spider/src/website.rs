@@ -3152,6 +3152,7 @@ impl Website {
 
             let mut domain_parsed = self.domain_parsed.take();
 
+            #[allow(unused_mut)]
             let mut page = if let Some(mut seeded_page) = self.build_seed_page() {
                 // Extract links and metadata from seeded HTML content if not binary
                 #[cfg(not(feature = "decentralized"))]
@@ -5419,7 +5420,7 @@ impl Website {
         let len = pages.len();
         if len > keep_recent {
             for page in &mut pages[..len - keep_recent] {
-                page.html = None;
+                page.set_html_bytes(None);
             }
         }
     }
