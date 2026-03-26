@@ -237,6 +237,8 @@ website.configuration.parallel_backends = Some(ParallelBackendsConfig {
         engine: BackendEngine::LightPanda,
         endpoint: Some("ws://127.0.0.1:9222".to_string()),
         binary_path: None,
+        protocol: None,
+        proxy: None, // inherits from website proxies config
     }],
     grace_period_ms: 500,       // wait up to 500ms for a better result
     fast_accept_threshold: 80,  // accept immediately if quality >= 80

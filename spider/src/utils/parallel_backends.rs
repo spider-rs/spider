@@ -679,6 +679,7 @@ pub async fn fetch_lightpanda_cdp(
     config: &std::sync::Arc<crate::configuration::Configuration>,
     backend_index: usize,
     connect_timeout: Duration,
+    proxy: Option<String>,
 ) -> Option<BackendResponse> {
     let start = Instant::now();
     let timeout = config.request_timeout.unwrap_or(Duration::from_secs(15));
@@ -696,7 +697,7 @@ pub async fn fetch_lightpanda_cdp(
     )
     .await;
 
-    let (browser, handler_handle) = match connect_result {
+    let (mut browser, handler_handle) = match connect_result {
         Ok(Ok((browser, mut handler))) => {
             let h = tokio::spawn(async move {
                 use crate::tokio_stream::StreamExt;
@@ -713,6 +714,23 @@ pub async fn fetch_lightpanda_cdp(
             return None;
         }
     };
+
+    // If a proxy is configured, create an isolated browser context with
+    // proxy_server so this backend's requests route through it.
+    if let Some(ref proxy_addr) = proxy {
+        let mut ctx_params =
+            chromiumoxide::cdp::browser_protocol::target::CreateBrowserContextParams::default();
+        ctx_params.dispose_on_detach = Some(true);
+        ctx_params.proxy_server = Some(proxy_addr.clone());
+        if let Ok(ctx) = browser.create_browser_context(ctx_params).await {
+            let _ = browser.send_new_context(ctx).await;
+        } else {
+            log::warn!(
+                "LightPanda proxy browser context failed for {}, continuing without proxy",
+                proxy_addr
+            );
+        }
+    }
 
     // Get the default page.
     let page = match browser.pages().await {
@@ -813,6 +831,7 @@ pub async fn fetch_servo_webdriver(
     config: &std::sync::Arc<crate::configuration::Configuration>,
     backend_index: usize,
     connect_timeout: Duration,
+    proxy: Option<String>,
 ) -> Option<BackendResponse> {
     use crate::features::webdriver_common::{WebDriverBrowser, WebDriverConfig};
 
@@ -825,10 +844,10 @@ pub async fn fetch_servo_webdriver(
         browser: WebDriverBrowser::Chrome, // Servo's WebDriver is browser-agnostic
         headless: true,
         timeout: Some(connect_timeout),
-        proxy: None, // Proxy set per-call via ProxyRotator at the call site
+        proxy, // Per-backend proxy or ProxyRotator fallback
         user_agent: config.user_agent.as_ref().map(|ua| ua.to_string()),
-        viewport_width: config.viewport.as_ref().map(|v| v.width as u32),
-        viewport_height: config.viewport.as_ref().map(|v| v.height as u32),
+        viewport_width: config.viewport.as_ref().map(|v| v.width),
+        viewport_height: config.viewport.as_ref().map(|v| v.height),
         accept_insecure_certs: config.accept_invalid_certs,
         ..Default::default()
     };
@@ -969,6 +988,19 @@ pub fn build_backend_futures(
         let proto = resolve_protocol(backend);
         let _source_name = backend_source_name(backend);
 
+        // Resolve proxy: per-backend proxy takes priority, then ProxyRotator fallback.
+        #[allow(unused_variables)]
+        let resolved_proxy: Option<String> = if backend.proxy.is_some() {
+            backend.proxy.clone()
+        } else if let Some(ref rotator) = proxy_rotator {
+            match proto {
+                BackendProtocol::Cdp => rotator.next_cdp().map(|s| s.to_string()),
+                BackendProtocol::WebDriver => rotator.next_webdriver().map(|s| s.to_string()),
+            }
+        } else {
+            None
+        };
+
         // Random sub-ms to 5ms jitter before each backend launch to prevent
         // fingerprint correlation from simultaneous requests. Uses a cheap
         // hash-based PRNG (no allocations, no syscalls).
@@ -992,6 +1024,7 @@ pub fn build_backend_futures(
             BackendProtocol::Cdp => {
                 let url = url.to_string();
                 let cfg = crawl_config.clone(); // Arc clone — cheap
+                let proxy = resolved_proxy.clone();
                 futs.push(Box::pin(async move {
                     // Acquire semaphore permit before doing any real work.
                     let _permit = if let Some(ref s) = sem {
@@ -1014,6 +1047,7 @@ pub fn build_backend_futures(
                         &cfg,
                         backend_index,
                         connect_timeout,
+                        proxy,
                     )
                     .await;
                     BackendResult {
@@ -1026,6 +1060,7 @@ pub fn build_backend_futures(
             BackendProtocol::WebDriver => {
                 let url = url.to_string();
                 let cfg = crawl_config.clone(); // Arc clone — cheap
+                let proxy = resolved_proxy.clone();
                 futs.push(Box::pin(async move {
                     // Acquire semaphore permit before doing any real work.
                     let _permit = if let Some(ref s) = sem {
@@ -1048,6 +1083,7 @@ pub fn build_backend_futures(
                         &cfg,
                         backend_index,
                         connect_timeout,
+                        proxy,
                     )
                     .await;
                     BackendResult {

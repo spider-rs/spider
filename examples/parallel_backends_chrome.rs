@@ -29,12 +29,14 @@ async fn main() {
             endpoint: Some("ws://127.0.0.1:9222".to_string()),
             binary_path: None,
             protocol: None,
+            proxy: None,
         }],
         grace_period_ms: 2000, // 2s grace — give LightPanda time on JS-heavy pages
         enabled: true,
         fast_accept_threshold: 85,
         max_consecutive_errors: 10,
         connect_timeout_ms: 5000,
+        ..Default::default()
     });
 
     let mut rx = website.subscribe(100).unwrap();

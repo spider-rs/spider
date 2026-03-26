@@ -39,12 +39,14 @@ fn test_config_serde_roundtrip() {
                 endpoint: Some("ws://127.0.0.1:9222".to_string()),
                 binary_path: None,
                 protocol: None,
+                proxy: None,
             },
             BackendEndpoint {
                 engine: BackendEngine::Servo,
                 endpoint: Some("http://localhost:4444".to_string()),
                 binary_path: None,
                 protocol: None,
+                proxy: None,
             },
         ],
         grace_period_ms: 250,
@@ -52,6 +54,7 @@ fn test_config_serde_roundtrip() {
         fast_accept_threshold: 90,
         max_consecutive_errors: 5,
         connect_timeout_ms: 3000,
+        ..Default::default()
     };
 
     let json = serde_json::to_string(&cfg).unwrap();
@@ -87,6 +90,7 @@ fn test_build_backend_futures_skips_disabled() {
             endpoint: Some("ws://localhost:9222".to_string()),
             binary_path: None,
             protocol: None,
+            proxy: None,
         }],
         ..Default::default()
     };
@@ -116,6 +120,7 @@ fn test_build_backend_futures_skips_local_stub() {
             endpoint: None,
             binary_path: Some("/usr/bin/servo".to_string()),
             protocol: None,
+            proxy: None,
         }],
         ..Default::default()
     };

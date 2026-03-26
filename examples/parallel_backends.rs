@@ -26,12 +26,14 @@ async fn main() {
             endpoint: Some("ws://127.0.0.1:9222".to_string()),
             binary_path: None,
             protocol: None, // inferred as CDP from engine
+            proxy: None,
         }],
         grace_period_ms: 500,
         enabled: true,
         fast_accept_threshold: 80,
         max_consecutive_errors: 5,
         connect_timeout_ms: 5000,
+        ..Default::default()
     });
 
     // Subscribe to see which backend won each page.

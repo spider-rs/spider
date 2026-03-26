@@ -141,9 +141,10 @@ pub enum BackendProtocol {
 
 /// The engine type for a parallel crawl backend.
 #[cfg(feature = "parallel_backends")]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BackendEngine {
+    #[default]
     /// LightPanda — communicates via CDP (same protocol as Chrome).
     LightPanda,
     /// Servo — communicates via WebDriver protocol.
@@ -159,8 +160,9 @@ pub enum BackendEngine {
 /// `endpoint`) or **locally** (spider manages the engine process via
 /// `binary_path`). Set `endpoint` for remote mode, `binary_path` for local.
 #[cfg(feature = "parallel_backends")]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct BackendEndpoint {
     /// The browser engine to use.
     pub engine: BackendEngine,
@@ -177,6 +179,12 @@ pub struct BackendEndpoint {
     /// `LightPanda` → CDP, `Servo` → WebDriver, `Custom` → **required**.
     /// For custom backends, set this to tell spider how to communicate.
     pub protocol: Option<BackendProtocol>,
+    /// Per-backend proxy address. When set, this backend routes its outbound
+    /// requests through the given proxy (e.g. `"socks5://proxy1:1080"`,
+    /// `"http://proxy2:8080"`). Overrides the global `ProxyRotator` for this
+    /// backend. For CDP backends, creates an isolated browser context with
+    /// the proxy. For WebDriver backends, sets the proxy capability.
+    pub proxy: Option<String>,
 }
 
 /// Configuration for parallel crawl backends.
