@@ -21,6 +21,7 @@ pub struct CrawlSession {
     pub status: CrawlSessionStatus,
     pub pages: Vec<CrawlPageResult>,
     #[serde(skip)]
+    #[allow(dead_code)]
     pub started_at: Instant,
 }
 
@@ -29,6 +30,7 @@ pub struct CrawlSession {
 pub enum CrawlSessionStatus {
     Running,
     Complete,
+    #[allow(dead_code)]
     Failed,
 }
 
