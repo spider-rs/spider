@@ -4,7 +4,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
-#[cfg(any(feature = "lightpanda", feature = "servo"))]
+#[cfg(any(feature = "chrome", feature = "webdriver"))]
 use std::time::Instant;
 
 use crate::configuration::{
@@ -666,20 +666,21 @@ impl Clone for ProxyRotator {
 // Backend Fetch Functions
 // ---------------------------------------------------------------------------
 
-/// Fetch a page via a remote LightPanda CDP endpoint.
+/// Fetch a page via a remote CDP endpoint (LightPanda, custom, or any CDP-speaking browser).
 ///
 /// Fresh CDP connection per fetch with the **same handler config** as the
 /// primary Chrome path — network interception, resource blocking, viewport,
 /// timeouts all pass through transparently via `connect_with_config()`.
 /// Fully lock-free: no mutexes, no semaphores, no locks.
-#[cfg(feature = "lightpanda")]
-pub async fn fetch_lightpanda_cdp(
+#[cfg(feature = "chrome")]
+pub async fn fetch_cdp(
     url: &str,
     endpoint: &str,
     config: &std::sync::Arc<crate::configuration::Configuration>,
     backend_index: usize,
     connect_timeout: Duration,
     proxy: Option<String>,
+    source_name: &str,
 ) -> Option<BackendResponse> {
     let start = Instant::now();
     let timeout = config.request_timeout.unwrap_or(Duration::from_secs(15));
@@ -706,11 +707,11 @@ pub async fn fetch_lightpanda_cdp(
             (browser, h)
         }
         Ok(Err(e)) => {
-            log::warn!("LightPanda CDP connect failed ({}): {:?}", endpoint, e);
+            log::warn!("{} CDP connect failed ({}): {:?}", source_name, endpoint, e);
             return None;
         }
         Err(_) => {
-            log::warn!("LightPanda CDP connect timed out ({})", endpoint);
+            log::warn!("{} CDP connect timed out ({})", source_name, endpoint);
             return None;
         }
     };
@@ -726,7 +727,8 @@ pub async fn fetch_lightpanda_cdp(
             let _ = browser.send_new_context(ctx).await;
         } else {
             log::warn!(
-                "LightPanda proxy browser context failed for {}, continuing without proxy",
+                "{} proxy browser context failed for {}, continuing without proxy",
+                source_name,
                 proxy_addr
             );
         }
@@ -738,7 +740,7 @@ pub async fn fetch_lightpanda_cdp(
         _ => match browser.new_page(url).await {
             Ok(p) => p,
             Err(e) => {
-                log::warn!("LightPanda page failed: {:?}", e);
+                log::warn!("{} page failed: {:?}", source_name, e);
                 handler_handle.abort();
                 return None;
             }
@@ -762,12 +764,12 @@ pub async fn fetch_lightpanda_cdp(
     match tokio::time::timeout(timeout, page.goto(url)).await {
         Ok(Ok(_)) => {}
         Ok(Err(e)) => {
-            log::warn!("LightPanda navigate failed for {}: {:?}", url, e);
+            log::warn!("{} navigate failed for {}: {:?}", source_name, url, e);
             handler_handle.abort();
             return None;
         }
         Err(_) => {
-            log::warn!("LightPanda navigate timed out for {}", url);
+            log::warn!("{} navigate timed out for {}", source_name, url);
             handler_handle.abort();
             return None;
         }
@@ -792,11 +794,16 @@ pub async fn fetch_lightpanda_cdp(
     let html_bytes: Vec<u8> = match html_result {
         Ok(Ok(b)) => b.to_vec(),
         Ok(Err(e)) => {
-            log::warn!("LightPanda outer_html_bytes() failed for {}: {:?}", url, e);
+            log::warn!(
+                "{} outer_html_bytes() failed for {}: {:?}",
+                source_name,
+                url,
+                e
+            );
             return None;
         }
         Err(_) => {
-            log::warn!("LightPanda outer_html_bytes() timed out for {}", url);
+            log::warn!("{} outer_html_bytes() timed out for {}", source_name, url);
             return None;
         }
     };
@@ -811,7 +818,7 @@ pub async fn fetch_lightpanda_cdp(
         ..Default::default()
     };
     let mut page = crate::page::build(url, res);
-    tag_page_source(&mut page, "lightpanda");
+    tag_page_source(&mut page, source_name);
 
     Some(BackendResponse {
         page,
@@ -821,24 +828,25 @@ pub async fn fetch_lightpanda_cdp(
     })
 }
 
-/// Fetch a page via a remote Servo WebDriver endpoint.
+/// Fetch a page via a remote WebDriver endpoint (Servo, custom, or any WebDriver-speaking browser).
 ///
 /// Reuses the existing `thirtyfour` / `webdriver.rs` infrastructure.
-#[cfg(feature = "servo")]
-pub async fn fetch_servo_webdriver(
+#[cfg(feature = "webdriver")]
+pub async fn fetch_webdriver(
     url: &str,
     endpoint: &str,
     config: &std::sync::Arc<crate::configuration::Configuration>,
     backend_index: usize,
     connect_timeout: Duration,
     proxy: Option<String>,
+    source_name: &str,
 ) -> Option<BackendResponse> {
     use crate::features::webdriver_common::{WebDriverBrowser, WebDriverConfig};
 
     let start = Instant::now();
     let timeout = config.request_timeout.unwrap_or(Duration::from_secs(15));
 
-    // Build a WebDriverConfig pointing at the Servo endpoint.
+    // Build a WebDriverConfig pointing at the remote endpoint.
     let wd_config = WebDriverConfig {
         server_url: endpoint.to_string(),
         browser: WebDriverBrowser::Chrome, // Servo's WebDriver is browser-agnostic
@@ -862,11 +870,11 @@ pub async fn fetch_servo_webdriver(
     let mut controller = match controller_opt {
         Ok(Some(c)) => c,
         Ok(None) => {
-            log::warn!("Servo WebDriver connect failed ({})", endpoint);
+            log::warn!("{} WebDriver connect failed ({})", source_name, endpoint);
             return None;
         }
         Err(_) => {
-            log::warn!("Servo WebDriver connect timed out ({})", endpoint);
+            log::warn!("{} WebDriver connect timed out ({})", source_name, endpoint);
             return None;
         }
     };
@@ -877,12 +885,17 @@ pub async fn fetch_servo_webdriver(
     match tokio::time::timeout(timeout, driver.goto(url)).await {
         Ok(Ok(_)) => {}
         Ok(Err(e)) => {
-            log::warn!("Servo WebDriver navigate failed for {}: {:?}", url, e);
+            log::warn!(
+                "{} WebDriver navigate failed for {}: {:?}",
+                source_name,
+                url,
+                e
+            );
             controller.dispose();
             return None;
         }
         Err(_) => {
-            log::warn!("Servo WebDriver navigate timed out for {}", url);
+            log::warn!("{} WebDriver navigate timed out for {}", source_name, url);
             controller.dispose();
             return None;
         }
@@ -892,12 +905,17 @@ pub async fn fetch_servo_webdriver(
     let source = match tokio::time::timeout(Duration::from_secs(10), driver.source()).await {
         Ok(Ok(s)) => s,
         Ok(Err(e)) => {
-            log::warn!("Servo WebDriver source failed for {}: {:?}", url, e);
+            log::warn!(
+                "{} WebDriver source failed for {}: {:?}",
+                source_name,
+                url,
+                e
+            );
             controller.dispose();
             return None;
         }
         Err(_) => {
-            log::warn!("Servo WebDriver source timed out for {}", url);
+            log::warn!("{} WebDriver source timed out for {}", source_name, url);
             controller.dispose();
             return None;
         }
@@ -916,7 +934,7 @@ pub async fn fetch_servo_webdriver(
         ..Default::default()
     };
     let mut page = crate::page::build(url, res);
-    tag_page_source(&mut page, "servo");
+    tag_page_source(&mut page, source_name);
 
     Some(BackendResponse {
         page,
@@ -1020,11 +1038,12 @@ pub fn build_backend_futures(
         let sem = semaphore.clone();
 
         match proto {
-            #[cfg(feature = "lightpanda")]
+            #[cfg(feature = "chrome")]
             BackendProtocol::Cdp => {
                 let url = url.to_string();
                 let cfg = crawl_config.clone(); // Arc clone — cheap
                 let proxy = resolved_proxy.clone();
+                let source = backend_source_name(backend).to_string();
                 futs.push(Box::pin(async move {
                     // Acquire semaphore permit before doing any real work.
                     let _permit = if let Some(ref s) = sem {
@@ -1041,13 +1060,14 @@ pub fn build_backend_futures(
                         None
                     };
                     tokio::time::sleep(Duration::from_micros(jitter_us)).await;
-                    let response = fetch_lightpanda_cdp(
+                    let response = fetch_cdp(
                         &url,
                         &resolved_endpoint,
                         &cfg,
                         backend_index,
                         connect_timeout,
                         proxy,
+                        &source,
                     )
                     .await;
                     BackendResult {
@@ -1056,11 +1076,12 @@ pub fn build_backend_futures(
                     }
                 }));
             }
-            #[cfg(feature = "servo")]
+            #[cfg(feature = "webdriver")]
             BackendProtocol::WebDriver => {
                 let url = url.to_string();
                 let cfg = crawl_config.clone(); // Arc clone — cheap
                 let proxy = resolved_proxy.clone();
+                let source = backend_source_name(backend).to_string();
                 futs.push(Box::pin(async move {
                     // Acquire semaphore permit before doing any real work.
                     let _permit = if let Some(ref s) = sem {
@@ -1077,13 +1098,14 @@ pub fn build_backend_futures(
                         None
                     };
                     tokio::time::sleep(Duration::from_micros(jitter_us)).await;
-                    let response = fetch_servo_webdriver(
+                    let response = fetch_webdriver(
                         &url,
                         &resolved_endpoint,
                         &cfg,
                         backend_index,
                         connect_timeout,
                         proxy,
+                        &source,
                     )
                     .await;
                     BackendResult {
