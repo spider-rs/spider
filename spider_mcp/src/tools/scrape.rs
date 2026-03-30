@@ -59,6 +59,7 @@ pub async fn run(params: ScrapeParams) -> Result<String, String> {
     );
 
     website.configuration.return_page_links = true;
+    website.with_limit(1);
 
     let mut website = website.build().map_err(|_| "Invalid URL".to_string())?;
 
