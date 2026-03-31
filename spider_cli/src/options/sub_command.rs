@@ -26,4 +26,11 @@ pub enum Commands {
         #[clap(short, long)]
         target_destination: Option<String>,
     },
+    /// Authenticate with the Spider Cloud service. Stores your API key locally for remote crawls.
+    /// Sign up at https://spider.cloud to get an API key.
+    #[clap(alias = "auth", alias = "login")]
+    AUTHENTICATE {
+        /// Your Spider Cloud API key (e.g. sk-...). If omitted, reads from stdin.
+        api_key: Option<String>,
+    },
 }

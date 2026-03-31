@@ -21,6 +21,45 @@ use tokio::io::AsyncWriteExt;
 
 use serde_json::{json, Value};
 
+/// Path to the Spider Cloud credentials file (~/.spider/credentials).
+fn credentials_path() -> Option<std::path::PathBuf> {
+    dirs_home().map(|h| h.join(".spider").join("credentials"))
+}
+
+fn dirs_home() -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("USERPROFILE").map(std::path::PathBuf::from)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var_os("HOME").map(std::path::PathBuf::from)
+    }
+}
+
+/// Read a stored Spider Cloud API key from ~/.spider/credentials.
+fn load_api_key() -> Option<String> {
+    let path = credentials_path()?;
+    std::fs::read_to_string(&path)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Persist a Spider Cloud API key to ~/.spider/credentials.
+fn save_api_key(key: &str) -> std::io::Result<()> {
+    let path = credentials_path().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "cannot determine home directory",
+        )
+    })?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, key.trim())
+}
+
 use spider_transformations::transformation::content::{
     transform_content_input, ReturnFormat, TransformConfig, TransformInput,
 };
@@ -154,6 +193,45 @@ async fn main() {
         env_logger::init_from_env(env);
     }
 
+    // Handle the authenticate command early — it doesn't need a URL.
+    if let Some(Commands::AUTHENTICATE { api_key }) = &cli.command {
+        let key = if let Some(k) = api_key {
+            k.clone()
+        } else {
+            eprint!("Enter your Spider Cloud API key: ");
+            let mut buf = String::new();
+            std::io::stdin()
+                .read_line(&mut buf)
+                .expect("failed to read API key from stdin");
+            buf.trim().to_string()
+        };
+
+        if key.is_empty() {
+            eprintln!("Error: API key cannot be empty.");
+            std::process::exit(1);
+        }
+
+        match save_api_key(&key) {
+            Ok(()) => {
+                if let Some(path) = credentials_path() {
+                    println!("API key saved to {}", path.display());
+                } else {
+                    println!("API key saved.");
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to save API key: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    if cli.url.is_empty() {
+        eprintln!("Error: --url is required for crawl/scrape/download commands.");
+        std::process::exit(1);
+    }
+
     let url = if cli.url.starts_with("http") {
         cli.url
     } else {
@@ -259,6 +337,41 @@ async fn main() {
                 write_warcinfo: true,
                 ..Default::default()
             });
+    }
+
+    // Resolve Spider Cloud API key: --spider-cloud-key > SPIDER_CLOUD_API_KEY env > stored credentials.
+    {
+        let api_key = cli
+            .spider_cloud_key
+            .or_else(|| std::env::var("SPIDER_CLOUD_API_KEY").ok())
+            .or_else(load_api_key);
+
+        if let Some(key) = api_key {
+            #[cfg(feature = "spider_cloud")]
+            {
+                if cli.spider_cloud_browser {
+                    website.with_spider_browser(&key);
+                } else {
+                    use spider::configuration::{SpiderCloudConfig, SpiderCloudMode};
+
+                    let mode = match cli.spider_cloud_mode.as_deref() {
+                        Some("api") => SpiderCloudMode::Api,
+                        Some("unblocker") => SpiderCloudMode::Unblocker,
+                        Some("fallback") => SpiderCloudMode::Fallback,
+                        Some("smart") => SpiderCloudMode::Smart,
+                        _ => SpiderCloudMode::Proxy,
+                    };
+
+                    let config = SpiderCloudConfig::new(&key).with_mode(mode);
+                    website.with_spider_cloud_config(config);
+                }
+            }
+            #[cfg(not(feature = "spider_cloud"))]
+            {
+                let _ = key;
+                eprintln!("Warning: Spider Cloud API key provided but the `spider_cloud` feature is not enabled. Ignoring.");
+            }
+        }
     }
 
     let return_headers = cli.return_headers;
@@ -426,6 +539,7 @@ async fn main() {
                         }
                     }
                 }
+                Some(Commands::AUTHENTICATE { .. }) => unreachable!("handled above"),
                 None => ()
             }
         }
