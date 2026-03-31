@@ -397,6 +397,41 @@ zero_copy = ["dep:zerocopy"]
 inline-more = []
 
 [package.metadata.docs.rs]
-all-features = true
+# NOTE: not `all-features` because `agent_full` pulls in memvid → candle-core →
+# metal → objc_exception which requires an Obj-C compiler unavailable on docs.rs.
+features = [
+    "basic",
+    "chrome", "chrome_intercept", "chrome_headless_new", "chrome_screenshot",
+    "chrome_store_page", "chrome_stealth", "chrome_headed", "chrome_cpu",
+    "chrome_simd", "chrome_serde_stacker",
+    "smart",
+    "serde", "cookies", "cron", "encoding", "headers",
+    "real_browser", "spoof", "dns_cache",
+    "openai", "openai_slim_fit", "gemini", "cache_gemini", "cache_openai",
+    "cache", "cache_mem", "cache_chrome_hybrid", "cache_chrome_hybrid_mem",
+    "budget", "control", "sync", "fs",
+    "tracing", "simd", "firewall",
+    "webdriver", "webdriver_headed", "webdriver_stealth",
+    "webdriver_chrome", "webdriver_firefox", "webdriver_edge", "webdriver_screenshot",
+    "search", "search_serper", "search_brave", "search_bing", "search_tavily",
+    "agent", "agent_chrome", "agent_webdriver", "agent_openai",
+    "agent_skills", "agent_fs",
+    "agent_search_serper", "agent_search_brave", "agent_search_bing", "agent_search_tavily",
+    "socks", "regex", "glob", "ua_generator",
+    "decentralized", "decentralized_headers",
+    "sitemap", "full_resources", "remote_addr",
+    "reqwest_json", "reqwest_hickory_dns", "reqwest_multipart",
+    "string_interner_buffer_backend", "string_interner_string_backend", "string_interner_bucket_backend",
+    "page_error_status_details", "extra_information",
+    "rate_limit", "request_coalesce", "adaptive_concurrency",
+    "priority_frontier", "hedge",
+    "parallel_backends", "lightpanda", "servo", "parallel_backends_full",
+    "cowboy", "h2_multiplex", "robots_cache",
+    "llm_json", "wreq",
+    "balance", "time", "cmd",
+    "auto_throttle", "etag_cache", "warc",
+    "inline-more", "zero_copy",
+    "spider_cloud",
+]
 rustdoc-args = ["--cfg", "docsrs"]
 cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
