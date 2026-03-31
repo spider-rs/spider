@@ -4375,6 +4375,7 @@ pub async fn handle_response_bytes(
                     }
 
                     if limit > 0 && data.len() + text.len() > limit {
+                        content_truncated = true;
                         break;
                     }
 
@@ -4499,6 +4500,7 @@ where
                     let bytes_len = res_bytes.len();
 
                     if limit > 0 && data_len + bytes_len > limit {
+                        content_truncated = true;
                         break;
                     }
 

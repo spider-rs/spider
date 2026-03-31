@@ -123,6 +123,7 @@ macro_rules! chrome_page_fetch {
 
                 let mut retry_count = $shared.6.retry.max(CHROME_MIN_RETRY);
                 let mut attempt: u32 = 0;
+                page.proxy_configured = $shared.6.proxies.is_some();
                 while page.needs_retry() && retry_count > 0 {
                     retry_count -= 1;
                     // Exponential backoff with jitter between retries.
@@ -182,6 +183,8 @@ macro_rules! chrome_page_fetch {
                                 $target_url,
                                 _elapsed
                             );
+                            page.should_retry = false;
+                            break;
                         }
                     } else {
                         log::warn!(
@@ -2980,6 +2983,7 @@ impl Website {
         let mut domain_parsed = self.domain_parsed.take();
 
         let mut retry_count = self.configuration.retry;
+        let mut attempt: u32 = 0;
         let mut last_err: Option<std::io::Error> = None;
 
         let build_error_page = |status: StatusCode, _err: std::io::Error| {
@@ -3043,11 +3047,10 @@ impl Website {
 
                 if page.needs_retry() && retry_count > 0 {
                     retry_count -= 1;
-                    if let Some(timeout) = page.get_timeout() {
-                        tokio::time::sleep(timeout).await;
-                    } else {
-                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-                    }
+                    let status_delay = page.get_timeout().unwrap_or_default();
+                    let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
+                    tokio::time::sleep(status_delay.max(backoff)).await;
+                    attempt += 1;
                     continue;
                 }
 
@@ -3198,17 +3201,20 @@ impl Website {
 
             let mut retry_count = self.configuration.retry;
             let domains_caseless = &self.configuration.external_domains_caseless;
+            page.proxy_configured = self.configuration.proxies.is_some();
+            let mut attempt: u32 = 0;
 
             while page.needs_retry() && retry_count > 0 {
                 retry_count -= 1;
-                if let Some(timeout) = page.get_timeout() {
-                    tokio::time::sleep(timeout).await;
-                }
+                let status_delay = page.get_timeout().unwrap_or_default();
+                let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
+                tokio::time::sleep(status_delay.max(backoff)).await;
+                attempt += 1;
 
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                     let mut domain_parsed_clone = self.domain_parsed.clone();
 
-                    if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                    if let Err(elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                         page = Page::new_page_streaming(
                             url,
                             client,
@@ -3226,7 +3232,11 @@ impl Website {
                     })
                     .await
                     {
-                        log::info!("backoff gateway timeout exceeded {elasped}");
+                        log::info!("backoff gateway timeout exceeded {elapsed}");
+                        // Timeout fired — page was NOT reassigned. Clear should_retry
+                        // to stop the loop from burning remaining retries on a stale page.
+                        page.should_retry = false;
+                        break;
                     }
 
                     self.domain_parsed = domain_parsed_clone;
@@ -3753,12 +3763,13 @@ impl Website {
             };
 
             let mut retry_count = self.configuration.retry;
+            page.proxy_configured = self.configuration.proxies.is_some();
 
             if let Some(final_redirect_destination) = &page.final_redirect_destination {
                 if final_redirect_destination == "chrome-error://chromewebdata/"
                     && page.status_code.is_success()
                     && page.is_empty()
-                    && self.configuration.proxies.is_some()
+                    && page.proxy_configured
                 {
                     page.error_status = Some("Invalid proxy configuration.".into());
                     page.should_retry = true;
@@ -3766,11 +3777,13 @@ impl Website {
                 }
             }
 
+            let mut attempt: u32 = 0;
             while page.needs_retry() && retry_count > 0 {
                 retry_count -= 1;
-                if let Some(timeout) = page.get_timeout() {
-                    tokio::time::sleep(timeout).await;
-                }
+                let status_delay = page.get_timeout().unwrap_or_default();
+                let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
+                tokio::time::sleep(status_delay.max(backoff)).await;
+                attempt += 1;
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                     if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                         let next_page = Page::new(
@@ -3963,12 +3976,13 @@ impl Website {
             .await;
 
             let mut retry_count = self.configuration.retry;
+            page.proxy_configured = self.configuration.proxies.is_some();
 
             if let Some(final_redirect_destination) = &page.final_redirect_destination {
                 if final_redirect_destination == "chrome-error://chromewebdata/"
                     && page.status_code.is_success()
                     && page.is_empty()
-                    && self.configuration.proxies.is_some()
+                    && page.proxy_configured
                 {
                     page.error_status = Some("Invalid proxy configuration.".into());
                     page.should_retry = true;
@@ -3976,11 +3990,13 @@ impl Website {
                 }
             }
 
+            let mut attempt: u32 = 0;
             while page.needs_retry() && retry_count > 0 {
                 retry_count -= 1;
-                if let Some(timeout) = page.get_timeout() {
-                    tokio::time::sleep(timeout).await;
-                }
+                let status_delay = page.get_timeout().unwrap_or_default();
+                let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
+                tokio::time::sleep(status_delay.max(backoff)).await;
+                attempt += 1;
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                     if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                         let next_page = Page::new(
@@ -4136,12 +4152,15 @@ impl Website {
                 Page::new_page_webdriver(url.unwrap_or(self.url.inner()), driver, timeout).await;
 
             let mut retry_count = self.configuration.retry;
+            page.proxy_configured = self.configuration.proxies.is_some();
+            let mut attempt: u32 = 0;
 
             while page.needs_retry() && retry_count > 0 {
                 retry_count -= 1;
-                if let Some(timeout_duration) = page.get_timeout() {
-                    tokio::time::sleep(timeout_duration).await;
-                }
+                let status_delay = page.get_timeout().unwrap_or_default();
+                let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
+                tokio::time::sleep(status_delay.max(backoff)).await;
+                attempt += 1;
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                     if let Err(elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                         let next_page =
@@ -4482,17 +4501,20 @@ impl Website {
 
                 let mut retry_count = self.configuration.retry;
                 let domains_caseless = &self.configuration.external_domains_caseless;
+                page.proxy_configured = self.configuration.proxies.is_some();
+                let mut attempt: u32 = 0;
 
                 while page.needs_retry() && retry_count > 0 {
                     retry_count -= 1;
-                    if let Some(timeout) = page.get_timeout() {
-                        tokio::time::sleep(timeout).await;
-                    }
+                    let status_delay = page.get_timeout().unwrap_or_default();
+                    let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
+                    tokio::time::sleep(status_delay.max(backoff)).await;
+                    attempt += 1;
 
                     if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                         let mut domain_parsed_clone = self.domain_parsed.clone();
 
-                        if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                        if let Err(elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                             page = Page::new_page_streaming(
                                 &url,
                                 client,
@@ -4510,7 +4532,9 @@ impl Website {
                         })
                         .await
                         {
-                            log::info!("backoff gateway timeout exceeded {elasped}");
+                            log::info!("backoff gateway timeout exceeded {elapsed}");
+                            page.should_retry = false;
+                            break;
                         }
 
                         self.domain_parsed = domain_parsed_clone;
@@ -4613,12 +4637,15 @@ impl Website {
             };
 
             let mut retry_count = self.configuration.retry;
+            page.proxy_configured = self.configuration.proxies.is_some();
+            let mut attempt: u32 = 0;
 
             while page.needs_retry() && retry_count > 0 {
                 retry_count -= 1;
-                if let Some(timeout) = page.get_timeout() {
-                    tokio::time::sleep(timeout).await;
-                }
+                let status_delay = page.get_timeout().unwrap_or_default();
+                let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
+                tokio::time::sleep(status_delay.max(backoff)).await;
+                attempt += 1;
                 let client_error = page.status_code.is_client_error();
 
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
@@ -6144,13 +6171,14 @@ impl Website {
                                     };
 
                                     let mut retry_count = shared.5;
+                                    let mut attempt: u32 = 0;
 
                                     while page.needs_retry() && retry_count > 0 {
                                         retry_count -= 1;
-
-                                        if let Some(timeout) = page.get_timeout() {
-                                            tokio::time::sleep(timeout).await;
-                                        }
+                                        let status_delay = page.get_timeout().unwrap_or_default();
+                                        let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
+                                        tokio::time::sleep(status_delay.max(backoff)).await;
+                                        attempt += 1;
 
                                         let retry_client = match &rotator {
                                             Some(r) => r.next(),
@@ -6900,6 +6928,8 @@ impl Website {
                                                                         page = p;
                                                                     }).await {
                                                                         log::info!("{target_url} chrome retry backoff timeout exceeded {_elapsed}");
+                                                                        page.should_retry = false;
+                                                                        break;
                                                                     }
                                                                 } else {
                                                                     log::warn!("{target_url} chrome retry tab creation failed, attempt {attempt}");
@@ -7392,13 +7422,14 @@ impl Website {
                                     };
 
                                     let mut retry_count = shared.5;
+                                    let mut attempt: u32 = 0;
 
                                     while page.needs_retry() && retry_count > 0 {
                                         retry_count -= 1;
-
-                                        if let Some(timeout) = page.get_timeout() {
-                                            tokio::time::sleep(timeout).await;
-                                        }
+                                        let status_delay = page.get_timeout().unwrap_or_default();
+                                        let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
+                                        tokio::time::sleep(status_delay.max(backoff)).await;
+                                        attempt += 1;
 
                                         let retry_client = match &rotator {
                                             Some(r) => r.next(),
@@ -8192,12 +8223,14 @@ impl Website {
                                             .await;
 
                                             let mut retry_count = shared.6.retry;
+                                            let mut attempt: u32 = 0;
 
                                             while page.needs_retry() && retry_count > 0 {
                                                 retry_count -= 1;
-                                                if let Some(timeout_duration) = page.get_timeout() {
-                                                    tokio::time::sleep(timeout_duration).await;
-                                                }
+                                                let status_delay = page.get_timeout().unwrap_or_default();
+                                                let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
+                                                tokio::time::sleep(status_delay.max(backoff)).await;
+                                                attempt += 1;
                                                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                                                     if let Err(elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                                                         let p = Page::new_page_webdriver(
@@ -8208,6 +8241,8 @@ impl Website {
                                                         page = p;
                                                     }).await {
                                                         log::info!("{target_url} backoff gateway timeout exceeded {elapsed}");
+                                                        page.should_retry = false;
+                                                        break;
                                                     }
                                                 } else {
                                                     page = Page::new_page_webdriver(
@@ -8618,13 +8653,14 @@ impl Website {
                                     .await;
 
                                     let mut retry_count = shared.4.retry;
+                                    let mut attempt: u32 = 0;
 
                                     while page.needs_retry() && retry_count > 0 {
                                         retry_count -= 1;
-
-                                        if let Some(timeout) = page.get_timeout() {
-                                            tokio::time::sleep(timeout).await;
-                                        }
+                                        let status_delay = page.get_timeout().unwrap_or_default();
+                                        let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
+                                        tokio::time::sleep(status_delay.max(backoff)).await;
+                                        attempt += 1;
 
                                         if page.status_code == StatusCode::GATEWAY_TIMEOUT {
 
@@ -8652,6 +8688,8 @@ impl Website {
                                             }).await
                                         {
                                             log::info!("backoff gateway timeout exceeded {elasped}");
+                                            page.should_retry = false;
+                                            break;
                                         }
 
                                         } else {
@@ -9753,11 +9791,15 @@ impl Website {
                                     .await;
 
                                     let mut retry_count = retry;
+                                    let mut attempt: u32 = 0;
 
                                     while page.needs_retry() && retry_count > 0 {
-                                        if let Some(timeout) = page.get_timeout() {
-                                            tokio::time::sleep(timeout).await;
-                                        }
+                                        let status_delay = page.get_timeout().unwrap_or_default();
+                                        let backoff = crate::utils::backoff::backoff_delay(
+                                            attempt, 1_000, 60_000,
+                                        );
+                                        tokio::time::sleep(status_delay.max(backoff)).await;
+                                        attempt += 1;
                                         page = Page::new_page_with_cache(
                                             link.inner(),
                                             &client,

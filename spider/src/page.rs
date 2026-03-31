@@ -658,6 +658,9 @@ pub struct Page {
     /// Whether the response content was truncated due to a stream error,
     /// chunk idle timeout, or Content-Length mismatch.
     pub content_truncated: bool,
+    /// Whether a proxy was configured for this request.
+    /// When true, 401 responses are retried (proxy rotation may fix auth).
+    pub proxy_configured: bool,
     #[cfg(feature = "parallel_backends")]
     /// Identifies which backend produced this page (e.g. "primary",
     /// "lightpanda", "servo"). `None` when parallel backends are not active.
@@ -743,6 +746,9 @@ pub struct Page {
     /// Whether the response content was truncated due to a stream error,
     /// chunk idle timeout, or Content-Length mismatch.
     pub content_truncated: bool,
+    /// Whether a proxy was configured for this request.
+    /// When true, 401 responses are retried (proxy rotation may fix auth).
+    pub proxy_configured: bool,
 }
 
 /// Assign properties from a new page.
@@ -1177,14 +1183,26 @@ fn extract_specific_error<'a, T: std::error::Error + 'static>(
 }
 
 /// Determine if the response is goaway and should retry.
+/// Covers transient HTTP/2 errors where a retry is likely to succeed:
+/// - GO_AWAY + NO_ERROR: graceful server shutdown (load balancer rotation)
+/// - REFUSED_STREAM: server rejected the stream before processing
+/// - ENHANCE_YOUR_CALM: server-side rate limiting (HTTP/2 equivalent of 429)
+/// - INTERNAL_ERROR: transient server error
 #[cfg(not(feature = "decentralized"))]
 fn should_attempt_retry(error: &(dyn std::error::Error + 'static)) -> bool {
     if let Some(e) = extract_specific_error::<h2::Error>(error) {
         if e.is_go_away() && e.is_remote() && e.reason() == Some(h2::Reason::NO_ERROR) {
             return true;
         }
-        if e.is_remote() && e.reason() == Some(h2::Reason::REFUSED_STREAM) {
-            return true;
+        if e.is_remote() {
+            if let Some(reason) = e.reason() {
+                return matches!(
+                    reason,
+                    h2::Reason::REFUSED_STREAM
+                        | h2::Reason::ENHANCE_YOUR_CALM
+                        | h2::Reason::INTERNAL_ERROR
+                );
+            }
         }
     }
     false
@@ -1200,7 +1218,7 @@ fn get_error_status_base(
         Some(e) => match e {
             Ok(_) => None,
             Err(er) => {
-                if er.is_status() || er.is_connect() || er.is_timeout() {
+                if er.is_connect() || er.is_timeout() {
                     *should_retry = true;
                 }
                 if !*should_retry && should_attempt_retry(&er) {
@@ -1209,7 +1227,6 @@ fn get_error_status_base(
                 if let Some(status_code) = er.status() {
                     let retry = match status_code {
                         StatusCode::TOO_MANY_REQUESTS
-                        | StatusCode::UNAUTHORIZED
                         | StatusCode::INTERNAL_SERVER_ERROR
                         | StatusCode::BAD_GATEWAY
                         | StatusCode::SERVICE_UNAVAILABLE
@@ -1300,7 +1317,7 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
                 StatusCode::TOO_MANY_REQUESTS | StatusCode::FORBIDDEN | StatusCode::REQUEST_TIMEOUT
             ));
 
-    let should_retry_resource = resource_found && !success;
+    let should_retry_resource = resource_found && !success && status != StatusCode::UNAUTHORIZED;
 
     // Success status but no usable content — the crawl likely failed silently
     // (e.g. upstream returned 200 with empty body or blank HTML shell).
@@ -1590,13 +1607,14 @@ pub(crate) fn metadata_handlers<'h>(
 
 impl Page {
     /// Whether the page needs a retry based on `should_retry`, a retryable status code,
-    /// or a truncated response (upstream stream ended prematurely).
-    /// This ensures transient errors (599, 598, 5xx, 429, 408) and incomplete
-    /// responses always get retried even when `should_retry` was not set by the
-    /// error classification path.
+    /// a truncated response (upstream stream ended prematurely), or a proxy-retryable
+    /// 401 (when `proxy_configured` is set, proxy rotation may resolve the auth failure).
     #[inline]
     pub fn needs_retry(&self) -> bool {
-        self.should_retry || self.content_truncated || is_retryable_status(self.status_code)
+        self.should_retry
+            || self.content_truncated
+            || is_retryable_status(self.status_code)
+            || (self.proxy_configured && self.status_code == StatusCode::UNAUTHORIZED)
     }
 
     /// Instantiate a new page and gather the html repro of standard fetch_page_html.
@@ -6711,6 +6729,75 @@ fn test_validate_empty_html_shell() {
 fn test_validate_empty_valid_content() {
     let valid = b"<html><head><title>Test</title></head><body><p>Hello</p></body></html>".to_vec();
     assert!(validate_empty(&Some(valid), true), "valid HTML should pass");
+}
+
+// ---------------------------------------------------------------------------
+// 401 proxy-conditional retry
+// ---------------------------------------------------------------------------
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_401_not_retried_without_proxy() {
+    let res = PageResponse {
+        status_code: StatusCode::UNAUTHORIZED,
+        content: Some(b"unauthorized".to_vec()),
+        ..Default::default()
+    };
+    let page = build("https://example.com", res);
+    assert!(
+        !page.needs_retry(),
+        "401 without proxy_configured should NOT trigger retry"
+    );
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_401_retried_with_proxy() {
+    let res = PageResponse {
+        status_code: StatusCode::UNAUTHORIZED,
+        content: Some(b"unauthorized".to_vec()),
+        ..Default::default()
+    };
+    let mut page = build("https://example.com", res);
+    page.proxy_configured = true;
+    assert!(
+        page.needs_retry(),
+        "401 with proxy_configured should trigger retry"
+    );
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_401_proxy_flag_does_not_affect_other_client_errors() {
+    // 404 (with content) should NOT be retried even with proxy
+    let res = PageResponse {
+        status_code: StatusCode::NOT_FOUND,
+        content: Some(b"<html><body>Not Found</body></html>".to_vec()),
+        ..Default::default()
+    };
+    let mut page = build("https://example.com/missing", res);
+    page.proxy_configured = true;
+    assert!(
+        !page.needs_retry(),
+        "404 should NOT be retried even with proxy"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// needs_retry integration: proxy + other flags
+// ---------------------------------------------------------------------------
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_needs_retry_server_error_regardless_of_proxy() {
+    let res = PageResponse {
+        status_code: StatusCode::INTERNAL_SERVER_ERROR,
+        content: Some(Default::default()),
+        ..Default::default()
+    };
+    let page = build("https://example.com", res);
+    // 500 is retryable regardless of proxy config
+    assert!(page.needs_retry(), "500 retried without proxy");
 }
 
 // ---------------------------------------------------------------------------
