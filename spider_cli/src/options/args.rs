@@ -1,7 +1,15 @@
 use crate::options::sub_command::Commands;
 use clap::{ArgAction, Parser};
 
-/// program to crawl a website and gather valid web urls.
+/// The fastest web crawler CLI. Crawl, scrape, or download any website.
+///
+/// Authenticate with [Spider Cloud](https://spider.cloud) for remote crawls:
+///
+/// ```sh
+/// spider authenticate YOUR_API_KEY
+/// ```
+///
+/// Sign up at <https://spider.cloud> to get an API key.
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 #[command(arg_required_else_help = true)]
@@ -10,7 +18,7 @@ pub struct Cli {
     #[clap(subcommand)]
     pub command: Option<Commands>,
     /// The website URL to crawl.
-    #[clap(short, long)]
+    #[clap(short, long, default_value = "")]
     pub url: String,
     /// Respect robots.txt file
     #[clap(short, long)]
@@ -67,11 +75,15 @@ pub struct Cli {
     #[clap(short, long)]
     pub proxy_url: Option<String>,
     /// Spider Cloud API key. Sign up at https://spider.cloud for an API key.
+    /// Falls back to the SPIDER_CLOUD_API_KEY env var, then stored credentials from `spider authenticate`.
     #[clap(long)]
     pub spider_cloud_key: Option<String>,
     /// Spider Cloud mode: proxy (default), api, unblocker, fallback, or smart.
     #[clap(long, default_value = "proxy")]
     pub spider_cloud_mode: Option<String>,
+    /// Use Spider Browser Cloud (remote headless CDP) instead of the HTTP/proxy cloud.
+    #[clap(long)]
+    pub spider_cloud_browser: bool,
     /// Wait for network request to be idle within a time frame period (500ms no network connections) with an optional timeout in milliseconds.
     #[clap(long)]
     pub wait_for_idle_network: Option<u64>,
