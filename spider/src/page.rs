@@ -6386,6 +6386,334 @@ fn test_normal_page_not_detected_as_chrome_error() {
 }
 
 // ---------------------------------------------------------------------------
+// is_retryable_status — exhaustive coverage
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_retryable_status_server_errors() {
+    // All 5xx except 525 are retryable
+    for code in [500, 501, 502, 503, 504, 521, 522, 523, 524, 598, 599] {
+        let status = StatusCode::from_u16(code).unwrap();
+        assert!(is_retryable_status(status), "{code} should be retryable");
+    }
+}
+
+#[test]
+fn test_retryable_status_rate_limit_and_timeout() {
+    assert!(
+        is_retryable_status(StatusCode::TOO_MANY_REQUESTS),
+        "429 retryable"
+    );
+    assert!(
+        is_retryable_status(StatusCode::REQUEST_TIMEOUT),
+        "408 retryable"
+    );
+}
+
+#[test]
+fn test_non_retryable_status_dns_error() {
+    let dns = StatusCode::from_u16(525).unwrap();
+    assert!(!is_retryable_status(dns), "525 DNS must never be retried");
+}
+
+#[test]
+fn test_non_retryable_client_errors() {
+    for code in [400, 401, 403, 404, 405, 409, 410, 422, 451] {
+        let status = StatusCode::from_u16(code).unwrap();
+        assert!(
+            !is_retryable_status(status),
+            "{code} should NOT be retryable"
+        );
+    }
+}
+
+#[test]
+fn test_non_retryable_success_codes() {
+    for code in [200, 201, 204, 301, 302, 304] {
+        let status = StatusCode::from_u16(code).unwrap();
+        assert!(
+            !is_retryable_status(status),
+            "{code} should NOT be retryable"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// needs_retry — combinatorial coverage
+// ---------------------------------------------------------------------------
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_needs_retry_should_retry_flag_alone() {
+    let res = PageResponse {
+        status_code: StatusCode::OK,
+        content: Some(b"<html><body>ok</body></html>".to_vec()),
+        ..Default::default()
+    };
+    let mut page = build("https://example.com", res);
+    assert!(!page.needs_retry(), "clean 200 page should not need retry");
+
+    page.should_retry = true;
+    assert!(page.needs_retry(), "should_retry flag forces retry");
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_needs_retry_content_truncated_alone() {
+    let res = PageResponse {
+        status_code: StatusCode::OK,
+        content: Some(b"<html><body>ok</body></html>".to_vec()),
+        ..Default::default()
+    };
+    let mut page = build("https://example.com", res);
+    page.content_truncated = true;
+    assert!(page.needs_retry(), "truncated content forces retry");
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_needs_retry_retryable_status_alone() {
+    let res = PageResponse {
+        status_code: StatusCode::BAD_GATEWAY,
+        content: Some(Default::default()),
+        ..Default::default()
+    };
+    let page = build("https://example.com", res);
+    // Even if should_retry wasn't explicitly set by build(), needs_retry
+    // catches it via is_retryable_status.
+    assert!(page.needs_retry(), "502 status triggers needs_retry");
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_needs_retry_dns_error_not_retried() {
+    let res = PageResponse {
+        status_code: StatusCode::from_u16(525).unwrap(),
+        content: None,
+        ..Default::default()
+    };
+    let page = build("https://nonexistent.invalid", res);
+    // DNS errors (525) are explicitly excluded from is_retryable_status AND
+    // should not set should_retry either.
+    assert!(!page.needs_retry(), "DNS 525 must never trigger retry");
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_needs_retry_client_error_no_flags() {
+    let res = PageResponse {
+        status_code: StatusCode::NOT_FOUND,
+        content: Some(b"<html>not found</html>".to_vec()),
+        ..Default::default()
+    };
+    let page = build("https://example.com/missing", res);
+    assert!(!page.needs_retry(), "404 should not need retry");
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_needs_retry_multiple_flags_combined() {
+    let res = PageResponse {
+        status_code: StatusCode::SERVICE_UNAVAILABLE,
+        content: Some(Default::default()),
+        ..Default::default()
+    };
+    let mut page = build("https://example.com", res);
+    page.content_truncated = true;
+    // Both retryable status AND truncated — still just needs_retry = true
+    assert!(
+        page.needs_retry(),
+        "multiple retry signals still returns true"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// is_chrome_error_page — edge cases
+// ---------------------------------------------------------------------------
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_chrome_error_page_under_500_bytes() {
+    let short = b"<script>var loadTimeDataRaw = {\"errorCode\":\"ERR_FAIL\"};</script></html>";
+    assert!(
+        !is_chrome_error_page(short),
+        "content < 500 bytes should be rejected"
+    );
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_chrome_error_page_missing_tail() {
+    let padding = "x".repeat(1000);
+    let html = format!(
+        "<html><style>{padding}</style>\
+         <script>var loadTimeDataRaw = {{\"errorCode\":\"ERR_FAIL\"}};</script></body></html>"
+    );
+    assert!(
+        !is_chrome_error_page(html.as_bytes()),
+        "wrong tail (has </body>) should not match"
+    );
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_chrome_error_page_missing_error_code_needle() {
+    let padding = "x".repeat(1000);
+    let html = format!(
+        "<html><style>{padding}</style>\
+         <script>var loadTimeDataRaw = {{\"someKey\":\"value\"}};</script></html>"
+    );
+    assert!(
+        !is_chrome_error_page(html.as_bytes()),
+        "missing errorCode needle should not match"
+    );
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_chrome_error_page_trailing_whitespace() {
+    let padding = "x".repeat(1000);
+    let html = format!(
+        "<html><style>{padding}</style>\
+         <script>var loadTimeDataRaw = {{\"errorCode\":\"ERR_TUNNEL_CONNECTION_FAILED\"}};</script></html>\n\r\n  "
+    );
+    assert!(
+        is_chrome_error_page(html.as_bytes()),
+        "trailing whitespace should be trimmed"
+    );
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_chrome_error_page_needle_outside_4kb_window() {
+    // Put the errorCode at the start, then pad >4KB before the tail.
+    // The needle should NOT be found because we only scan the last 4KB.
+    let error_part = r#"<script>var loadTimeDataRaw = {"errorCode":"ERR_FAIL"};</script>"#;
+    let padding = "x".repeat(5000); // >4KB of padding after needle
+    let html = format!(
+        "<html>{error_part}<style>{padding}</style>\
+         <script>var more = {{}};</script></html>"
+    );
+    assert!(
+        !is_chrome_error_page(html.as_bytes()),
+        "needle outside last 4KB window should not match"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// get_timeout — status-specific delay values
+// ---------------------------------------------------------------------------
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_get_timeout_rate_limit() {
+    let res = PageResponse {
+        status_code: StatusCode::TOO_MANY_REQUESTS,
+        content: None,
+        ..Default::default()
+    };
+    let page = build("https://example.com", res);
+    let timeout = page.get_timeout();
+    assert_eq!(
+        timeout,
+        Some(std::time::Duration::from_millis(2_500)),
+        "429 → 2500ms"
+    );
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_get_timeout_gateway_timeout() {
+    let res = PageResponse {
+        status_code: StatusCode::GATEWAY_TIMEOUT,
+        content: None,
+        ..Default::default()
+    };
+    let page = build("https://example.com", res);
+    let timeout = page.get_timeout();
+    assert_eq!(
+        timeout,
+        Some(std::time::Duration::from_millis(1_500)),
+        "504 → 1500ms"
+    );
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_get_timeout_proxy_errors() {
+    for code in [598u16, 599] {
+        let res = PageResponse {
+            status_code: StatusCode::from_u16(code).unwrap(),
+            content: None,
+            ..Default::default()
+        };
+        let page = build("https://example.com", res);
+        let timeout = page.get_timeout();
+        assert_eq!(
+            timeout,
+            Some(std::time::Duration::from_millis(500)),
+            "{code} → 500ms"
+        );
+    }
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_get_timeout_normal_status_none() {
+    for code in [200u16, 301, 404, 500, 502, 503] {
+        let res = PageResponse {
+            status_code: StatusCode::from_u16(code).unwrap(),
+            content: Some(b"<html></html>".to_vec()),
+            ..Default::default()
+        };
+        let page = build("https://example.com", res);
+        let timeout = page.get_timeout();
+        assert_eq!(timeout, None, "{code} should have no special timeout");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// validate_empty — edge cases
+// ---------------------------------------------------------------------------
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_validate_empty_none_content() {
+    assert!(!validate_empty(&None, true), "None content is empty");
+    assert!(
+        !validate_empty(&None, false),
+        "None content is empty regardless of success"
+    );
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_validate_empty_zero_length() {
+    assert!(!validate_empty(&Some(vec![]), true), "empty vec is empty");
+    assert!(
+        !validate_empty(&Some(vec![]), false),
+        "empty vec is empty regardless of success"
+    );
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_validate_empty_html_shell() {
+    let shell = b"<html><head></head><body></body></html>".to_vec();
+    assert!(
+        !validate_empty(&Some(shell), true),
+        "empty HTML shell should be rejected"
+    );
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_validate_empty_valid_content() {
+    let valid = b"<html><head><title>Test</title></head><body><p>Hello</p></body></html>".to_vec();
+    assert!(validate_empty(&Some(valid), true), "valid HTML should pass");
+}
+
+// ---------------------------------------------------------------------------
 // Trait implementations
 // ---------------------------------------------------------------------------
 

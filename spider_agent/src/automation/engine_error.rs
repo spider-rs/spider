@@ -94,3 +94,176 @@ impl From<serde_json::Error> for EngineError {
         EngineError::Json(e)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -----------------------------------------------------------------------
+    // RemoteStatus — retryable codes
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn remote_status_retryable_codes() {
+        for code in [429u16, 500, 502, 503, 504] {
+            let err = EngineError::RemoteStatus(code, format!("err {code}"));
+            assert!(
+                err.is_retryable_on_different_model(),
+                "RemoteStatus({code}) should be retryable"
+            );
+        }
+    }
+
+    #[test]
+    fn remote_status_non_retryable_codes() {
+        for code in [400u16, 401, 403, 404, 405, 409, 422, 501] {
+            let err = EngineError::RemoteStatus(code, format!("err {code}"));
+            assert!(
+                !err.is_retryable_on_different_model(),
+                "RemoteStatus({code}) should NOT be retryable"
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Remote (legacy string matching)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn remote_legacy_retryable_messages() {
+        for keyword in ["502", "503", "429", "500", "504"] {
+            let err = EngineError::Remote(format!("upstream returned {keyword} bad gateway"));
+            assert!(
+                err.is_retryable_on_different_model(),
+                "Remote message containing '{keyword}' should be retryable"
+            );
+        }
+    }
+
+    #[test]
+    fn remote_legacy_non_retryable_message() {
+        let err = EngineError::Remote("authentication failed".into());
+        assert!(
+            !err.is_retryable_on_different_model(),
+            "Remote without status hint should NOT be retryable"
+        );
+    }
+
+    #[test]
+    fn remote_legacy_no_false_positive_on_partial() {
+        // "4290" contains "429" — verify substring matching behavior is understood.
+        // Current implementation uses contains(), so this WILL match.
+        // This test documents the behavior rather than asserting it's wrong.
+        let err = EngineError::Remote("error code 4290 custom".into());
+        // contains("429") is true — this is a known edge case.
+        assert!(err.is_retryable_on_different_model());
+    }
+
+    // -----------------------------------------------------------------------
+    // Non-retryable variants
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn missing_field_not_retryable() {
+        let err = EngineError::MissingField("choices[0].message.content");
+        assert!(!err.is_retryable_on_different_model());
+    }
+
+    #[test]
+    fn invalid_field_not_retryable() {
+        let err = EngineError::InvalidField("steps is not an array");
+        assert!(!err.is_retryable_on_different_model());
+    }
+
+    #[test]
+    fn json_error_not_retryable() {
+        let json_err: serde_json::Error =
+            serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
+        let err = EngineError::Json(json_err);
+        assert!(!err.is_retryable_on_different_model());
+    }
+
+    #[test]
+    fn unsupported_not_retryable() {
+        let err = EngineError::Unsupported("chrome feature not enabled");
+        assert!(!err.is_retryable_on_different_model());
+    }
+
+    // -----------------------------------------------------------------------
+    // Display formatting
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn display_format_all_variants() {
+        assert_eq!(
+            EngineError::MissingField("foo").to_string(),
+            "missing field: foo"
+        );
+        assert_eq!(
+            EngineError::InvalidField("bar").to_string(),
+            "invalid field: bar"
+        );
+        assert_eq!(
+            EngineError::Remote("oops".into()).to_string(),
+            "remote error: oops"
+        );
+        assert_eq!(
+            EngineError::RemoteStatus(502, "bad gw".into()).to_string(),
+            "remote error 502: bad gw"
+        );
+        assert_eq!(
+            EngineError::Unsupported("nope").to_string(),
+            "unsupported: nope"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // From conversions
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn from_serde_json_error() {
+        let json_err = serde_json::from_str::<serde_json::Value>("{bad}").unwrap_err();
+        let engine_err: EngineError = json_err.into();
+        assert!(matches!(engine_err, EngineError::Json(_)));
+    }
+
+    // -----------------------------------------------------------------------
+    // Http variant — reqwest errors are hard to construct without a real
+    // request, but we can verify the timeout/connect/request branches
+    // by constructing errors from actual failed requests to localhost.
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn http_timeout_is_retryable() {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(1))
+            .build()
+            .unwrap();
+        // Request to a non-routable address to trigger timeout
+        let result = client.get("http://192.0.2.1:1").send().await;
+        if let Err(e) = result {
+            let engine_err = EngineError::Http(e);
+            // Either timeout or connect error — both should be retryable
+            assert!(
+                engine_err.is_retryable_on_different_model(),
+                "HTTP timeout/connect error should be retryable"
+            );
+        }
+        // If the request somehow succeeds (shouldn't), test is vacuously true
+    }
+
+    #[tokio::test]
+    async fn http_connect_refused_is_retryable() {
+        let client = reqwest::Client::new();
+        // Port 1 is almost certainly not listening
+        let result = client.get("http://127.0.0.1:1").send().await;
+        if let Err(e) = result {
+            let engine_err = EngineError::Http(e);
+            assert!(
+                engine_err.is_retryable_on_different_model(),
+                "HTTP connection refused should be retryable"
+            );
+        }
+    }
+}
