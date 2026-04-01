@@ -76,7 +76,10 @@ pub mod zero_copy;
 #[cfg(feature = "chrome")]
 use crate::features::automation::RemoteMultimodalConfigs;
 use crate::{
-    page::{AntiBotTech, Metadata, STREAMING_CHUNK_SIZE},
+    page::{
+        AntiBotTech, Metadata, REWRITER_YIELD_INTERVAL, REWRITER_YIELD_THRESHOLD,
+        STREAMING_CHUNK_SIZE,
+    },
     RelativeSelectors,
 };
 use abs::parse_absolute_url;
@@ -7110,14 +7113,16 @@ pub(crate) async fn normalize_html(html: &[u8]) -> Vec<u8> {
         |c: &[u8]| output.extend_from_slice(c),
     );
 
-    let chunks = html.chunks(*STREAMING_CHUNK_SIZE);
-    let mut stream = tokio_stream::iter(chunks);
     let mut wrote_error = false;
+    let should_yield = html.len() > REWRITER_YIELD_THRESHOLD;
 
-    while let Some(chunk) = stream.next().await {
+    for (i, chunk) in html.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
         if rewriter.write(chunk).is_err() {
             wrote_error = true;
             break;
+        }
+        if should_yield && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
+            tokio::task::yield_now().await;
         }
     }
 

@@ -401,10 +401,10 @@ lazy_static! {
 
 /// Byte threshold above which rewriter loops yield to the async runtime.
 /// Pages smaller than this are processed without yielding (zero overhead).
-const REWRITER_YIELD_THRESHOLD: usize = 512 * 1024;
+pub const REWRITER_YIELD_THRESHOLD: usize = 512 * 1024;
 
 /// How many chunks between yield points for large pages.
-const REWRITER_YIELD_INTERVAL: usize = 8;
+pub const REWRITER_YIELD_INTERVAL: usize = 8;
 
 /// The AI data returned from a GPT.
 #[derive(Debug, Clone, Default)]
