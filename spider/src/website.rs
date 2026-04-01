@@ -2976,7 +2976,7 @@ impl Website {
 
         let url = self.url.inner();
 
-        let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+        let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
         let mut links_ssg = HashSet::new();
         let mut links_pages = if self.configuration.return_page_links {
             Some(HashSet::new())
@@ -3149,7 +3149,7 @@ impl Website {
         {
             let url = self.url.inner();
 
-            let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+            let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
             let mut links_ssg = HashSet::new();
             let mut links_pages = if self.configuration.return_page_links {
                 Some(HashSet::new())
@@ -3383,7 +3383,7 @@ impl Website {
         ) = self.setup_selectors();
 
         if self.single_page() {
-            let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+            let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
             let mut links_pages: Option<HashSet<CaseInsensitiveString>> =
                 if self.configuration.return_page_links {
                     Some(HashSet::new())
@@ -3545,7 +3545,7 @@ impl Website {
                                     _ => (link, None),
                                 };
 
-                                let mut out_links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                let mut out_links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
                                 let mut links_pages = if shared.7 { Some(HashSet::new()) } else { None };
 
                                 let mut relative_selectors = shared.2.clone();
@@ -4313,7 +4313,7 @@ impl Website {
         _: &(CompactString, smallvec::SmallVec<[CompactString; 2]>),
         http_worker: bool,
     ) -> HashSet<CaseInsensitiveString> {
-        let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+        let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
         let expanded = self.get_expanded_links(self.url.inner().as_str());
         self.configuration.configure_allowlist();
 
@@ -4379,7 +4379,7 @@ impl Website {
         if self.skip_initial {
             return Default::default();
         }
-        let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+        let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
         let expanded = self.get_expanded_links(&self.url.inner().as_str());
         self.configuration.configure_allowlist();
 
@@ -4457,7 +4457,7 @@ impl Website {
         if self.skip_initial {
             return Default::default();
         }
-        let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+        let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
         let domain_name = self.url.inner();
         let expanded = self.get_expanded_links(domain_name.as_str());
 
@@ -5497,7 +5497,7 @@ impl Website {
                                 if let Some(p) = self.pages.as_mut() {
                                     p.push(page);
                                     #[cfg(feature = "balance")]
-                                    if crate::utils::detect_system::get_process_memory_state().await >= 2 {
+                                    if crate::utils::detect_system::get_process_memory_state_sync() >= 2 {
                                         Self::shed_page_html(p);
                                     }
                                 }
@@ -6036,7 +6036,7 @@ impl Website {
                                                 let fetch_start = Instant::now();
 
                                                 let primary_fut = async {
-                                                    let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                                    let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
                                                     let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
                                                     let mut selectors = shared.1.clone();
                                                     let mut r_settings = shared.7;
@@ -6062,7 +6062,7 @@ impl Website {
                                                             hedge_trk.hedge_win_rate_pct(), hedge_trk.consecutive_errors(), target_url);
 
                                                         let hedge_fut = async {
-                                                            let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                                            let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
                                                             let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
                                                             let mut selectors = shared.1.clone();
                                                             let mut r_settings = shared.7;
@@ -6102,7 +6102,7 @@ impl Website {
                                                 result
                                             } else {
                                                 let fetch_start = Instant::now();
-                                                let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                                let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
                                                 let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
                                                 let mut selectors = shared.1.clone();
                                                 let mut r_settings = shared.7;
@@ -6127,7 +6127,7 @@ impl Website {
                                                 None => &shared.0,
                                             };
                                             let fetch_start = Instant::now();
-                                            let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                            let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
                                             let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
                                             let mut selectors = shared.1.clone();
                                             let mut r_settings = shared.7;
@@ -6154,7 +6154,7 @@ impl Website {
                                             Some(r) => r.next(),
                                             None => &shared.0,
                                         };
-                                        let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                        let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
                                         let mut links_pages = if return_page_links {
                                             Some(HashSet::new())
                                         } else {
@@ -7285,7 +7285,7 @@ impl Website {
                                                 let fetch_start = Instant::now();
 
                                                 let primary_fut = async {
-                                                    let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                                    let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
                                                     let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
                                                     let mut selectors = shared.1.clone();
                                                     let mut r_settings = shared.7;
@@ -7311,7 +7311,7 @@ impl Website {
                                                             hedge_trk.hedge_win_rate_pct(), hedge_trk.consecutive_errors(), target_url);
 
                                                         let hedge_fut = async {
-                                                            let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                                            let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
                                                             let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
                                                             let mut selectors = shared.1.clone();
                                                             let mut r_settings = shared.7;
@@ -7351,7 +7351,7 @@ impl Website {
                                                 result
                                             } else {
                                                 let fetch_start = Instant::now();
-                                                let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                                let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
                                                 let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
                                                 let mut selectors = shared.1.clone();
                                                 let mut r_settings = shared.7;
@@ -7376,7 +7376,7 @@ impl Website {
                                                 None => &shared.0,
                                             };
                                             let fetch_start = Instant::now();
-                                            let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                            let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
                                             let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
                                             let mut selectors = shared.1.clone();
                                             let mut r_settings = shared.7;
@@ -7403,7 +7403,7 @@ impl Website {
                                             Some(r) => r.next(),
                                             None => &shared.0,
                                         };
-                                        let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+                                        let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
                                         let mut links_pages = if return_page_links {
                                             Some(HashSet::new())
                                         } else {

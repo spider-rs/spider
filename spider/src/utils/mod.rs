@@ -7182,8 +7182,8 @@ const REBALANCE_TIME: std::time::Duration = std::time::Duration::from_millis(100
 pub async fn get_semaphore(semaphore: &Arc<Semaphore>, detect: bool) -> &Arc<Semaphore> {
     let (cpu_load, mem_load) = if detect {
         (
-            detect_system::get_global_cpu_state().await,
-            detect_system::get_process_memory_state().await,
+            detect_system::get_global_cpu_state_sync(),
+            detect_system::get_process_memory_state_sync(),
         )
     } else {
         (0, 0)

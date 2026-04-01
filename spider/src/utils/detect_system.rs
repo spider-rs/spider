@@ -182,9 +182,25 @@ pub async fn get_global_cpu_state() -> i8 {
     CPU_STATE.load(Ordering::Relaxed)
 }
 
+/// Get CPU state without async overhead.
+#[cfg(feature = "balance")]
+pub fn get_global_cpu_state_sync() -> i8 {
+    if INIT.initialized() {
+        CPU_STATE.load(Ordering::Relaxed)
+    } else {
+        0
+    }
+}
+
 /// Get the cpu usage being used state utility.
 #[cfg(not(feature = "balance"))]
 pub async fn get_global_cpu_state() -> i8 {
+    0
+}
+
+/// Get CPU state without async overhead (no-op without balance).
+#[cfg(not(feature = "balance"))]
+pub fn get_global_cpu_state_sync() -> i8 {
     0
 }
 
@@ -242,9 +258,25 @@ pub async fn get_process_memory_state() -> i8 {
     PROCESS_MEMORY_STATE.load(Ordering::Relaxed)
 }
 
+/// Get process RSS memory state without async overhead.
+#[cfg(feature = "balance")]
+pub fn get_process_memory_state_sync() -> i8 {
+    if INIT.initialized() {
+        PROCESS_MEMORY_STATE.load(Ordering::Relaxed)
+    } else {
+        0
+    }
+}
+
 /// Get the process RSS memory pressure state (no-op without balance).
 #[cfg(not(feature = "balance"))]
 pub async fn get_process_memory_state() -> i8 {
+    0
+}
+
+/// Get process RSS memory state without async overhead (no-op without balance).
+#[cfg(not(feature = "balance"))]
+pub fn get_process_memory_state_sync() -> i8 {
     0
 }
 

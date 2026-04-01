@@ -3190,7 +3190,7 @@ impl Page {
         html: &str,
         base: &Option<Box<Url>>,
     ) -> HashSet<A> {
-        let mut map: HashSet<A> = HashSet::new();
+        let mut map: HashSet<A> = HashSet::with_capacity(32);
         let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
             Some(HashSet::new())
         } else {
@@ -3348,7 +3348,7 @@ impl Page {
     ) -> HashSet<A> {
         use auto_encoder::auto_encode_bytes;
 
-        let mut map: HashSet<A> = HashSet::new();
+        let mut map: HashSet<A> = HashSet::with_capacity(32);
         let mut map_ssg: HashSet<A> = HashSet::new();
         let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
             Some(HashSet::new())
@@ -3634,7 +3634,7 @@ impl Page {
         use std::sync::atomic::Ordering;
 
         let mut bytes_transferred: Option<f64> = None;
-        let mut map: HashSet<A> = HashSet::new();
+        let mut map: HashSet<A> = HashSet::with_capacity(32);
         let mut inner_map: HashSet<A> = HashSet::new();
         let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
             Some(HashSet::new())
@@ -4074,7 +4074,7 @@ impl Page {
         use std::sync::atomic::Ordering;
 
         let mut bytes_transferred: Option<f64> = None;
-        let mut map: HashSet<A> = HashSet::new();
+        let mut map: HashSet<A> = HashSet::with_capacity(32);
         let mut inner_map: HashSet<A> = HashSet::new();
         let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
             Some(HashSet::new())
@@ -4493,7 +4493,7 @@ impl Page {
         selectors: &RelativeSelectors,
         base: &Option<Box<Url>>,
     ) -> HashSet<A> {
-        let mut map: HashSet<A> = HashSet::new();
+        let mut map: HashSet<A> = HashSet::with_capacity(32);
         let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
             Some(HashSet::new())
         } else {
@@ -5113,7 +5113,7 @@ async fn test_metadata_from_streaming_bytes() {
     let mut selectors = get_page_selectors(url, false, false);
     let external_domains: Arc<HashSet<CaseInsensitiveString>> = Default::default();
     let r_settings = PageLinkBuildSettings::default();
-    let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+    let mut map: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
     let prior_domain: Option<Box<Url>> = None;
     let mut domain_parsed: Option<Box<Url>> = None;
     let mut links_pages: Option<HashSet<CaseInsensitiveString>> = None;
@@ -5174,7 +5174,7 @@ async fn test_metadata_partial_title_only() {
     let mut selectors = get_page_selectors(url, false, false);
     let external_domains: Arc<HashSet<CaseInsensitiveString>> = Default::default();
     let r_settings = PageLinkBuildSettings::default();
-    let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+    let mut map: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
     let prior_domain: Option<Box<Url>> = None;
     let mut domain_parsed: Option<Box<Url>> = None;
     let mut links_pages: Option<HashSet<CaseInsensitiveString>> = None;
@@ -5227,7 +5227,7 @@ async fn test_metadata_partial_description_only() {
     let mut selectors = get_page_selectors(url, false, false);
     let external_domains: Arc<HashSet<CaseInsensitiveString>> = Default::default();
     let r_settings = PageLinkBuildSettings::default();
-    let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+    let mut map: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
     let prior_domain: Option<Box<Url>> = None;
     let mut domain_parsed: Option<Box<Url>> = None;
     let mut links_pages: Option<HashSet<CaseInsensitiveString>> = None;
@@ -5280,7 +5280,7 @@ async fn test_metadata_partial_image_only() {
     let mut selectors = get_page_selectors(url, false, false);
     let external_domains: Arc<HashSet<CaseInsensitiveString>> = Default::default();
     let r_settings = PageLinkBuildSettings::default();
-    let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+    let mut map: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
     let prior_domain: Option<Box<Url>> = None;
     let mut domain_parsed: Option<Box<Url>> = None;
     let mut links_pages: Option<HashSet<CaseInsensitiveString>> = None;
@@ -5331,7 +5331,7 @@ async fn test_metadata_empty_html() {
     let mut selectors = get_page_selectors(url, false, false);
     let external_domains: Arc<HashSet<CaseInsensitiveString>> = Default::default();
     let r_settings = PageLinkBuildSettings::default();
-    let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+    let mut map: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
     let prior_domain: Option<Box<Url>> = None;
     let mut domain_parsed: Option<Box<Url>> = None;
     let mut links_pages: Option<HashSet<CaseInsensitiveString>> = None;
@@ -5376,7 +5376,7 @@ async fn test_metadata_special_characters() {
     let mut selectors = get_page_selectors(url, false, false);
     let external_domains: Arc<HashSet<CaseInsensitiveString>> = Default::default();
     let r_settings = PageLinkBuildSettings::default();
-    let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+    let mut map: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
     let prior_domain: Option<Box<Url>> = None;
     let mut domain_parsed: Option<Box<Url>> = None;
     let mut links_pages: Option<HashSet<CaseInsensitiveString>> = None;
@@ -5436,7 +5436,7 @@ async fn test_metadata_unicode() {
     let mut selectors = get_page_selectors(url, false, false);
     let external_domains: Arc<HashSet<CaseInsensitiveString>> = Default::default();
     let r_settings = PageLinkBuildSettings::default();
-    let mut map: HashSet<CaseInsensitiveString> = HashSet::new();
+    let mut map: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
     let prior_domain: Option<Box<Url>> = None;
     let mut domain_parsed: Option<Box<Url>> = None;
     let mut links_pages: Option<HashSet<CaseInsensitiveString>> = None;
