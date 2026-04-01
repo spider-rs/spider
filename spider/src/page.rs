@@ -884,7 +884,9 @@ pub fn page_assign(page: &mut Page, new_page: Page) {
 }
 
 /// Validate link and push into the map
-pub(crate) fn validate_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+pub(crate) fn validate_link<
+    A: PartialEq + Eq + std::hash::Hash + From<String> + for<'a> From<&'a str>,
+>(
     base: &Option<&Url>,
     href: &str,
     base_domain: &CompactString,
@@ -898,7 +900,7 @@ pub(crate) fn validate_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         let abs = convert_abs_path(b, href);
 
         if let Some(link_map) = links_pages {
-            link_map.insert(A::from(href.to_string()));
+            link_map.insert(A::from(href));
         }
 
         let scheme = abs.scheme();
@@ -959,7 +961,9 @@ pub(crate) fn relative_directory_url(href: &str) -> bool {
 }
 
 /// Validate link and push into the map without extended verify.
-pub(crate) fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+pub(crate) fn push_link<
+    A: PartialEq + Eq + std::hash::Hash + From<String> + for<'a> From<&'a str>,
+>(
     base: &Option<&Url>,
     href: &str,
     map: &mut HashSet<A>,
@@ -986,12 +990,15 @@ pub(crate) fn push_link<A: PartialEq + Eq + std::hash::Hash + From<String>>(
         if abs.scheme() != parent_host_scheme.as_str() {
             let _ = abs.set_scheme(parent_host_scheme.as_str());
         }
-        map.insert(A::from(abs.into()));
+        let s: String = abs.into();
+        map.insert(A::from(s));
     }
 }
 
 /// Validate link and push into the map
-pub(crate) fn push_link_verify<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+pub(crate) fn push_link_verify<
+    A: PartialEq + Eq + std::hash::Hash + From<String> + for<'a> From<&'a str>,
+>(
     base: &Option<&Url>,
     href: &str,
     map: &mut HashSet<A>,
@@ -1022,7 +1029,8 @@ pub(crate) fn push_link_verify<A: PartialEq + Eq + std::hash::Hash + From<String
         if verify {
             push_link_check(&mut abs, map, full_resources, &mut true);
         } else {
-            map.insert(A::from(abs.into()));
+            let s: String = abs.into();
+            map.insert(A::from(s));
         }
     }
 }
@@ -1039,7 +1047,9 @@ pub fn is_asset_url(url: &str) -> bool {
 }
 
 /// Validate link and push into the map checking if asset
-pub(crate) fn push_link_check<A: PartialEq + Eq + std::hash::Hash + From<String>>(
+pub(crate) fn push_link_check<
+    A: PartialEq + Eq + std::hash::Hash + From<String> + for<'a> From<&'a str>,
+>(
     abs: &mut Url,
     map: &mut HashSet<A>,
     full_resources: bool,
@@ -1064,7 +1074,7 @@ pub(crate) fn push_link_check<A: PartialEq + Eq + std::hash::Hash + From<String>
     }
 
     if *can_process {
-        map.insert(A::from(abs.as_str().to_string()));
+        map.insert(A::from(abs.as_str()));
     }
 }
 
@@ -1848,7 +1858,15 @@ impl Page {
     /// New page with rewriter
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn new_page_streaming<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + std::hash::Hash
+            + From<String>
+            + for<'a> From<&'a str>,
     >(
         url: &str,
         client: &Client,
@@ -2207,7 +2225,15 @@ impl Page {
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     #[cfg(feature = "cmd")]
     pub async fn new_page_streaming_from_bytes<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + std::hash::Hash + From<String>,
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + std::hash::Hash
+            + From<String>
+            + for<'a> From<&'a str>,
     >(
         url: &str,
         input_bytes: &[u8],
@@ -3130,7 +3156,8 @@ impl Page {
             + ToString
             + std::hash::Hash
             + From<String>
-            + Into<CaseInsensitiveString>,
+            + Into<CaseInsensitiveString>
+            + for<'a> From<&'a str>,
     >(
         &mut self,
         selectors: &RelativeSelectors,
@@ -3239,7 +3266,8 @@ impl Page {
             + ToString
             + std::hash::Hash
             + From<String>
-            + Into<CaseInsensitiveString>,
+            + Into<CaseInsensitiveString>
+            + for<'a> From<&'a str>,
     >(
         &mut self,
         selectors: &RelativeSelectors,
@@ -3402,7 +3430,8 @@ impl Page {
             + ToString
             + std::hash::Hash
             + From<String>
-            + Into<CaseInsensitiveString>,
+            + Into<CaseInsensitiveString>
+            + for<'a> From<&'a str>,
     >(
         &mut self,
         selectors: &RelativeSelectors,
@@ -3631,7 +3660,8 @@ impl Page {
             + ToString
             + std::hash::Hash
             + From<String>
-            + Into<CaseInsensitiveString>,
+            + Into<CaseInsensitiveString>
+            + for<'a> From<&'a str>,
     >(
         &mut self,
         selectors: &RelativeSelectors,
@@ -3678,7 +3708,8 @@ impl Page {
             + ToString
             + std::hash::Hash
             + From<String>
-            + Into<CaseInsensitiveString>,
+            + Into<CaseInsensitiveString>
+            + for<'a> From<&'a str>,
     >(
         &mut self,
         selectors: &RelativeSelectors,
@@ -3710,7 +3741,8 @@ impl Page {
             + ToString
             + std::hash::Hash
             + From<String>
-            + Into<CaseInsensitiveString>,
+            + Into<CaseInsensitiveString>
+            + for<'a> From<&'a str>,
     >(
         &mut self,
         selectors: &RelativeSelectors,
@@ -4155,7 +4187,8 @@ impl Page {
             + ToString
             + std::hash::Hash
             + From<String>
-            + Into<CaseInsensitiveString>,
+            + Into<CaseInsensitiveString>
+            + for<'a> From<&'a str>,
     >(
         &mut self,
         selectors: &RelativeSelectors,
@@ -4587,7 +4620,8 @@ impl Page {
             + ToString
             + std::hash::Hash
             + From<String>
-            + Into<CaseInsensitiveString>,
+            + Into<CaseInsensitiveString>
+            + for<'a> From<&'a str>,
     >(
         &mut self,
         selectors: &RelativeSelectors,
@@ -4744,7 +4778,8 @@ impl Page {
             + ToString
             + std::hash::Hash
             + From<String>
-            + Into<CaseInsensitiveString>,
+            + Into<CaseInsensitiveString>
+            + for<'a> From<&'a str>,
     >(
         &mut self,
         selectors: &RelativeSelectors,
@@ -4770,7 +4805,8 @@ impl Page {
             + ToString
             + std::hash::Hash
             + From<String>
-            + Into<CaseInsensitiveString>,
+            + Into<CaseInsensitiveString>
+            + for<'a> From<&'a str>,
     >(
         &mut self,
         _: &RelativeSelectors,

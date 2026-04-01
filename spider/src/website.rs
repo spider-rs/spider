@@ -5061,7 +5061,7 @@ impl Website {
         let mut cache_misses: HashSet<CaseInsensitiveString> = HashSet::new();
 
         'cache_loop: loop {
-            let current_links: Vec<CaseInsensitiveString> = links.drain().collect();
+            let current_links = std::mem::take(&mut links);
             if current_links.is_empty() {
                 break;
             }
