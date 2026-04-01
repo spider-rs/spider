@@ -6598,9 +6598,7 @@ impl Website {
                                 #[cfg(all(feature = "agent", feature = "serde"))]
                                 self.apply_url_prefilter(&mut links).await;
 
-                                let mut stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
-                                    links.drain().collect(),
-                                );
+                                let mut stream = tokio_stream::iter(std::mem::take(&mut links));
 
                                 loop {
                                     if !concurrency {
@@ -7694,9 +7692,7 @@ impl Website {
                                 #[cfg(all(feature = "agent", feature = "serde"))]
                                 self.apply_url_prefilter(&mut links).await;
 
-                                let mut stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
-                                    links.drain().collect(),
-                                );
+                                let mut stream = tokio_stream::iter(std::mem::take(&mut links));
 
                                 loop {
                                     if !concurrency {
@@ -8155,9 +8151,7 @@ impl Website {
                         #[cfg(all(feature = "agent", feature = "serde"))]
                         self.apply_url_prefilter(&mut links).await;
 
-                        let mut stream = tokio_stream::iter::<HashSet<CaseInsensitiveString>>(
-                            links.drain().collect(),
-                        );
+                        let mut stream = tokio_stream::iter(std::mem::take(&mut links));
 
                         loop {
                             if !concurrency {
@@ -8940,14 +8934,12 @@ impl Website {
             }
 
             'outer: loop {
-                let stream =
-                    tokio_stream::iter::<Vec<Box<CompactString>>>(sitemaps.drain(..).collect());
-                tokio::pin!(stream);
+                let drained: Vec<Box<CompactString>> = sitemaps.drain(..).collect();
 
                 let mut first_request = false;
                 let mut attempted_correct = false;
 
-                while let Some(mut sitemap_url) = stream.next().await {
+                for mut sitemap_url in drained {
                     if !self.handle_process(handle, &mut interval, async {}).await {
                         break 'outer;
                     }
@@ -9179,8 +9171,8 @@ impl Website {
                 }
 
                 'outer: loop {
-                    let stream: tokio_stream::Iter<std::vec::IntoIter<Box<CompactString>>> =
-                        tokio_stream::iter::<Vec<Box<CompactString>>>(sitemaps.drain(..).collect());
+                    let drained: Vec<Box<CompactString>> = sitemaps.drain(..).collect();
+                    let stream = tokio_stream::iter(drained);
                     tokio::pin!(stream);
 
                     tokio::select! {
@@ -9256,9 +9248,8 @@ impl Website {
 
                                     if is_xml {
                                         let reader = SiteMapReader::new(&*page.get_html_bytes_u8());
-                                        let mut stream = tokio_stream::iter(reader);
 
-                                        while let Some(entity) = stream.next().await {
+                                        for entity in reader {
                                             if !self.handle_process(handle, &mut interval, async {}).await {
                                                 break;
                                             }
@@ -9383,9 +9374,7 @@ impl Website {
 
                                         let links = page.links(&shared.6, &shared.7).await;
 
-                                        let mut stream = tokio_stream::iter(links);
-
-                                        while let Some(link) = stream.next().await {
+                                        for link in links {
                                             if !self.handle_process(handle, &mut interval, async {}).await {
                                                 break;
                                             }
@@ -9749,11 +9738,11 @@ impl Website {
         use sitemap::structs::Location;
 
         if !b.is_empty() && b.starts_with(b"<?xml") {
-            let mut stream = tokio_stream::iter(SiteMapReader::new(&*b));
+            let reader = SiteMapReader::new(&*b);
 
             let retry = self.configuration.retry;
 
-            while let Some(entity) = stream.next().await {
+            for entity in reader {
                 if !self.handle_process(handle, interval, async {}).await {
                     break;
                 }

@@ -5,7 +5,6 @@ use scraper::{ElementRef, Html, Selector};
 use std::{fmt::Debug, hash::Hash};
 use sxd_document::parser;
 use sxd_xpath::evaluate_xpath;
-use tokio_stream::StreamExt;
 
 /// The type of selectors that can be used to query.
 #[derive(Default, Debug, Clone)]
@@ -44,10 +43,9 @@ where
     let mut map: CSSQueryMap = HashMap::new();
 
     if !selectors.css.is_empty() {
-        let mut stream = tokio_stream::iter(&selectors.css);
         let fragment = Box::new(Html::parse_document(html));
 
-        while let Some(selector) = stream.next().await {
+        for selector in &selectors.css {
             for s in selector.1 {
                 for element in fragment.select(s) {
                     process_selector::<K>(element, selector.0, &mut map);
