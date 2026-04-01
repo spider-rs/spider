@@ -29,7 +29,6 @@ use tokio::time::Instant;
 #[cfg(all(feature = "decentralized", feature = "headers"))]
 use crate::utils::FetchPageResult;
 use lazy_static::lazy_static;
-#[cfg(not(feature = "decentralized"))]
 use url::Url;
 
 /// Construct an element content handler tuple using a pre-compiled `&'static Selector`.
