@@ -863,9 +863,16 @@ pub fn detect_anti_bot_from_headers(headers: &HeaderSource) -> Option<AntiBotTec
 /// Detect the anti-bot technology.
 #[inline]
 pub fn detect_anti_bot_from_body(body: &[u8]) -> Option<AntiBotTech> {
-    // Scan body for anti-bot fingerprints (only for small pages)
-    if body.len() < 30_000 {
-        if let Some(mat) = AC_BODY_SCAN.find(body) {
+    // Scan the first 30 KB for anti-bot fingerprints. Challenge pages are
+    // almost always small, and most WAF interstitials inject markers near the
+    // top. Scanning only the head avoids a linear scan over multi-MB bodies.
+    let scan = if body.len() > 30_000 {
+        &body[..30_000]
+    } else {
+        body
+    };
+    {
+        if let Some(mat) = AC_BODY_SCAN.find(scan) {
             let tech = match mat.pattern().as_usize() {
                 0..=2 | 10 | 11 | 21 => AntiBotTech::Cloudflare,
                 3 => AntiBotTech::DataDome,
@@ -7334,9 +7341,22 @@ mod tests {
 
     #[test]
     fn test_detect_anti_bot_from_body() {
-        // Too large - returns None
+        // Large body with no pattern in first 30KB — returns None
         let large_body = vec![0u8; 40_000];
         assert!(detect_anti_bot_from_body(&large_body).is_none());
+
+        // Large body with anti-bot pattern in the first 30KB — detected
+        let mut large_with_pattern = b"<span class=\"cf-error-code\">1020</span>".to_vec();
+        large_with_pattern.resize(40_000, b' ');
+        assert_eq!(
+            detect_anti_bot_from_body(&large_with_pattern),
+            Some(AntiBotTech::Cloudflare)
+        );
+
+        // Large body with anti-bot pattern AFTER the 30KB boundary — not detected
+        let mut large_pattern_late = vec![b' '; 30_001];
+        large_pattern_late.extend_from_slice(b"cf-error-code");
+        assert!(detect_anti_bot_from_body(&large_pattern_late).is_none());
         // Normal page - no match
         let normal = b"<html><body>Hello world</body></html>".to_vec();
         assert!(detect_anti_bot_from_body(&normal).is_none());

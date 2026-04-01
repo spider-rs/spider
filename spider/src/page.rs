@@ -180,6 +180,25 @@ pub(crate) fn get_error_http_status_code(err: &crate::client::Error) -> StatusCo
     *UNKNOWN_STATUS_ERROR
 }
 
+/// Check if a script src URL is a known ad, tracker, or analytics script.
+/// Uses `spider_network_blocker` trie for absolute URLs and `ADBLOCK_PATTERNS`
+/// substring matching for relative paths. Returns `true` if the script should
+/// be excluded from upgrade scoring (i.e., it is a tracker/ad, not app logic).
+#[cfg(all(not(feature = "decentralized"), feature = "smart"))]
+#[inline]
+fn is_tracker_script(src: &str) -> bool {
+    use chromiumoxide::spider_network_blocker;
+    if src.starts_with("http") {
+        // Absolute URL — trie prefix match against known tracker domains.
+        spider_network_blocker::scripts::URL_IGNORE_TRIE.contains_prefix(src)
+    } else {
+        // Relative path — substring match against adblock patterns.
+        spider_network_blocker::adblock::ADBLOCK_PATTERNS
+            .iter()
+            .any(|p| src.contains(p))
+    }
+}
+
 #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
 lazy_static! {
     /// General no script patterns.
@@ -194,23 +213,23 @@ lazy_static! {
     /// Methods that cause the dom to mutate.
     static ref DOM_SCRIPT_WATCH_METHODS: aho_corasick::AhoCorasick = {
         let patterns = &[
-            ".createElementNS", ".removeChild", ".insertBefore", ".createElement",
-            ".setAttribute", ".createTextNode", ".replaceChildren", ".prepend",
-            ".append", ".appendChild", ".write", "window.location.href",
+            ".createElementNS", ".removeChild", ".insertBefore", ".createElement(",
+            ".createTextNode", ".replaceChildren(", ".prepend(",
+            ".appendChild(", "document.write(", "window.location.href",
             // DOM mutation hot paths
-            ".innerHTML", ".outerHTML", ".insertAdjacentHTML", ".insertAdjacentElement",
-            ".replaceWith", ".replaceChild", ".before", ".after", ".cloneNode",
-            ".setProperty", "new DOMParser", "sessionStorage.",
+            ".innerHTML", ".outerHTML", ".insertAdjacentHTML(", ".insertAdjacentElement(",
+            ".replaceWith(", ".replaceChild(", ".cloneNode(",
+            "new DOMParser",
             // SPA routing
             "history.pushState", "history.replaceState",
-            "location.assign", "location.replace", "location.reload",
-            "window.location", "document.location", "window.applicationCache",
+            "location.assign(", "location.replace(",
+            "window.location=", "document.location=",
             // Fetching required
-            "fetch", "XMLHttpRequest",
+            "fetch(", "new XMLHttpRequest",
             // APPS
             "window.__NUXT__"
         ];
-        aho_corasick::AhoCorasick::new(patterns).expect("valid dom script  patterns")
+        aho_corasick::AhoCorasick::new(patterns).expect("valid dom script patterns")
     };
 
     /// Attributes for JS requirements.
@@ -3606,7 +3625,7 @@ impl Page {
     ) -> (HashSet<A>, Option<f64>) {
         use auto_encoder::auto_encode_bytes;
         use lol_html::{element, text};
-        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::atomic::Ordering;
 
         let mut bytes_transferred: Option<f64> = None;
         let mut map: HashSet<A> = HashSet::new();
@@ -3647,11 +3666,14 @@ impl Page {
                     self.get_url_parsed_ref().as_ref().cloned()
                 };
 
-                let rerender = AtomicBool::new(false);
-                let script_src = AtomicBool::new(false);
+                // Weighted upgrade score: avoids Chrome on a single weak signal.
+                // Strong signals (framework markers, hydration IDs) set the score
+                // above the threshold immediately. Weak signals (script src) accumulate.
+                const SMART_UPGRADE_THRESHOLD: u8 = 10;
+                let upgrade_score = std::sync::atomic::AtomicU8::new(0);
 
                 let mut static_app = false;
-                let mut script_found = false;
+                let mut script_src_count: u8 = 0;
                 let xml_file = self.get_url().ends_with(".xml");
 
                 let mut element_content_handlers =
@@ -3668,7 +3690,9 @@ impl Page {
                 }));
 
                 element_content_handlers.push(element!("script", |el| {
-                    if static_app || rerender.load(Ordering::Relaxed) {
+                    if static_app
+                        || upgrade_score.load(Ordering::Relaxed) >= SMART_UPGRADE_THRESHOLD
+                    {
                         return Ok(());
                     }
 
@@ -3676,12 +3700,12 @@ impl Page {
 
                     if id.as_deref() == *NUXT_DATA {
                         static_app = true;
-                        rerender.store(true, Ordering::Relaxed);
+                        upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
                         return Ok(());
                     }
 
                     if el.get_attribute("data-target").as_deref() == *REACT_SSR {
-                        rerender.store(true, Ordering::Relaxed);
+                        upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
                         return Ok(());
                     }
 
@@ -3689,9 +3713,16 @@ impl Page {
                         return Ok(());
                     };
 
-                    if !script_found {
-                        script_found = true;
-                        script_src.store(true, Ordering::Relaxed);
+                    // Skip known ad/tracker scripts — they don't indicate an SPA.
+                    if !is_tracker_script(&src) {
+                        script_src_count = script_src_count.saturating_add(1);
+                        if script_src_count >= 4 {
+                            let _ = upgrade_score.fetch_update(
+                                Ordering::Relaxed,
+                                Ordering::Relaxed,
+                                |v| Some(v.saturating_add(SMART_UPGRADE_THRESHOLD)),
+                            );
+                        }
                     }
 
                     if !src.starts_with('/') {
@@ -3709,7 +3740,7 @@ impl Page {
                     }
 
                     if is_nuxt_asset {
-                        rerender.store(true, Ordering::Relaxed);
+                        upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
                         return Ok(());
                     }
 
@@ -3721,7 +3752,7 @@ impl Page {
                                 chromiumoxide::handler::network::ALLOWED_MATCHER.is_match(p)
                             })
                         }) {
-                            rerender.store(true, Ordering::Relaxed);
+                            upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
                         }
                     }
 
@@ -3767,9 +3798,9 @@ impl Page {
                 ));
 
                 element_content_handlers.push(text!("noscript", |el| {
-                    if !rerender.load(Ordering::Relaxed) {
+                    if upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD {
                         if NO_SCRIPT_JS_REQUIRED.find(el.as_str()).is_some() {
-                            rerender.swap(true, Ordering::Relaxed);
+                            upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
                         }
                     }
                     Ok(())
@@ -3777,31 +3808,37 @@ impl Page {
 
                 element_content_handlers.push(text!("script", |el| {
                     let s = el.as_str();
-                    if !s.is_empty() {
-                        if !rerender.load(Ordering::Relaxed) {
-                            if DOM_SCRIPT_WATCH_METHODS.find(s).is_some() {
-                                rerender.swap(true, Ordering::Relaxed);
-                            }
+                    if !s.is_empty()
+                        && upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD
+                    {
+                        if DOM_SCRIPT_WATCH_METHODS.find(s).is_some() {
+                            // Inline DOM mutation is a medium signal (7 points).
+                            // Combined with script srcs it crosses the threshold.
+                            let _ = upgrade_score.fetch_update(
+                                Ordering::Relaxed,
+                                Ordering::Relaxed,
+                                |v| Some(v.saturating_add(7)),
+                            );
                         }
                     }
                     Ok(())
                 }));
 
                 element_content_handlers.push(element!("body", |el| {
-                    if !rerender.load(Ordering::Relaxed) {
-                        let mut swapped = false;
+                    if upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD {
+                        let mut matched = false;
 
                         if let Some(id) = el.get_attribute("id") {
                             if HYDRATION_IDS.contains(&id) {
-                                rerender.swap(true, Ordering::Relaxed);
-                                swapped = true;
+                                upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
+                                matched = true;
                             }
                         }
 
-                        if !swapped {
+                        if !matched {
                             for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
                                 if el.has_attribute(attr) {
-                                    rerender.swap(true, Ordering::Relaxed);
+                                    upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
                                     break;
                                 }
                             }
@@ -3836,11 +3873,15 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                let should_upgrade = rerender.load(Ordering::Relaxed)
-                    || script_src.load(Ordering::Relaxed)
-                    // Anti-bot body detection as fallback upgrade signal (lazy — skipped when already upgrading)
-                    || crate::utils::detect_anti_bot_from_body(html_resource.as_bytes()).is_some();
-                if should_upgrade {
+                // Anti-bot detection is a strong signal (immediate upgrade).
+                let mut score = upgrade_score.load(Ordering::Relaxed);
+                if score < SMART_UPGRADE_THRESHOLD {
+                    if crate::utils::detect_anti_bot_from_body(html_resource.as_bytes()).is_some() {
+                        score = SMART_UPGRADE_THRESHOLD;
+                    }
+                }
+
+                if score >= SMART_UPGRADE_THRESHOLD {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {
                             crate::website::Website::setup_browser_base(&configuration, &base, jar)
@@ -4023,7 +4064,7 @@ impl Page {
     ) -> (HashSet<A>, Option<f64>) {
         use auto_encoder::auto_encode_bytes;
         use lol_html::{element, text};
-        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::atomic::Ordering;
 
         let mut bytes_transferred: Option<f64> = None;
         let mut map: HashSet<A> = HashSet::new();
@@ -4064,11 +4105,11 @@ impl Page {
                     self.get_url_parsed_ref().as_ref().cloned()
                 };
 
-                let rerender = AtomicBool::new(false);
-                let script_src = AtomicBool::new(false);
+                const SMART_UPGRADE_THRESHOLD: u8 = 10;
+                let upgrade_score = std::sync::atomic::AtomicU8::new(0);
 
                 let mut static_app = false;
-                let mut script_found = false;
+                let mut script_src_count: u8 = 0;
 
                 let mut element_content_handlers = vec![
                     element!("base", |el| {
@@ -4081,7 +4122,9 @@ impl Page {
                         Ok(())
                     }),
                     element!("script", |el| {
-                        if static_app || rerender.load(Ordering::Relaxed) {
+                        if static_app
+                            || upgrade_score.load(Ordering::Relaxed) >= SMART_UPGRADE_THRESHOLD
+                        {
                             return Ok(());
                         }
 
@@ -4089,12 +4132,12 @@ impl Page {
 
                         if id.as_deref() == *NUXT_DATA {
                             static_app = true;
-                            rerender.store(true, Ordering::Relaxed);
+                            upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
                             return Ok(());
                         }
 
                         if el.get_attribute("data-target").as_deref() == *REACT_SSR {
-                            rerender.store(true, Ordering::Relaxed);
+                            upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
                             return Ok(());
                         }
 
@@ -4117,7 +4160,7 @@ impl Page {
                         }
 
                         if is_nuxt_asset {
-                            rerender.store(true, Ordering::Relaxed);
+                            upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
                             return Ok(());
                         }
 
@@ -4129,7 +4172,7 @@ impl Page {
                                     chromiumoxide::handler::network::ALLOWED_MATCHER.is_match(p)
                                 })
                             }) {
-                                rerender.store(true, Ordering::Relaxed);
+                                upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
                             }
                         }
 
@@ -4137,9 +4180,17 @@ impl Page {
                     }),
                     element!("a[href],script[src],link[href]", |el| {
                         let attribute = if el.tag_name() == "script" {
-                            if !script_found && el.get_attribute("src").is_some() {
-                                script_found = true;
-                                script_src.store(true, Ordering::Relaxed);
+                            if let Some(src) = el.get_attribute("src") {
+                                if !is_tracker_script(&src) {
+                                    script_src_count = script_src_count.saturating_add(1);
+                                    if script_src_count >= 4 {
+                                        let _ = upgrade_score.fetch_update(
+                                            Ordering::Relaxed,
+                                            Ordering::Relaxed,
+                                            |v| Some(v.saturating_add(SMART_UPGRADE_THRESHOLD)),
+                                        );
+                                    }
+                                }
                             }
                             "src"
                         } else {
@@ -4175,39 +4226,44 @@ impl Page {
                         Ok(())
                     }),
                     text!("noscript", |el| {
-                        if !rerender.load(Ordering::Relaxed) {
+                        if upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD {
                             if NO_SCRIPT_JS_REQUIRED.find(el.as_str()).is_some() {
-                                rerender.swap(true, Ordering::Relaxed);
+                                upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
                             }
                         }
                         Ok(())
                     }),
                     text!("script", |el| {
                         let s = el.as_str();
-                        if !s.is_empty() {
-                            if !rerender.load(Ordering::Relaxed) {
-                                if DOM_SCRIPT_WATCH_METHODS.find(s).is_some() {
-                                    rerender.swap(true, Ordering::Relaxed);
-                                }
+                        if !s.is_empty()
+                            && upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD
+                        {
+                            if DOM_SCRIPT_WATCH_METHODS.find(s).is_some() {
+                                let _ = upgrade_score.fetch_update(
+                                    Ordering::Relaxed,
+                                    Ordering::Relaxed,
+                                    |v| Some(v.saturating_add(7)),
+                                );
                             }
                         }
                         Ok(())
                     }),
                     element!("body", |el| {
-                        if !rerender.load(Ordering::Relaxed) {
-                            let mut swapped = false;
+                        if upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD {
+                            let mut matched = false;
 
                             if let Some(id) = el.get_attribute("id") {
                                 if HYDRATION_IDS.contains(&id) {
-                                    rerender.swap(true, Ordering::Relaxed);
-                                    swapped = true;
+                                    upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
+                                    matched = true;
                                 }
                             }
 
-                            if !swapped {
+                            if !matched {
                                 for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
                                     if el.has_attribute(attr) {
-                                        rerender.swap(true, Ordering::Relaxed);
+                                        upgrade_score
+                                            .store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
                                         break;
                                     }
                                 }
@@ -4249,11 +4305,15 @@ impl Page {
                     let _ = rewriter.end();
                 }
 
-                let should_upgrade = rerender.load(Ordering::Relaxed)
-                    || script_src.load(Ordering::Relaxed)
-                    // Anti-bot body detection as fallback upgrade signal (lazy — skipped when already upgrading)
-                    || crate::utils::detect_anti_bot_from_body(html_resource.as_bytes()).is_some();
-                if should_upgrade {
+                // Anti-bot detection is a strong signal (immediate upgrade).
+                let mut score = upgrade_score.load(Ordering::Relaxed);
+                if score < SMART_UPGRADE_THRESHOLD {
+                    if crate::utils::detect_anti_bot_from_body(html_resource.as_bytes()).is_some() {
+                        score = SMART_UPGRADE_THRESHOLD;
+                    }
+                }
+
+                if score >= SMART_UPGRADE_THRESHOLD {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {
                             crate::website::Website::setup_browser_base(&configuration, &base, jar)
@@ -4698,6 +4758,52 @@ pub fn get_html_encoded(html: &Option<bytes::Bytes>, _label: &str) -> String {
     match html {
         Some(b) => String::from_utf8_lossy(b).into_owned(),
         _ => Default::default(),
+    }
+}
+
+#[cfg(all(test, not(feature = "decentralized"), feature = "smart"))]
+mod smart_tests {
+    use super::is_tracker_script;
+
+    #[test]
+    fn tracker_absolute_urls() {
+        // Known tracker scripts (absolute) should be detected.
+        assert!(is_tracker_script(
+            "https://www.googletagmanager.com/gtm.js?id=GTM-ABC"
+        ));
+        assert!(is_tracker_script(
+            "https://www.google-analytics.com/analytics.js"
+        ));
+        assert!(is_tracker_script(
+            "https://static.hotjar.com/c/hotjar-123.js"
+        ));
+        assert!(is_tracker_script(
+            "https://connect.facebook.net/en_US/fbevents.js"
+        ));
+    }
+
+    #[test]
+    fn non_tracker_absolute_urls() {
+        // Application scripts should not be flagged.
+        assert!(!is_tracker_script("https://cdn.example.com/app.js"));
+        assert!(!is_tracker_script(
+            "https://unpkg.com/react@18/umd/react.production.min.js"
+        ));
+    }
+
+    #[test]
+    fn tracker_relative_paths() {
+        // Relative paths matching adblock patterns.
+        assert!(is_tracker_script("/js/analytics.js"));
+        assert!(is_tracker_script("/scripts/gtm.js?id=GTM-XYZ"));
+    }
+
+    #[test]
+    fn non_tracker_relative_paths() {
+        // Normal app scripts should pass through.
+        assert!(!is_tracker_script("/assets/app.bundle.js"));
+        assert!(!is_tracker_script("/_next/static/chunks/pages/index.js"));
+        assert!(!is_tracker_script("/main.js"));
     }
 }
 
