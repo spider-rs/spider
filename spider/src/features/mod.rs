@@ -42,9 +42,9 @@ pub mod gemini_common;
 /// Solve all.
 pub mod solvers;
 
-#[cfg(all(not(feature = "simd"), feature = "openai"))]
+#[cfg(all(not(feature = "simd"), any(feature = "openai", feature = "gemini")))]
 pub(crate) use serde_json;
-#[cfg(all(feature = "simd", feature = "openai"))]
+#[cfg(all(feature = "simd", any(feature = "openai", feature = "gemini")))]
 pub(crate) use sonic_rs as serde_json;
 
 /// Automation scripts.

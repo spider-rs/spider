@@ -1068,7 +1068,7 @@ impl Website {
     /// Insert a new URL if it doesn't exist. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     pub async fn insert_link(&mut self, new_url: CaseInsensitiveString) {
-        let mem_load = crate::utils::detect_system::get_global_memory_state().await;
+        let mem_load = crate::utils::detect_system::get_global_memory_state_sync();
         let beyond_memory_limits = self.links_visited.len() >= *LINKS_VISITED_MEMORY_LIMIT;
         let seed_check = mem_load == 2 || mem_load == 1 || beyond_memory_limits;
 
@@ -1107,7 +1107,7 @@ impl Website {
     /// Insert a new signature if it doesn't exist. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     pub async fn insert_signature(&mut self, new_signature: u64) {
-        let mem_load = crate::utils::detect_system::get_global_memory_state().await;
+        let mem_load = crate::utils::detect_system::get_global_memory_state_sync();
         let beyond_memory_limits = self.signatures.len() >= *LINKS_VISITED_MEMORY_LIMIT;
         let seed_check = mem_load == 2 || mem_load == 1 || beyond_memory_limits;
 

@@ -5,19 +5,21 @@
 //! - LRU eviction with size-aware cleanup
 //! - TTL-based expiration
 //! - Automatic cleanup on memory pressure
+//! - Lock-free concurrent reads via DashMap
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
+
+use dashmap::DashMap;
 
 /// Size-aware LRU cache with automatic cleanup.
 ///
-/// Manages cache size based on both entry count and estimated memory usage.
+/// Uses `DashMap` for lock-free concurrent reads. Writes are per-shard
+/// and do not block readers on other shards.
 #[derive(Debug)]
 pub struct SmartCache<V: CacheValue> {
-    entries: Arc<RwLock<HashMap<String, CacheEntry<V>>>>,
+    entries: Arc<DashMap<String, CacheEntry<V>>>,
     /// Maximum number of entries.
     max_entries: usize,
     /// Maximum total size in bytes.
@@ -158,7 +160,7 @@ impl<V: CacheValue> SmartCache<V> {
     /// Create with custom limits.
     pub fn with_limits(max_entries: usize, max_size_bytes: usize, default_ttl: Duration) -> Self {
         Self {
-            entries: Arc::new(RwLock::new(HashMap::with_capacity(max_entries.min(10000)))),
+            entries: Arc::new(DashMap::with_capacity(max_entries.min(10000))),
             max_entries,
             max_size_bytes,
             current_size: Arc::new(AtomicUsize::new(0)),
@@ -180,49 +182,22 @@ impl<V: CacheValue> SmartCache<V> {
     /// Get a value from the cache.
     pub async fn get(&self, key: &str) -> Option<V> {
         let now = Instant::now();
-        let mut saw_expired = false;
 
-        {
-            let entries = self.entries.read().await;
-            if let Some(entry) = entries.get(key) {
-                if now.duration_since(entry.created_at) <= entry.ttl {
-                    let value = entry.value.clone();
-                    drop(entries);
-
-                    // Best-effort metadata touch. We avoid awaiting a write lock on every hit.
-                    if let Ok(mut entries) = self.entries.try_write() {
-                        if let Some(entry) = entries.get_mut(key) {
-                            if now.duration_since(entry.created_at) <= entry.ttl {
-                                entry.last_accessed = now;
-                                entry.access_count = entry.access_count.saturating_add(1);
-                            }
-                        }
-                    }
-
-                    self.stats.hits.fetch_add(1, Ordering::Relaxed);
-                    return Some(value);
-                }
-
-                saw_expired = true;
-            }
-        }
-
-        if saw_expired {
-            let mut entries = self.entries.write().await;
-            if let Some(entry) = entries.get(key) {
-                if now.duration_since(entry.created_at) > entry.ttl {
-                    let size = entry.size_bytes;
-                    entries.remove(key);
-                    self.current_size.fetch_sub(size, Ordering::Relaxed);
-                    self.stats.expirations.fetch_add(1, Ordering::Relaxed);
-                    self.stats.misses.fetch_add(1, Ordering::Relaxed);
-                    return None;
-                }
-
+        if let Some(mut entry) = self.entries.get_mut(key) {
+            if now.duration_since(entry.created_at) <= entry.ttl {
                 let value = entry.value.clone();
+                entry.last_accessed = now;
+                entry.access_count = entry.access_count.saturating_add(1);
                 self.stats.hits.fetch_add(1, Ordering::Relaxed);
                 return Some(value);
             }
+
+            // Expired — drop the ref before removing.
+            let size = entry.size_bytes;
+            drop(entry);
+            self.entries.remove(key);
+            self.current_size.fetch_sub(size, Ordering::Relaxed);
+            self.stats.expirations.fetch_add(1, Ordering::Relaxed);
         }
 
         self.stats.misses.fetch_add(1, Ordering::Relaxed);
@@ -239,24 +214,23 @@ impl<V: CacheValue> SmartCache<V> {
         let key = key.into();
         let size = value.estimated_size() + key.len() + std::mem::size_of::<CacheEntry<V>>();
 
-        let mut entries = self.entries.write().await;
-
-        // Remove old entry if exists
-        if let Some(old) = entries.remove(&key) {
+        // Remove old entry if exists.
+        if let Some((_, old)) = self.entries.remove(&key) {
             self.current_size
                 .fetch_sub(old.size_bytes, Ordering::Relaxed);
         }
 
         // Batch eviction: compute how many entries to evict in a single pass
         // instead of scanning the entire map per eviction.
-        let over_count = entries
+        let over_count = self
+            .entries
             .len()
             .saturating_sub(self.max_entries.saturating_sub(1));
         let over_bytes =
             (self.current_size.load(Ordering::Relaxed) + size).saturating_sub(self.max_size_bytes);
 
         if over_count > 0 || over_bytes > 0 {
-            self.batch_evict_locked(&mut entries, over_count, over_bytes);
+            self.batch_evict(over_count, over_bytes);
         }
 
         let now = Instant::now();
@@ -269,14 +243,13 @@ impl<V: CacheValue> SmartCache<V> {
             access_count: 1,
         };
 
-        entries.insert(key, entry);
+        self.entries.insert(key, entry);
         self.current_size.fetch_add(size, Ordering::Relaxed);
     }
 
     /// Remove a value from the cache.
     pub async fn remove(&self, key: &str) -> Option<V> {
-        let mut entries = self.entries.write().await;
-        if let Some(entry) = entries.remove(key) {
+        if let Some((_, entry)) = self.entries.remove(key) {
             self.current_size
                 .fetch_sub(entry.size_bytes, Ordering::Relaxed);
             Some(entry.value)
@@ -287,19 +260,18 @@ impl<V: CacheValue> SmartCache<V> {
 
     /// Clear the entire cache.
     pub async fn clear(&self) {
-        let mut entries = self.entries.write().await;
-        entries.clear();
+        self.entries.clear();
         self.current_size.store(0, Ordering::Relaxed);
     }
 
     /// Get current entry count.
     pub async fn len(&self) -> usize {
-        self.entries.read().await.len()
+        self.entries.len()
     }
 
     /// Check if cache is empty.
     pub async fn is_empty(&self) -> bool {
-        self.entries.read().await.is_empty()
+        self.entries.is_empty()
     }
 
     /// Get current size in bytes.
@@ -317,13 +289,8 @@ impl<V: CacheValue> SmartCache<V> {
     /// First sweeps expired entries (free evictions), then uses partial sort
     /// (`select_nth_unstable`) to find the oldest-accessed candidates without
     /// sorting the entire Vec.
-    fn batch_evict_locked(
-        &self,
-        entries: &mut HashMap<String, CacheEntry<V>>,
-        min_count: usize,
-        min_bytes: usize,
-    ) {
-        if entries.is_empty() {
+    fn batch_evict(&self, min_count: usize, min_bytes: usize) {
+        if self.entries.is_empty() {
             return;
         }
 
@@ -332,14 +299,15 @@ impl<V: CacheValue> SmartCache<V> {
         let mut freed_bytes = 0usize;
 
         // Phase 1: sweep expired entries first (free evictions, no sort needed).
-        let expired_keys: Vec<String> = entries
+        let expired_keys: Vec<String> = self
+            .entries
             .iter()
-            .filter(|(_, e)| now.duration_since(e.created_at) > e.ttl)
-            .map(|(k, _)| k.clone())
+            .filter(|r| now.duration_since(r.value().created_at) > r.value().ttl)
+            .map(|r| r.key().clone())
             .collect();
 
         for key in &expired_keys {
-            if let Some(entry) = entries.remove(key) {
+            if let Some((_, entry)) = self.entries.remove(key) {
                 freed_bytes += entry.size_bytes;
                 freed_count += 1;
                 self.current_size
@@ -360,9 +328,16 @@ impl<V: CacheValue> SmartCache<V> {
             return;
         }
 
-        let mut candidates: Vec<(String, Instant, usize)> = entries
+        let mut candidates: Vec<(String, Instant, usize)> = self
+            .entries
             .iter()
-            .map(|(k, e)| (k.clone(), e.last_accessed, e.size_bytes))
+            .map(|r| {
+                (
+                    r.key().clone(),
+                    r.value().last_accessed,
+                    r.value().size_bytes,
+                )
+            })
             .collect();
 
         if candidates.is_empty() {
@@ -378,7 +353,7 @@ impl<V: CacheValue> SmartCache<V> {
             if freed_count >= min_count && freed_bytes >= min_bytes {
                 break;
             }
-            if let Some(entry) = entries.remove(key) {
+            if let Some((_, entry)) = self.entries.remove(key) {
                 freed_bytes += entry.size_bytes;
                 freed_count += 1;
                 self.current_size
@@ -390,21 +365,23 @@ impl<V: CacheValue> SmartCache<V> {
 
     /// Clean up expired entries.
     pub async fn cleanup_expired(&self) {
-        let mut entries = self.entries.write().await;
         let now = Instant::now();
 
-        // retain() does a single pass — no intermediate Vec allocation.
-        let current_size = &self.current_size;
-        let stats = &self.stats;
-        entries.retain(|_, entry| {
-            if now.duration_since(entry.created_at) > entry.ttl {
-                current_size.fetch_sub(entry.size_bytes, Ordering::Relaxed);
-                stats.expirations.fetch_add(1, Ordering::Relaxed);
-                false
-            } else {
-                true
+        // Collect expired keys, then remove — avoids holding any refs during removal.
+        let expired_keys: Vec<String> = self
+            .entries
+            .iter()
+            .filter(|r| now.duration_since(r.value().created_at) > r.value().ttl)
+            .map(|r| r.key().clone())
+            .collect();
+
+        for key in expired_keys {
+            if let Some((_, entry)) = self.entries.remove(&key) {
+                self.current_size
+                    .fetch_sub(entry.size_bytes, Ordering::Relaxed);
+                self.stats.expirations.fetch_add(1, Ordering::Relaxed);
             }
-        });
+        }
     }
 
     /// Start a background cleanup task.

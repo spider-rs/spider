@@ -30,7 +30,6 @@ use tokio::time::Instant;
 use crate::utils::FetchPageResult;
 use lazy_static::lazy_static;
 #[cfg(not(feature = "decentralized"))]
-use tokio_stream::StreamExt;
 use url::Url;
 
 /// Allocate up to 128kb upfront for small pages.
@@ -399,6 +398,13 @@ lazy_static! {
             .unwrap_or(default_streaming_chunk_size)
     };
 }
+
+/// Byte threshold above which rewriter loops yield to the async runtime.
+/// Pages smaller than this are processed without yielding (zero overhead).
+const REWRITER_YIELD_THRESHOLD: usize = 512 * 1024;
+
+/// How many chunks between yield points for large pages.
+const REWRITER_YIELD_INTERVAL: usize = 8;
 
 /// The AI data returned from a GPT.
 #[derive(Debug, Clone, Default)]
@@ -3280,14 +3286,15 @@ impl Page {
                     lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
 
                 let html_bytes = html.as_bytes();
-                let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
+                let should_yield = html_bytes.len() > REWRITER_YIELD_THRESHOLD;
 
-                let mut stream = tokio_stream::iter(chunks);
-
-                while let Some(chunk) = stream.next().await {
+                for (i, chunk) in html_bytes.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
                     if rewriter.write(chunk).is_err() {
                         wrote_error = true;
                         break;
+                    }
+                    if should_yield && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
+                        tokio::task::yield_now().await;
                     }
                 }
 
@@ -3451,17 +3458,16 @@ impl Page {
                     lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
 
                 let html_bytes = html.as_bytes();
-                let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
                 let mut wrote_error = false;
+                let should_yield = html_bytes.len() > REWRITER_YIELD_THRESHOLD;
 
-                let mut stream = tokio_stream::iter(chunks).map(Ok::<&[u8], A>);
-
-                while let Some(chunk) = stream.next().await {
-                    if let Ok(chunk) = chunk {
-                        if rewriter.write(chunk).is_err() {
-                            wrote_error = true;
-                            break;
-                        }
+                for (i, chunk) in html_bytes.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
+                    if rewriter.write(chunk).is_err() {
+                        wrote_error = true;
+                        break;
+                    }
+                    if should_yield && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
+                        tokio::task::yield_now().await;
                     }
                 }
 
@@ -3857,15 +3863,16 @@ impl Page {
                     lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |_c: &[u8]| {});
 
                 let html_bytes = html_resource.as_bytes();
-                let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
                 let mut wrote_error = false;
+                let should_yield = html_bytes.len() > REWRITER_YIELD_THRESHOLD;
 
-                let mut stream = tokio_stream::iter(chunks);
-
-                while let Some(chunk) = stream.next().await {
-                    if let Err(_) = rewriter.write(chunk) {
+                for (i, chunk) in html_bytes.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
+                    if rewriter.write(chunk).is_err() {
                         wrote_error = true;
                         break;
+                    }
+                    if should_yield && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
+                        tokio::task::yield_now().await;
                     }
                 }
 
@@ -4289,15 +4296,16 @@ impl Page {
                     lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |_c: &[u8]| {});
 
                 let html_bytes = html_resource.as_bytes();
-                let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
                 let mut wrote_error = false;
+                let should_yield = html_bytes.len() > REWRITER_YIELD_THRESHOLD;
 
-                let mut stream = tokio_stream::iter(chunks);
-
-                while let Some(chunk) = stream.next().await {
-                    if let Err(_) = rewriter.write(chunk) {
+                for (i, chunk) in html_bytes.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
+                    if rewriter.write(chunk).is_err() {
                         wrote_error = true;
                         break;
+                    }
+                    if should_yield && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
+                        tokio::task::yield_now().await;
                     }
                 }
 
@@ -4581,15 +4589,16 @@ impl Page {
                 let mut rewriter = lol_html::send::HtmlRewriter::new(settings, |_c: &[u8]| {});
 
                 let html_bytes = html.as_bytes();
-                let chunks = html_bytes.chunks(*STREAMING_CHUNK_SIZE);
                 let mut wrote_error = false;
+                let should_yield = html_bytes.len() > REWRITER_YIELD_THRESHOLD;
 
-                let mut stream = tokio_stream::iter(chunks);
-
-                while let Some(chunk) = stream.next().await {
+                for (i, chunk) in html_bytes.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
                     if rewriter.write(chunk).is_err() {
                         wrote_error = true;
                         break;
+                    }
+                    if should_yield && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
+                        tokio::task::yield_now().await;
                     }
                 }
 

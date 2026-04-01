@@ -195,15 +195,42 @@ pub async fn get_global_memory_state() -> i8 {
     MEMORY_STATE.load(Ordering::Relaxed)
 }
 
+/// Get the memory state without async overhead.
+///
+/// Returns the cached atomic value if the background monitor is already
+/// initialized, otherwise returns 0 (no pressure). This avoids the
+/// `OnceCell` poll + waker machinery on every call in hot paths like
+/// `insert_link` / `insert_signature`.
+#[cfg(all(feature = "disk", feature = "balance"))]
+pub fn get_global_memory_state_sync() -> i8 {
+    if INIT.initialized() {
+        MEMORY_STATE.load(Ordering::Relaxed)
+    } else {
+        0
+    }
+}
+
 /// Get the memory usage being used state utility.
 #[cfg(all(feature = "disk", not(feature = "balance")))]
 pub async fn get_global_memory_state() -> i8 {
     0
 }
 
+/// Get the memory state without async overhead (no-op without balance).
+#[cfg(all(feature = "disk", not(feature = "balance")))]
+pub fn get_global_memory_state_sync() -> i8 {
+    0
+}
+
 /// Get the memory usage being used state utility.
 #[cfg(not(feature = "disk"))]
 pub async fn get_global_memory_state() -> i8 {
+    0
+}
+
+/// Get the memory state without async overhead (no-op without disk).
+#[cfg(not(feature = "disk"))]
+pub fn get_global_memory_state_sync() -> i8 {
     0
 }
 
