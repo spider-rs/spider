@@ -1066,8 +1066,11 @@ impl Website {
     }
 
     /// Insert a new URL if it doesn't exist. This does nothing with `disk` flag enabled.
+    ///
+    /// Accepts a reference to avoid cloning at the call site. The URL is only
+    /// cloned internally when it is actually new and needs to be stored.
     #[cfg(feature = "disk")]
-    pub async fn insert_link(&mut self, new_url: CaseInsensitiveString) {
+    pub async fn insert_link(&mut self, new_url: &CaseInsensitiveString) {
         let mem_load = crate::utils::detect_system::get_global_memory_state_sync();
         let beyond_memory_limits = self.links_visited.len() >= *LINKS_VISITED_MEMORY_LIMIT;
         let seed_check = mem_load == 2 || mem_load == 1 || beyond_memory_limits;
@@ -1086,22 +1089,29 @@ impl Website {
         }
 
         if mem_load == 2 || beyond_memory_limits || self.shared_disk_enabled() {
-            self.insert_url_disk(&new_url).await
+            self.insert_url_disk(new_url).await
         } else if mem_load == 1 {
             if self.links_visited.len() <= 100 {
-                self.links_visited.insert(new_url);
+                if !self.links_visited.contains(new_url) {
+                    self.links_visited.insert(new_url.clone());
+                }
             } else {
-                self.insert_url_disk(&new_url).await
+                self.insert_url_disk(new_url).await
             }
-        } else {
-            self.links_visited.insert(new_url);
+        } else if !self.links_visited.contains(new_url) {
+            self.links_visited.insert(new_url.clone());
         }
     }
 
     /// Insert a new URL if it doesn't exist. This does nothing with `disk` flag enabled.
+    ///
+    /// Accepts a reference to avoid cloning at the call site. The URL is only
+    /// cloned internally when it is actually new and needs to be stored.
     #[cfg(not(feature = "disk"))]
-    pub async fn insert_link(&mut self, link: CaseInsensitiveString) {
-        self.links_visited.insert(link);
+    pub async fn insert_link(&mut self, link: &CaseInsensitiveString) {
+        if !self.links_visited.contains(link) {
+            self.links_visited.insert(link.clone());
+        }
     }
 
     /// Insert a new signature if it doesn't exist. This does nothing with `disk` flag enabled.
@@ -3086,7 +3096,7 @@ impl Website {
             Some(cb) => cb(*self.url.clone(), None).0,
             _ => *self.url.clone(),
         };
-        self.insert_link(url_ci).await;
+        self.insert_link(&url_ci).await;
 
         if self.configuration.return_page_links {
             page.page_links = links_pages
@@ -3272,7 +3282,7 @@ impl Website {
                 _ => *self.url.clone(),
             };
 
-            self.insert_link(url).await;
+            self.insert_link(&url).await;
 
             if self.configuration.return_page_links {
                 page.page_links = links_pages
@@ -3524,7 +3534,7 @@ impl Website {
                         }
 
                         emit_log(link.inner());
-                        self.insert_link(link.clone()).await;
+                        self.insert_link(&link).await;
 
                         if let Ok(permit) = semaphore.clone().acquire_owned().await {
                             let shared = shared.clone();
@@ -3888,7 +3898,7 @@ impl Website {
                 _ => *self.url.clone(),
             };
 
-            self.insert_link(url).await;
+            self.insert_link(&url).await;
 
             // setup link tracking.
             if self.configuration.return_page_links && page.page_links.is_none() {
@@ -4258,11 +4268,11 @@ impl Website {
                 self.insert_signature(sid).await;
             }
 
-            self.insert_link(match &self.on_link_find_callback {
+            let initial_url = match &self.on_link_find_callback {
                 Some(cb) => cb(*self.url.to_owned(), None).0,
                 _ => *self.url.to_owned(),
-            })
-            .await;
+            };
+            self.insert_link(&initial_url).await;
 
             self.initial_status_code = page.status_code;
             self.initial_html_length = if page.is_empty() {
@@ -4341,7 +4351,7 @@ impl Website {
                 self.insert_signature(sid).await;
             }
 
-            self.insert_link(link_result.0).await;
+            self.insert_link(&link_result.0).await;
 
             if self.configuration.return_page_links {
                 page.page_links = Some(Default::default());
@@ -4416,7 +4426,7 @@ impl Website {
                 self.insert_signature(sid).await;
             }
 
-            self.insert_link(link_result.0).await;
+            self.insert_link(&link_result.0).await;
 
             if self.configuration.return_page_links {
                 page.page_links = Some(Default::default());
@@ -4565,13 +4575,12 @@ impl Website {
                     self.insert_signature(signature).await;
                 }
 
-                self.insert_link(
-                    self.on_link_find_callback
-                        .as_ref()
-                        .map(|cb| cb(*self.url.clone(), None).0)
-                        .unwrap_or_else(|| *self.url.clone()),
-                )
-                .await;
+                let initial_url = self
+                    .on_link_find_callback
+                    .as_ref()
+                    .map(|cb| cb(*self.url.clone(), None).0)
+                    .unwrap_or_else(|| *self.url.clone());
+                self.insert_link(&initial_url).await;
 
                 if self.configuration.return_page_links {
                     page.page_links = links_pages.filter(|pages| !pages.is_empty()).map(Box::new);
@@ -4726,13 +4735,12 @@ impl Website {
                 self.insert_signature(sid).await;
             }
 
-            self.insert_link(
-                self.on_link_find_callback
-                    .as_ref()
-                    .map(|cb| cb(*self.url.clone(), None).0)
-                    .unwrap_or_else(|| *self.url.clone()),
-            )
-            .await;
+            let initial_url = self
+                .on_link_find_callback
+                .as_ref()
+                .map(|cb| cb(*self.url.clone(), None).0)
+                .unwrap_or_else(|| *self.url.clone());
+            self.insert_link(&initial_url).await;
 
             let links = if !page_links.is_empty() {
                 page_links
@@ -5013,7 +5021,7 @@ impl Website {
             Some(cb) => cb(*self.url.clone(), None).0,
             _ => *self.url.clone(),
         };
-        self.insert_link(url).await;
+        self.insert_link(&url).await;
         self.links_visited
             .insert(CaseInsensitiveString::from(target_url.as_str()));
 
@@ -5078,7 +5086,7 @@ impl Website {
                 {
                     Some(cached_html) => {
                         emit_log(&link_url);
-                        self.insert_link(link.clone()).await;
+                        self.insert_link(&link).await;
 
                         let mut page_response =
                             build_cached_html_page_response(&link_url, &cached_html);
@@ -5485,7 +5493,7 @@ impl Website {
                                 if let Some(sid) = page.signature {
                                     self.insert_signature(sid).await;
                                 }
-                                self.insert_link(page.get_url().into()).await;
+                                { let url: CaseInsensitiveString = page.get_url().into(); self.insert_link(&url).await; }
                                 if let Some(p) = self.pages.as_mut() {
                                     p.push(page);
                                     #[cfg(feature = "balance")]
@@ -5535,7 +5543,7 @@ impl Website {
                                 if let Some(sid) = page.signature {
                                     self.insert_signature(sid).await;
                                 }
-                                self.insert_link(page.get_url().into()).await;
+                                { let url: CaseInsensitiveString = page.get_url().into(); self.insert_link(&url).await; }
                                 if let Some(p) = self.pages.as_mut() {
                                     p.push(page);
                                 }
@@ -5580,7 +5588,7 @@ impl Website {
                                 if let Some(sid) = page.signature {
                                     self.insert_signature(sid).await;
                                 }
-                                self.insert_link(page.get_url().into()).await;
+                                { let url: CaseInsensitiveString = page.get_url().into(); self.insert_link(&url).await; }
                                 if let Some(p) = self.pages.as_mut() {
                                     p.push(page);
                                 }
@@ -5625,7 +5633,7 @@ impl Website {
                                 if let Some(sid) = page.signature {
                                     self.insert_signature(sid).await;
                                 }
-                                self.insert_link(page.get_url().into()).await;
+                                { let url: CaseInsensitiveString = page.get_url().into(); self.insert_link(&url).await; }
                                 if let Some(p) = self.pages.as_mut() {
                                     p.push(page);
                                 }
@@ -5863,7 +5871,7 @@ impl Website {
 
                             emit_log(link.inner());
 
-                            self.insert_link(link.clone()).await;
+                            self.insert_link(&link).await;
 
                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                 let shared = shared.clone();
@@ -6642,7 +6650,7 @@ impl Website {
 
                                             emit_log(link.inner());
 
-                                            self.insert_link(link.clone()).await;
+                                            self.insert_link(&link).await;
 
                                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                                 let shared = shared.clone();
@@ -7239,7 +7247,7 @@ impl Website {
 
                             emit_log(link.inner());
 
-                            website.insert_link(link.clone()).await;
+                            website.insert_link(&link).await;
 
                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                 let shared = shared.clone();
@@ -7736,7 +7744,7 @@ impl Website {
 
                                             emit_log(link.inner());
 
-                                            website.insert_link(link.clone()).await;
+                                            website.insert_link(&link).await;
 
                                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                                 let shared = shared.clone();
@@ -8192,7 +8200,7 @@ impl Website {
 
                                     emit_log(link.inner());
 
-                                    self.insert_link(link.clone()).await;
+                                    self.insert_link(&link).await;
 
                                     if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                         let shared = shared.clone();
@@ -8434,7 +8442,7 @@ impl Website {
 
                         emit_log(link.inner());
 
-                        self.insert_link(link.clone()).await;
+                        self.insert_link(&link).await;
 
                         if let Ok(permit) = SEM.acquire().await {
                             let client = client.clone();
@@ -8626,7 +8634,7 @@ impl Website {
                             }
 
                             emit_log(&link.inner());
-                            self.insert_link(link.clone()).await;
+                            self.insert_link(&link).await;
 
                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                 let shared = shared.clone();
@@ -8952,7 +8960,7 @@ impl Website {
                         continue;
                     }
 
-                    self.insert_link(link).await;
+                    self.insert_link(&link).await;
 
                     let (tx, mut rx) = tokio::sync::mpsc::channel::<Page>(100);
 
@@ -9190,7 +9198,7 @@ impl Website {
                                 continue;
                             }
 
-                            self.insert_link(link).await;
+                            self.insert_link(&link).await;
 
                             match attempt_navigation(
                                 "about:blank",
@@ -9268,7 +9276,7 @@ impl Website {
                                                             break;
                                                         }
 
-                                                        self.insert_link(link.clone()).await;
+                                                        self.insert_link(&link).await;
 
                                                         let client = client.clone();
                                                         let shared = shared.clone();
@@ -9394,7 +9402,7 @@ impl Website {
                                                 continue;
                                             }
 
-                                            self.insert_link(link.clone()).await;
+                                            self.insert_link(&link).await;
 
                                             let client = client.clone();
                                             let shared = shared.clone();
@@ -9762,7 +9770,7 @@ impl Website {
                                 break;
                             }
 
-                            self.insert_link(link.clone()).await;
+                            self.insert_link(&link).await;
 
                             if crawl {
                                 let client = client.clone();
