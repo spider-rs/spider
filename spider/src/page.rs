@@ -7,7 +7,7 @@ use crate::utils::templates::EMPTY_HTML_BASIC;
 #[cfg(not(feature = "decentralized"))]
 use crate::utils::RequestError;
 use crate::utils::{
-    css_selectors::{BASE_CSS_SELECTORS, BASE_CSS_SELECTORS_WITH_XML},
+    css_selectors::{compiled_base_element_selector, compiled_selector, compiled_xml_selector},
     get_domain_from_url, hash_html, networking_capable, BasicCachePolicy, CacheOptions,
     PageResponse,
 };
@@ -31,6 +31,25 @@ use crate::utils::FetchPageResult;
 use lazy_static::lazy_static;
 #[cfg(not(feature = "decentralized"))]
 use url::Url;
+
+/// Construct an element content handler tuple using a pre-compiled `&'static Selector`.
+/// Same as `lol_html::element!` but uses `Cow::Borrowed` to avoid re-parsing.
+macro_rules! element_precompiled {
+    ($selector:expr, $handler:expr) => {{
+        #[inline(always)]
+        const fn type_hint<'h, T, H: lol_html::HandlerTypes>(h: T) -> T
+        where
+            T: FnMut(&mut lol_html::html_content::Element<'_, '_, H>) -> lol_html::HandlerResult
+                + 'h,
+        {
+            h
+        }
+        (
+            std::borrow::Cow::Borrowed($selector),
+            lol_html::send::ElementContentHandlers::default().element(type_hint($handler)),
+        )
+    }};
+}
 
 /// Allocate up to 128kb upfront for small pages.
 pub(crate) const MAX_PRE_ALLOCATED_HTML_PAGE_SIZE: u64 = 128 * 1024;
@@ -1980,11 +1999,11 @@ impl Page {
                         Ok(())
                     })
                 } else {
-                    lol_html::element!(
+                    element_precompiled!(
                         if xml_file {
-                            BASE_CSS_SELECTORS_WITH_XML
+                            compiled_xml_selector()
                         } else {
-                            BASE_CSS_SELECTORS
+                            compiled_selector()
                         },
                         |el| {
                             if let Some(href) = el.get_attribute("href") {
@@ -2019,15 +2038,18 @@ impl Page {
                 let mut element_content_handlers =
                     Vec::with_capacity(if r_settings.ssg_build { 2 } else { 1 } + 4);
 
-                element_content_handlers.push(lol_html::element!("base", |el| {
-                    if let Some(href) = el.get_attribute("href") {
-                        if let Ok(parsed_base) = Url::parse(&href) {
-                            let _ = base_input_url.set(parsed_base);
+                element_content_handlers.push(element_precompiled!(
+                    compiled_base_element_selector(),
+                    |el| {
+                        if let Some(href) = el.get_attribute("href") {
+                            if let Ok(parsed_base) = Url::parse(&href) {
+                                let _ = base_input_url.set(parsed_base);
+                            }
                         }
-                    }
 
-                    Ok(())
-                }));
+                        Ok(())
+                    }
+                ));
                 element_content_handlers.push(base_links_settings);
 
                 element_content_handlers.extend(metadata_handlers(
@@ -2325,11 +2347,11 @@ impl Page {
                 Ok(())
             })
         } else {
-            lol_html::element!(
+            element_precompiled!(
                 if xml_file {
-                    BASE_CSS_SELECTORS_WITH_XML
+                    compiled_xml_selector()
                 } else {
-                    BASE_CSS_SELECTORS
+                    compiled_selector()
                 },
                 |el| {
                     if let Some(href) = el.get_attribute("href") {
@@ -2365,14 +2387,17 @@ impl Page {
         let mut element_content_handlers =
             Vec::with_capacity(if r_settings.ssg_build { 2 } else { 1 } + 4);
 
-        element_content_handlers.push(lol_html::element!("base", |el| {
-            if let Some(href) = el.get_attribute("href") {
-                if let Ok(parsed_base) = Url::parse(&href) {
-                    let _ = base_input_url.set(parsed_base);
+        element_content_handlers.push(element_precompiled!(
+            compiled_base_element_selector(),
+            |el| {
+                if let Some(href) = el.get_attribute("href") {
+                    if let Ok(parsed_base) = Url::parse(&href) {
+                        let _ = base_input_url.set(parsed_base);
+                    }
                 }
+                Ok(())
             }
-            Ok(())
-        }));
+        ));
 
         element_content_handlers.push(base_links_settings);
 
@@ -3312,21 +3337,24 @@ impl Page {
                 let mut element_content_handlers =
                     metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
 
-                element_content_handlers.push(lol_html::element!("base", |el| {
-                    if let Some(href) = el.get_attribute("href") {
-                        if let Ok(parsed_base) = Url::parse(&href) {
-                            let _ = base_input_url.set(parsed_base);
+                element_content_handlers.push(element_precompiled!(
+                    compiled_base_element_selector(),
+                    |el| {
+                        if let Some(href) = el.get_attribute("href") {
+                            if let Ok(parsed_base) = Url::parse(&href) {
+                                let _ = base_input_url.set(parsed_base);
+                            }
                         }
+
+                        Ok(())
                     }
+                ));
 
-                    Ok(())
-                }));
-
-                element_content_handlers.push(lol_html::element!(
+                element_content_handlers.push(element_precompiled!(
                     if xml_file {
-                        BASE_CSS_SELECTORS_WITH_XML
+                        compiled_xml_selector()
                     } else {
-                        BASE_CSS_SELECTORS
+                        compiled_selector()
                     },
                     |el| {
                         if let Some(href) = el.get_attribute("href") {
@@ -3482,21 +3510,24 @@ impl Page {
                 let mut element_content_handlers =
                     metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
 
-                element_content_handlers.push(lol_html::element!("base", |el| {
-                    if let Some(href) = el.get_attribute("href") {
-                        if let Ok(parsed_base) = Url::parse(&href) {
-                            let _ = base_input_url.set(parsed_base);
+                element_content_handlers.push(element_precompiled!(
+                    compiled_base_element_selector(),
+                    |el| {
+                        if let Some(href) = el.get_attribute("href") {
+                            if let Ok(parsed_base) = Url::parse(&href) {
+                                let _ = base_input_url.set(parsed_base);
+                            }
                         }
+
+                        Ok(())
                     }
+                ));
 
-                    Ok(())
-                }));
-
-                element_content_handlers.push(lol_html::element!(
+                element_content_handlers.push(element_precompiled!(
                     if xml_file {
-                        BASE_CSS_SELECTORS_WITH_XML
+                        compiled_xml_selector()
                     } else {
-                        BASE_CSS_SELECTORS
+                        compiled_selector()
                     },
                     |el| {
                         if let Some(href) = el.get_attribute("href") {
@@ -3807,15 +3838,18 @@ impl Page {
                 let mut element_content_handlers =
                     metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
 
-                element_content_handlers.push(element!("base", |el| {
-                    if let Some(href) = el.get_attribute("href") {
-                        if let Ok(parsed_base) = Url::parse(&href) {
-                            let _ = base_input_url.set(parsed_base);
+                element_content_handlers.push(element_precompiled!(
+                    compiled_base_element_selector(),
+                    |el| {
+                        if let Some(href) = el.get_attribute("href") {
+                            if let Ok(parsed_base) = Url::parse(&href) {
+                                let _ = base_input_url.set(parsed_base);
+                            }
                         }
-                    }
 
-                    Ok(())
-                }));
+                        Ok(())
+                    }
+                ));
 
                 element_content_handlers.push(element!("script", |el| {
                     if static_app
@@ -3887,11 +3921,11 @@ impl Page {
                     Ok(())
                 }));
 
-                element_content_handlers.push(element!(
+                element_content_handlers.push(element_precompiled!(
                     if xml_file {
-                        BASE_CSS_SELECTORS_WITH_XML
+                        compiled_xml_selector()
                     } else {
-                        BASE_CSS_SELECTORS
+                        compiled_selector()
                     },
                     |el| {
                         if let Some(href) = el.get_attribute("href") {
@@ -4247,7 +4281,7 @@ impl Page {
                 let mut script_src_count: u8 = 0;
 
                 let mut element_content_handlers = vec![
-                    element!("base", |el| {
+                    element_precompiled!(compiled_base_element_selector(), |el| {
                         if let Some(href) = el.get_attribute("href") {
                             if let Ok(parsed_base) = Url::parse(&href) {
                                 let _ = base_input_url.set(parsed_base);
@@ -4702,15 +4736,18 @@ impl Page {
                 let mut element_content_handlers =
                     metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
 
-                element_content_handlers.push(lol_html::element!("base", |el| {
-                    if let Some(href) = el.get_attribute("href") {
-                        if let Ok(parsed_base) = Url::parse(&href) {
-                            let _ = base_input_url.set(parsed_base);
+                element_content_handlers.push(element_precompiled!(
+                    compiled_base_element_selector(),
+                    |el| {
+                        if let Some(href) = el.get_attribute("href") {
+                            if let Ok(parsed_base) = Url::parse(&href) {
+                                let _ = base_input_url.set(parsed_base);
+                            }
                         }
-                    }
 
-                    Ok(())
-                }));
+                        Ok(())
+                    }
+                ));
 
                 element_content_handlers.push(base_links_settings);
 

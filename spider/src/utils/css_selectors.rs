@@ -82,6 +82,37 @@ pub(crate) const BASE_CSS_SELECTORS: &str = concat!(
     ":not([href$=\".dump\"])",
 );
 
+// Pre-compiled selector for BASE_CSS_SELECTORS. Lock-free after first init
+// (single atomic Acquire load on the fast path). Avoids re-parsing the 80+
+// :not() CSS selector on every page.
+static COMPILED_BASE_SELECTOR: std::sync::OnceLock<lol_html::Selector> = std::sync::OnceLock::new();
+
+// Pre-compiled selector for BASE_CSS_SELECTORS_WITH_XML.
+static COMPILED_BASE_XML_SELECTOR: std::sync::OnceLock<lol_html::Selector> =
+    std::sync::OnceLock::new();
+
+// Pre-compiled selector for the <base> element.
+static COMPILED_BASE_ELEMENT_SELECTOR: std::sync::OnceLock<lol_html::Selector> =
+    std::sync::OnceLock::new();
+
+/// Get the pre-compiled link extraction selector (non-XML).
+#[inline]
+pub(crate) fn compiled_selector() -> &'static lol_html::Selector {
+    COMPILED_BASE_SELECTOR.get_or_init(|| BASE_CSS_SELECTORS.parse().unwrap())
+}
+
+/// Get the pre-compiled link extraction selector (XML variant).
+#[inline]
+pub(crate) fn compiled_xml_selector() -> &'static lol_html::Selector {
+    COMPILED_BASE_XML_SELECTOR.get_or_init(|| BASE_CSS_SELECTORS_WITH_XML.parse().unwrap())
+}
+
+/// Get the pre-compiled `<base>` element selector.
+#[inline]
+pub(crate) fn compiled_base_element_selector() -> &'static lol_html::Selector {
+    COMPILED_BASE_ELEMENT_SELECTOR.get_or_init(|| "base".parse().unwrap())
+}
+
 /// Base css selector to use for getting valid web pages including xml files. We may remove this for general xml including links always.
 pub(crate) const BASE_CSS_SELECTORS_WITH_XML: &str = concat!(
     "a[href]",
