@@ -3,10 +3,21 @@
     not(windows),
     not(target_os = "android"),
     not(target_env = "musl"),
-    feature = "jemalloc"
+    feature = "jemalloc",
+    not(feature = "mimalloc")
 ))]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
+// mimalloc — alternative high-performance allocator with thread-local caches
+#[cfg(all(
+    not(windows),
+    not(target_os = "android"),
+    not(target_env = "musl"),
+    feature = "mimalloc"
+))]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 extern crate env_logger;
 extern crate serde_json;

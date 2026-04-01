@@ -87,6 +87,24 @@ website
    .with_proxies(None);
 ```
 
+## Performance: Global Allocator
+
+Using a custom global allocator can improve throughput by **30-60%** under high concurrency.
+We recommend [`mimalloc`](https://crates.io/crates/mimalloc) for mixed crawl+parse workloads
+or [`tikv-jemallocator`](https://crates.io/crates/tikv-jemallocator) for pure crawl workloads.
+
+```toml
+[dependencies]
+mimalloc = { version = "0.1", default-features = false }
+# or: tikv-jemallocator = "0.6"
+```
+
+```rust
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+// or: static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+```
+
 ## Features
 
 We have the following optional feature flags.

@@ -399,6 +399,41 @@ lazy_static! {
     };
 }
 
+/// Global EMA of links-per-page. Used to pre-size extraction HashSets and
+/// avoid repeated rehashing on link-dense sites. Lock-free, race-safe:
+/// worst case a slightly stale hint, which is still better than a static 32.
+static LINK_CAPACITY_HINT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(32);
+
+/// Read the current link capacity hint (minimum 32).
+#[inline(always)]
+fn link_set_capacity() -> usize {
+    LINK_CAPACITY_HINT
+        .load(std::sync::atomic::Ordering::Relaxed)
+        .max(32)
+}
+
+/// Update the EMA after a page extraction. Uses 3:1 weighting (75% old, 25% new).
+#[inline(always)]
+fn update_link_capacity_hint(count: usize) {
+    let prev = LINK_CAPACITY_HINT.load(std::sync::atomic::Ordering::Relaxed);
+    let next = if prev == 0 {
+        count.max(32)
+    } else {
+        ((prev * 3 + count) / 4).max(32)
+    };
+    LINK_CAPACITY_HINT.store(next, std::sync::atomic::Ordering::Relaxed);
+}
+
+// Thread-local reusable buffer for XML sitemap parsing.
+// Uses Cell take/replace pattern — safe across `.await` points because the
+// Vec is taken out (owned) before any await and put back after.
+// If the task migrates threads between take and replace, the buffer simply
+// lands on a different thread — harmless. Re-entrant calls see an empty Vec
+// (no panic, just no reuse for that nested invocation).
+thread_local! {
+    static XML_PARSE_BUF: std::cell::Cell<Vec<u8>> = const { std::cell::Cell::new(Vec::new()) };
+}
+
 /// Byte threshold above which rewriter loops yield to the async runtime.
 /// Pages smaller than this are processed without yielding (zero overhead).
 pub const REWRITER_YIELD_THRESHOLD: usize = 512 * 1024;
@@ -3086,7 +3121,16 @@ impl Page {
     /// Find the links as a stream using string resource validation for XML files
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn links_stream_xml_links_stream_base<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + ToString
+            + std::hash::Hash
+            + From<String>
+            + Into<CaseInsensitiveString>,
     >(
         &mut self,
         selectors: &RelativeSelectors,
@@ -3101,7 +3145,9 @@ impl Page {
 
         reader.config_mut().trim_text(true);
 
-        let mut buf = Vec::new();
+        // Take the thread-local buffer (owned, safe across awaits).
+        // If re-entered or migrated, we just get an empty Vec — no panic.
+        let mut buf = XML_PARSE_BUF.with(|c| c.take());
 
         let parent_host = &selectors.1[0];
         let parent_host_scheme = &selectors.1[1];
@@ -3170,12 +3216,13 @@ impl Page {
             buf.clear();
         }
 
+        // Return the buffer to the thread-local pool (retains capacity for reuse).
+        buf.clear();
+        XML_PARSE_BUF.with(|c| c.set(buf));
+
         if let Some(lp) = links_pages {
             let page_links = self.page_links.get_or_insert_with(Default::default);
-            page_links.extend(
-                lp.into_iter()
-                    .map(|item| CaseInsensitiveString::from(item.to_string())),
-            );
+            page_links.extend(lp.into_iter().map(Into::into));
         }
     }
 
@@ -3183,14 +3230,23 @@ impl Page {
     #[inline(always)]
     #[cfg(not(feature = "decentralized"))]
     pub async fn links_stream_base<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + ToString
+            + std::hash::Hash
+            + From<String>
+            + Into<CaseInsensitiveString>,
     >(
         &mut self,
         selectors: &RelativeSelectors,
         html: &str,
         base: &Option<Box<Url>>,
     ) -> HashSet<A> {
-        let mut map: HashSet<A> = HashSet::with_capacity(32);
+        let mut map: HashSet<A> = HashSet::with_capacity(link_set_capacity());
         let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
             Some(HashSet::new())
         } else {
@@ -3306,10 +3362,7 @@ impl Page {
 
         if let Some(lp) = links_pages {
             let page_links = self.page_links.get_or_insert_with(Default::default);
-            page_links.extend(
-                lp.into_iter()
-                    .map(|item| CaseInsensitiveString::from(item.to_string())),
-            );
+            page_links.extend(lp.into_iter().map(Into::into));
         }
 
         let valid_meta =
@@ -3330,6 +3383,8 @@ impl Page {
             }
         }
 
+        update_link_capacity_hint(map.len());
+
         map
     }
 
@@ -3338,7 +3393,16 @@ impl Page {
     #[cfg(not(feature = "decentralized"))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn links_stream_base_ssg<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + ToString
+            + std::hash::Hash
+            + From<String>
+            + Into<CaseInsensitiveString>,
     >(
         &mut self,
         selectors: &RelativeSelectors,
@@ -3348,7 +3412,7 @@ impl Page {
     ) -> HashSet<A> {
         use auto_encoder::auto_encode_bytes;
 
-        let mut map: HashSet<A> = HashSet::with_capacity(32);
+        let mut map: HashSet<A> = HashSet::with_capacity(link_set_capacity());
         let mut map_ssg: HashSet<A> = HashSet::new();
         let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
             Some(HashSet::new())
@@ -3521,10 +3585,7 @@ impl Page {
 
         if let Some(lp) = links_pages {
             let page_links = self.page_links.get_or_insert_with(Default::default);
-            page_links.extend(
-                lp.into_iter()
-                    .map(|item| CaseInsensitiveString::from(item.to_string())),
-            );
+            page_links.extend(lp.into_iter().map(Into::into));
         }
 
         let valid_meta = meta_title.is_some()
@@ -3553,13 +3614,24 @@ impl Page {
 
         map.extend(map_ssg);
 
+        update_link_capacity_hint(map.len());
+
         map
     }
 
     /// Find the links as a stream using string resource validation and parsing the script for nextjs initial SSG paths.
     #[cfg(not(feature = "decentralized"))]
     pub async fn links_stream_ssg<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + ToString
+            + std::hash::Hash
+            + From<String>
+            + Into<CaseInsensitiveString>,
     >(
         &mut self,
         selectors: &RelativeSelectors,
@@ -3597,7 +3669,16 @@ impl Page {
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized"), not(feature = "full_resources")))]
     pub async fn links_stream<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + ToString
+            + std::hash::Hash
+            + From<String>
+            + Into<CaseInsensitiveString>,
     >(
         &mut self,
         selectors: &RelativeSelectors,
@@ -3620,7 +3701,16 @@ impl Page {
     #[inline(always)]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub(crate) async fn links_stream_smart<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + ToString
+            + std::hash::Hash
+            + From<String>
+            + Into<CaseInsensitiveString>,
     >(
         &mut self,
         selectors: &RelativeSelectors,
@@ -3634,7 +3724,7 @@ impl Page {
         use std::sync::atomic::Ordering;
 
         let mut bytes_transferred: Option<f64> = None;
-        let mut map: HashSet<A> = HashSet::with_capacity(32);
+        let mut map: HashSet<A> = HashSet::with_capacity(link_set_capacity());
         let mut inner_map: HashSet<A> = HashSet::new();
         let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
             Some(HashSet::new())
@@ -4020,14 +4110,8 @@ impl Page {
 
         if let Some(lp) = links_pages {
             let page_links = self.page_links.get_or_insert_with(Default::default);
-            page_links.extend(
-                lp.into_iter()
-                    .map(|item| CaseInsensitiveString::from(item.to_string())),
-            );
-            page_links.extend(
-                map.iter()
-                    .map(|item| CaseInsensitiveString::from(item.to_string())),
-            );
+            page_links.extend(lp.into_iter().map(Into::into));
+            page_links.extend(map.iter().map(|item| item.clone().into()));
         }
 
         let valid_meta =
@@ -4048,6 +4132,8 @@ impl Page {
             }
         }
 
+        update_link_capacity_hint(map.len());
+
         (map, bytes_transferred)
     }
 
@@ -4060,7 +4146,16 @@ impl Page {
     #[inline(always)]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn links_stream_smart<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + ToString
+            + std::hash::Hash
+            + From<String>
+            + Into<CaseInsensitiveString>,
     >(
         &mut self,
         selectors: &RelativeSelectors,
@@ -4074,7 +4169,7 @@ impl Page {
         use std::sync::atomic::Ordering;
 
         let mut bytes_transferred: Option<f64> = None;
-        let mut map: HashSet<A> = HashSet::with_capacity(32);
+        let mut map: HashSet<A> = HashSet::with_capacity(link_set_capacity());
         let mut inner_map: HashSet<A> = HashSet::new();
         let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
             Some(HashSet::new())
@@ -4451,14 +4546,8 @@ impl Page {
 
         if let Some(lp) = links_pages {
             let page_links = self.page_links.get_or_insert_with(Default::default);
-            page_links.extend(
-                lp.into_iter()
-                    .map(|item| CaseInsensitiveString::from(item.to_string())),
-            );
-            page_links.extend(
-                map.iter()
-                    .map(|item| CaseInsensitiveString::from(item.to_string())),
-            );
+            page_links.extend(lp.into_iter().map(Into::into));
+            page_links.extend(map.iter().map(|item| item.clone().into()));
         }
 
         let valid_meta =
@@ -4479,6 +4568,8 @@ impl Page {
             }
         }
 
+        update_link_capacity_hint(map.len());
+
         (map, bytes_transferred)
     }
 
@@ -4487,13 +4578,22 @@ impl Page {
     #[cfg(not(feature = "decentralized"))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all,))]
     pub async fn links_stream_full_resource<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + ToString
+            + std::hash::Hash
+            + From<String>
+            + Into<CaseInsensitiveString>,
     >(
         &mut self,
         selectors: &RelativeSelectors,
         base: &Option<Box<Url>>,
     ) -> HashSet<A> {
-        let mut map: HashSet<A> = HashSet::with_capacity(32);
+        let mut map: HashSet<A> = HashSet::with_capacity(link_set_capacity());
         let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
             Some(HashSet::new())
         } else {
@@ -4626,6 +4726,8 @@ impl Page {
             }
         }
 
+        update_link_capacity_hint(map.len());
+
         map
     }
 
@@ -4633,7 +4735,16 @@ impl Page {
     #[inline(always)]
     #[cfg(all(not(feature = "decentralized"), feature = "full_resources"))]
     pub async fn links_stream<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + ToString
+            + std::hash::Hash
+            + From<String>
+            + Into<CaseInsensitiveString>,
     >(
         &mut self,
         selectors: &RelativeSelectors,
@@ -4650,7 +4761,16 @@ impl Page {
     #[cfg(feature = "decentralized")]
     /// Find the links as a stream using string resource validation
     pub async fn links_stream<
-        A: PartialEq + Eq + Sync + Send + Clone + Default + ToString + std::hash::Hash + From<String>,
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + ToString
+            + std::hash::Hash
+            + From<String>
+            + Into<CaseInsensitiveString>,
     >(
         &mut self,
         _: &RelativeSelectors,
