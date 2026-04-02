@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.48.25"
+version = "2.48.29"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -124,11 +124,11 @@ features = ["serde", "headers", "dynamic-versions"]
 
 [dependencies.spider_agent_types]
 path = "../spider_agent_types"
-version = "2.48.25"
+version = "2.48.28"
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.48.25"
+version = "2.48.28"
 optional = true
 default-features = false
 
@@ -420,8 +420,8 @@ features = [
     "real_browser", "spoof", "dns_cache",
     "openai", "openai_slim_fit", "gemini", "cache_gemini", "cache_openai",
     "cache", "cache_mem", "cache_chrome_hybrid", "cache_chrome_hybrid_mem",
-    "budget", "control", "sync", "fs",
-    "tracing", "simd", "firewall",
+    "control", "sync", "fs",
+    "tracing", "simd",
     "webdriver", "webdriver_headed", "webdriver_stealth",
     "webdriver_chrome", "webdriver_firefox", "webdriver_edge", "webdriver_screenshot",
     "search", "search_serper", "search_brave", "search_bing", "search_tavily",
