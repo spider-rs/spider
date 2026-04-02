@@ -24,6 +24,16 @@ use std::time::Duration;
 #[cfg(feature = "chrome")]
 pub use spider_fingerprint::Fingerprint;
 
+/// Check if an API key is a placeholder or empty.
+pub fn is_placeholder_api_key(key: &str) -> bool {
+    let trimmed = key.trim();
+    trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("YOUR_API_KEY")
+        || trimmed.eq_ignore_ascii_case("YOUR-API-KEY")
+        || trimmed.eq_ignore_ascii_case("API_KEY")
+        || trimmed.eq_ignore_ascii_case("API-KEY")
+}
+
 /// Redirect policy configuration for request
 #[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -1901,6 +1911,10 @@ impl Configuration {
     /// Set a [spider.cloud](https://spider.cloud) API key (Proxy mode).
     #[cfg(feature = "spider_cloud")]
     pub fn with_spider_cloud(&mut self, api_key: &str) -> &mut Self {
+        if is_placeholder_api_key(api_key) {
+            log::warn!("Spider Cloud API key looks like a placeholder — skipping. Get a real key at https://spider.cloud");
+            return self;
+        }
         self.spider_cloud = Some(Box::new(SpiderCloudConfig::new(api_key)));
         self
     }
@@ -1930,6 +1944,10 @@ impl Configuration {
     /// Sets `chrome_connection_url` to `wss://browser.spider.cloud/v1/browser?token=API_KEY`.
     #[cfg(all(feature = "spider_cloud", feature = "chrome"))]
     pub fn with_spider_browser(&mut self, api_key: &str) -> &mut Self {
+        if is_placeholder_api_key(api_key) {
+            log::warn!("Spider Browser Cloud API key looks like a placeholder — skipping. Get a real key at https://spider.cloud");
+            return self;
+        }
         let cfg = SpiderBrowserConfig::new(api_key);
         self.chrome_connection_url = Some(cfg.connection_url());
         self.spider_browser = Some(Box::new(cfg));

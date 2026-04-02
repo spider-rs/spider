@@ -13,6 +13,16 @@ use crate::tools::{
     SpiderCloudToolConfig,
 };
 use std::sync::Arc;
+
+/// Check if an API key is a placeholder or empty.
+fn is_placeholder_api_key(key: &str) -> bool {
+    let trimmed = key.trim();
+    trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("YOUR_API_KEY")
+        || trimmed.eq_ignore_ascii_case("YOUR-API-KEY")
+        || trimmed.eq_ignore_ascii_case("API_KEY")
+        || trimmed.eq_ignore_ascii_case("API-KEY")
+}
 use tokio::sync::Semaphore;
 
 #[cfg(feature = "search")]
@@ -1150,7 +1160,12 @@ impl AgentBuilder {
     /// `/unblocker`.
     /// AI routes remain disabled unless enabled in `with_spider_cloud_config`.
     pub fn with_spider_cloud(mut self, api_key: impl Into<String>) -> Self {
-        self.spider_cloud = Some(SpiderCloudToolConfig::new(api_key));
+        let key = api_key.into();
+        if is_placeholder_api_key(&key) {
+            log::warn!("Spider Cloud API key looks like a placeholder — skipping. Get a real key at https://spider.cloud");
+            return self;
+        }
+        self.spider_cloud = Some(SpiderCloudToolConfig::new(key));
         self
     }
 
@@ -1167,7 +1182,12 @@ impl AgentBuilder {
     /// Connects to a remote browser instance at `wss://browser.spider.cloud/v1/browser`
     /// via CDP. Registers navigate, html, screenshot, evaluate, click, fill, and wait tools.
     pub fn with_spider_browser(mut self, api_key: impl Into<String>) -> Self {
-        self.spider_browser = Some(SpiderBrowserToolConfig::new(api_key));
+        let key = api_key.into();
+        if is_placeholder_api_key(&key) {
+            log::warn!("Spider Browser Cloud API key looks like a placeholder — skipping. Get a real key at https://spider.cloud");
+            return self;
+        }
+        self.spider_browser = Some(SpiderBrowserToolConfig::new(key));
         self
     }
 
