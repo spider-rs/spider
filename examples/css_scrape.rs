@@ -14,8 +14,7 @@ async fn main() {
         .with_limit(5)
         .build()
         .unwrap();
-    let mut rx2: tokio::sync::broadcast::Receiver<spider::page::Page> =
-        website.subscribe(0).unwrap();
+    let mut rx2: tokio::sync::broadcast::Receiver<spider::page::Page> = website.subscribe(0);
     let mut stdout = tokio::io::stdout();
 
     let join_handle = tokio::spawn(async move {

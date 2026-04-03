@@ -48,7 +48,7 @@ async fn crawl_website(url: &str) -> Result<()> {
         .with_chrome_connection(Some("http://127.0.0.1:9222/json/version".into()))
         .build()
         .unwrap();
-    let mut rx2 = website.subscribe(16).unwrap();
+    let mut rx2 = website.subscribe(16);
     let mut g = website.subscribe_guard().unwrap();
 
     let start = crate::tokio::time::Instant::now();

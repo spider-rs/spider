@@ -87,7 +87,7 @@ async fn main() {
         .build()
         .unwrap();
 
-    let mut rx = website.subscribe(16).unwrap();
+    let mut rx = website.subscribe(16);
 
     let join_handle = tokio::spawn(async move {
         while let Ok(page) = rx.recv().await {

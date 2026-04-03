@@ -11,7 +11,7 @@ async fn main() {
         .with_viewport(Some(Viewport::new(375, 500)))
         .build()
         .unwrap();
-    let mut rx2 = website.subscribe(16).unwrap();
+    let mut rx2 = website.subscribe(16);
 
     tokio::spawn(async move {
         while let Ok(page) = rx2.recv().await {

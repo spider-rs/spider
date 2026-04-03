@@ -358,7 +358,7 @@ async fn robots_crawl_with_respect_robots() {
         .with_request_timeout(Some(std::time::Duration::from_secs(30)))
         .with_crawl_timeout(Some(std::time::Duration::from_secs(60)));
 
-    let mut rx = website.subscribe(16).expect("subscribe");
+    let mut rx = website.subscribe(16);
     let (done_tx, done_rx) = spider::tokio::sync::oneshot::channel();
 
     let collector = spider::tokio::spawn(async move {

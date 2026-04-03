@@ -46,7 +46,7 @@ async fn crawl_with_spider_browser(url: &str) -> Result<()> {
         .build()
         .unwrap();
 
-    let mut rx = website.subscribe(16).unwrap();
+    let mut rx = website.subscribe(16);
 
     tokio::spawn(async move {
         while let Ok(page) = rx.recv().await {

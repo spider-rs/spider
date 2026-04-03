@@ -54,7 +54,7 @@ async fn main() {
         .with_openai(Some(gpt_config))
         .build()
         .unwrap();
-    let mut rx2 = website.subscribe(16).unwrap();
+    let mut rx2 = website.subscribe(16);
 
     website.set_extra_links(HashSet::from([(website_url.to_owned()
         + "/search/howsearchworks/?fg=1")

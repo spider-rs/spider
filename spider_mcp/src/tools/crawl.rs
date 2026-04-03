@@ -100,9 +100,7 @@ pub async fn run(params: CrawlParams, state: Arc<SharedState>) -> Result<String,
     let return_format = ReturnFormat::from_str(format_str);
 
     let mut website = website.build().map_err(|_| "Invalid URL".to_string())?;
-    let mut rx = website
-        .subscribe(16)
-        .ok_or_else(|| "Subscribe failed (sync feature required)".to_string())?;
+    let mut rx = website.subscribe(16);
 
     let use_headless = params.headless.unwrap_or(false);
 

@@ -30,7 +30,7 @@ async fn main() {
         .with_event_tracker(Some(tracker))
         .build()
         .unwrap();
-    let mut rx2 = website.subscribe(500).unwrap();
+    let mut rx2 = website.subscribe(500);
 
     let start = std::time::Instant::now();
 
@@ -46,7 +46,7 @@ async fn main() {
     website.crawl().await;
     website.unsubscribe();
 
-    let mut rx2 = website.subscribe(500).unwrap();
+    let mut rx2 = website.subscribe(500);
 
     let subscription = async move {
         while let Ok(res) = rx2.recv().await {

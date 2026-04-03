@@ -19,7 +19,7 @@ async fn main() {
         .build()
         .unwrap();
 
-    let mut rx = website.subscribe(16).unwrap();
+    let mut rx = website.subscribe(16);
 
     let handle = tokio::spawn(async move {
         let mut html = String::new();

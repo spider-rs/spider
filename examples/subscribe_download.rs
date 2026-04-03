@@ -25,7 +25,7 @@ async fn main() {
     let website_name = "https://choosealicense.com";
 
     let mut website: Website = Website::new(website_name);
-    let mut rx2 = website.subscribe(888).unwrap();
+    let mut rx2 = website.subscribe(888);
 
     tokio::spawn(async move {
         while let Ok(page) = rx2.recv().await {

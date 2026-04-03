@@ -77,7 +77,7 @@ async fn main() {
         .unwrap();
 
     // Subscribe to receive pages
-    let mut rx = website.subscribe(16).unwrap();
+    let mut rx = website.subscribe(16);
 
     // Spawn task to handle received pages
     let join_handle = tokio::spawn(async move {

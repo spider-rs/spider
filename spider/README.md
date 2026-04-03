@@ -208,7 +208,7 @@ use spider::tokio;
 #[tokio::main]
 async fn main() {
     let mut website = Website::new("https://choosealicense.com");
-    let mut rx2 = website.subscribe(16).unwrap();
+    let mut rx2 = website.subscribe(16);
 
     tokio::spawn(async move {
         while let Ok(res) = rx2.recv().await {
@@ -339,7 +339,7 @@ async fn main() {
     // set the cron to run or use the builder pattern `website.with_cron`.
     website.cron_str = "1/5 * * * * *".into();
 
-    let mut rx2 = website.subscribe(16).unwrap();
+    let mut rx2 = website.subscribe(16);
 
     let join_handle = tokio::spawn(async move {
         while let Ok(res) = rx2.recv().await {

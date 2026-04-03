@@ -8,8 +8,7 @@ use tokio::io::AsyncWriteExt;
 async fn main() {
     let mut website: Website = Website::new("https://example.com?target=1");
 
-    let mut rx2: tokio::sync::broadcast::Receiver<spider::page::Page> =
-        website.subscribe(0).unwrap();
+    let mut rx2: tokio::sync::broadcast::Receiver<spider::page::Page> = website.subscribe(0);
 
     let mut website2 = website.clone();
     website2.set_url_only("https://example.com?target=2");

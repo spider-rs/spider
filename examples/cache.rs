@@ -18,8 +18,7 @@ async fn main() {
         .with_caching(true)
         .build()
         .unwrap();
-    let mut rx2: tokio::sync::broadcast::Receiver<spider::page::Page> =
-        website.subscribe(16).unwrap();
+    let mut rx2: tokio::sync::broadcast::Receiver<spider::page::Page> = website.subscribe(16);
 
     let start = std::time::Instant::now();
 

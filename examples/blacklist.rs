@@ -11,8 +11,7 @@ async fn main() {
 
     website.with_blacklist_url(Some(vec!["/books".into(), "/blog".into(), "/tag".into()]));
 
-    let mut rx2: tokio::sync::broadcast::Receiver<spider::page::Page> =
-        website.subscribe(0).unwrap();
+    let mut rx2: tokio::sync::broadcast::Receiver<spider::page::Page> = website.subscribe(0);
     let mut stdout = tokio::io::stdout();
 
     let join_handle = tokio::spawn(async move {

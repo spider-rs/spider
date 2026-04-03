@@ -31,7 +31,7 @@ async fn main() {
     let mut website = Website::new("https://example.com");
     website.with_spider_cloud("YOUR_API_KEY");
 
-    let mut rx = website.subscribe(0).unwrap();
+    let mut rx = website.subscribe(0);
     tokio::spawn(async move {
         while let Ok(page) = rx.recv().await {
             println!("{} - {} bytes", page.get_url(), page.get_html_bytes_u8().len());
@@ -209,7 +209,7 @@ Requires `features = ["sync"]` (included in `basic`).
 
 ```rust
 let mut website = Website::new("https://example.com");
-let mut rx = website.subscribe(16).unwrap();
+let mut rx = website.subscribe(16);
 
 tokio::spawn(async move {
     while let Ok(page) = rx.recv().await {

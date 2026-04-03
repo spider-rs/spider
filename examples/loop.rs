@@ -21,7 +21,7 @@ async fn main() {
         tasks.push(tokio::spawn(async move {
             let mut website: Website = Website::new(u).with_config(configuration).build().unwrap();
             let mut rx2: tokio::sync::broadcast::Receiver<spider::page::Page> =
-                website.subscribe(0).unwrap();
+                website.subscribe(0);
 
             let mut stdout = tokio::io::stdout();
 

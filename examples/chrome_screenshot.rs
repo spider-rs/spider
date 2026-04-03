@@ -11,7 +11,7 @@ use spider::website::Website;
 async fn main() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.configuration.request_timeout = Some(std::time::Duration::from_secs(60).into());
-    let mut rx2 = website.subscribe(18).unwrap();
+    let mut rx2 = website.subscribe(18);
     let mut rxg = website.subscribe_guard().unwrap();
 
     tokio::spawn(async move {

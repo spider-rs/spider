@@ -620,7 +620,7 @@ async fn infinite_urls_budget_caps_crawl() {
         .with_crawl_timeout(Some(std::time::Duration::from_secs(60)));
 
     let mut w = website.clone();
-    let mut rx = w.subscribe(16).expect("subscribe");
+    let mut rx = w.subscribe(16);
     let (done_tx, mut done_rx) = spider::tokio::sync::oneshot::channel::<()>();
 
     let crawl = async move {

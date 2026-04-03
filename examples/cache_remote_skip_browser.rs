@@ -20,7 +20,7 @@ async fn crawl_once(url: &str, skip_browser: bool) -> (std::time::Duration, Opti
         .build()
         .expect("build website");
 
-    let mut rx = website.subscribe(4).expect("subscribe");
+    let mut rx = website.subscribe(4);
     let page_task = tokio::spawn(async move { rx.recv().await.ok() });
 
     let started = tokio::time::Instant::now();

@@ -41,7 +41,7 @@ mod compare {
     async fn fetch_chrome(url: &str) -> Option<spider::page::Page> {
         let website = build_website(url);
         let mut w = website.clone();
-        let mut rx = w.subscribe(4).expect("subscribe");
+        let mut rx = w.subscribe(4);
         let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<()>();
 
         let crawl = async move {
@@ -75,7 +75,7 @@ mod compare {
     async fn fetch_smart(url: &str) -> Option<spider::page::Page> {
         let website = build_website(url);
         let mut w = website.clone();
-        let mut rx = w.subscribe(4).expect("subscribe");
+        let mut rx = w.subscribe(4);
         let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<()>();
 
         let crawl = async move {

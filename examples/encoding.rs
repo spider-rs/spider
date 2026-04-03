@@ -12,7 +12,7 @@ async fn main() {
             .with_budget(Some(HashMap::from([("*", 2)])))
             .build()
             .unwrap();
-    let mut rx2 = website.subscribe(16).unwrap();
+    let mut rx2 = website.subscribe(16);
 
     tokio::spawn(async move {
         while let Ok(res) = rx2.recv().await {

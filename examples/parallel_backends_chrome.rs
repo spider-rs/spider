@@ -39,7 +39,7 @@ async fn main() {
         ..Default::default()
     });
 
-    let mut rx = website.subscribe(100).unwrap();
+    let mut rx = website.subscribe(100);
 
     let handle = tokio::spawn(async move {
         let mut primary_wins = 0u32;

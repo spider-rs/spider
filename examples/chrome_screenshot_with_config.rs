@@ -17,7 +17,7 @@ async fn main() {
         .with_screenshot(Some(screenshot_config))
         .build()
         .unwrap();
-    let mut rx2 = website.subscribe(18).unwrap();
+    let mut rx2 = website.subscribe(18);
 
     tokio::spawn(async move {
         while let Ok(page) = rx2.recv().await {

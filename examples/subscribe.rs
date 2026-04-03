@@ -8,8 +8,7 @@ use tokio::io::AsyncWriteExt;
 #[tokio::main]
 async fn main() {
     let mut website: Website = Website::new("https://spider.cloud");
-    let mut rx2: tokio::sync::broadcast::Receiver<spider::page::Page> =
-        website.subscribe(0).unwrap();
+    let mut rx2: tokio::sync::broadcast::Receiver<spider::page::Page> = website.subscribe(0);
     let mut stdout = tokio::io::stdout();
 
     let join_handle = tokio::spawn(async move {

@@ -2819,10 +2819,7 @@ impl Website {
                     Ok((writer, file_handle)) => {
                         self.warc_writer = Some(writer.clone());
                         // Subscribe to the page broadcast channel for lock-free WARC writing.
-                        let rx = self.subscribe(512).unwrap_or_else(|| {
-                            let (_, rx) = tokio::sync::broadcast::channel(1);
-                            rx
-                        });
+                        let rx = self.subscribe(512);
                         // Bridge: reads from broadcast, serializes + sends to file writer.
                         // Already spawns its own task internally.
                         let _bridge = crate::utils::warc::spawn_warc_writer(writer, rx);
@@ -5464,7 +5461,7 @@ impl Website {
     pub async fn scrape(&mut self) {
         if !self.status.eq(&CrawlStatus::FirewallBlocked) {
             let mut w = self.clone();
-            let mut rx2 = w.subscribe(0).expect("receiver enabled");
+            let mut rx2 = w.subscribe(0);
 
             if self.pages.is_none() {
                 self.pages = Some(Vec::new());
@@ -5519,7 +5516,7 @@ impl Website {
     pub async fn scrape_raw(&mut self) {
         if !self.status.eq(&CrawlStatus::FirewallBlocked) {
             let mut w = self.clone();
-            let mut rx2 = w.subscribe(0).expect("receiver enabled");
+            let mut rx2 = w.subscribe(0);
 
             if self.pages.is_none() {
                 self.pages = Some(Vec::new());
@@ -5564,7 +5561,7 @@ impl Website {
     pub async fn scrape_smart(&mut self) {
         if !self.status.eq(&CrawlStatus::FirewallBlocked) {
             let mut w = self.clone();
-            let mut rx2 = w.subscribe(0).expect("receiver enabled");
+            let mut rx2 = w.subscribe(0);
 
             if self.pages.is_none() {
                 self.pages = Some(Vec::new());
@@ -5609,7 +5606,7 @@ impl Website {
     pub async fn scrape_sitemap(&mut self) {
         if !self.status.eq(&CrawlStatus::FirewallBlocked) {
             let mut w = self.clone();
-            let mut rx2 = w.subscribe(0).expect("receiver enabled");
+            let mut rx2 = w.subscribe(0);
 
             if self.pages.is_none() {
                 self.pages = Some(Vec::new());
@@ -10825,10 +10822,9 @@ impl Website {
         }
     }
 
-    #[cfg(not(feature = "sync"))]
     /// Sets up a subscription to receive concurrent data. This will panic if it is larger than `usize::MAX / 2`.
     /// Set the value to `0` to use the semaphore permits. If the subscription is going to block or use async methods,
-    /// make sure to spawn a task to avoid losing messages. This does nothing unless the `sync` flag is enabled.
+    /// make sure to spawn a task to avoid losing messages.
     ///
     /// # Examples
     ///
@@ -10840,7 +10836,7 @@ impl Website {
     /// #[tokio::main]
     /// async fn main() {
     ///     let mut website = Website::new("http://example.com");
-    ///     let mut rx = website.subscribe(0).unwrap();
+    ///     let mut rx = website.subscribe(0);
     ///
     ///     tokio::spawn(async move {
     ///         while let Ok(page) = rx.recv().await {
@@ -10854,40 +10850,7 @@ impl Website {
     ///     website.crawl().await;
     /// }
     /// ```
-    pub fn subscribe(&mut self, _capacity: usize) -> Option<broadcast::Receiver<Page>> {
-        None
-    }
-
-    /// Sets up a subscription to receive concurrent data. This will panic if it is larger than `usize::MAX / 2`.
-    /// Set the value to `0` to use the semaphore permits. If the subscription is going to block or use async methods,
-    /// make sure to spawn a task to avoid losing messages. This does nothing unless the `sync` flag is enabled.
-    ///
-    /// # Examples
-    ///
-    /// Subscribe and receive messages using an async tokio environment:
-    ///
-    /// ```rust
-    /// use spider::{tokio, website::Website};
-    ///
-    /// #[tokio::main]
-    /// async fn main() {
-    ///     let mut website = Website::new("http://example.com");
-    ///     let mut rx = website.subscribe(0).unwrap();
-    ///
-    ///     tokio::spawn(async move {
-    ///         while let Ok(page) = rx.recv().await {
-    ///             tokio::spawn(async move {
-    ///                 // Process the received page.
-    ///                 // If performing non-blocking tasks or managing a high subscription count, configure accordingly.
-    ///             });
-    ///         }
-    ///     });
-    ///
-    ///     website.crawl().await;
-    /// }
-    /// ```
-    #[cfg(feature = "sync")]
-    pub fn subscribe(&mut self, capacity: usize) -> Option<broadcast::Receiver<Page>> {
+    pub fn subscribe(&mut self, capacity: usize) -> broadcast::Receiver<Page> {
         let channel = self.channel.get_or_insert_with(|| {
             let (tx, rx) = broadcast::channel(
                 (if capacity == 0 {
@@ -10900,9 +10863,7 @@ impl Website {
             (tx, Arc::new(rx))
         });
 
-        let rx2 = channel.0.subscribe();
-
-        Some(rx2)
+        channel.0.subscribe()
     }
 
     /// Get a sender for queueing extra links mid crawl. This does nothing unless the `sync` flag is enabled.
@@ -10961,7 +10922,7 @@ impl Website {
     ///
     /// async fn main() {
     ///     let mut website: Website = Website::new("http://example.com");
-    ///     let mut rx2 = website.subscribe(18).unwrap();
+    ///     let mut rx2 = website.subscribe(18);
     ///     let mut rxg = website.subscribe_guard().unwrap();
     ///
     ///     tokio::spawn(async move {
@@ -11002,7 +10963,7 @@ impl Website {
     /// #[tokio::main]
     /// async fn main() {
     ///     let mut website: Website = Website::new("http://example.com");
-    ///     let mut rx2 = website.subscribe(18).unwrap();
+    ///     let mut rx2 = website.subscribe(18);
     ///     let mut rxg = website.subscribe_guard().unwrap();
     ///
     ///     tokio::spawn(async move {
@@ -11425,7 +11386,7 @@ async fn crawl_cron() {
         .with_cron("1/5 * * * * *", Default::default())
         .build()
         .unwrap();
-    let mut rx2 = website.subscribe(16).unwrap();
+    let mut rx2 = website.subscribe(16);
 
     // handle an event on every cron
     let join_handle = tokio::spawn(async move {
@@ -11459,7 +11420,7 @@ async fn crawl_cron_own() {
         .with_cron("1/5 * * * * *", Default::default())
         .build()
         .unwrap();
-    let mut rx2 = website.subscribe(16).unwrap();
+    let mut rx2 = website.subscribe(16);
 
     // handle an event on every cron
     let join_handle = tokio::spawn(async move {
@@ -11695,7 +11656,7 @@ async fn test_crawl_tld() {
 #[cfg(all(feature = "sync", not(feature = "decentralized")))]
 async fn test_crawl_subscription() {
     let mut website: Website = Website::new("https://choosealicense.com");
-    let mut rx2 = website.subscribe(100).unwrap();
+    let mut rx2 = website.subscribe(100);
 
     let join_handle = tokio::spawn(async move {
         let mut count = 0;
@@ -11932,7 +11893,7 @@ async fn test_cache_shortcircuit_single_page() {
     website.with_cache_skip_browser(true);
     website.with_budget(Some(HashMap::from([("*", 1)])));
 
-    let mut rx = website.subscribe(4).unwrap();
+    let mut rx = website.subscribe(4);
     let handle = tokio::spawn(async move { rx.recv().await.ok() });
 
     let start = tokio::time::Instant::now();
@@ -12094,7 +12055,7 @@ async fn test_cache_shortcircuit_crawl_smart() {
     website.with_cache_skip_browser(true);
     website.with_budget(Some(HashMap::from([("*", 1)])));
 
-    let mut rx = website.subscribe(4).unwrap();
+    let mut rx = website.subscribe(4);
     let handle = tokio::spawn(async move { rx.recv().await.ok() });
 
     let start = tokio::time::Instant::now();
@@ -12355,9 +12316,7 @@ mod tests {
     async fn test_crawl_single_page_subscription_receives_page() {
         let mut website = crate::website::Website::new("https://example.com");
         website.configuration.with_limit(1);
-        let mut rx = website
-            .subscribe(10)
-            .expect("sync feature must enable subscribe");
+        let mut rx = website.subscribe(10);
         let crawl = async {
             website.crawl_raw().await;
             website.unsubscribe();
@@ -12438,7 +12397,7 @@ async fn test_cache_phase_multi_page_all_cached() {
     website.with_cache_skip_browser(true);
     website.with_budget(Some(HashMap::from([("*", 10)])));
 
-    let mut rx = website.subscribe(16).unwrap();
+    let mut rx = website.subscribe(16);
 
     website.crawl_raw().await;
 
@@ -12515,7 +12474,7 @@ async fn test_cache_mem_auto_skip_browser() {
         );
     }
 
-    let mut rx = website.subscribe(16).unwrap();
+    let mut rx = website.subscribe(16);
 
     let start = tokio::time::Instant::now();
     website.crawl_raw().await;
@@ -12632,7 +12591,7 @@ async fn test_chrome_remote_cache_skip_browser_timing() {
         );
     }
 
-    let mut rx = website.subscribe(16).unwrap();
+    let mut rx = website.subscribe(16);
 
     let start = tokio::time::Instant::now();
     website.crawl_raw().await;
@@ -12700,7 +12659,7 @@ async fn test_cache_phase_partial_miss() {
     website.with_cache_skip_browser(true);
     website.with_budget(Some(HashMap::from([("*", 10)])));
 
-    let mut rx = website.subscribe(16).unwrap();
+    let mut rx = website.subscribe(16);
 
     // crawl_raw will: cache phase serves root, puts sub in extra_links,
     // then falls through to raw HTTP which fails to connect (localhost:9).
@@ -12815,7 +12774,7 @@ async fn test_cache_phase_respects_budget() {
     website.with_cache_skip_browser(true);
     website.with_budget(Some(HashMap::from([("*", 2)])));
 
-    let mut rx = website.subscribe(16).unwrap();
+    let mut rx = website.subscribe(16);
     website.crawl_raw().await;
 
     let mut pages = Vec::new();
@@ -12892,7 +12851,7 @@ async fn test_cache_phase_dedup_signatures() {
     website.with_cache_skip_browser(true);
     website.with_budget(Some(HashMap::from([("*", 10)])));
 
-    let mut rx = website.subscribe(16).unwrap();
+    let mut rx = website.subscribe(16);
     website.crawl_raw().await;
 
     let mut pages = Vec::new();
@@ -12953,7 +12912,7 @@ async fn test_cache_shortcircuit_single_page_mem() {
     website.with_cache_skip_browser(true);
     website.with_budget(Some(HashMap::from([("*", 1)])));
 
-    let mut rx = website.subscribe(4).unwrap();
+    let mut rx = website.subscribe(4);
     let handle = tokio::spawn(async move { rx.recv().await.ok() });
 
     let start = tokio::time::Instant::now();
@@ -13035,7 +12994,7 @@ async fn test_cache_phase_multi_page_all_cached_mem() {
     website.with_cache_skip_browser(true);
     website.with_budget(Some(HashMap::from([("*", 10)])));
 
-    let mut rx = website.subscribe(16).unwrap();
+    let mut rx = website.subscribe(16);
     website.crawl_raw().await;
 
     let mut pages = Vec::new();
@@ -13095,8 +13054,20 @@ impl crate::traits::Crawler for Website {
 
 #[cfg(feature = "sync")]
 impl crate::traits::CrawlerSubscription for Website {
-    fn subscribe(&mut self, capacity: usize) -> Option<tokio::sync::broadcast::Receiver<Page>> {
-        Website::subscribe(self, capacity)
+    fn subscribe(&mut self, capacity: usize) -> tokio::sync::broadcast::Receiver<Page> {
+        let channel = self.channel.get_or_insert_with(|| {
+            let (tx, rx) = tokio::sync::broadcast::channel(
+                (if capacity == 0 {
+                    *DEFAULT_PERMITS
+                } else {
+                    capacity
+                })
+                .max(1),
+            );
+            (tx, std::sync::Arc::new(rx))
+        });
+
+        channel.0.subscribe()
     }
 }
 

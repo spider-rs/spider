@@ -36,7 +36,7 @@ async fn crawl_website(url: &str) -> Result<()> {
         .build()
         .unwrap();
 
-    let mut rx2 = website.subscribe(16).unwrap();
+    let mut rx2 = website.subscribe(16);
     let mut stdout = tokio::io::stdout();
 
     tokio::spawn(async move {

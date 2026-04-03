@@ -76,8 +76,5 @@ pub trait Crawler {
 #[cfg_attr(docsrs, doc(cfg(feature = "sync")))]
 pub trait CrawlerSubscription: Crawler {
     /// Subscribe to receive pages as they are crawled.
-    fn subscribe(
-        &mut self,
-        capacity: usize,
-    ) -> Option<tokio::sync::broadcast::Receiver<Self::Page>>;
+    fn subscribe(&mut self, capacity: usize) -> tokio::sync::broadcast::Receiver<Self::Page>;
 }

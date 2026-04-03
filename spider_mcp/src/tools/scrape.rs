@@ -63,9 +63,7 @@ pub async fn run(params: ScrapeParams) -> Result<String, String> {
 
     let mut website = website.build().map_err(|_| "Invalid URL".to_string())?;
 
-    let mut rx = website
-        .subscribe(0)
-        .ok_or_else(|| "Subscribe failed (sync feature required)".to_string())?;
+    let mut rx = website.subscribe(0);
 
     let use_headless = params.headless.unwrap_or(false);
 

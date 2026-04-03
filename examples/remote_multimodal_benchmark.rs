@@ -199,7 +199,7 @@ async fn benchmark_model(api_key: &str, url: &str, model: &ModelConfig) -> Bench
         .unwrap();
 
     // Use subscribe + crawl pattern (like the working example)
-    let mut rx = website.subscribe(16).unwrap();
+    let mut rx = website.subscribe(16);
 
     // Collect results from the subscription
     let results_handle = tokio::spawn(async move {

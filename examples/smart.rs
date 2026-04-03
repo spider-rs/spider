@@ -7,7 +7,7 @@ use spider::website::Website;
 #[tokio::main]
 async fn main() {
     let mut website: Website = Website::new("https://choosealicense.com");
-    let mut rx2 = website.subscribe(16).unwrap();
+    let mut rx2 = website.subscribe(16);
 
     tokio::spawn(async move {
         while let Ok(res) = rx2.recv().await {

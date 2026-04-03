@@ -25,7 +25,7 @@ async fn crawl_website(url: &str) -> Result<()> {
         .build()
         .unwrap();
 
-    let mut rx2 = website.subscribe(16).unwrap();
+    let mut rx2 = website.subscribe(16);
 
     let handle = tokio::spawn(async move {
         while let Ok(page) = rx2.recv().await {

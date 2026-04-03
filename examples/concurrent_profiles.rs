@@ -34,7 +34,7 @@ async fn crawl_website(url: &str) -> Result<()> {
 
     website.set_disk_persistance(true);
 
-    let mut rx2 = website.subscribe(16).unwrap();
+    let mut rx2 = website.subscribe(16);
     let mut website1 = website.clone();
 
     let website1 = website1

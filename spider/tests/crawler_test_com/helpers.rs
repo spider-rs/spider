@@ -69,7 +69,7 @@ pub async fn crawl_collect_http(path: &str, budget: u32, depth: usize) -> Vec<Pa
         .with_crawl_timeout(Some(CRAWL_TIMEOUT));
 
     let mut w = website.clone();
-    let mut rx = w.subscribe(16).expect("subscribe");
+    let mut rx = w.subscribe(16);
     let (done_tx, mut done_rx) = spider::tokio::sync::oneshot::channel::<()>();
 
     let crawl = async move {
@@ -111,7 +111,7 @@ pub async fn crawl_collect_smart(path: &str, budget: u32, depth: usize) -> Vec<P
         .with_crawl_timeout(Some(CRAWL_TIMEOUT));
 
     let mut w = website.clone();
-    let mut rx = w.subscribe(16).expect("subscribe");
+    let mut rx = w.subscribe(16);
     let (done_tx, mut done_rx) = spider::tokio::sync::oneshot::channel::<()>();
 
     let crawl = async move {
@@ -154,7 +154,7 @@ pub async fn fetch_page_chrome(path: &str) -> Option<Page> {
         .with_crawl_timeout(Some(CRAWL_TIMEOUT));
 
     let mut w = website.clone();
-    let mut rx = w.subscribe(4).expect("subscribe");
+    let mut rx = w.subscribe(4);
     let (done_tx, mut done_rx) = spider::tokio::sync::oneshot::channel::<()>();
 
     let crawl = async move {

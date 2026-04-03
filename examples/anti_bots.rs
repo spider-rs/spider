@@ -57,7 +57,7 @@ async fn crawl_website(url: &str) {
         .build()
         .unwrap();
 
-    let mut rx2 = website.subscribe(16).unwrap();
+    let mut rx2 = website.subscribe(16);
     let mut g = website.subscribe_guard().unwrap();
     g.guard(true);
 

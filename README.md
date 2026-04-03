@@ -29,7 +29,7 @@ async fn main() {
     // Get your API key free at https://spider.cloud
     website.with_spider_cloud("YOUR_API_KEY");
 
-    let mut rx = website.subscribe(0).unwrap();
+    let mut rx = website.subscribe(0);
 
     tokio::spawn(async move {
         while let Ok(page) = rx.recv().await {

@@ -122,7 +122,7 @@ async fn main() {
         .unwrap();
 
     // Subscribe to receive pages
-    let mut rx = website.subscribe(16).unwrap();
+    let mut rx = website.subscribe(16);
 
     // Clone output_dir path for the spawned task
     let output_dir_clone = output_dir.to_path_buf();

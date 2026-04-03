@@ -9,7 +9,7 @@ async fn main() {
     let mut website: Website = Website::new("https://choosealicense.com");
     website.configuration.cron_str = "1/5 * * * * *".into();
 
-    let mut rx2 = website.subscribe(16).unwrap();
+    let mut rx2 = website.subscribe(16);
 
     let join_handle = tokio::spawn(async move {
         while let Ok(res) = rx2.recv().await {

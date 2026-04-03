@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
 
     website.configure_setup().await;
 
-    let mut rx2 = website.subscribe(16).unwrap();
+    let mut rx2 = website.subscribe(16);
 
     let handle = tokio::spawn(async move {
         while let Ok(page) = rx2.recv().await {

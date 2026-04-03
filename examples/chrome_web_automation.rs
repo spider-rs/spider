@@ -39,7 +39,7 @@ async fn main() {
         .build()
         .unwrap();
 
-    let mut rx2 = website.subscribe(16).unwrap();
+    let mut rx2 = website.subscribe(16);
 
     tokio::spawn(async move {
         while let Ok(page) = rx2.recv().await {

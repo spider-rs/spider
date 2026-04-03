@@ -393,7 +393,7 @@ async fn main() {
         .build()
     {
         Ok(mut website) => {
-            let mut rx2 = website.subscribe(0).expect("sync feature required");
+            let mut rx2 = website.subscribe(0);
 
             match cli.command {
                 Some(Commands::CRAWL {
