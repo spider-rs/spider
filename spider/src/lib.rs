@@ -105,6 +105,7 @@
 //!         .with_return_format("markdown");
 //!
 //!     let mut website: Website = Website::new("https://example.com")
+//!         .with_limit(10)
 //!         .with_spider_cloud_config(config)
 //!         .build()
 //!         .unwrap();
@@ -113,7 +114,11 @@
 //!
 //!     tokio::spawn(async move {
 //!         while let Ok(page) = rx.recv().await {
-//!             println!("{}\n{}", page.get_url(), page.get_content());
+//!             let url = page.get_url();
+//!             let markdown = page.get_content();
+//!             let status = page.status_code;
+//!
+//!             println!("[{status}] {url}\n---\n{markdown}\n");
 //!         }
 //!     });
 //!

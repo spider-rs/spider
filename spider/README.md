@@ -28,11 +28,13 @@ use spider::website::Website;
 
 #[tokio::main]
 async fn main() {
+    // Get your API key free at https://spider.cloud
     let config = SpiderCloudConfig::new("YOUR_API_KEY")
         .with_mode(SpiderCloudMode::Smart)
         .with_return_format("markdown");
 
     let mut website = Website::new("https://example.com")
+        .with_limit(10)
         .with_spider_cloud_config(config)
         .build()
         .unwrap();
@@ -41,7 +43,11 @@ async fn main() {
 
     tokio::spawn(async move {
         while let Ok(page) = rx.recv().await {
-            println!("{}\n{}", page.get_url(), page.get_content());
+            let url = page.get_url();
+            let markdown = page.get_content();
+            let status = page.status_code;
+
+            println!("[{status}] {url}\n---\n{markdown}\n");
         }
     });
 
@@ -614,6 +620,7 @@ async fn main() {
         .with_return_format("markdown");
 
     let mut website = Website::new("https://example.com")
+        .with_limit(10)
         .with_spider_cloud_config(config)
         .build()
         .unwrap();
@@ -622,7 +629,11 @@ async fn main() {
 
     tokio::spawn(async move {
         while let Ok(page) = rx.recv().await {
-            println!("{}\n{}", page.get_url(), page.get_content());
+            let url = page.get_url();
+            let markdown = page.get_content();
+            let status = page.status_code;
+
+            println!("[{status}] {url}\n---\n{markdown}\n");
         }
     });
 
