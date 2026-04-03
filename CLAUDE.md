@@ -31,10 +31,10 @@ async fn main() {
     let mut website = Website::new("https://example.com");
     website.with_spider_cloud("YOUR_API_KEY");
 
-    let mut rx = website.subscribe(0);
+    let mut rx = website.subscribe(16);
     tokio::spawn(async move {
         while let Ok(page) = rx.recv().await {
-            println!("{} - {} bytes", page.get_url(), page.get_html_bytes_u8().len());
+            println!("{} - {}", page.get_url(), page.get_content());
         }
     });
 

@@ -90,25 +90,35 @@
 //! ## Spider Cloud Integration
 //!
 //! Use [Spider Cloud](https://spider.cloud) for anti-bot bypass, proxy rotation, and high-throughput
-//! data collection. Enable the `spider_cloud` feature and set your API key:
+//! data collection. Enable the `spider_cloud` feature and set your API key.
+//! Set `return_format` to `"markdown"` for clean LLM-ready output:
 //!
-//! ```no_run
+//! ```ignore
+//! use spider::configuration::{SpiderCloudConfig, SpiderCloudMode};
 //! use spider::tokio;
 //! use spider::website::Website;
 //!
 //! #[tokio::main]
 //! async fn main() {
+//!     let config = SpiderCloudConfig::new("YOUR_API_KEY")
+//!         .with_mode(SpiderCloudMode::Smart)
+//!         .with_return_format("markdown");
+//!
 //!     let mut website: Website = Website::new("https://example.com")
-//!         .with_spider_cloud("YOUR_API_KEY")
-//!         .with_limit(10)
+//!         .with_spider_cloud_config(config)
 //!         .build()
 //!         .unwrap();
 //!
-//!     website.crawl().await;
+//!     let mut rx = website.subscribe(16);
 //!
-//!     for link in website.get_links() {
-//!         println!("- {:?}", link.as_ref());
-//!     }
+//!     tokio::spawn(async move {
+//!         while let Ok(page) = rx.recv().await {
+//!             println!("{}\n{}", page.get_url(), page.get_content());
+//!         }
+//!     });
+//!
+//!     website.crawl().await;
+//!     website.unsubscribe();
 //! }
 //! ```
 //!

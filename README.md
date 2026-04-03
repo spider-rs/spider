@@ -20,21 +20,26 @@ spider = { version = "2", features = ["spider_cloud"] }
 ```
 
 ```rust
+use spider::configuration::{SpiderCloudConfig, SpiderCloudMode};
 use spider::tokio;
 use spider::website::Website;
 
 #[tokio::main]
 async fn main() {
-    let mut website = Website::new("https://example.com");
-    // Get your API key free at https://spider.cloud
-    website.with_spider_cloud("YOUR_API_KEY");
+    let config = SpiderCloudConfig::new("YOUR_API_KEY")
+        .with_mode(SpiderCloudMode::Smart)
+        .with_return_format("markdown");
 
-    let mut rx = website.subscribe(0);
+    let mut website = Website::new("https://example.com")
+        .with_spider_cloud_config(config)
+        .build()
+        .unwrap();
+
+    let mut rx = website.subscribe(16);
 
     tokio::spawn(async move {
         while let Ok(page) = rx.recv().await {
-            println!("- {}", page.get_url());
-            // page.get_html();
+            println!("{}\n{}", page.get_url(), page.get_content());
         }
     });
 

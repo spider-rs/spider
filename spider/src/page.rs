@@ -3035,6 +3035,17 @@ impl Page {
         }
     }
 
+    /// Content getter — returns the page body as a string.
+    ///
+    /// This is an alias for [`get_html`](Self::get_html) that works with any
+    /// return format (HTML, markdown, text, etc.) set via
+    /// [`SpiderCloudConfig::with_return_format`](crate::configuration::SpiderCloudConfig::with_return_format)
+    /// or transformed locally with `spider_transformations`.
+    #[inline]
+    pub fn get_content(&self) -> String {
+        self.get_html()
+    }
+
     /// Html getter that avoids allocation when the content is already valid UTF-8.
     /// Returns `Cow::Borrowed` for UTF-8 content (common case), `Cow::Owned` when
     /// encoding conversion is needed.
@@ -3054,6 +3065,14 @@ impl Page {
             Some(html) => html,
             _ => Default::default(),
         }
+    }
+
+    /// Content getter as raw bytes — alias for [`get_html_bytes_u8`](Self::get_html_bytes_u8).
+    ///
+    /// Works with any return format (HTML, markdown, text, etc.).
+    #[inline]
+    pub fn get_content_bytes(&self) -> &[u8] {
+        self.get_html_bytes_u8()
     }
 
     /// Compute an HTML quality score (0–100) for this page.

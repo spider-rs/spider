@@ -16,26 +16,37 @@ This is a basic async example crawling a web page, add spider to your `Cargo.tom
 
 ```toml
 [dependencies]
-spider = "2"
+spider = { version = "2", features = ["spider_cloud"] }
 ```
 
 And then the code:
 
 ```rust,no_run
-extern crate spider;
-
-use spider::website::Website;
+use spider::configuration::{SpiderCloudConfig, SpiderCloudMode};
 use spider::tokio;
+use spider::website::Website;
 
 #[tokio::main]
 async fn main() {
-    let url = "https://choosealicense.com";
-    let mut website = Website::new(&url);
-    website.crawl().await;
+    let config = SpiderCloudConfig::new("YOUR_API_KEY")
+        .with_mode(SpiderCloudMode::Smart)
+        .with_return_format("markdown");
 
-    for link in website.get_links() {
-        println!("- {:?}", link.as_ref());
-    }
+    let mut website = Website::new("https://example.com")
+        .with_spider_cloud_config(config)
+        .build()
+        .unwrap();
+
+    let mut rx = website.subscribe(16);
+
+    tokio::spawn(async move {
+        while let Ok(page) = rx.recv().await {
+            println!("{}\n{}", page.get_url(), page.get_content());
+        }
+    });
+
+    website.crawl().await;
+    website.unsubscribe();
 }
 ```
 
@@ -581,24 +592,42 @@ If you need a blocking sync implementation use a version prior to `v1.12.0`.
 
 ### Spider Cloud
 
-Use [spider.cloud](https://spider.cloud) to help with hard-to-crawl pages.
+Use [spider.cloud](https://spider.cloud) to help with hard-to-crawl pages. Get clean LLM-ready
+markdown by setting `return_format` to `"markdown"`:
 
 ```toml
 [dependencies]
-spider = { version = "2", features = ["spider_cloud"] }
+spider = { version = "2", features = ["spider_cloud", "sync"] }
 ```
 
 ```rust,no_run
 extern crate spider;
 
+use spider::configuration::{SpiderCloudConfig, SpiderCloudMode};
 use spider::website::Website;
 use spider::tokio;
 
 #[tokio::main]
 async fn main() {
-    let mut website = Website::new("https://example.com");
-    website.with_spider_cloud("your-api-key");
+    let config = SpiderCloudConfig::new("your-api-key")
+        .with_mode(SpiderCloudMode::Smart)
+        .with_return_format("markdown");
+
+    let mut website = Website::new("https://example.com")
+        .with_spider_cloud_config(config)
+        .build()
+        .unwrap();
+
+    let mut rx = website.subscribe(16);
+
+    tokio::spawn(async move {
+        while let Ok(page) = rx.recv().await {
+            println!("{}\n{}", page.get_url(), page.get_content());
+        }
+    });
+
     website.crawl().await;
+    website.unsubscribe();
 }
 ```
 
