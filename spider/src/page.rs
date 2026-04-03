@@ -750,7 +750,7 @@ pub struct Page {
 #[derive(Debug, Clone, Default)]
 pub struct Page {
     /// The bytes of the resource.
-    html: Option<bytes::Bytes>,
+    pub(crate) html: Option<bytes::Bytes>,
     /// Base absolute url for page.
     pub(crate) base: Option<Url>,
     /// The raw url for the page. Useful since Url::parse adds a trailing slash.
@@ -827,6 +827,10 @@ pub struct Page {
     /// Whether a proxy was configured for this request.
     /// When true, 401 responses are retried (proxy rotation may fix auth).
     pub proxy_configured: bool,
+    #[cfg(feature = "parallel_backends")]
+    /// Identifies which backend produced this page (e.g. "primary",
+    /// "lightpanda", "servo"). `None` when parallel backends are not active.
+    pub backend_source: Option<crate::compact_str::CompactString>,
 }
 
 /// Assign properties from a new page.
