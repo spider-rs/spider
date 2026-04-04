@@ -20,9 +20,11 @@ spider = { version = "2", features = ["spider_cloud"] }
 ```
 
 ```rust
-use spider::configuration::{SpiderCloudConfig, SpiderCloudMode, SpiderCloudReturnFormat};
-use spider::tokio;
-use spider::website::Website;
+use spider::{
+    configuration::{SpiderCloudConfig, SpiderCloudMode, SpiderCloudReturnFormat},
+    tokio, // re-export
+    website::Website,
+};
 
 #[tokio::main]
 async fn main() {

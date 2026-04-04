@@ -804,6 +804,11 @@ pub struct Page {
     pub extra_remote_multimodal_data: Option<Vec<AutomationResults>>,
     /// URLs requested by automation to spawn as additional pages.
     pub spawn_pages: Option<Vec<String>>,
+    /// Additional content keyed by return format (e.g. `"markdown"`, `"text"`).
+    /// Populated when multiple formats are requested via
+    /// [`SpiderCloudConfig::with_return_formats`](crate::configuration::SpiderCloudConfig::with_return_formats).
+    #[cfg(feature = "spider_cloud")]
+    pub content_map: Option<hashbrown::HashMap<String, bytes::Bytes>>,
     /// The links found on the page. Unused until we can structure the buffers to match.
     pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
     /// The request should retry.
