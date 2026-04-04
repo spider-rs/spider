@@ -711,6 +711,11 @@ pub struct Page {
     pub extra_remote_multimodal_data: Option<Vec<AutomationResults>>,
     /// URLs requested by automation to spawn as additional pages.
     pub spawn_pages: Option<Vec<String>>,
+    /// Additional content keyed by return format (e.g. `"markdown"`, `"text"`).
+    /// Populated when multiple formats are requested via
+    /// [`SpiderCloudConfig::with_return_formats`](crate::configuration::SpiderCloudConfig::with_return_formats).
+    #[cfg(feature = "spider_cloud")]
+    pub content_map: Option<hashbrown::HashMap<String, bytes::Bytes>>,
     /// The links found on the page. This includes all links that have an href url.
     pub page_links: Option<Box<HashSet<CaseInsensitiveString>>>,
     /// The request should retry.
@@ -1481,6 +1486,8 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
         remote_multimodal_usage: res.remote_multimodal_usage,
         extra_remote_multimodal_data: res.extra_remote_multimodal_data,
         spawn_pages: res.spawn_pages,
+        #[cfg(feature = "spider_cloud")]
+        content_map: res.content_map,
         should_retry,
         waf_check: res.waf_check,
         bytes_transferred: res.bytes_transferred,
@@ -3073,6 +3080,41 @@ impl Page {
     #[inline]
     pub fn get_content_bytes(&self) -> &[u8] {
         self.get_html_bytes_u8()
+    }
+
+    /// Get content for a specific return format from a multi-format response.
+    ///
+    /// Returns `None` if multi-format was not requested or the format is not present.
+    /// Use [`with_return_formats`](crate::configuration::SpiderCloudConfig::with_return_formats)
+    /// on `SpiderCloudConfig` to request multiple formats.
+    #[cfg(feature = "spider_cloud")]
+    #[inline]
+    pub fn get_content_for(&self, format: &str) -> Option<String> {
+        self.content_map.as_ref().and_then(|map| {
+            map.get(format).map(|b| {
+                std::str::from_utf8(b)
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|_| auto_encoder::auto_encode_bytes(b))
+            })
+        })
+    }
+
+    /// Get content for a specific return format as raw bytes.
+    ///
+    /// Returns `None` if multi-format was not requested or the format is not present.
+    #[cfg(feature = "spider_cloud")]
+    #[inline]
+    pub fn get_content_bytes_for(&self, format: &str) -> Option<&[u8]> {
+        self.content_map
+            .as_ref()
+            .and_then(|map| map.get(format).map(|b| b.as_ref()))
+    }
+
+    /// Check if this page has multi-format content available.
+    #[cfg(feature = "spider_cloud")]
+    #[inline]
+    pub fn has_content_map(&self) -> bool {
+        self.content_map.as_ref().is_some_and(|m| !m.is_empty())
     }
 
     /// Compute an HTML quality score (0–100) for this page.

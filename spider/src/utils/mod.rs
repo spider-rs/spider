@@ -441,6 +441,10 @@ pub fn chunk_idle_timeout() -> Option<Duration> {
 pub struct PageResponse {
     /// The page response resource.
     pub content: Option<Vec<u8>>,
+    /// Additional content keyed by return format (populated when multiple
+    /// formats are requested via [`SpiderCloudConfig::with_return_formats`]).
+    #[cfg(feature = "spider_cloud")]
+    pub content_map: Option<hashbrown::HashMap<String, bytes::Bytes>>,
     /// The headers of the response. (Always None if a webdriver protocol is used for fetching.).
     pub headers: Option<reqwest::header::HeaderMap>,
     #[cfg(feature = "remote_addr")]
@@ -4804,10 +4808,28 @@ pub async fn fetch_page_html_spider_cloud(
 ) -> PageResponse {
     let route = config.fallback_route();
 
-    let mut body = serde_json::json!({
-        "url": target_url,
-        "return_format": config.return_format.as_str(),
-    });
+    let multi = config.has_multiple_formats();
+
+    let mut body = if multi {
+        let mut formats: Vec<&str> = Vec::new();
+        if let Some(fmts) = config.return_formats.as_ref() {
+            for f in fmts {
+                let s = f.as_str();
+                if !formats.contains(&s) {
+                    formats.push(s);
+                }
+            }
+        }
+        serde_json::json!({
+            "url": target_url,
+            "return_format": formats,
+        })
+    } else {
+        serde_json::json!({
+            "url": target_url,
+            "return_format": config.return_format.as_str(),
+        })
+    };
 
     // /crawl needs limit: 1 to fetch a single page
     if route == "crawl" {
@@ -4855,11 +4877,6 @@ pub async fn fetch_page_html_spider_cloud(
                                 log::warn!("spider.cloud error for {}: {}", target_url, err);
                             }
 
-                            let content = first
-                                .get("content")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or_default();
-
                             let item_status =
                                 first.get("status").and_then(|v| v.as_u64()).unwrap_or(200) as u16;
 
@@ -4868,8 +4885,48 @@ pub async fn fetch_page_html_spider_cloud(
                                 .and_then(|v| v.as_str())
                                 .map(|s| s.to_string());
 
+                            // Multi-format: content is an object {"markdown": "...", "raw": "..."}
+                            // Single format: content is a string
+                            let content_val = first.get("content");
+
+                            let (primary_content, content_map) = if multi {
+                                if let Some(serde_json::Value::Object(obj)) = content_val {
+                                    let primary_key = config.return_format.as_str();
+                                    let primary = obj
+                                        .get(primary_key)
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or_default()
+                                        .to_string();
+
+                                    let mut map = hashbrown::HashMap::new();
+                                    for (k, v) in obj {
+                                        if let Some(s) = v.as_str() {
+                                            map.insert(
+                                                k.clone(),
+                                                bytes::Bytes::from(s.as_bytes().to_vec()),
+                                            );
+                                        }
+                                    }
+                                    (primary, Some(map))
+                                } else {
+                                    // Fallback: API returned string even with multi-format
+                                    let s = content_val
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or_default()
+                                        .to_string();
+                                    (s, None)
+                                }
+                            } else {
+                                let s = content_val
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or_default()
+                                    .to_string();
+                                (s, None)
+                            };
+
                             return PageResponse {
-                                content: Some(content.as_bytes().to_vec()),
+                                content: Some(primary_content.into_bytes()),
+                                content_map,
                                 status_code: StatusCode::from_u16(item_status)
                                     .unwrap_or(StatusCode::OK),
                                 final_url,

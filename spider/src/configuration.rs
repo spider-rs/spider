@@ -2207,6 +2207,17 @@ pub struct SpiderCloudConfig {
     /// Return format for API responses (default: [`SpiderCloudReturnFormat::Raw`]).
     #[cfg_attr(feature = "serde", serde(default))]
     pub return_format: SpiderCloudReturnFormat,
+    /// Request multiple return formats in a single crawl.
+    ///
+    /// When set, the API returns `content` as an object keyed by format
+    /// (e.g. `{"markdown": "...", "raw": "..."}`). The primary `return_format`
+    /// is stored in [`Page::get_content`](crate::page::Page::get_content) and
+    /// the extras are accessible via [`Page::get_content_for`](crate::page::Page::get_content_for).
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub return_formats: Option<Vec<SpiderCloudReturnFormat>>,
     /// Extra params forwarded in API mode (e.g. `stealth`, `fingerprint`, `cache`).
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     pub extra_params: Option<hashbrown::HashMap<String, serde_json::Value>>,
@@ -2221,6 +2232,7 @@ impl Default for SpiderCloudConfig {
             api_url: Self::default_api_url(),
             proxy_url: Self::default_proxy_url(),
             return_format: SpiderCloudReturnFormat::default(),
+            return_formats: None,
             extra_params: None,
         }
     }
@@ -2264,6 +2276,38 @@ impl SpiderCloudConfig {
     pub fn with_return_format(mut self, fmt: impl Into<SpiderCloudReturnFormat>) -> Self {
         self.return_format = fmt.into();
         self
+    }
+
+    /// Request multiple return formats in a single crawl.
+    ///
+    /// The first format becomes the primary content (accessible via
+    /// [`Page::get_content`](crate::page::Page::get_content)), and all formats are
+    /// accessible via [`Page::get_content_for`](crate::page::Page::get_content_for).
+    ///
+    /// ```ignore
+    /// config.with_return_formats(vec![
+    ///     SpiderCloudReturnFormat::Markdown,
+    ///     SpiderCloudReturnFormat::Raw,
+    /// ])
+    /// ```
+    pub fn with_return_formats(mut self, formats: Vec<SpiderCloudReturnFormat>) -> Self {
+        // Deduplicate while preserving order.
+        let mut seen = Vec::with_capacity(formats.len());
+        for f in formats {
+            if !seen.contains(&f) {
+                seen.push(f);
+            }
+        }
+        if let Some(first) = seen.first() {
+            self.return_format = first.clone();
+        }
+        self.return_formats = Some(seen);
+        self
+    }
+
+    /// Check if multiple return formats are requested.
+    pub fn has_multiple_formats(&self) -> bool {
+        self.return_formats.as_ref().is_some_and(|f| f.len() > 1)
     }
 
     /// Set extra params for API mode.
