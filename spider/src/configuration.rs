@@ -2122,6 +2122,63 @@ pub enum SpiderCloudMode {
     Smart,
 }
 
+/// Return format for Spider Cloud API responses.
+#[cfg(feature = "spider_cloud")]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum SpiderCloudReturnFormat {
+    /// Original HTML (default).
+    #[default]
+    #[cfg_attr(feature = "serde", serde(rename = "raw"))]
+    Raw,
+    /// Clean markdown — ideal for LLM pipelines.
+    #[cfg_attr(feature = "serde", serde(rename = "markdown"))]
+    Markdown,
+    /// CommonMark-flavored markdown.
+    #[cfg_attr(feature = "serde", serde(rename = "commonmark"))]
+    CommonMark,
+    /// Plain text with markup stripped.
+    #[cfg_attr(feature = "serde", serde(rename = "text"))]
+    Text,
+    /// Raw bytes (no encoding conversion).
+    #[cfg_attr(feature = "serde", serde(rename = "bytes"))]
+    Bytes,
+}
+
+#[cfg(feature = "spider_cloud")]
+impl SpiderCloudReturnFormat {
+    /// The API wire value sent to spider.cloud.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Raw => "raw",
+            Self::Markdown => "markdown",
+            Self::CommonMark => "commonmark",
+            Self::Text => "text",
+            Self::Bytes => "bytes",
+        }
+    }
+}
+
+#[cfg(feature = "spider_cloud")]
+impl std::fmt::Display for SpiderCloudReturnFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[cfg(feature = "spider_cloud")]
+impl From<&str> for SpiderCloudReturnFormat {
+    fn from(s: &str) -> Self {
+        match s {
+            "markdown" | "Markdown" | "MARKDOWN" => Self::Markdown,
+            "commonmark" | "CommonMark" | "COMMONMARK" => Self::CommonMark,
+            "text" | "Text" | "TEXT" => Self::Text,
+            "bytes" | "Bytes" | "BYTES" => Self::Bytes,
+            _ => Self::Raw,
+        }
+    }
+}
+
 /// Configuration for spider.cloud integration.
 ///
 /// Spider Cloud provides anti-bot bypass, proxy rotation, and high-throughput
@@ -2147,12 +2204,9 @@ pub struct SpiderCloudConfig {
         serde(default = "SpiderCloudConfig::default_proxy_url")
     )]
     pub proxy_url: String,
-    /// Return format for API mode (default: `"raw"` to get original HTML).
-    #[cfg_attr(
-        feature = "serde",
-        serde(default = "SpiderCloudConfig::default_return_format")
-    )]
-    pub return_format: String,
+    /// Return format for API responses (default: [`SpiderCloudReturnFormat::Raw`]).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub return_format: SpiderCloudReturnFormat,
     /// Extra params forwarded in API mode (e.g. `stealth`, `fingerprint`, `cache`).
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     pub extra_params: Option<hashbrown::HashMap<String, serde_json::Value>>,
@@ -2166,7 +2220,7 @@ impl Default for SpiderCloudConfig {
             mode: SpiderCloudMode::default(),
             api_url: Self::default_api_url(),
             proxy_url: Self::default_proxy_url(),
-            return_format: Self::default_return_format(),
+            return_format: SpiderCloudReturnFormat::default(),
             extra_params: None,
         }
     }
@@ -2200,8 +2254,14 @@ impl SpiderCloudConfig {
         self
     }
 
-    /// Set the return format for API mode.
-    pub fn with_return_format(mut self, fmt: impl Into<String>) -> Self {
+    /// Set the return format for API responses.
+    ///
+    /// Accepts `SpiderCloudReturnFormat` directly or a string like `"markdown"`:
+    /// ```ignore
+    /// config.with_return_format(SpiderCloudReturnFormat::Markdown)
+    /// config.with_return_format("markdown")
+    /// ```
+    pub fn with_return_format(mut self, fmt: impl Into<SpiderCloudReturnFormat>) -> Self {
         self.return_format = fmt.into();
         self
     }
@@ -2312,10 +2372,6 @@ impl SpiderCloudConfig {
 
     fn default_proxy_url() -> String {
         "https://proxy.spider.cloud".to_string()
-    }
-
-    fn default_return_format() -> String {
-        "raw".to_string()
     }
 }
 

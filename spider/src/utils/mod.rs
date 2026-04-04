@@ -4806,7 +4806,7 @@ pub async fn fetch_page_html_spider_cloud(
 
     let mut body = serde_json::json!({
         "url": target_url,
-        "return_format": config.return_format,
+        "return_format": config.return_format.as_str(),
     });
 
     // /crawl needs limit: 1 to fetch a single page

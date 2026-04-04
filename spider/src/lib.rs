@@ -94,7 +94,7 @@
 //! Set `return_format` to `"markdown"` for clean LLM-ready output:
 //!
 //! ```ignore
-//! use spider::configuration::{SpiderCloudConfig, SpiderCloudMode};
+//! use spider::configuration::{SpiderCloudConfig, SpiderCloudMode, SpiderCloudReturnFormat};
 //! use spider::tokio;
 //! use spider::website::Website;
 //!
@@ -102,7 +102,7 @@
 //! async fn main() {
 //!     let config = SpiderCloudConfig::new("YOUR_API_KEY")
 //!         .with_mode(SpiderCloudMode::Smart)
-//!         .with_return_format("markdown");
+//!         .with_return_format(SpiderCloudReturnFormat::Markdown);
 //!
 //!     let mut website: Website = Website::new("https://example.com")
 //!         .with_limit(10)

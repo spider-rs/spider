@@ -22,7 +22,7 @@ spider = { version = "2", features = ["spider_cloud"] }
 And then the code:
 
 ```rust,no_run
-use spider::configuration::{SpiderCloudConfig, SpiderCloudMode};
+use spider::configuration::{SpiderCloudConfig, SpiderCloudMode, SpiderCloudReturnFormat};
 use spider::tokio;
 use spider::website::Website;
 
@@ -31,7 +31,7 @@ async fn main() {
     // Get your API key free at https://spider.cloud
     let config = SpiderCloudConfig::new("YOUR_API_KEY")
         .with_mode(SpiderCloudMode::Smart)
-        .with_return_format("markdown");
+        .with_return_format(SpiderCloudReturnFormat::Markdown);
 
     let mut website = Website::new("https://example.com")
         .with_limit(10)
@@ -609,7 +609,7 @@ spider = { version = "2", features = ["spider_cloud", "sync"] }
 ```rust,no_run
 extern crate spider;
 
-use spider::configuration::{SpiderCloudConfig, SpiderCloudMode};
+use spider::configuration::{SpiderCloudConfig, SpiderCloudMode, SpiderCloudReturnFormat};
 use spider::website::Website;
 use spider::tokio;
 
@@ -617,7 +617,7 @@ use spider::tokio;
 async fn main() {
     let config = SpiderCloudConfig::new("your-api-key")
         .with_mode(SpiderCloudMode::Smart)
-        .with_return_format("markdown");
+        .with_return_format(SpiderCloudReturnFormat::Markdown);
 
     let mut website = Website::new("https://example.com")
         .with_limit(10)
