@@ -413,6 +413,13 @@ pub struct Configuration {
         feature = "chrome_remote_cache"
     ))]
     pub cache_skip_browser: bool,
+    /// Namespace mixed into every cache key so logically distinct variants
+    /// (country, proxy pool, tenant, A/B bucket, device profile, …) never
+    /// collide on the same cached bytes. Free-form — spider treats it as an
+    /// opaque partition string. `None` uses the default (empty) namespace.
+    /// Always present (zero cost when unset); its effect is gated by whichever
+    /// cache feature is active.
+    pub cache_namespace: Option<Box<String>>,
     #[cfg(feature = "chrome")]
     /// Enable or disable service workers. Enabled by default.
     pub service_worker_enabled: bool,
@@ -1320,6 +1327,23 @@ impl Configuration {
     /// This method does nothing if the cache features are not enabled.
     pub fn with_cache_skip_browser(&mut self, _skip: bool) -> &mut Self {
         self
+    }
+
+    /// Partition the cache by an opaque namespace so logically distinct
+    /// variants of the same URL (country, proxy pool, tenant, A/B bucket,
+    /// device profile, …) never collide on the same cached bytes.
+    /// `None` uses the default (empty) namespace. Has no observable effect
+    /// when no cache feature is active, but the configuration is always
+    /// settable regardless of feature flags.
+    pub fn with_cache_namespace<S: Into<String>>(&mut self, namespace: Option<S>) -> &mut Self {
+        self.cache_namespace = namespace.map(|s| Box::new(s.into()));
+        self
+    }
+
+    /// Borrowed access to the cache namespace (`None` = default partition).
+    #[inline]
+    pub(crate) fn cache_namespace_str(&self) -> Option<&str> {
+        self.cache_namespace.as_ref().map(|s| s.as_str())
     }
 
     #[cfg(feature = "chrome")]

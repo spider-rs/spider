@@ -78,6 +78,12 @@ pub struct Cli {
     /// Falls back to the SPIDER_CLOUD_API_KEY env var, then stored credentials from `spider authenticate`.
     #[clap(long)]
     pub spider_cloud_key: Option<String>,
+    /// Partition the cache by an opaque namespace so logically distinct variants of
+    /// the same URL (country, proxy pool, tenant, A/B bucket, device profile, …)
+    /// never collide on the same cached bytes. Falls back to the
+    /// SPIDER_CACHE_NAMESPACE env var.
+    #[clap(long)]
+    pub cache_namespace: Option<String>,
     /// Spider Cloud mode: proxy (default), api, unblocker, fallback, or smart.
     #[clap(long, default_value = "proxy")]
     pub spider_cloud_mode: Option<String>,

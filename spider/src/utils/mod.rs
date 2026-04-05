@@ -1336,6 +1336,7 @@ pub async fn perform_chrome_http_request_cache(
     referrer: Option<String>,
     cache_options: &Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
+    cache_namespace: Option<&str>,
 ) -> Result<ChromeHTTPReqRes, chromiumoxide::error::CdpError> {
     async fn attempt_once(
         page: &chromiumoxide::Page,
@@ -1343,6 +1344,7 @@ pub async fn perform_chrome_http_request_cache(
         referrer: Option<String>,
         cache_options: &Option<CacheOptions>,
         cache_policy: &Option<BasicCachePolicy>,
+        cache_namespace: Option<&str>,
     ) -> Result<ChromeHTTPReqRes, chromiumoxide::error::CdpError> {
         let mut waf_check = false;
         let mut status_code = *crate::page::UNKNOWN_STATUS_ERROR;
@@ -1376,6 +1378,7 @@ pub async fn perform_chrome_http_request_cache(
             cache_policy,
             cache_strategy,
             remote,
+            cache_namespace,
         );
 
         match page_base.await {
@@ -1472,7 +1475,16 @@ pub async fn perform_chrome_http_request_cache(
         })
     }
 
-    match attempt_once(page, source, referrer.clone(), cache_options, cache_policy).await {
+    match attempt_once(
+        page,
+        source,
+        referrer.clone(),
+        cache_options,
+        cache_policy,
+        cache_namespace,
+    )
+    .await
+    {
         Ok(ok) => Ok(ok),
         Err(e) => {
             if is_cipher_mismatch(&e) {
@@ -1483,14 +1495,22 @@ pub async fn perform_chrome_http_request_cache(
                         referrer.clone(),
                         cache_options,
                         cache_policy,
+                        cache_namespace,
                     )
                     .await;
                 }
             }
             if is_ssl_protocol_error(&e) {
                 if let Some(no_www) = strip_www(source) {
-                    return attempt_once(page, &no_www, referrer, cache_options, cache_policy)
-                        .await;
+                    return attempt_once(
+                        page,
+                        &no_www,
+                        referrer,
+                        cache_options,
+                        cache_policy,
+                        cache_namespace,
+                    )
+                    .await;
                 }
             }
             Err(e)
@@ -1896,9 +1916,17 @@ async fn navigate_cache(
     referrer: Option<String>,
     cache_options: &Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
+    cache_namespace: Option<&str>,
 ) -> Result<(), chromiumoxide::error::CdpError> {
-    *chrome_http_req_res =
-        perform_chrome_http_request_cache(page, url, referrer, cache_options, cache_policy).await?;
+    *chrome_http_req_res = perform_chrome_http_request_cache(
+        page,
+        url,
+        referrer,
+        cache_options,
+        cache_policy,
+        cache_namespace,
+    )
+    .await?;
     Ok(())
 }
 
@@ -1953,6 +1981,7 @@ pub async fn cache_chrome_response(
     page_response: &PageResponse,
     chrome_http_req_res: ChromeHTTPReqRes,
     cache_options: &Option<CacheOptions>,
+    namespace: Option<&str>,
 ) {
     // Skip caching empty content.
     let body = match page_response.content.as_ref() {
@@ -1984,6 +2013,7 @@ pub async fn cache_chrome_response(
         target_url,
         Some(&chrome_http_req_res.method),
         auth_opt.map(|token| token.as_ref()),
+        namespace,
     );
 
     // Destructure chrome_http_req_res to avoid cloning fields consumed by both paths.
@@ -1999,7 +2029,8 @@ pub async fn cache_chrome_response(
     // Use the same body/headers — remote dump spawns a task that takes ownership.
     #[cfg(feature = "chrome_remote_cache")]
     let remote_dump_data = {
-        let cache_site = chromiumoxide::cache::manager::site_key_for_target_url(target_url, None);
+        let cache_site =
+            chromiumoxide::cache::manager::site_key_for_target_url(target_url, None, namespace);
         let remote_version = match chromey_version {
             HttpVersion::Http09 => chromiumoxide::http::HttpVersion::Http09,
             HttpVersion::Http10 => chromiumoxide::http::HttpVersion::Http10,
@@ -2068,6 +2099,7 @@ pub async fn cache_chrome_response(
     _page_response: &PageResponse,
     _chrome_http_req_res: ChromeHTTPReqRes,
     _cache_options: &Option<CacheOptions>,
+    _namespace: Option<&str>,
 ) {
 }
 
@@ -2116,6 +2148,7 @@ async fn cache_chrome_response_from_cdp_body(
     body: &[u8],
     chrome_http_req_res: &ChromeHTTPReqRes,
     cache_options: &Option<CacheOptions>,
+    namespace: Option<&str>,
 ) {
     use crate::utils::create_cache_key_raw;
 
@@ -2150,6 +2183,7 @@ async fn cache_chrome_response_from_cdp_body(
             target_url,
             Some(&chrome_http_req_res.method),
             auth_opt.map(|x| x.as_str()),
+            namespace,
         );
 
         put_hybrid_cache(
@@ -2366,13 +2400,15 @@ async fn set_document_content_if_requested_cached(
     cache_policy: &Option<BasicCachePolicy>,
     resp_headers: &Option<HeaderMap<HeaderValue>>,
     chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
+    namespace: Option<&str>,
 ) {
     let auth_opt = cache_auth_token(cache_options);
     let cache_policy = chrome_cache_policy(cache_policy);
     let cache_strategy = None;
     let remote = Some("true");
     let target_url = url_target.unwrap_or_default();
-    let cache_site = chromiumoxide::cache::manager::site_key_for_target_url(target_url, auth_opt);
+    let cache_site =
+        chromiumoxide::cache::manager::site_key_for_target_url(target_url, auth_opt, namespace);
 
     let _ = page
         .set_cache_key((Some(cache_site.clone()), cache_policy.clone()))
@@ -2397,9 +2433,10 @@ async fn set_document_content_if_requested_cached(
             &cache_site,
             auth_opt.map(|f| f.into()),
             cache_strategy,
-            remote.map(|f| f.into())
+            remote.map(|f| f.into()),
+            namespace,
         ),
-        page.seed_cache(target_url, auth_opt, remote),
+        page.seed_cache(target_url, auth_opt, remote, namespace),
         cache_future
     );
 
@@ -2440,6 +2477,7 @@ async fn navigate_if_requested_cache(
     block_bytes: &mut bool,
     cache_options: &Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
+    cache_namespace: Option<&str>,
 ) -> Result<(), chromiumoxide::error::CdpError> {
     if let Err(e) = navigate_cache(
         page,
@@ -2448,6 +2486,7 @@ async fn navigate_if_requested_cache(
         referrer,
         cache_options,
         cache_policy,
+        cache_namespace,
     )
     .await
     {
@@ -2501,6 +2540,7 @@ pub async fn run_navigate_or_content_set_core(
     _cache_policy: &Option<BasicCachePolicy>,
     resp_headers: &Option<HeaderMap<HeaderValue>>,
     chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
+    _namespace: Option<&str>,
 ) -> Result<(), chromiumoxide::error::CdpError> {
     if page_set {
         return Ok(());
@@ -2554,6 +2594,7 @@ pub async fn run_navigate_or_content_set_core(
     cache_policy: &Option<BasicCachePolicy>,
     resp_headers: &Option<HeaderMap<HeaderValue>>,
     chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
+    namespace: Option<&str>,
 ) -> Result<(), chromiumoxide::error::CdpError> {
     if page_set {
         return Ok(());
@@ -2577,6 +2618,7 @@ pub async fn run_navigate_or_content_set_core(
                 cache_policy,
                 resp_headers,
                 chrome_intercept,
+                namespace,
             )
             .await;
         } else {
@@ -2603,6 +2645,7 @@ pub async fn run_navigate_or_content_set_core(
             block_bytes,
             cache_options,
             cache_policy,
+            namespace,
         )
         .await
     } else {
@@ -2742,6 +2785,7 @@ pub async fn fetch_page_html_chrome_base(
     chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
+    cache_namespace: Option<&str>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES, UNKNOWN_STATUS_ERROR};
     use chromiumoxide::{
@@ -3170,6 +3214,7 @@ pub async fn fetch_page_html_chrome_base(
             cache_policy,
             resp_headers,
             chrome_intercept,
+            cache_namespace,
         )
         .await
     };
@@ -3741,7 +3786,7 @@ pub async fn fetch_page_html_chrome_base(
                         if !page_set && cache_request {
                             let _ = tokio::time::timeout(
                                 base_timeout,
-                                cache_chrome_response(source, &page_response, chrome_http_req_res1, &cache_options),
+                                cache_chrome_response(source, &page_response, chrome_http_req_res1, &cache_options, cache_namespace),
                             )
                             .await;
                         }
@@ -3831,6 +3876,7 @@ pub async fn fetch_page_html_chrome_base(
                                     &raw_body,
                                     &chrome_http_req_res,
                                     &cache_options,
+                                    cache_namespace,
                                 ),
                             )
                             .await;
@@ -3955,6 +4001,7 @@ pub async fn fetch_page_html_chrome_base(
                             &page_response,
                             chrome_http_req_res,
                             &cache_options,
+                            cache_namespace,
                         ),
                     )
                     .await;
@@ -4770,6 +4817,7 @@ pub async fn fetch_page_html_raw_cached(
     client: &Client,
     cache_options: Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
+    cache_namespace: Option<&str>,
 ) -> PageResponse {
     let duration = if cfg!(feature = "time") {
         Some(tokio::time::Instant::now())
@@ -4777,8 +4825,13 @@ pub async fn fetch_page_html_raw_cached(
         None
     };
 
-    if let Some(cached_html) =
-        get_cached_url(target_url, cache_options.as_ref(), cache_policy).await
+    if let Some(cached_html) = get_cached_url(
+        target_url,
+        cache_options.as_ref(),
+        cache_policy,
+        cache_namespace,
+    )
+    .await
     {
         let mut response = build_cached_html_page_response(target_url, &cached_html);
         set_page_response_duration(&mut response, duration);
@@ -5207,6 +5260,7 @@ pub async fn fetch_page_html(
     cache_options: Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
     #[cfg(feature = "cookies")] jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
+    cache_namespace: Option<&str>,
 ) -> PageResponse {
     use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
@@ -5214,7 +5268,13 @@ pub async fn fetch_page_html(
     let duration = Some(tokio::time::Instant::now());
 
     let skip_browser = cache_skip_browser(&cache_options);
-    let cached_html = get_cached_url(target_url, cache_options.as_ref(), cache_policy).await;
+    let cached_html = get_cached_url(
+        target_url,
+        cache_options.as_ref(),
+        cache_policy,
+        cache_namespace,
+    )
+    .await;
     let cached = cached_html.is_some();
 
     // Skip browser entirely if cached and skip_browser mode is enabled
@@ -5260,6 +5320,7 @@ pub async fn fetch_page_html(
                 &None,
                 jar,
                 &None,
+                cache_namespace,
             )
             .await
             {
@@ -5391,20 +5452,24 @@ pub async fn fetch_page_html(
 
 #[cfg(any(feature = "cache", feature = "cache_mem"))]
 /// Create the cache key from string.
+///
+/// `namespace` is an opaque caller-supplied partition string so logically
+/// distinct variants of the same URL (country, proxy pool, tenant, A/B bucket,
+/// device profile, …) never collide on the same cached bytes. Passing `None`
+/// produces the same key format as before this parameter existed, preserving
+/// backward compatibility with existing cache stores.
 pub fn create_cache_key_raw(
     uri: &str,
     override_method: Option<&str>,
     auth: Option<&str>,
+    namespace: Option<&str>,
 ) -> String {
-    if let Some(authentication) = auth {
-        format!(
-            "{}:{}:{}",
-            override_method.unwrap_or("GET"),
-            uri,
-            authentication
-        )
-    } else {
-        format!("{}:{}", override_method.unwrap_or("GET"), uri)
+    let method = override_method.unwrap_or("GET");
+    match (auth, namespace) {
+        (Some(a), Some(ns)) => format!("{}:{}:{}:ns={}", method, uri, a, ns),
+        (Some(a), None) => format!("{}:{}:{}", method, uri, a),
+        (None, Some(ns)) => format!("{}:{}::ns={}", method, uri, ns),
+        (None, None) => format!("{}:{}", method, uri),
     }
 }
 
@@ -5414,11 +5479,13 @@ pub fn create_cache_key(
     parts: &http::request::Parts,
     override_method: Option<&str>,
     auth: Option<&str>,
+    namespace: Option<&str>,
 ) -> String {
     create_cache_key_raw(
         &parts.uri.to_string(),
         Some(override_method.unwrap_or_else(|| parts.method.as_str())),
         auth,
+        namespace,
     )
 }
 
@@ -5507,6 +5574,7 @@ pub async fn get_cached_url_base(
     target_url: &str,
     cache_options: Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>, // optional override/behavior
+    namespace: Option<&str>,
 ) -> Option<String> {
     use crate::http_cache_reqwest::CacheManager;
 
@@ -5531,7 +5599,7 @@ pub async fn get_cached_url_base(
 
     // Helper: attempt CACACHE_MANAGER lookup for a given URL.
     let try_cacache = |url: &str| {
-        let cache_url = create_cache_key_raw(url, None, auth_str);
+        let cache_url = create_cache_key_raw(url, None, auth_str, namespace);
         async move {
             let result = tokio::time::timeout(Duration::from_millis(60), async {
                 crate::website::CACACHE_MANAGER.get(&cache_url).await
@@ -5589,8 +5657,11 @@ pub async fn get_cached_url_base(
     // data populated by browser_server's CDP interception.
     #[cfg(feature = "chrome_remote_cache")]
     {
-        let cache_site =
-            chromiumoxide::cache::manager::site_key_for_target_url(target_url, auth_opt.as_deref());
+        let cache_site = chromiumoxide::cache::manager::site_key_for_target_url(
+            target_url,
+            auth_opt.as_deref(),
+            namespace,
+        );
         let make_session_key = |url: &str| format!("GET:{}", url);
 
         let try_session_get = |url: &str| {
@@ -5625,6 +5696,7 @@ pub async fn get_cached_url_base(
                 target_url,
                 auth_opt.as_deref(),
                 Some("true"),
+                namespace,
             ),
         )
         .await;
@@ -5653,6 +5725,7 @@ pub async fn get_cached_url_base(
     target_url: &str,
     cache_options: Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>, // optional override/behavior
+    namespace: Option<&str>,
 ) -> Option<String> {
     let auth_opt = match cache_options {
         Some(CacheOptions::Yes) | Some(CacheOptions::SkipBrowser) => None,
@@ -5667,8 +5740,11 @@ pub async fn get_cached_url_base(
         _ => std::time::SystemTime::now(),
     };
 
-    let cache_site =
-        chromiumoxide::cache::manager::site_key_for_target_url(target_url, auth_opt.as_deref());
+    let cache_site = chromiumoxide::cache::manager::site_key_for_target_url(
+        target_url,
+        auth_opt.as_deref(),
+        namespace,
+    );
     let make_session_key = |url: &str| format!("GET:{}", url);
 
     let try_get = |url: &str| {
@@ -5716,7 +5792,12 @@ pub async fn get_cached_url_base(
     // Timeout prevents blocking the critical path if the cache server is slow/down.
     let _ = tokio::time::timeout(
         Duration::from_secs(3),
-        chromiumoxide::cache::remote::get_cache_site(target_url, auth_opt.as_deref(), Some("true")),
+        chromiumoxide::cache::remote::get_cache_site(
+            target_url,
+            auth_opt.as_deref(),
+            Some("true"),
+            namespace,
+        ),
     )
     .await;
 
@@ -5743,11 +5824,12 @@ pub async fn get_cached_url(
     target_url: &str,
     cache_options: Option<&CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
+    namespace: Option<&str>,
 ) -> Option<String> {
     // get_cached_url_base already handles trailing-slash fallback internally
     // (both in the cache/cache_mem and chrome_remote_cache paths),
     // so no outer alt-URL retry is needed.
-    get_cached_url_base(target_url, cache_options.cloned(), cache_policy).await
+    get_cached_url_base(target_url, cache_options.cloned(), cache_policy, namespace).await
 }
 
 #[cfg(all(
@@ -5760,6 +5842,7 @@ pub async fn get_cached_url(
     _target_url: &str,
     _cache_options: Option<&CacheOptions>,
     _cache_policy: &Option<BasicCachePolicy>,
+    _namespace: Option<&str>,
 ) -> Option<String> {
     None
 }
@@ -5786,6 +5869,7 @@ pub async fn fetch_page_html_base(
     seeded_resource: Option<String>,
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
+    cache_namespace: Option<&str>,
 ) -> PageResponse {
     let skip_browser = cache_skip_browser(&cache_options);
     let cached_html = if let Some(seeded) = seeded_resource {
@@ -5796,7 +5880,13 @@ pub async fn fetch_page_html_base(
             Some(seeded)
         }
     } else {
-        get_cached_url(target_url, cache_options.as_ref(), cache_policy).await
+        get_cached_url(
+            target_url,
+            cache_options.as_ref(),
+            cache_policy,
+            cache_namespace,
+        )
+        .await
     };
     let cached = cached_html.is_some();
 
@@ -5839,6 +5929,7 @@ pub async fn fetch_page_html_base(
         &None,
         jar,
         remote_multimodal,
+        cache_namespace,
     )
     .await
     {
@@ -5870,6 +5961,7 @@ pub async fn fetch_page_html(
     cache_options: Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
     remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
+    cache_namespace: Option<&str>,
 ) -> PageResponse {
     fetch_page_html_base(
         target_url,
@@ -5891,6 +5983,7 @@ pub async fn fetch_page_html(
         None,
         None,
         remote_multimodal,
+        cache_namespace,
     )
     .await
 }
@@ -5917,6 +6010,7 @@ pub async fn fetch_page_html_seeded(
     seeded_resource: Option<String>,
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
+    cache_namespace: Option<&str>,
 ) -> PageResponse {
     fetch_page_html_base(
         target_url,
@@ -5938,6 +6032,7 @@ pub async fn fetch_page_html_seeded(
         seeded_resource,
         jar,
         remote_multimodal,
+        cache_namespace,
     )
     .await
 }
@@ -5964,6 +6059,7 @@ async fn _fetch_page_html_chrome(
     resource: Option<String>,
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
+    cache_namespace: Option<&str>,
 ) -> PageResponse {
     let duration = if cfg!(feature = "time") {
         Some(tokio::time::Instant::now())
@@ -5975,7 +6071,13 @@ async fn _fetch_page_html_chrome(
     let cached_html = if resource.is_some() {
         resource
     } else {
-        get_cached_url(target_url, cache_options.as_ref(), cache_policy).await
+        get_cached_url(
+            target_url,
+            cache_options.as_ref(),
+            cache_policy,
+            cache_namespace,
+        )
+        .await
     };
 
     if skip_browser {
@@ -6017,6 +6119,7 @@ async fn _fetch_page_html_chrome(
                 &None,
                 jar,
                 remote_multimodal,
+                cache_namespace,
             )
             .await
             {
@@ -6125,6 +6228,7 @@ pub async fn fetch_page_html_chrome(
     cache_policy: &Option<BasicCachePolicy>,
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
+    cache_namespace: Option<&str>,
 ) -> PageResponse {
     _fetch_page_html_chrome(
         target_url,
@@ -6146,6 +6250,7 @@ pub async fn fetch_page_html_chrome(
         None,
         jar,
         remote_multimodal,
+        cache_namespace,
     )
     .await
 }
@@ -6172,6 +6277,7 @@ pub async fn fetch_page_html_chrome_seeded(
     resource: Option<String>,
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
+    cache_namespace: Option<&str>,
 ) -> PageResponse {
     _fetch_page_html_chrome(
         target_url,
@@ -6193,6 +6299,7 @@ pub async fn fetch_page_html_chrome_seeded(
         resource,
         jar,
         remote_multimodal,
+        cache_namespace,
     )
     .await
 }
@@ -8067,17 +8174,39 @@ mod tests {
     #[cfg(any(feature = "cache", feature = "cache_mem"))]
     #[test]
     fn test_create_cache_key_raw() {
+        // No namespace — format identical to the pre-namespace era,
+        // preserving backward compatibility with existing cache stores.
         assert_eq!(
-            create_cache_key_raw("https://example.com", None, None),
+            create_cache_key_raw("https://example.com", None, None, None),
             "GET:https://example.com"
         );
         assert_eq!(
-            create_cache_key_raw("https://example.com", Some("POST"), None),
+            create_cache_key_raw("https://example.com", Some("POST"), None, None),
             "POST:https://example.com"
         );
         assert_eq!(
-            create_cache_key_raw("https://example.com", None, Some("token123")),
+            create_cache_key_raw("https://example.com", None, Some("token123"), None),
             "GET:https://example.com:token123"
+        );
+
+        // Namespaced variants — distinct from non-namespaced and from each other.
+        assert_eq!(
+            create_cache_key_raw("https://example.com", None, None, Some("us")),
+            "GET:https://example.com::ns=us"
+        );
+        assert_eq!(
+            create_cache_key_raw("https://example.com", None, Some("token123"), Some("us")),
+            "GET:https://example.com:token123:ns=us"
+        );
+        assert_eq!(
+            create_cache_key_raw("https://example.com", Some("POST"), None, Some("gb")),
+            "POST:https://example.com::ns=gb"
+        );
+
+        // Different namespaces never collide on the same URL.
+        assert_ne!(
+            create_cache_key_raw("https://example.com", None, None, Some("us")),
+            create_cache_key_raw("https://example.com", None, None, Some("gb")),
         );
     }
 
@@ -8087,7 +8216,7 @@ mod tests {
         use std::collections::HashMap;
 
         let target_url = "https://cache-unit-test.invalid/path";
-        let cache_key = create_cache_key_raw(target_url, None, None);
+        let cache_key = create_cache_key_raw(target_url, None, None, None);
 
         let mut response_headers = HashMap::new();
         response_headers.insert("accept-language".to_string(), "en-US".to_string());
@@ -8121,7 +8250,8 @@ mod tests {
         let cache_policy = None;
 
         let page =
-            fetch_page_html_raw_cached(target_url, &client, cache_options, &cache_policy).await;
+            fetch_page_html_raw_cached(target_url, &client, cache_options, &cache_policy, None)
+                .await;
         assert_eq!(page.status_code, StatusCode::OK);
 
         let content = String::from_utf8_lossy(
@@ -8184,7 +8314,7 @@ mod tests {
 
         assert_eq!(network_page.status_code, StatusCode::OK);
 
-        let cache_key = create_cache_key_raw(&target_url, None, None);
+        let cache_key = create_cache_key_raw(&target_url, None, None, None);
         let mut response_headers = HashMap::new();
         response_headers.insert("content-type".to_string(), "text/html".to_string());
         response_headers.insert(
@@ -8209,7 +8339,8 @@ mod tests {
 
         let cached_start = tokio::time::Instant::now();
         let cached_page =
-            fetch_page_html_raw_cached(&target_url, &client, cache_options, &cache_policy).await;
+            fetch_page_html_raw_cached(&target_url, &client, cache_options, &cache_policy, None)
+                .await;
         let cached_duration = cached_start.elapsed();
 
         assert_eq!(cached_page.status_code, StatusCode::OK);
@@ -8240,7 +8371,7 @@ mod tests {
         use std::collections::HashMap;
 
         let target_url = "https://no-cache-override.test/page";
-        let cache_key = create_cache_key_raw(target_url, None, None);
+        let cache_key = create_cache_key_raw(target_url, None, None, None);
 
         let mut response_headers = HashMap::new();
         response_headers.insert("content-type".to_string(), "text/html".to_string());
@@ -8266,6 +8397,7 @@ mod tests {
             target_url,
             Some(CacheOptions::SkipBrowser),
             &cache_policy_period,
+            None,
         )
         .await;
         assert!(
@@ -8280,6 +8412,7 @@ mod tests {
             target_url,
             Some(CacheOptions::SkipBrowser),
             &cache_policy_normal,
+            None,
         )
         .await;
         assert!(
@@ -8295,7 +8428,7 @@ mod tests {
         use std::collections::HashMap;
 
         let target_url = "https://no-store-override.test/page";
-        let cache_key = create_cache_key_raw(target_url, None, None);
+        let cache_key = create_cache_key_raw(target_url, None, None, None);
 
         let mut response_headers = HashMap::new();
         response_headers.insert("content-type".to_string(), "text/html".to_string());
@@ -8320,6 +8453,7 @@ mod tests {
             target_url,
             Some(CacheOptions::SkipBrowser),
             &cache_policy_period,
+            None,
         )
         .await;
         assert!(
@@ -8336,7 +8470,7 @@ mod tests {
         use std::collections::HashMap;
 
         let target_url = "https://last-modified-heuristic.test/page";
-        let cache_key = create_cache_key_raw(target_url, None, None);
+        let cache_key = create_cache_key_raw(target_url, None, None, None);
 
         let mut response_headers = HashMap::new();
         response_headers.insert("content-type".to_string(), "text/html".to_string());
@@ -8366,6 +8500,7 @@ mod tests {
             target_url,
             Some(CacheOptions::SkipBrowser),
             &cache_policy_period,
+            None,
         )
         .await;
         assert!(
@@ -8382,7 +8517,7 @@ mod tests {
         use std::collections::HashMap;
 
         let target_url = "https://set-cookie-cache.test/page";
-        let cache_key = create_cache_key_raw(target_url, None, None);
+        let cache_key = create_cache_key_raw(target_url, None, None, None);
 
         let mut response_headers = HashMap::new();
         response_headers.insert("content-type".to_string(), "text/html".to_string());
@@ -8414,6 +8549,7 @@ mod tests {
             target_url,
             Some(CacheOptions::SkipBrowser),
             &cache_policy_period,
+            None,
         )
         .await;
         assert!(

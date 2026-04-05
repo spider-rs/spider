@@ -118,6 +118,7 @@ macro_rules! chrome_page_fetch {
                     $shared.6.get_cache_options(),
                     &$shared.6.cache_policy,
                     &$shared.6.remote_multimodal,
+                    $shared.6.cache_namespace_str(),
                 )
                 .await;
 
@@ -172,6 +173,7 @@ macro_rules! chrome_page_fetch {
                                 $shared.6.get_cache_options(),
                                 &$shared.6.cache_policy,
                                 &$shared.6.remote_multimodal,
+                                $shared.6.cache_namespace_str(),
                             )
                             .await;
                             page = p;
@@ -2275,7 +2277,12 @@ impl Website {
         if self.configuration.cache {
             let mut cache_options = HttpCacheOptions::default();
 
-            cache_options.cache_key = Some(Arc::new(|req: &http::request::Parts| {
+            let ns: Option<String> = self
+                .configuration
+                .cache_namespace
+                .as_ref()
+                .map(|s| s.as_str().to_string());
+            cache_options.cache_key = Some(Arc::new(move |req: &http::request::Parts| {
                 let mut auth_token = None;
                 if let Some(auth) = req.headers.get("authorization") {
                     if let Ok(token) = auth.to_str() {
@@ -2284,7 +2291,7 @@ impl Website {
                         }
                     }
                 }
-                create_cache_key(req, Some(req.method.as_str()), auth_token)
+                create_cache_key(req, Some(req.method.as_str()), auth_token, ns.as_deref())
             }));
             client.with(Cache(HttpCache {
                 mode: CacheMode::Default,
@@ -2469,7 +2476,12 @@ impl Website {
         if self.configuration.cache {
             let mut cache_options = HttpCacheOptions::default();
 
-            cache_options.cache_key = Some(Arc::new(|req: &http::request::Parts| {
+            let ns: Option<String> = self
+                .configuration
+                .cache_namespace
+                .as_ref()
+                .map(|s| s.as_str().to_string());
+            cache_options.cache_key = Some(Arc::new(move |req: &http::request::Parts| {
                 let mut auth_token = None;
                 if let Some(auth) = req.headers.get("authorization") {
                     if let Ok(token) = auth.to_str() {
@@ -2478,7 +2490,7 @@ impl Website {
                         }
                     }
                 }
-                create_cache_key(req, Some(req.method.as_str()), auth_token)
+                create_cache_key(req, Some(req.method.as_str()), auth_token, ns.as_deref())
             }));
 
             Some(
@@ -2664,7 +2676,12 @@ impl Website {
 
         let mut cache_options = HttpCacheOptions::default();
 
-        cache_options.cache_key = Some(Arc::new(|req: &http::request::Parts| {
+        let ns: Option<String> = self
+            .configuration
+            .cache_namespace
+            .as_ref()
+            .map(|s| s.as_str().to_string());
+        cache_options.cache_key = Some(Arc::new(move |req: &http::request::Parts| {
             let mut auth_token = None;
             if let Some(auth) = req.headers.get("authorization") {
                 if let Ok(token) = auth.to_str() {
@@ -2673,7 +2690,7 @@ impl Website {
                     }
                 }
             }
-            create_cache_key(req, Some(req.method.as_str()), auth_token)
+            create_cache_key(req, Some(req.method.as_str()), auth_token, ns.as_deref())
         }));
 
         if !self.configuration.modify_headers && self.configuration.modify_http_client_headers {
@@ -3744,6 +3761,7 @@ impl Website {
                     Some(seeded_html.clone()),
                     Some(&self.cookie_jar),
                     &self.configuration.remote_multimodal,
+                    self.configuration.cache_namespace_str(),
                 )
                 .await
             } else {
@@ -3765,6 +3783,7 @@ impl Website {
                     self.configuration.get_cache_options(),
                     &self.configuration.cache_policy,
                     &self.configuration.remote_multimodal,
+                    self.configuration.cache_namespace_str(),
                 )
                 .await
             };
@@ -3811,6 +3830,7 @@ impl Website {
                             self.configuration.get_cache_options(),
                             &self.configuration.cache_policy,
                             &self.configuration.remote_multimodal,
+                            self.configuration.cache_namespace_str(),
                         )
                         .await;
                         page = next_page;
@@ -3838,6 +3858,7 @@ impl Website {
                         self.configuration.get_cache_options(),
                         &self.configuration.cache_policy,
                         &self.configuration.remote_multimodal,
+                        self.configuration.cache_namespace_str(),
                     )
                     .await;
                     page = next_page;
@@ -3979,6 +4000,7 @@ impl Website {
                 self.configuration.get_cache_options(),
                 &self.configuration.cache_policy,
                 &self.configuration.remote_multimodal,
+                self.configuration.cache_namespace_str(),
             )
             .await;
 
@@ -4024,6 +4046,7 @@ impl Website {
                             self.configuration.get_cache_options(),
                             &self.configuration.cache_policy,
                             &self.configuration.remote_multimodal,
+                            self.configuration.cache_namespace_str(),
                         )
                         .await;
                         page = next_page;
@@ -4051,6 +4074,7 @@ impl Website {
                         self.configuration.get_cache_options(),
                         &self.configuration.cache_policy,
                         &self.configuration.remote_multimodal,
+                        self.configuration.cache_namespace_str(),
                     )
                     .await;
                     page = next_page;
@@ -4258,6 +4282,7 @@ impl Website {
                 &client,
                 self.configuration.get_cache_options(),
                 &self.configuration.cache_policy,
+                self.configuration.cache_namespace_str(),
             )
             .await;
 
@@ -4333,6 +4358,7 @@ impl Website {
                 client,
                 self.configuration.get_cache_options(),
                 &self.configuration.cache_policy,
+                self.configuration.cache_namespace_str(),
             )
             .await;
 
@@ -4408,6 +4434,7 @@ impl Website {
                 self.configuration.get_cache_options(),
                 &self.configuration.cache_policy,
                 &self.configuration.remote_multimodal,
+                self.configuration.cache_namespace_str(),
             )
             .await;
 
@@ -4837,6 +4864,7 @@ impl Website {
                     config.get_cache_options(),
                     &config.cache_policy,
                     &config.remote_multimodal,
+                    config.cache_namespace_str(),
                 )
                 .await;
 
@@ -4907,6 +4935,7 @@ impl Website {
             &target_url,
             cache_options.as_ref(),
             &self.configuration.cache_policy,
+            self.configuration.cache_namespace_str(),
         )
         .await
         {
@@ -4967,6 +4996,7 @@ impl Website {
             &target_url,
             cache_options.as_ref(),
             &self.configuration.cache_policy,
+            self.configuration.cache_namespace_str(),
         )
         .await
         {
@@ -5078,6 +5108,7 @@ impl Website {
                     &link_url,
                     cache_options.as_ref(),
                     &self.configuration.cache_policy,
+                    self.configuration.cache_namespace_str(),
                 )
                 .await
                 {
@@ -5743,6 +5774,16 @@ impl Website {
                 feature = "cache_mem",
                 feature = "chrome_remote_cache"
             ))]
+            let cache_namespace_raw: Option<String> = self
+                .configuration
+                .cache_namespace
+                .as_ref()
+                .map(|s| s.as_str().to_string());
+            #[cfg(any(
+                feature = "cache",
+                feature = "cache_mem",
+                feature = "chrome_remote_cache"
+            ))]
             let normalize_raw = self.configuration.normalize;
             let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
 
@@ -5883,6 +5924,8 @@ impl Website {
                                 #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
                                 let cache_pol = cache_policy_raw.clone();
                                 #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
+                                let cache_ns = cache_namespace_raw.clone();
+                                #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
                                 let normalize = normalize_raw;
                                 #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
                                 let custom_antibot = self.compiled_custom_antibot.clone();
@@ -5930,7 +5973,7 @@ impl Website {
                                     {
                                         use crate::utils::{cache_skip_browser, get_cached_url, build_cached_html_page_response};
                                         if cache_skip_browser(&cache_opts) {
-                                            if let Some(html) = get_cached_url(target_url, cache_opts.as_ref(), &cache_pol).await {
+                                            if let Some(html) = get_cached_url(target_url, cache_opts.as_ref(), &cache_pol, cache_ns.as_deref()).await {
                                                 let mut page_response = build_cached_html_page_response(target_url, &html);
                                                 if page_response.anti_bot_tech == AntiBotTech::None {
                                                     if let Some(ref custom) = custom_antibot {
@@ -6685,7 +6728,7 @@ impl Website {
                                                         use crate::utils::{cache_skip_browser, get_cached_url, build_cached_html_page_response};
                                                         let cache_options = shared.6.get_cache_options();
                                                         if cache_skip_browser(&cache_options) {
-                                                            if let Some(html) = get_cached_url(&target_url_string, cache_options.as_ref(), &shared.6.cache_policy).await {
+                                                            if let Some(html) = get_cached_url(&target_url_string, cache_options.as_ref(), &shared.6.cache_policy, shared.6.cache_namespace_str()).await {
                                                                 let mut page_response = build_cached_html_page_response(&target_url_string, &html);
                                                                 if page_response.anti_bot_tech == AntiBotTech::None {
                                                                     if let Some(ref compiled) = compiled_custom_antibot {
@@ -6874,6 +6917,7 @@ impl Website {
                                                                 shared.6.get_cache_options(),
                                                                 &shared.6.cache_policy,
                                                                 &shared.6.remote_multimodal,
+                                                                shared.6.cache_namespace_str(),
                                                             )
                                                             .await;
 
@@ -6927,6 +6971,7 @@ impl Website {
                                                                             shared.6.get_cache_options(),
                                                                             &shared.6.cache_policy,
                                                                             &shared.6.remote_multimodal,
+                                                                shared.6.cache_namespace_str(),
                                                                         ).await;
                                                                         page = p;
                                                                     }).await {
@@ -7868,6 +7913,7 @@ impl Website {
                                                                     shared.6.get_cache_options(),
                                                                     &shared.6.cache_policy,
                                                                     &shared.6.remote_multimodal,
+                                                                shared.6.cache_namespace_str(),
                                                                 )
                                                                 .await;
 
@@ -7912,6 +7958,7 @@ impl Website {
                                                                                 shared.6.get_cache_options(),
                                                                                 &shared.6.cache_policy,
                                                                                 &shared.6.remote_multimodal,
+                                                                shared.6.cache_namespace_str(),
                                                                             ).await;
                                                                             page = p;
                                                                         }).await {
@@ -8755,6 +8802,7 @@ impl Website {
                                             let title = page.metadata.as_ref().and_then(|m| m.title.as_ref()).map(|t| t.as_str());
                                             if let Ok(Some(result)) = run_remote_multimodal_extraction(
                                                 &shared.4.remote_multimodal,
+                                                shared.4.cache_namespace_str(),
                                                 &html,
                                                 url,
                                                 title,
@@ -9232,6 +9280,7 @@ impl Website {
                                         self.configuration.get_cache_options(),
                                         &self.configuration.cache_policy,
                                         &self.configuration.remote_multimodal,
+                    self.configuration.cache_namespace_str(),
                                     )
                                     .await;
 
@@ -9319,6 +9368,7 @@ impl Website {
                                                                     shared.3.get_cache_options(),
                                                                     &shared.3.cache_policy,
                                                                     &shared.3.remote_multimodal,
+                                                                    shared.3.cache_namespace_str(),
                                                                 )
                                                                 .await;
 
@@ -9445,6 +9495,7 @@ impl Website {
                                                             shared.3.get_cache_options(),
                                                             &shared.3.cache_policy,
                                                             &shared.3.remote_multimodal,
+                                                                    shared.3.cache_namespace_str(),
                                                         )
                                                         .await;
 
@@ -9774,6 +9825,11 @@ impl Website {
                                 let tx = tx.clone();
                                 let cache_options = self.configuration.get_cache_options();
                                 let cache_policy = self.configuration.cache_policy.clone();
+                                let cache_ns: Option<String> = self
+                                    .configuration
+                                    .cache_namespace
+                                    .as_ref()
+                                    .map(|s| s.as_str().to_string());
 
                                 crate::utils::spawn_task("page_fetch", async move {
                                     let mut page = Page::new_page_with_cache(
@@ -9781,6 +9837,7 @@ impl Website {
                                         &client,
                                         cache_options.clone(),
                                         &cache_policy,
+                                        cache_ns.as_deref(),
                                     )
                                     .await;
 
@@ -9799,6 +9856,7 @@ impl Website {
                                             &client,
                                             cache_options.clone(),
                                             &cache_policy,
+                                            cache_ns.as_deref(),
                                         )
                                         .await;
                                         retry_count -= 1;
@@ -10370,6 +10428,16 @@ impl Website {
     /// Skip browser rendering entirely if cached content exists.
     pub fn with_cache_skip_browser(&mut self, skip: bool) -> &mut Self {
         self.configuration.with_cache_skip_browser(skip);
+        self
+    }
+
+    /// Partition the cache by an opaque namespace (e.g. country, proxy pool,
+    /// tenant, A/B bucket, device profile, …). Cached bytes are never shared
+    /// across namespaces. `None` uses the default (empty) namespace. This
+    /// method does nothing without any of the `cache_request`, `chrome`, or
+    /// `chrome_remote_cache` features.
+    pub fn with_cache_namespace<S: Into<String>>(&mut self, namespace: Option<S>) -> &mut Self {
+        self.configuration.with_cache_namespace(namespace);
         self
     }
 
@@ -11814,7 +11882,7 @@ async fn test_crawl_smart_uses_seeded_cache_with_skip_browser() {
     use std::collections::HashMap as StdHashMap;
 
     let target_url = "http://localhost:9/cache-smart-test";
-    let cache_key = create_cache_key_raw(target_url, None, None);
+    let cache_key = create_cache_key_raw(target_url, None, None, None);
 
     let mut response_headers = StdHashMap::new();
     response_headers.insert("content-type".to_string(), "text/html".to_string());
@@ -11864,7 +11932,7 @@ async fn test_cache_shortcircuit_single_page() {
     use std::collections::HashMap as StdHashMap;
 
     let target_url = "http://localhost:9/shortcircuit-test";
-    let cache_key = create_cache_key_raw(target_url, None, None);
+    let cache_key = create_cache_key_raw(target_url, None, None, None);
 
     let mut response_headers = StdHashMap::new();
     response_headers.insert("content-type".to_string(), "text/html".to_string());
@@ -11938,7 +12006,7 @@ async fn test_cache_shortcircuit_not_without_skip_browser() {
     use std::collections::HashMap as StdHashMap;
 
     let target_url = "http://localhost:9/no-skip-shortcircuit";
-    let cache_key = create_cache_key_raw(target_url, None, None);
+    let cache_key = create_cache_key_raw(target_url, None, None, None);
 
     let mut response_headers = StdHashMap::new();
     response_headers.insert("content-type".to_string(), "text/html".to_string());
@@ -11983,7 +12051,7 @@ async fn test_cache_shortcircuit_not_for_multi_page() {
     use std::collections::HashMap as StdHashMap;
 
     let target_url = "http://localhost:9/multi-page-shortcircuit";
-    let cache_key = create_cache_key_raw(target_url, None, None);
+    let cache_key = create_cache_key_raw(target_url, None, None, None);
 
     let mut response_headers = StdHashMap::new();
     response_headers.insert("content-type".to_string(), "text/html".to_string());
@@ -12026,7 +12094,7 @@ async fn test_cache_shortcircuit_crawl_smart() {
     use std::collections::HashMap as StdHashMap;
 
     let target_url = "http://localhost:9/smart-shortcircuit-test";
-    let cache_key = create_cache_key_raw(target_url, None, None);
+    let cache_key = create_cache_key_raw(target_url, None, None, None);
 
     let mut response_headers = StdHashMap::new();
     response_headers.insert("content-type".to_string(), "text/html".to_string());
@@ -12381,7 +12449,7 @@ async fn test_cache_phase_multi_page_all_cached() {
         (sub1_url, sub1_html),
         (sub2_url, sub2_html),
     ] {
-        let cache_key = create_cache_key_raw(url, None, None);
+        let cache_key = create_cache_key_raw(url, None, None, None);
         let http_response = HttpResponse {
             body: html.as_bytes().to_vec(),
             headers: response_headers.clone(),
@@ -12437,7 +12505,7 @@ async fn test_cache_mem_auto_skip_browser() {
     use std::collections::HashMap as StdHashMap;
 
     let target_url = "http://localhost:9/cache-mem-auto-skip";
-    let cache_key = create_cache_key_raw(target_url, None, None);
+    let cache_key = create_cache_key_raw(target_url, None, None, None);
 
     let mut response_headers = StdHashMap::new();
     response_headers.insert("content-type".to_string(), "text/html".to_string());
@@ -12556,7 +12624,7 @@ async fn test_chrome_remote_cache_skip_browser_timing() {
 
     // --- Populate local in-memory cache ---
     let target_url = "http://localhost:9/remote-cache-skip-timing";
-    let cache_key = create_cache_key_raw(target_url, None, None);
+    let cache_key = create_cache_key_raw(target_url, None, None, None);
 
     let mut response_headers = StdHashMap::new();
     response_headers.insert("content-type".to_string(), "text/html".to_string());
@@ -12644,7 +12712,7 @@ async fn test_cache_phase_partial_miss() {
     };
 
     // Only seed root, NOT sub
-    let cache_key = create_cache_key_raw(root_url, None, None);
+    let cache_key = create_cache_key_raw(root_url, None, None, None);
     let http_response = HttpResponse {
         body: root_html.as_bytes().to_vec(),
         headers: response_headers,
@@ -12699,7 +12767,7 @@ async fn test_cache_phase_skipped_without_skip_browser() {
         h
     };
 
-    let cache_key = create_cache_key_raw(root_url, None, None);
+    let cache_key = create_cache_key_raw(root_url, None, None, None);
     let http_response = HttpResponse {
         body: b"<html><body>Cached</body></html>".to_vec(),
         headers: response_headers,
@@ -12757,7 +12825,7 @@ async fn test_cache_phase_respects_budget() {
         (sub1_url, sub_html),
         (sub2_url, sub_html),
     ] {
-        let cache_key = create_cache_key_raw(url, None, None);
+        let cache_key = create_cache_key_raw(url, None, None, None);
         let http_response = HttpResponse {
             body: html.as_bytes().to_vec(),
             headers: response_headers.clone(),
@@ -12834,7 +12902,7 @@ async fn test_cache_phase_dedup_signatures() {
     };
 
     for url in [root_url, dup_url] {
-        let cache_key = create_cache_key_raw(url, None, None);
+        let cache_key = create_cache_key_raw(url, None, None, None);
         let http_response = HttpResponse {
             body: html.as_bytes().to_vec(),
             headers: response_headers.clone(),
@@ -12884,7 +12952,7 @@ async fn test_cache_shortcircuit_single_page_mem() {
     use std::collections::HashMap as StdHashMap;
 
     let target_url = "http://localhost:9/shortcircuit-mem-test";
-    let cache_key = create_cache_key_raw(target_url, None, None);
+    let cache_key = create_cache_key_raw(target_url, None, None, None);
 
     let mut response_headers = StdHashMap::new();
     response_headers.insert("content-type".to_string(), "text/html".to_string());
@@ -12978,7 +13046,7 @@ async fn test_cache_phase_multi_page_all_cached_mem() {
         (sub1_url, sub1_html),
         (sub2_url, sub2_html),
     ] {
-        let cache_key = create_cache_key_raw(url, None, None);
+        let cache_key = create_cache_key_raw(url, None, None, None);
         let http_response = HttpResponse {
             body: html.as_bytes().to_vec(),
             headers: response_headers.clone(),

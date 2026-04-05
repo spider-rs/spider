@@ -1736,10 +1736,16 @@ impl Page {
         client: &Client,
         cache_options: Option<CacheOptions>,
         cache_policy: &Option<BasicCachePolicy>,
+        cache_namespace: Option<&str>,
     ) -> Self {
-        let page_resource: PageResponse =
-            crate::utils::fetch_page_html_raw_cached(url, client, cache_options, cache_policy)
-                .await;
+        let page_resource: PageResponse = crate::utils::fetch_page_html_raw_cached(
+            url,
+            client,
+            cache_options,
+            cache_policy,
+            cache_namespace,
+        )
+        .await;
 
         build(url, page_resource)
     }
@@ -2502,6 +2508,7 @@ impl Page {
         seeded_resource: Option<String>,
         jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
         remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
+        cache_namespace: Option<&str>,
     ) -> Self {
         let page_resource = if seeded_resource.is_some() {
             crate::utils::fetch_page_html_seeded(
@@ -2524,6 +2531,7 @@ impl Page {
                 seeded_resource,
                 jar,
                 remote_multimodal,
+                cache_namespace,
             )
             .await
         } else {
@@ -2545,6 +2553,7 @@ impl Page {
                 cache_options,
                 cache_policy,
                 remote_multimodal,
+                cache_namespace,
             )
             .await
         };
@@ -2579,6 +2588,7 @@ impl Page {
         cache_options: Option<CacheOptions>,
         cache_policy: &Option<BasicCachePolicy>,
         remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
+        cache_namespace: Option<&str>,
     ) -> Self {
         Self::new_base(
             url,
@@ -2600,6 +2610,7 @@ impl Page {
             None,
             None,
             remote_multimodal,
+            cache_namespace,
         )
         .await
     }
@@ -2627,6 +2638,7 @@ impl Page {
         seeded_resource: Option<String>,
         jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
         remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
+        cache_namespace: Option<&str>,
     ) -> Self {
         Self::new_base(
             url,
@@ -2648,6 +2660,7 @@ impl Page {
             seeded_resource,
             jar,
             remote_multimodal,
+            cache_namespace,
         )
         .await
     }

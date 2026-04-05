@@ -350,6 +350,19 @@ async fn main() {
             });
     }
 
+    // Cache namespace (partition key for country / proxy pool / tenant / …).
+    // Flag first, then SPIDER_CACHE_NAMESPACE env var.
+    {
+        let ns = cli
+            .cache_namespace
+            .clone()
+            .or_else(|| std::env::var("SPIDER_CACHE_NAMESPACE").ok())
+            .filter(|s| !s.is_empty());
+        if let Some(ns) = ns {
+            website.with_cache_namespace(Some(ns));
+        }
+    }
+
     // Resolve Spider Cloud API key: --spider-cloud-key > SPIDER_CLOUD_API_KEY env > stored credentials.
     {
         let api_key = cli
