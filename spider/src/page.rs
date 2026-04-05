@@ -4210,6 +4210,7 @@ impl Page {
                                 &Some(&configuration.chrome_intercept),
                                 jar,
                                 &configuration.remote_multimodal,
+                                configuration.cache_namespace_str(),
                             )
                             .await;
 
@@ -4649,6 +4650,7 @@ impl Page {
                                 &Some(&configuration.chrome_intercept),
                                 jar,
                                 &configuration.remote_multimodal,
+                                configuration.cache_namespace_str(),
                             )
                             .await;
 

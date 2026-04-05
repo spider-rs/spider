@@ -4665,6 +4665,7 @@ impl Website {
                     &client,
                     self.configuration.get_cache_options(),
                     &self.configuration.cache_policy,
+                    self.configuration.cache_namespace_str(),
                 )
                 .await
             };
@@ -4699,6 +4700,7 @@ impl Website {
                                 &client,
                                 self.configuration.get_cache_options(),
                                 &self.configuration.cache_policy,
+                                self.configuration.cache_namespace_str(),
                             )
                             .await;
                             page = next_page;
@@ -4725,6 +4727,7 @@ impl Website {
                             &client,
                             self.configuration.get_cache_options(),
                             &self.configuration.cache_policy,
+                            self.configuration.cache_namespace_str(),
                         )
                         .await;
                     }
@@ -8695,6 +8698,7 @@ impl Website {
                                         &shared.0,
                                         shared.4.get_cache_options(),
                                         &shared.4.cache_policy,
+                                        shared.4.cache_namespace_str(),
                                     )
                                     .await;
 
@@ -8725,6 +8729,7 @@ impl Website {
                                                         &shared.0,
                                                         shared.4.get_cache_options(),
                                                         &shared.4.cache_policy,
+                                            shared.4.cache_namespace_str(),
                                                     )
                                                     .await;
 
@@ -8754,6 +8759,7 @@ impl Website {
                                                         &shared.0,
                                                         shared.4.get_cache_options(),
                                                         &shared.4.cache_policy,
+                                                shared.4.cache_namespace_str(),
                                                     )
                                                         .await;
                                             }
