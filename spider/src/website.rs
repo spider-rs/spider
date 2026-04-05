@@ -8808,7 +8808,6 @@ impl Website {
                                             let title = page.metadata.as_ref().and_then(|m| m.title.as_ref()).map(|t| t.as_str());
                                             if let Ok(Some(result)) = run_remote_multimodal_extraction(
                                                 &shared.4.remote_multimodal,
-                                                shared.4.cache_namespace_str(),
                                                 &html,
                                                 url,
                                                 title,
