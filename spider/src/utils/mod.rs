@@ -3884,7 +3884,7 @@ pub async fn fetch_page_html_chrome_base(
                         }
                     }
                     Err(e) => {
-                        log::error!("{:?}", e)
+                        log::debug!("{:?}", e)
                     }
                 }
             }
