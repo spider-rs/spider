@@ -3513,10 +3513,6 @@ impl Website {
             let mut stream = tokio_stream::iter(std::mem::take(&mut links));
 
             loop {
-                if !concurrency {
-                    tokio::time::sleep(*throttle).await;
-                }
-
                 let semaphore = get_semaphore(&semaphore, !self.configuration.shared_queue).await;
 
                 tokio::select! {
@@ -3549,6 +3545,10 @@ impl Website {
 
                         emit_log(link.inner());
                         self.insert_link(&link).await;
+
+                        if !concurrency {
+                            tokio::time::sleep(*throttle).await;
+                        }
 
                         if let Ok(permit) = semaphore.clone().acquire_owned().await {
                             let shared = shared.clone();
@@ -5866,22 +5866,6 @@ impl Website {
                 let mut stream = tokio_stream::iter(std::mem::take(&mut links));
 
                 loop {
-                    if !concurrency {
-                        tokio::time::sleep(*throttle).await;
-                    }
-
-                    // Auto-throttle: apply adaptive per-domain delay on top of static delay.
-                    #[cfg(feature = "auto_throttle")]
-                    if let Some(ref at) = auto_throttle_arc {
-                        let domain = crate::utils::get_domain_from_url(self.url.inner());
-                        if !domain.is_empty() {
-                            let adaptive = at.delay_for(domain);
-                            if adaptive > *throttle {
-                                tokio::time::sleep(adaptive - *throttle).await;
-                            }
-                        }
-                    }
-
                     let semaphore =
                         get_semaphore(&semaphore, !self.configuration.shared_queue).await;
 
@@ -5913,6 +5897,22 @@ impl Website {
                             emit_log(link.inner());
 
                             self.insert_link(&link).await;
+
+                            if !concurrency {
+                                tokio::time::sleep(*throttle).await;
+                            }
+
+                            // Auto-throttle: apply adaptive per-domain delay on top of static delay.
+                            #[cfg(feature = "auto_throttle")]
+                            if let Some(ref at) = auto_throttle_arc {
+                                let domain = crate::utils::get_domain_from_url(self.url.inner());
+                                if !domain.is_empty() {
+                                    let adaptive = at.delay_for(domain);
+                                    if adaptive > *throttle {
+                                        tokio::time::sleep(adaptive - *throttle).await;
+                                    }
+                                }
+                            }
 
                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                 let shared = shared.clone();
@@ -6652,10 +6652,6 @@ impl Website {
                                 let mut stream = tokio_stream::iter(std::mem::take(&mut links));
 
                                 loop {
-                                    if !concurrency {
-                                        tokio::time::sleep(*throttle).await;
-                                    }
-
                                     let semaphore =
                                         get_semaphore(&semaphore, !self.configuration.shared_queue)
                                             .await;
@@ -6694,6 +6690,10 @@ impl Website {
                                             emit_log(link.inner());
 
                                             self.insert_link(&link).await;
+
+                                            if !concurrency {
+                                                tokio::time::sleep(*throttle).await;
+                                            }
 
                                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                                 let shared = shared.clone();
@@ -7261,10 +7261,6 @@ impl Website {
                 let mut stream = tokio_stream::iter(std::mem::take(&mut links));
 
                 loop {
-                    if !concurrency {
-                        tokio::time::sleep(*throttle).await;
-                    }
-
                     let semaphore =
                         get_semaphore(&semaphore, !self.configuration.shared_queue).await;
 
@@ -7293,6 +7289,10 @@ impl Website {
                             emit_log(link.inner());
 
                             website.insert_link(&link).await;
+
+                            if !concurrency {
+                                tokio::time::sleep(*throttle).await;
+                            }
 
                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                 let shared = shared.clone();
@@ -7748,10 +7748,6 @@ impl Website {
                                 let mut stream = tokio_stream::iter(std::mem::take(&mut links));
 
                                 loop {
-                                    if !concurrency {
-                                        tokio::time::sleep(*throttle).await;
-                                    }
-
                                     let semaphore =
                                         get_semaphore(&semaphore, !self.configuration.shared_queue)
                                             .await;
@@ -7790,6 +7786,10 @@ impl Website {
                                             emit_log(link.inner());
 
                                             website.insert_link(&link).await;
+
+                                            if !concurrency {
+                                                tokio::time::sleep(*throttle).await;
+                                            }
 
                                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                                 let shared = shared.clone();
@@ -8209,10 +8209,6 @@ impl Website {
                         let mut stream = tokio_stream::iter(std::mem::take(&mut links));
 
                         loop {
-                            if !concurrency {
-                                tokio::time::sleep(*throttle).await;
-                            }
-
                             let semaphore =
                                 get_semaphore(&semaphore, !self.configuration.shared_queue).await;
 
@@ -8248,6 +8244,10 @@ impl Website {
                                     emit_log(link.inner());
 
                                     self.insert_link(&link).await;
+
+                                    if !concurrency {
+                                        tokio::time::sleep(*throttle).await;
+                                    }
 
                                     if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                         let shared = shared.clone();
@@ -8643,10 +8643,6 @@ impl Website {
                 let mut stream = tokio_stream::iter(std::mem::take(&mut links));
 
                 loop {
-                    if !concurrency {
-                        tokio::time::sleep(*throttle).await;
-                    }
-
                     let semaphore =
                         get_semaphore(&semaphore, !self.configuration.shared_queue).await;
 
@@ -8682,6 +8678,10 @@ impl Website {
 
                             emit_log(&link.inner());
                             self.insert_link(&link).await;
+
+                            if !concurrency {
+                                tokio::time::sleep(*throttle).await;
+                            }
 
                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                 let shared = shared.clone();
