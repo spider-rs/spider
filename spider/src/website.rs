@@ -12,7 +12,8 @@ use crate::features::chrome_common::RequestInterceptConfiguration;
 use crate::features::disk::DatabaseHandler;
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{
-    AntiBotTech, Page, PageLinkBuildSettings, CHROME_UNKNOWN_STATUS_ERROR, UNKNOWN_STATUS_ERROR,
+    AntiBotTech, Page, PageLinkBuildSettings, CHROME_UNKNOWN_STATUS_ERROR, DNS_RESOLVE_ERROR,
+    UNKNOWN_STATUS_ERROR,
 };
 use crate::utils::abs::{convert_abs_url, parse_absolute_url};
 use crate::utils::interner::ListBucket;
@@ -2956,6 +2957,8 @@ impl Website {
             self.status = CrawlStatus::Blocked;
         } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
             self.status = CrawlStatus::RateLimited;
+        } else if page.status_code == *DNS_RESOLVE_ERROR {
+            self.status = CrawlStatus::ConnectError;
         } else if (page.status_code == *UNKNOWN_STATUS_ERROR
             || page.status_code == *CHROME_UNKNOWN_STATUS_ERROR)
             && page.is_empty()
@@ -12340,6 +12343,29 @@ mod tests {
         let links = hashbrown::HashSet::new();
         website.set_crawl_initial_status(&page, &links);
         assert_eq!(*website.get_status(), super::CrawlStatus::Empty);
+    }
+
+    #[test]
+    fn test_crawl_status_dns_error_is_connect_error() {
+        let mut website = crate::website::Website::new("http://www.a.com");
+        let page = make_page(*crate::page::DNS_RESOLVE_ERROR);
+        let links = hashbrown::HashSet::new();
+        website.set_crawl_initial_status(&page, &links);
+        assert_eq!(
+            *website.get_status(),
+            super::CrawlStatus::ConnectError,
+            "DNS resolve errors should map to ConnectError, not ServerError"
+        );
+        assert!(
+            !page.needs_retry(),
+            "DNS errors are permanent and must not trigger retry"
+        );
+        // Simulate what crawl_establish does: set initial_page_should_retry from needs_retry()
+        website.set_initial_page_should_retry(page.needs_retry());
+        assert!(
+            !website.get_initial_page_should_retry(),
+            "website.initial_page_should_retry must be false for DNS errors"
+        );
     }
 
     #[test]

@@ -1320,7 +1320,7 @@ fn get_error_status_base(
         Some(e) => match e {
             Ok(_) => None,
             Err(er) => {
-                if er.is_connect() || er.is_timeout() {
+                if er.is_timeout() || (er.is_connect() && !is_dns_error(&er)) {
                     *should_retry = true;
                 }
                 if !*should_retry && should_attempt_retry(&er) {
@@ -6418,6 +6418,39 @@ fn test_waf_and_retry_fields() {
     assert!(page.should_retry, "should_retry should be true");
 }
 
+/// Test that is_retryable_status excludes DNS_RESOLVE_ERROR but includes other 5xx codes.
+#[test]
+fn test_is_retryable_status_excludes_dns() {
+    assert!(
+        !is_retryable_status(*DNS_RESOLVE_ERROR),
+        "DNS_RESOLVE_ERROR (525) must not be retryable"
+    );
+    assert!(
+        is_retryable_status(StatusCode::INTERNAL_SERVER_ERROR),
+        "500 should be retryable"
+    );
+    assert!(
+        is_retryable_status(StatusCode::BAD_GATEWAY),
+        "502 should be retryable"
+    );
+    assert!(
+        is_retryable_status(StatusCode::SERVICE_UNAVAILABLE),
+        "503 should be retryable"
+    );
+    assert!(
+        is_retryable_status(StatusCode::GATEWAY_TIMEOUT),
+        "504 should be retryable"
+    );
+    assert!(
+        is_retryable_status(StatusCode::TOO_MANY_REQUESTS),
+        "429 should be retryable"
+    );
+    assert!(
+        !is_retryable_status(StatusCode::OK),
+        "200 should not be retryable"
+    );
+}
+
 /// Test blocked_crawl field exists and works correctly.
 #[test]
 #[cfg(not(feature = "decentralized"))]
@@ -6708,7 +6741,7 @@ async fn test_same_domain_page_links_resolution() {
     );
 }
 
-/// DNS resolve error (525) should not be retried.
+/// DNS resolve error (525) should not be retried and needs_retry() must be false.
 #[cfg(not(feature = "decentralized"))]
 #[test]
 fn test_dns_error_no_retry() {
@@ -6721,6 +6754,10 @@ fn test_dns_error_no_retry() {
     assert!(
         !page.should_retry,
         "DNS resolve errors (525) must not be retried"
+    );
+    assert!(
+        !page.needs_retry(),
+        "DNS resolve errors (525) — needs_retry() must be false"
     );
 }
 
