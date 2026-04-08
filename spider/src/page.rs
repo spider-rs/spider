@@ -2112,8 +2112,9 @@ impl Page {
 
                 let mut collected_bytes = match res.content_length() {
                     Some(cap) if cap >= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE => {
-                        Vec::with_capacity(cap.max(MAX_PRE_ALLOCATED_HTML_PAGE_SIZE) as usize)
+                        Vec::with_capacity(cap as usize)
                     }
+                    Some(cap) if cap > 0 => Vec::with_capacity(cap as usize),
                     _ => Vec::with_capacity(MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE),
                 };
 
@@ -2444,6 +2445,7 @@ impl Page {
 
         let mut collected_bytes: Vec<u8> = match input_bytes.len() {
             n if n >= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE => Vec::with_capacity(n),
+            n if n > 0 => Vec::with_capacity(n),
             _ => Vec::with_capacity(MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE),
         };
 
@@ -3163,21 +3165,21 @@ impl Page {
         not(feature = "decentralized")
     ))]
     pub(crate) fn modify_xml_html(&mut self) -> &[u8] {
-        if let Some(xml) = self.html.as_deref() {
+        if let Some(html_bytes) = self.html.take() {
             const XML_DECL: &str = r#"<?xml version="1.0" encoding="UTF-8"?>"#;
 
-            let stripped = if let Ok(xml_str) = std::str::from_utf8(xml) {
-                xml_str
+            let xml = html_bytes.as_ref();
+            if let Ok(xml_str) = std::str::from_utf8(xml) {
+                let stripped = xml_str
                     .strip_prefix(XML_DECL)
                     .map(|f| f.trim_start())
-                    .unwrap_or(xml_str)
-                    .as_bytes()
-                    .to_vec()
+                    .unwrap_or(xml_str);
+                // Zero-copy: Bytes::slice shares the same Arc backing buffer.
+                let offset = stripped.as_ptr() as usize - xml.as_ptr() as usize;
+                self.html = Some(html_bytes.slice(offset..offset + stripped.len()));
             } else {
-                xml.to_vec()
-            };
-
-            self.html = Some(bytes::Bytes::from(stripped));
+                self.html = Some(html_bytes);
+            }
         }
 
         self.html.as_deref().unwrap_or_default()

@@ -4396,8 +4396,9 @@ pub async fn handle_response_bytes(
         let expected_len = res.content_length();
         let mut data = match expected_len {
             Some(cap) if cap >= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE => {
-                Vec::with_capacity(cap.max(MAX_PRE_ALLOCATED_HTML_PAGE_SIZE) as usize)
+                Vec::with_capacity(cap as usize)
             }
+            Some(cap) if cap > 0 => Vec::with_capacity(cap as usize),
             _ => Vec::with_capacity(MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE),
         };
         let mut stream = res.bytes_stream();
