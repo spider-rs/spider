@@ -3792,10 +3792,18 @@ impl Page {
     ) -> HashSet<A> {
         if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             Default::default()
+        } else if let Some(html_bytes) = self.html.take() {
+            let html = match std::str::from_utf8(&html_bytes) {
+                Ok(s) => std::borrow::Cow::Borrowed(s),
+                Err(_) => std::borrow::Cow::Owned(auto_encoder::auto_encode_bytes(&html_bytes)),
+            };
+            let result = self
+                .links_stream_base_ssg(selectors, &html, client, prior_domain)
+                .await;
+            self.html = Some(html_bytes);
+            result
         } else {
-            let html = self.get_html();
-            self.links_stream_base_ssg(selectors, &html, client, prior_domain)
-                .await
+            Default::default()
         }
     }
 
@@ -3839,9 +3847,16 @@ impl Page {
     ) -> HashSet<A> {
         if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             Default::default()
+        } else if let Some(html_bytes) = self.html.take() {
+            let html = match std::str::from_utf8(&html_bytes) {
+                Ok(s) => std::borrow::Cow::Borrowed(s),
+                Err(_) => std::borrow::Cow::Owned(auto_encoder::auto_encode_bytes(&html_bytes)),
+            };
+            let result = self.links_stream_base(selectors, &html, base).await;
+            self.html = Some(html_bytes);
+            result
         } else {
-            let html = self.get_html();
-            self.links_stream_base(selectors, &html, base).await
+            Default::default()
         }
     }
 
@@ -3892,7 +3907,14 @@ impl Page {
         let mut meta_og_image: Option<_> = None;
 
         if !self.is_empty() {
-            let html_resource = self.get_html();
+            let html_bytes_taken = self.html.take();
+            let html_resource = match html_bytes_taken.as_deref() {
+                Some(b) => match std::str::from_utf8(b) {
+                    Ok(s) => std::borrow::Cow::Borrowed(s),
+                    Err(_) => std::borrow::Cow::Owned(auto_encode_bytes(b)),
+                },
+                None => std::borrow::Cow::Borrowed(""),
+            };
 
             if html_resource.starts_with("<?xml") {
                 self.links_stream_xml_links_stream_base(selectors, &html_resource, &mut map, &base)
@@ -4264,6 +4286,8 @@ impl Page {
             }
 
             map.extend(inner_map);
+            drop(html_resource);
+            self.html = html_bytes_taken;
         }
 
         if let Some(lp) = links_pages {
@@ -4342,7 +4366,14 @@ impl Page {
         let mut meta_og_image: Option<_> = None;
 
         if !self.is_empty() {
-            let html_resource = self.get_html();
+            let html_bytes_taken = self.html.take();
+            let html_resource = match html_bytes_taken.as_deref() {
+                Some(b) => match std::str::from_utf8(b) {
+                    Ok(s) => std::borrow::Cow::Borrowed(s),
+                    Err(_) => std::borrow::Cow::Owned(auto_encode_bytes(b)),
+                },
+                None => std::borrow::Cow::Borrowed(""),
+            };
 
             if html_resource.starts_with("<?xml") {
                 self.links_stream_xml_links_stream_base(selectors, &html_resource, &mut map, &base)
@@ -4702,6 +4733,8 @@ impl Page {
             }
 
             map.extend(inner_map);
+            drop(html_resource);
+            self.html = html_bytes_taken;
         }
 
         if let Some(lp) = links_pages {
@@ -4767,7 +4800,14 @@ impl Page {
         let mut meta_og_image: Option<_> = None;
 
         if !self.is_empty() {
-            let html = self.get_html();
+            let html_bytes_taken = self.html.take();
+            let html = match html_bytes_taken.as_deref() {
+                Some(b) => match std::str::from_utf8(b) {
+                    Ok(s) => std::borrow::Cow::Borrowed(s),
+                    Err(_) => std::borrow::Cow::Owned(auto_encoder::auto_encode_bytes(b)),
+                },
+                None => std::borrow::Cow::Borrowed(""),
+            };
 
             if html.starts_with("<?xml") {
                 self.links_stream_xml_links_stream_base(selectors, &html, &mut map, base)
@@ -4870,6 +4910,9 @@ impl Page {
                     let _ = rewriter.end();
                 }
             }
+
+            drop(html);
+            self.html = html_bytes_taken;
         }
 
         let valid_meta =
