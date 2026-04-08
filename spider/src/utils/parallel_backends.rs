@@ -15,6 +15,70 @@ use crate::page::AntiBotTech;
 use reqwest::StatusCode;
 
 // ---------------------------------------------------------------------------
+// Global In-Flight Byte Tracking
+// ---------------------------------------------------------------------------
+
+/// Total HTML bytes currently held by in-flight backend responses across all
+/// concurrent races. This is a proactive memory safeguard that works without
+/// the `balance` feature — it caps the aggregate memory footprint of racing
+/// backend pages regardless of system memory monitoring.
+static BACKEND_BYTES_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+
+/// RAII guard that decrements [`BACKEND_BYTES_IN_FLIGHT`] on drop.
+///
+/// Attached to every [`BackendResponse`]. When the response is consumed
+/// (winner extracted by caller) or discarded (losers dropped after race),
+/// the tracked bytes are released automatically.
+pub struct BackendBytesGuard(usize);
+
+impl BackendBytesGuard {
+    /// Register `n` bytes as in-flight and return a guard that will release
+    /// them on drop. Returns `None` if adding `n` bytes would exceed `limit`,
+    /// indicating the caller should skip this backend fetch.
+    pub fn try_acquire(n: usize, limit: usize) -> Option<Self> {
+        if limit == 0 {
+            // Unlimited — always succeed, but still track for observability.
+            BACKEND_BYTES_IN_FLIGHT.fetch_add(n, Ordering::Relaxed);
+            return Some(Self(n));
+        }
+        // CAS loop: only add if we stay under the limit.
+        let mut current = BACKEND_BYTES_IN_FLIGHT.load(Ordering::Relaxed);
+        loop {
+            if current.saturating_add(n) > limit {
+                return None;
+            }
+            match BACKEND_BYTES_IN_FLIGHT.compare_exchange_weak(
+                current,
+                current + n,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Some(Self(n)),
+                Err(actual) => current = actual,
+            }
+        }
+    }
+
+    /// Register bytes unconditionally (no limit check). Used when the response
+    /// is already committed (e.g. primary path).
+    pub fn acquire_unchecked(n: usize) -> Self {
+        BACKEND_BYTES_IN_FLIGHT.fetch_add(n, Ordering::Relaxed);
+        Self(n)
+    }
+
+    /// Current total in-flight bytes (for testing / diagnostics).
+    pub fn in_flight() -> usize {
+        BACKEND_BYTES_IN_FLIGHT.load(Ordering::Relaxed)
+    }
+}
+
+impl Drop for BackendBytesGuard {
+    fn drop(&mut self) {
+        BACKEND_BYTES_IN_FLIGHT.fetch_sub(self.0, Ordering::Relaxed);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Asset / Binary Content-Type Detection
 // ---------------------------------------------------------------------------
 
@@ -390,6 +454,10 @@ pub struct BackendResponse {
     pub backend_index: usize,
     /// Wall-clock duration of the fetch.
     pub duration: Duration,
+    /// RAII guard that releases the tracked in-flight bytes on drop.
+    /// When a losing response is discarded or the winning response is
+    /// consumed by the caller, the bytes are freed automatically.
+    pub _bytes_guard: Option<BackendBytesGuard>,
 }
 
 /// Wrapper returned by backend futures — always carries the backend index
@@ -503,7 +571,18 @@ pub async fn race_backends(
         futs.spawn(alt);
     }
 
-    let grace = Duration::from_millis(config.grace_period_ms);
+    // Under memory pressure, halve the grace period so losing responses
+    // are freed sooner. Under critical pressure, skip grace entirely.
+    let grace = {
+        let mem_state = crate::utils::detect_system::get_process_memory_state_sync();
+        if mem_state >= 2 {
+            Duration::ZERO
+        } else if mem_state >= 1 {
+            Duration::from_millis(config.grace_period_ms / 2)
+        } else {
+            Duration::from_millis(config.grace_period_ms)
+        }
+    };
     let threshold = config.fast_accept_threshold;
 
     let mut best: Option<BackendResponse> = None;
@@ -812,6 +891,7 @@ pub async fn fetch_cdp(
     let status = StatusCode::OK;
 
     let score = html_quality_score(Some(&html_bytes), status, &AntiBotTech::None);
+    let byte_len = html_bytes.len();
     let res = crate::utils::PageResponse {
         content: Some(html_bytes),
         status_code: status,
@@ -825,6 +905,7 @@ pub async fn fetch_cdp(
         quality_score: score,
         backend_index,
         duration: dur,
+        _bytes_guard: Some(BackendBytesGuard::acquire_unchecked(byte_len)),
     })
 }
 
@@ -928,6 +1009,7 @@ pub async fn fetch_webdriver(
     let status = StatusCode::OK;
 
     let score = html_quality_score(Some(&html_bytes), status, &AntiBotTech::None);
+    let byte_len = html_bytes.len();
     let res = crate::utils::PageResponse {
         content: Some(html_bytes),
         status_code: status,
@@ -941,6 +1023,7 @@ pub async fn fetch_webdriver(
         quality_score: score,
         backend_index,
         duration: dur,
+        _bytes_guard: Some(BackendBytesGuard::acquire_unchecked(byte_len)),
     })
 }
 
@@ -974,11 +1057,39 @@ pub fn build_backend_futures(
         return Vec::new();
     }
 
+    // Proactive byte-level guard: skip backends when the aggregate in-flight
+    // HTML from all concurrent races exceeds the configured cap. Works without
+    // the `balance` feature.
+    let byte_limit = config.max_backend_bytes_in_flight;
+    if byte_limit > 0 && BackendBytesGuard::in_flight() >= byte_limit {
+        log::debug!(
+            "[parallel_backends] skipping backends — in-flight bytes ({}) >= limit ({})",
+            BackendBytesGuard::in_flight(),
+            byte_limit,
+        );
+        return Vec::new();
+    }
+
+    // Reactive memory pressure guard (requires `balance` feature, otherwise
+    // no-op returning 0). State 2 (critical) skips all backends; state 1
+    // (pressure) limits to at most 1 alternative backend.
+    let mem_state = crate::utils::detect_system::get_process_memory_state_sync();
+    if mem_state >= 2 {
+        log::debug!("[parallel_backends] skipping all backends — process memory critical");
+        return Vec::new();
+    }
+    let mem_pressure = mem_state >= 1;
+
     #[allow(unused_mut)]
     let mut futs: Vec<Pin<Box<dyn Future<Output = BackendResult> + Send>>> = Vec::new();
 
     for (i, backend) in config.backends.iter().enumerate() {
         let backend_index = i + 1; // 0 is primary
+
+        // Under memory pressure, only keep the first enabled backend.
+        if mem_pressure && !futs.is_empty() {
+            break;
+        }
 
         if tracker.is_disabled(backend_index) {
             continue;
@@ -1349,6 +1460,7 @@ mod tests {
                 quality_score: score,
                 backend_index: 0,
                 duration: Duration::from_millis(delay_ms),
+                _bytes_guard: None,
             })
         })
     }
@@ -1370,6 +1482,7 @@ mod tests {
                     quality_score: score,
                     backend_index: idx,
                     duration: Duration::from_millis(delay_ms),
+                    _bytes_guard: None,
                 }),
             }
         })
@@ -1414,6 +1527,7 @@ mod tests {
             skip_binary_content_types: true,
             max_concurrent_sessions: 0,
             skip_extensions: Vec::new(),
+            max_backend_bytes_in_flight: 0, // unlimited for test mocks
         }
     }
 
@@ -1839,5 +1953,176 @@ mod tests {
             "https://example.com/page.html",
             &extras
         ));
+    }
+
+    // ---- BackendBytesGuard ----
+    //
+    // BACKEND_BYTES_IN_FLIGHT is a process-wide global atomic. Since tests
+    // run in parallel threads, we consolidate all counter-sensitive assertions
+    // into a single test function to guarantee sequential execution.
+
+    #[test]
+    fn test_bytes_guard_all() {
+        // --- acquire_unchecked + Drop ---
+        let base = BackendBytesGuard::in_flight();
+        {
+            let g = BackendBytesGuard::acquire_unchecked(1000);
+            assert_eq!(BackendBytesGuard::in_flight(), base + 1000);
+            drop(g);
+        }
+        assert_eq!(BackendBytesGuard::in_flight(), base);
+
+        // --- try_acquire within limit ---
+        let g = BackendBytesGuard::try_acquire(500, base + 1000);
+        assert!(g.is_some());
+        assert_eq!(BackendBytesGuard::in_flight(), base + 500);
+        drop(g);
+        assert_eq!(BackendBytesGuard::in_flight(), base);
+
+        // --- try_acquire exceeds limit ---
+        let hold = BackendBytesGuard::acquire_unchecked(800);
+        assert_eq!(BackendBytesGuard::in_flight(), base + 800);
+        let g = BackendBytesGuard::try_acquire(300, base + 1000);
+        assert!(g.is_none(), "should reject when would exceed limit");
+        assert_eq!(BackendBytesGuard::in_flight(), base + 800);
+        drop(hold);
+        assert_eq!(BackendBytesGuard::in_flight(), base);
+
+        // --- try_acquire with limit=0 (unlimited) ---
+        let g = BackendBytesGuard::try_acquire(1_000_000, 0);
+        assert!(g.is_some(), "limit=0 means unlimited");
+        assert_eq!(BackendBytesGuard::in_flight(), base + 1_000_000);
+        drop(g);
+        assert_eq!(BackendBytesGuard::in_flight(), base);
+
+        // --- multiple guards, selective drops ---
+        let g1 = BackendBytesGuard::acquire_unchecked(100);
+        let g2 = BackendBytesGuard::acquire_unchecked(200);
+        let g3 = BackendBytesGuard::acquire_unchecked(300);
+        assert_eq!(BackendBytesGuard::in_flight(), base + 600);
+        drop(g2);
+        assert_eq!(BackendBytesGuard::in_flight(), base + 400);
+        drop(g1);
+        drop(g3);
+        assert_eq!(BackendBytesGuard::in_flight(), base);
+
+        // --- guard inside BackendResponse: full drop ---
+        let resp = BackendResponse {
+            page: crate::page::Page::default(),
+            quality_score: 90,
+            backend_index: 1,
+            duration: Duration::from_millis(50),
+            _bytes_guard: Some(BackendBytesGuard::acquire_unchecked(5000)),
+        };
+        assert_eq!(BackendBytesGuard::in_flight(), base + 5000);
+        drop(resp);
+        assert_eq!(BackendBytesGuard::in_flight(), base);
+
+        // --- guard inside BackendResponse: partial move (page extracted) ---
+        {
+            let resp = BackendResponse {
+                page: crate::page::Page::default(),
+                quality_score: 90,
+                backend_index: 0,
+                duration: Duration::from_millis(10),
+                _bytes_guard: Some(BackendBytesGuard::acquire_unchecked(2000)),
+            };
+            assert_eq!(BackendBytesGuard::in_flight(), base + 2000);
+            let _page = resp.page;
+            // Remaining fields (including _bytes_guard) dropped at end of block.
+        }
+        assert_eq!(BackendBytesGuard::in_flight(), base);
+
+        // --- build_backend_futures: skips when byte limit exceeded ---
+        let _hold = BackendBytesGuard::acquire_unchecked(1_000_000);
+        let cfg = ParallelBackendsConfig {
+            backends: vec![crate::configuration::BackendEndpoint {
+                engine: crate::configuration::BackendEngine::LightPanda,
+                endpoint: Some("ws://localhost:9222".to_string()),
+                binary_path: None,
+                protocol: None,
+                proxy: None,
+            }],
+            max_backend_bytes_in_flight: base + 500, // well below current
+            ..Default::default()
+        };
+        let crawl_cfg = Arc::new(crate::configuration::Configuration::default());
+        let tracker = BackendTracker::new(2, 10);
+        let futs = build_backend_futures(
+            "https://example.com",
+            &cfg,
+            &crawl_cfg,
+            &tracker,
+            &None,
+            &None,
+        );
+        assert!(
+            futs.is_empty(),
+            "should skip backends when byte limit exceeded"
+        );
+        drop(_hold);
+        assert_eq!(BackendBytesGuard::in_flight(), base);
+
+        // --- thread safety: hammer the counter, verify no underflow ---
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    for _ in 0..1000 {
+                        let g = BackendBytesGuard::acquire_unchecked(100);
+                        std::thread::yield_now();
+                        drop(g);
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(
+            BackendBytesGuard::in_flight(),
+            base,
+            "counter must return to baseline after concurrent thread usage"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_race_grace_zero_under_pressure_no_deadlock() {
+        // Simulate what happens when grace=0 (critical memory pressure path).
+        // This must not deadlock or panic.
+        let tracker = BackendTracker::new(3, 10);
+        let cfg = ParallelBackendsConfig {
+            grace_period_ms: 0,
+            ..Default::default()
+        };
+        let primary = mock_primary(50, 5);
+        let alt = mock_alt(1, 95, 1);
+        let result = race_backends(primary, vec![alt], &cfg, &tracker).await;
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_build_backend_futures_allows_when_byte_limit_not_exceeded() {
+        let cfg = ParallelBackendsConfig {
+            backends: vec![crate::configuration::BackendEndpoint {
+                engine: crate::configuration::BackendEngine::LightPanda,
+                endpoint: Some("ws://localhost:9222".to_string()),
+                binary_path: None,
+                protocol: None,
+                proxy: None,
+            }],
+            max_backend_bytes_in_flight: usize::MAX,
+            ..Default::default()
+        };
+        let crawl_cfg = Arc::new(crate::configuration::Configuration::default());
+        let tracker = BackendTracker::new(2, 10);
+        // Should not panic or deadlock regardless of feature flags.
+        let _futs = build_backend_futures(
+            "https://example.com",
+            &cfg,
+            &crawl_cfg,
+            &tracker,
+            &None,
+            &None,
+        );
     }
 }

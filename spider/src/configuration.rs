@@ -237,6 +237,12 @@ pub struct ParallelBackendsConfig {
     /// built-in asset list (images, fonts, videos, etc.). Case-insensitive.
     /// Example: `["xml", "rss"]`.
     pub skip_extensions: Vec<CompactString>,
+    /// Maximum aggregate HTML bytes held by in-flight backend responses across
+    /// all concurrent races. When this cap is reached, new backend fetches are
+    /// skipped (primary-only) until existing responses are consumed or dropped.
+    /// Works without the `balance` feature. `0` means unlimited.
+    /// Default: 256 MiB (268_435_456).
+    pub max_backend_bytes_in_flight: usize,
 }
 
 #[cfg(feature = "parallel_backends")]
@@ -252,6 +258,7 @@ impl Default for ParallelBackendsConfig {
             skip_binary_content_types: true,
             max_concurrent_sessions: 8,
             skip_extensions: Vec::new(),
+            max_backend_bytes_in_flight: 256 * 1024 * 1024, // 256 MiB
         }
     }
 }
