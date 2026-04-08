@@ -1031,8 +1031,7 @@ pub(crate) fn push_link<
         if abs.scheme() != parent_host_scheme.as_str() {
             let _ = abs.set_scheme(parent_host_scheme.as_str());
         }
-        let s: String = abs.into();
-        map.insert(A::from(s));
+        map.insert(A::from(abs.as_str()));
     }
 }
 
@@ -1070,8 +1069,7 @@ pub(crate) fn push_link_verify<
         if verify {
             push_link_check(&mut abs, map, full_resources, &mut true);
         } else {
-            let s: String = abs.into();
-            map.insert(A::from(s));
+            map.insert(A::from(abs.as_str()));
         }
     }
 }
