@@ -1122,49 +1122,67 @@ pub(crate) fn domain_name(domain: &Url) -> &str {
     domain.host_str().unwrap_or_default()
 }
 
-/// extract the valid domains from a url.
+/// Extract the root domain from a hostname in a single pass.
+/// "sub.example.com" → "example.com", "example.com" → "example", "localhost" → "localhost"
+#[inline]
 fn extract_root_domain(domain: &str) -> &str {
-    let dot_count = domain.bytes().filter(|&b| b == b'.').count();
+    // Single-pass: find the second-to-last dot position by scanning from the end.
+    let bytes = domain.as_bytes();
+    let mut dot_count = 0u8;
+    let mut second_last_dot = 0;
+
+    for i in (0..bytes.len()).rev() {
+        if bytes[i] == b'.' {
+            dot_count += 1;
+            if dot_count == 2 {
+                second_last_dot = i + 1;
+                break;
+            }
+        }
+    }
 
     if dot_count >= 2 {
-        // Find second-to-last dot: skip past the first (dot_count - 1) dots
-        let skip = dot_count - 1;
-        let start = domain
-            .match_indices('.')
-            .nth(skip - 1)
-            .map(|(i, _)| i + 1)
-            .unwrap_or(0);
-        &domain[start..]
+        &domain[second_last_dot..]
     } else if dot_count == 1 {
         // "example.com" → "example"
-        domain.split('.').next().unwrap_or(domain)
+        let dot_pos = memchr::memchr(b'.', bytes).unwrap_or(domain.len());
+        &domain[..dot_pos]
     } else {
         domain
     }
 }
 
-/// check for subdomain matches
+/// Check for subdomain matches by comparing root domains.
+#[inline]
+#[cfg_attr(not(test), allow(dead_code))]
 fn is_subdomain(subdomain: &str, domain: &str) -> bool {
     extract_root_domain(subdomain) == extract_root_domain(domain)
 }
 
-/// validation to match a domain to parent host and the top level redirect for the crawl 'parent_host' and 'base_host' being the input start domain.
+/// Validation to match a domain to parent host and the top level redirect
+/// for the crawl. Short-circuits on exact match (most common case).
 pub(crate) fn parent_host_match(
     host_name: Option<&str>,
-    base_domain: &str,           // the base domain input
-    parent_host: &CompactString, // the main parent host
-    base_host: &CompactString,   // the host before any redirections - entered in Website::new()
-    sub_matcher: &CompactString, // matches TLDS or subdomains. If tlds the domain is stripped.
+    base_domain: &str,
+    parent_host: &CompactString,
+    base_host: &CompactString,
+    sub_matcher: &CompactString,
 ) -> bool {
     match host_name {
         Some(host) => {
-            let exact_match = parent_host.eq(&host) || base_host.eq(&host);
+            // Fast path: exact match (covers ~80% of same-domain links).
+            if parent_host.eq(&host) || base_host.eq(&host) {
+                return true;
+            }
 
             if base_domain.is_empty() {
-                exact_match
-            } else {
-                exact_match || is_subdomain(host, parent_host) || is_subdomain(host, sub_matcher)
+                return false;
             }
+
+            // Extract host's root domain once, compare against both targets.
+            let host_root = extract_root_domain(host);
+            extract_root_domain(parent_host) == host_root
+                || extract_root_domain(sub_matcher) == host_root
         }
         _ => false,
     }
