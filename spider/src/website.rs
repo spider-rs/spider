@@ -474,6 +474,14 @@ lazy_static! {
         }
     };
     static ref WILD_CARD_PATH: CaseInsensitiveString = CaseInsensitiveString::from("*");
+    /// The max extra links to buffer in memory between crawl iterations.
+    pub(crate) static ref EXTRA_LINKS_MEMORY_LIMIT: usize = {
+        const DEFAULT_LIMIT: usize = 25_000;
+        match std::env::var("EXTRA_LINKS_MEMORY_LIMIT") {
+            Ok(limit) => limit.parse::<usize>().unwrap_or(DEFAULT_LIMIT),
+            _ => DEFAULT_LIMIT
+        }
+    };
 }
 
 #[cfg(not(feature = "decentralized"))]
@@ -1530,6 +1538,26 @@ impl Website {
         self.extra_links.drain()
     }
 
+    /// Insert a single link into extra_links if under the memory cap.
+    #[inline]
+    fn extra_links_insert(&mut self, link: CaseInsensitiveString) {
+        if self.extra_links.len() < *EXTRA_LINKS_MEMORY_LIMIT {
+            self.extra_links.insert(link);
+        }
+    }
+
+    /// Extend extra_links from an iterator, stopping at the memory cap.
+    #[inline]
+    fn extra_links_extend(&mut self, iter: impl IntoIterator<Item = CaseInsensitiveString>) {
+        let limit = *EXTRA_LINKS_MEMORY_LIMIT;
+        for link in iter {
+            if self.extra_links.len() >= limit {
+                break;
+            }
+            self.extra_links.insert(link);
+        }
+    }
+
     /// Set the initial status code of the request.
     pub fn set_initial_status_code(&mut self, initial_status_code: StatusCode) {
         self.initial_status_code = initial_status_code;
@@ -1649,7 +1677,7 @@ impl Website {
         &mut self,
         extra_links: HashSet<CaseInsensitiveString>,
     ) -> &HashSet<CaseInsensitiveString> {
-        self.extra_links.extend(extra_links);
+        self.extra_links_extend(extra_links);
         &self.extra_links
     }
 
@@ -3532,7 +3560,7 @@ impl Website {
                             semaphore.add_permits(permits);
                         }).await {
                             while let Some(links) = stream.next().await {
-                                self.extra_links.insert(links);
+                                self.extra_links_insert(links);
                             }
                             break 'outer;
                         }
@@ -3676,11 +3704,11 @@ impl Website {
                 if (links.is_empty() && set.is_empty()) || exceeded_budget {
                     if exceeded_budget {
                         while let Some(links) = stream.next().await {
-                            self.extra_links.insert(links);
+                            self.extra_links_insert(links);
                         }
                         while let Some(links) = set.join_next().await {
                             if let Ok(links) = links {
-                                self.extra_links.extend(links.0);
+                                self.extra_links_extend(links.0);
                             }
                         }
                     }
@@ -3697,7 +3725,7 @@ impl Website {
         }
 
         if !links.is_empty() {
-            self.extra_links.extend(links);
+            self.extra_links_extend(links);
         }
     }
 
@@ -4383,10 +4411,8 @@ impl Website {
                 page.page_links = Some(Default::default());
             }
 
-            channel_send_page(&self.channel, page.clone(), &self.channel_guard);
-
-            let page_links = page.links;
-
+            let page_links = page.links.clone();
+            channel_send_page(&self.channel, page, &self.channel_guard);
             links.extend(page_links);
         }
 
@@ -4457,17 +4483,11 @@ impl Website {
 
             if self.configuration.return_page_links {
                 page.page_links = Some(Default::default());
-                let next_links = HashSet::from(page.links(&base, &self.domain_parsed).await);
-
-                channel_send_page(&self.channel, page.clone(), &self.channel_guard);
-
-                links.extend(next_links);
-            } else {
-                channel_send_page(&self.channel, page.clone(), &self.channel_guard);
-                let next_links = HashSet::from(page.links(&base, &self.domain_parsed).await);
-
-                links.extend(next_links);
             }
+
+            let next_links = HashSet::from(page.links(&base, &self.domain_parsed).await);
+            channel_send_page(&self.channel, page, &self.channel_guard);
+            links.extend(next_links);
         }
 
         links
@@ -5176,7 +5196,7 @@ impl Website {
 
         // If there are cache misses, put them in extra_links for Chrome/HTTP
         if !cache_misses.is_empty() {
-            self.extra_links.extend(cache_misses);
+            self.extra_links_extend(cache_misses);
             return false; // Need Chrome/HTTP for remaining links
         }
 
@@ -5882,7 +5902,7 @@ impl Website {
                                 semaphore.add_permits(permits);
                             }).await {
                                 while let Some(links) = stream.next().await {
-                                    self.extra_links.insert(links);
+                                    self.extra_links_insert(links);
                                 }
                                 break 'outer;
                             }
@@ -6500,11 +6520,11 @@ impl Website {
                         // await for all tasks to complete.
                         if exceeded_budget {
                             while let Some(links) = stream.next().await {
-                                self.extra_links.insert(links);
+                                self.extra_links_insert(links);
                             }
                             while let Some(links) = set.join_next().await {
                                 if let Ok(links) = links {
-                                    self.extra_links.extend(links.0);
+                                    self.extra_links_extend(links.0);
                                 }
                             }
                         }
@@ -6522,7 +6542,7 @@ impl Website {
 
             // store the extra links.
             if !links.is_empty() {
-                self.extra_links.extend(links);
+                self.extra_links_extend(links);
             }
         }
     }
@@ -7137,7 +7157,7 @@ impl Website {
                             b.dispose();
                             // store the extra links.
                             if !links.is_empty() {
-                                self.extra_links.extend(links);
+                                self.extra_links_extend(links);
                             }
                         }
                     }
@@ -8400,7 +8420,7 @@ impl Website {
                     controller.dispose();
 
                     if !links.is_empty() {
-                        self.extra_links.extend(links);
+                        self.extra_links_extend(links);
                     }
                 }
             }
@@ -8543,7 +8563,7 @@ impl Website {
         }
 
         if !links.is_empty() {
-            self.extra_links.extend(links);
+            self.extra_links_extend(links);
         }
     }
 
@@ -8890,7 +8910,7 @@ impl Website {
             }
 
             if !links.is_empty() {
-                self.extra_links.extend(links);
+                self.extra_links_extend(links);
             }
         }
     }
@@ -9028,14 +9048,14 @@ impl Website {
                                 page.page_links = Some(links.into());
                             }
 
-                            if scrape || persist_links {
-                                pages.push(page.clone());
-                            };
-
                             // reset the page links before sending to the main subscriber.
                             if !return_page_links {
                                 page.page_links = None;
                             }
+
+                            if scrape || persist_links {
+                                pages.push(page.clone());
+                            };
 
                             if shared.0.is_some() {
                                 channel_send_page(&shared.0, page, &shared.1);
@@ -9129,7 +9149,7 @@ impl Website {
                         for page in handle.iter_mut() {
                             if let Some(mut links) = page.page_links.clone() {
                                 self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
-                                self.extra_links.extend(*links)
+                                self.extra_links_extend(*links)
                             }
                         }
                         if scrape {
@@ -9556,14 +9576,13 @@ impl Website {
                                             if self.is_signature_allowed(signature).await {
                                                 if let Some(mut links) = page.page_links.clone() {
                                                     self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
-                                                    self.extra_links.extend(*links)
+                                                    self.extra_links_extend(*links)
                                                 }
                                                 self.insert_signature(signature).await;
 
                                                 channel_send_page(
                                                     &shared.0, page.clone(), &shared.1,
                                                 );
-
                                                 if scrape || persist_links {
                                                     if let Some(p) = self.pages.as_mut() {
                                                         p.push(page);
@@ -9573,7 +9592,7 @@ impl Website {
                                         } else {
                                             if let Some(mut links) = page.page_links.clone() {
                                                 self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
-                                                self.extra_links.extend(*links)
+                                                self.extra_links_extend(*links)
                                             }
                                             channel_send_page(
                                                 &shared.0, page.clone(), &shared.1,
@@ -9608,7 +9627,7 @@ impl Website {
                                         if let Some(mut links) = page.page_links.clone() {
                                             self.dequeue(&mut q, &mut links, &mut exceeded_budget)
                                                 .await;
-                                            self.extra_links.extend(*links)
+                                            self.extra_links_extend(*links)
                                         }
                                         self.insert_signature(signature).await;
                                         channel_send_page(&shared.0, page.clone(), &shared.1);
@@ -9622,7 +9641,7 @@ impl Website {
                                     if let Some(mut links) = page.page_links.clone() {
                                         self.dequeue(&mut q, &mut links, &mut exceeded_budget)
                                             .await;
-                                        self.extra_links.extend(*links)
+                                        self.extra_links_extend(*links)
                                     }
                                     channel_send_page(&shared.0, page.clone(), &shared.1);
                                     if scrape || persist_links {
@@ -10946,7 +10965,7 @@ impl Website {
     #[cfg(feature = "sync")]
     pub fn queue(&mut self, capacity: usize) -> Option<broadcast::Sender<String>> {
         let channel = self.channel_queue.get_or_insert_with(|| {
-            let (tx, rx) = broadcast::channel(capacity);
+            let (tx, rx) = broadcast::channel(capacity.max(1));
             (tx, Arc::new(rx))
         });
 

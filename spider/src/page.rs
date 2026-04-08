@@ -907,9 +907,18 @@ pub fn page_assign(page: &mut Page, new_page: Page) {
     page.should_retry = new_page.should_retry;
     page.signature = new_page.signature;
     if let Some(mut new_spawn_pages) = new_page.spawn_pages {
+        /// Max URLs a single page can accumulate via automation spawn_pages.
+        const MAX_SPAWN_PAGES: usize = 1000;
         match page.spawn_pages.as_mut() {
-            Some(existing) => existing.append(&mut new_spawn_pages),
-            None => page.spawn_pages = Some(new_spawn_pages),
+            Some(existing) => {
+                let remaining = MAX_SPAWN_PAGES.saturating_sub(existing.len());
+                new_spawn_pages.truncate(remaining);
+                existing.append(&mut new_spawn_pages);
+            }
+            None => {
+                new_spawn_pages.truncate(MAX_SPAWN_PAGES);
+                page.spawn_pages = Some(new_spawn_pages);
+            }
         }
     }
     page.metadata = new_page.metadata;
