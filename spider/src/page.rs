@@ -1603,6 +1603,8 @@ pub struct PageLinkBuildSettings {
     pub subdomains: bool,
     /// De-duplication signature.
     pub normalize: bool,
+    /// Skip link extraction (single-page crawls that don't need links).
+    pub skip_links: bool,
 }
 
 impl PageLinkBuildSettings {
@@ -1629,6 +1631,7 @@ impl PageLinkBuildSettings {
             subdomains,
             tld,
             normalize,
+            skip_links: false,
         }
     }
 }
@@ -2100,7 +2103,9 @@ impl Page {
                         Ok(())
                     }
                 ));
-                element_content_handlers.push(base_links_settings);
+                if !r_settings.skip_links {
+                    element_content_handlers.push(base_links_settings);
+                }
 
                 element_content_handlers.extend(metadata_handlers(
                     &mut meta_title,
@@ -2108,7 +2113,7 @@ impl Page {
                     &mut meta_og_image,
                 ));
 
-                if r_settings.ssg_build {
+                if r_settings.ssg_build && !r_settings.skip_links {
                     element_content_handlers.push(lol_html::element!("script", |el| {
                         if let Some(build_path) = el.get_attribute("src") {
                             if build_path.starts_with("/_next/static/")

@@ -3207,6 +3207,9 @@ impl Website {
             page_links_settings.subdomains = self.configuration.subdomains;
             page_links_settings.tld = self.configuration.tld;
             page_links_settings.normalize = self.configuration.normalize;
+            // Skip link extraction for single-page crawls unless the user wants page links.
+            page_links_settings.skip_links =
+                self.single_page() && !self.configuration.return_page_links;
 
             let mut domain_parsed = self.domain_parsed.take();
 
@@ -3214,7 +3217,7 @@ impl Website {
             let mut page = if let Some(mut seeded_page) = self.build_seed_page() {
                 // Extract links and metadata from seeded HTML content if not binary
                 #[cfg(not(feature = "decentralized"))]
-                {
+                if !page_links_settings.skip_links {
                     let html_bytes = seeded_page.get_html_bytes_u8();
                     if !html_bytes.is_empty() && !auto_encoder::is_binary_file(html_bytes) {
                         let html = seeded_page.get_html();
@@ -3242,7 +3245,7 @@ impl Website {
                 .await
             };
 
-            if page.get_html_bytes_u8().starts_with(b"<?xml") {
+            if !page_links_settings.skip_links && page.get_html_bytes_u8().starts_with(b"<?xml") {
                 page.links_stream_xml_links_stream_base(base, &page.get_html(), &mut links, &None)
                     .await;
             }
@@ -3954,15 +3957,19 @@ impl Website {
                 page.page_links = Some(Box::default());
             }
 
+            // Skip link extraction for single-page crawls unless the user wants page links.
+            let skip_links = self.single_page() && !self.configuration.return_page_links;
             let xml_file = page.get_html_bytes_u8().starts_with(b"<?xml");
 
-            let mut links = if !page.is_empty() && !xml_file {
+            let mut links = if skip_links {
+                Default::default()
+            } else if !page.is_empty() && !xml_file {
                 page.links_ssg(base, client, &self.domain_parsed).await
             } else {
                 Default::default()
             };
 
-            if xml_file {
+            if !skip_links && xml_file {
                 page.links_stream_xml_links_stream_base(base, &page.get_html(), &mut links, &None)
                     .await;
             }
@@ -4155,15 +4162,19 @@ impl Website {
                 page.page_links = Some(Box::default());
             }
 
+            // Skip link extraction for single-page crawls unless the user wants page links.
+            let skip_links = self.single_page() && !self.configuration.return_page_links;
             let xml_file = page.get_html_bytes_u8().starts_with(b"<?xml");
 
-            let mut links = if !page.is_empty() && !xml_file {
+            let mut links = if skip_links {
+                Default::default()
+            } else if !page.is_empty() && !xml_file {
                 page.links_ssg(base, client, &self.domain_parsed).await
             } else {
                 Default::default()
             };
 
-            if xml_file {
+            if !skip_links && xml_file {
                 page.links_stream_xml_links_stream_base(base, &page.get_html(), &mut links, &None)
                     .await;
             }
@@ -4260,15 +4271,19 @@ impl Website {
                 page.page_links = Some(Box::default());
             }
 
+            // Skip link extraction for single-page crawls unless the user wants page links.
+            let skip_links = self.single_page() && !self.configuration.return_page_links;
             let xml_file = page.get_html_bytes_u8().starts_with(b"<?xml");
 
-            let mut links = if !page.is_empty() && !xml_file {
+            let mut links = if skip_links {
+                Default::default()
+            } else if !page.is_empty() && !xml_file {
                 page.links_ssg(base, client, &self.domain_parsed).await
             } else {
                 Default::default()
             };
 
-            if xml_file {
+            if !skip_links && xml_file {
                 page.links_stream_xml_links_stream_base(base, &page.get_html(), &mut links, &None)
                     .await;
             }
@@ -4485,7 +4500,12 @@ impl Website {
                 page.page_links = Some(Default::default());
             }
 
-            let next_links = HashSet::from(page.links(&base, &self.domain_parsed).await);
+            // Skip link extraction for single-page crawls unless the user wants page links.
+            let next_links = if self.single_page() && !self.configuration.return_page_links {
+                Default::default()
+            } else {
+                HashSet::from(page.links(&base, &self.domain_parsed).await)
+            };
             channel_send_page(&self.channel, page, &self.channel_guard);
             links.extend(next_links);
         }
@@ -4531,6 +4551,9 @@ impl Website {
                 page_links_settings.subdomains = self.configuration.subdomains;
                 page_links_settings.tld = self.configuration.tld;
                 page_links_settings.normalize = self.configuration.normalize;
+                // Skip link extraction for single-page crawls unless the user wants page links.
+                page_links_settings.skip_links =
+                    self.single_page() && !self.configuration.return_page_links;
 
                 let mut domain_parsed = self.domain_parsed.take();
 
@@ -4757,15 +4780,20 @@ impl Website {
                 }
             }
 
+            // Skip link extraction for single-page crawls unless the user wants page links.
             let (page_links, bytes_transferred): (HashSet<CaseInsensitiveString>, Option<f64>) =
-                page.smart_links(
-                    &base,
-                    &self.configuration,
-                    &self.domain_parsed,
-                    &browser,
-                    Some(&self.cookie_jar),
-                )
-                .await;
+                if self.single_page() && !self.configuration.return_page_links {
+                    (Default::default(), None)
+                } else {
+                    page.smart_links(
+                        &base,
+                        &self.configuration,
+                        &self.domain_parsed,
+                        &browser,
+                        Some(&self.cookie_jar),
+                    )
+                    .await
+                };
 
             if let Some(domain) = &page.final_redirect_destination {
                 let prior_domain = self.domain_parsed.take();
@@ -5050,7 +5078,11 @@ impl Website {
         }
 
         let page_base = page.base.take().map(Box::new);
-        let mut links: HashSet<CaseInsensitiveString> = if full_resources {
+        // Skip link extraction for single-page crawls unless the user wants page links.
+        let skip_links = self.single_page() && !return_page_links;
+        let mut links: HashSet<CaseInsensitiveString> = if skip_links {
+            Default::default()
+        } else if full_resources {
             page.links_full(&selectors, &page_base).await
         } else {
             page.links(&selectors, &page_base).await
