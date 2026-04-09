@@ -377,4 +377,4 @@ required-features = ["spider/parallel_backends", "spider/sync"]
 [[example]]
 name = "parallel_backends_chrome"
 path = "parallel_backends_chrome.rs"
-required-features = ["spider/lightpanda", "spider/sync", "spider/chrome"]
+required-features = ["spider/parallel_backends", "spider/sync", "spider/chrome"]

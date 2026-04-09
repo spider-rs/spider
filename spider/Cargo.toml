@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.48.50"
+version = "2.48.51"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -124,11 +124,11 @@ features = ["serde", "headers", "dynamic-versions"]
 
 [dependencies.spider_agent_types]
 path = "../spider_agent_types"
-version = "2.48.50"
+version = "2.48.51"
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.48.50"
+version = "2.48.51"
 optional = true
 default-features = false
 
@@ -369,16 +369,12 @@ hedge = []
 
 # Parallel crawl backends — race LightPanda / Servo alongside the primary crawl.
 parallel_backends = []
-# LightPanda remote (connect to a running LightPanda instance via CDP).
-lightpanda = ["parallel_backends", "chrome"]
-# LightPanda local (compile lightpanda as a dependency).
-# lightpanda_local = ["lightpanda", "dep:lightpanda"]
 # Servo remote (connect to a running Servo instance via WebDriver).
 servo = ["parallel_backends", "webdriver"]
 # Servo local (compile servo engine as a dependency).
 # servo_local = ["servo", "dep:servo"]
-# All remote backends.
-parallel_backends_full = ["lightpanda", "servo"]
+# All remote backends (Chrome CDP + Servo WebDriver).
+parallel_backends_full = ["parallel_backends", "chrome", "servo"]
 
 # Allows full concurrency.
 cowboy = []
@@ -436,7 +432,7 @@ features = [
     "page_error_status_details", "extra_information",
     "rate_limit", "request_coalesce", "adaptive_concurrency",
     "priority_frontier", "hedge",
-    "parallel_backends", "lightpanda", "servo", "parallel_backends_full",
+    "parallel_backends", "servo", "parallel_backends_full",
     "cowboy", "h2_multiplex", "robots_cache",
     "llm_json", "wreq",
     "balance", "time", "cmd",

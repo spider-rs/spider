@@ -4,7 +4,7 @@
 //! # Start LightPanda:
 //! #   .tools/lightpanda serve --host 127.0.0.1 --port 9222
 //!
-//! cargo run --example parallel_backends_chrome --features "spider/lightpanda spider/sync spider/chrome"
+//! cargo run --example parallel_backends_chrome --features "spider/parallel_backends spider/sync spider/chrome"
 //! ```
 extern crate spider;
 
