@@ -1,6 +1,7 @@
 /// Base css selector to use for getting valid web pages.
 pub(crate) const BASE_CSS_SELECTORS: &str = concat!(
     "a[href]",
+    ":not([aria-hidden=\"true\"])",
     ":not([href$=\".jpg\"])",
     ":not([href$=\".jpeg\"])",
     ":not([href$=\".png\"])",
@@ -116,6 +117,7 @@ pub(crate) fn compiled_base_element_selector() -> &'static lol_html::Selector {
 /// Base css selector to use for getting valid web pages including xml files. We may remove this for general xml including links always.
 pub(crate) const BASE_CSS_SELECTORS_WITH_XML: &str = concat!(
     "a[href]",
+    ":not([aria-hidden=\"true\"])",
     ":not([href$=\".jpg\"])",
     ":not([href$=\".jpeg\"])",
     ":not([href$=\".png\"])",

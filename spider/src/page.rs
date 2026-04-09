@@ -2012,38 +2012,42 @@ impl Page {
                 let xml_file = target_url.ends_with(".xml");
 
                 let base_links_settings = if r_settings.full_resources {
-                    lol_html::element!("a[href],script[src],link[href]", |el| {
-                        let tag_name = el.tag_name();
-                        let attribute = if tag_name == "script" { "src" } else { "href" };
+                    lol_html::element!(
+                        "a[href]:not([aria-hidden=\"true\"]),script[src],link[href]",
+                        |el| {
+                            let tag_name = el.tag_name();
 
-                        if let Some(href) = el.get_attribute(attribute) {
-                            let base = if relative_directory_url(&href) || base.is_none() {
-                                original_page.as_ref()
-                            } else {
-                                base.as_deref()
-                            };
-                            let base = if base_input_url.initialized() {
-                                base_input_url.get()
-                            } else {
-                                base
-                            };
+                            let attribute = if tag_name == "script" { "src" } else { "href" };
 
-                            push_link(
-                                &base,
-                                &href,
-                                map,
-                                &selectors.0,
-                                parent_host,
-                                parent_host_scheme,
-                                base_input_domain,
-                                sub_matcher,
-                                external_domains_caseless,
-                                links_pages,
-                            );
+                            if let Some(href) = el.get_attribute(attribute) {
+                                let base = if relative_directory_url(&href) || base.is_none() {
+                                    original_page.as_ref()
+                                } else {
+                                    base.as_deref()
+                                };
+                                let base = if base_input_url.initialized() {
+                                    base_input_url.get()
+                                } else {
+                                    base
+                                };
+
+                                push_link(
+                                    &base,
+                                    &href,
+                                    map,
+                                    &selectors.0,
+                                    parent_host,
+                                    parent_host_scheme,
+                                    base_input_domain,
+                                    sub_matcher,
+                                    external_domains_caseless,
+                                    links_pages,
+                                );
+                            }
+
+                            Ok(())
                         }
-
-                        Ok(())
-                    })
+                    )
                 } else {
                     element_precompiled!(
                         if xml_file {
@@ -2361,38 +2365,41 @@ impl Page {
         let xml_file = url.ends_with(".xml");
 
         let base_links_settings = if r_settings.full_resources {
-            lol_html::element!("a[href],script[src],link[href]", |el| {
-                let tag_name = el.tag_name();
-                let attribute = if tag_name == "script" { "src" } else { "href" };
+            lol_html::element!(
+                "a[href]:not([aria-hidden=\"true\"]),script[src],link[href]",
+                |el| {
+                    let tag_name = el.tag_name();
+                    let attribute = if tag_name == "script" { "src" } else { "href" };
 
-                if let Some(href) = el.get_attribute(attribute) {
-                    let base = if relative_directory_url(&href) || base.is_none() {
-                        original_page.as_ref()
-                    } else {
-                        base.as_deref()
-                    };
-                    let base = if base_input_url.initialized() {
-                        base_input_url.get()
-                    } else {
-                        base
-                    };
+                    if let Some(href) = el.get_attribute(attribute) {
+                        let base = if relative_directory_url(&href) || base.is_none() {
+                            original_page.as_ref()
+                        } else {
+                            base.as_deref()
+                        };
+                        let base = if base_input_url.initialized() {
+                            base_input_url.get()
+                        } else {
+                            base
+                        };
 
-                    push_link(
-                        &base,
-                        &href,
-                        map,
-                        &selectors.0,
-                        parent_host,
-                        parent_host_scheme,
-                        base_input_domain,
-                        sub_matcher,
-                        external_domains_caseless,
-                        links_pages,
-                    );
+                        push_link(
+                            &base,
+                            &href,
+                            map,
+                            &selectors.0,
+                            parent_host,
+                            parent_host_scheme,
+                            base_input_domain,
+                            sub_matcher,
+                            external_domains_caseless,
+                            links_pages,
+                        );
+                    }
+
+                    Ok(())
                 }
-
-                Ok(())
-            })
+            )
         } else {
             element_precompiled!(
                 if xml_file {
@@ -4488,53 +4495,56 @@ impl Page {
 
                         Ok(())
                     }),
-                    element!("a[href],script[src],link[href]", |el| {
-                        let attribute = if el.tag_name() == "script" {
-                            if let Some(src) = el.get_attribute("src") {
-                                if !is_tracker_script(&src) {
-                                    script_src_count = script_src_count.saturating_add(1);
-                                    if script_src_count >= 4 {
-                                        let _ = upgrade_score.fetch_update(
-                                            Ordering::Relaxed,
-                                            Ordering::Relaxed,
-                                            |v| Some(v.saturating_add(SMART_UPGRADE_THRESHOLD)),
-                                        );
+                    element!(
+                        "a[href]:not([aria-hidden=\"true\"]),script[src],link[href]",
+                        |el| {
+                            let attribute = if el.tag_name() == "script" {
+                                if let Some(src) = el.get_attribute("src") {
+                                    if !is_tracker_script(&src) {
+                                        script_src_count = script_src_count.saturating_add(1);
+                                        if script_src_count >= 4 {
+                                            let _ = upgrade_score.fetch_update(
+                                                Ordering::Relaxed,
+                                                Ordering::Relaxed,
+                                                |v| Some(v.saturating_add(SMART_UPGRADE_THRESHOLD)),
+                                            );
+                                        }
                                     }
                                 }
+                                "src"
+                            } else {
+                                "href"
+                            };
+                            if let Some(href) = el.get_attribute(attribute) {
+                                let base = if relative_directory_url(&href) || base.is_none() {
+                                    original_page.as_ref()
+                                } else {
+                                    base.as_deref()
+                                };
+
+                                let base = if base_input_url.initialized() {
+                                    base_input_url.get()
+                                } else {
+                                    base
+                                };
+
+                                push_link(
+                                    &base,
+                                    &href,
+                                    &mut inner_map,
+                                    &selectors.0,
+                                    parent_host,
+                                    parent_host_scheme,
+                                    base_input_domain,
+                                    sub_matcher,
+                                    &external_domains_caseless,
+                                    &mut links_pages,
+                                );
                             }
-                            "src"
-                        } else {
-                            "href"
-                        };
-                        if let Some(href) = el.get_attribute(attribute) {
-                            let base = if relative_directory_url(&href) || base.is_none() {
-                                original_page.as_ref()
-                            } else {
-                                base.as_deref()
-                            };
 
-                            let base = if base_input_url.initialized() {
-                                base_input_url.get()
-                            } else {
-                                base
-                            };
-
-                            push_link(
-                                &base,
-                                &href,
-                                &mut inner_map,
-                                &selectors.0,
-                                parent_host,
-                                parent_host_scheme,
-                                base_input_domain,
-                                sub_matcher,
-                                &external_domains_caseless,
-                                &mut links_pages,
-                            );
+                            Ok(())
                         }
-
-                        Ok(())
-                    }),
+                    ),
                     text!("noscript", |el| {
                         if upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD {
                             if NO_SCRIPT_JS_REQUIRED.find(el.as_str()).is_some() {
@@ -4849,8 +4859,9 @@ impl Page {
 
                 let external_domains_caseless = self.external_domains_caseless.clone();
 
-                let base_links_settings =
-                    lol_html::element!("a[href],script[src],link[href]", |el| {
+                let base_links_settings = lol_html::element!(
+                    "a[href]:not([aria-hidden=\"true\"]),script[src],link[href]",
+                    |el| {
                         let attribute = if el.tag_name() == "script" {
                             "src"
                         } else {
@@ -4882,7 +4893,8 @@ impl Page {
                             );
                         }
                         Ok(())
-                    });
+                    }
+                );
 
                 let mut element_content_handlers =
                     metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
