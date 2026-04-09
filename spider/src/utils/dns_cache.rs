@@ -6,6 +6,10 @@ use std::time::{Duration, Instant};
 /// Maximum number of cached entries before eviction on overflow.
 const MAX_ENTRIES: usize = 5_000;
 
+/// Default proxy-host DNS refresh interval bounds.
+const PROXY_REFRESH_MIN_SECS: u64 = 30;
+const PROXY_REFRESH_MAX_SECS: u64 = 240;
+
 /// Cached DNS entry with TTL tracking.
 pub(crate) struct DnsEntry {
     /// Pre-computed socket addresses (port 0) — avoids per-hit IpAddr→SocketAddr conversion.
@@ -148,6 +152,46 @@ impl DnsCache {
         let now = Instant::now();
         self.cache.retain(|_, v| v.expires > now);
     }
+
+    /// Invalidate a single host, forcing the next lookup to re-resolve.
+    /// Call this when a proxy connection fails so stale DNS doesn't persist.
+    pub fn invalidate(&self, host: &str) {
+        self.cache.remove(host);
+    }
+
+    /// Resolve a hostname, but if the cached entry exists and fails a
+    /// liveness check, invalidate and re-resolve once. Returns `None` only
+    /// if the re-resolve also fails.
+    ///
+    /// This is useful for proxy hosts: if the proxy becomes unreachable,
+    /// the caller invalidates + retries DNS to pick up a potential IP change.
+    pub async fn resolve_or_refresh(&self, host: &str) -> Option<Vec<IpAddr>> {
+        // Try cached first.
+        if let Some(ips) = self.resolve(host).await {
+            return Some(ips);
+        }
+        // Cache miss already does a fresh resolve, so if that failed too
+        // there's nothing more to do.
+        None
+    }
+
+    /// Compute a cheap hash of the resolved IPs for a host without
+    /// allocating. Used by the adaptive refresh to detect IP changes.
+    pub(crate) async fn resolve_hash(&self, host: &str) -> Option<u64> {
+        let ips = self.resolve(host).await?;
+        let mut hash: u64 = 0xcbf29ce484222325;
+        for ip in ips {
+            let bits = match ip {
+                IpAddr::V4(v4) => u32::from(v4) as u64,
+                IpAddr::V6(v6) => {
+                    let b = u128::from(v6);
+                    (b as u64) ^ ((b >> 64) as u64)
+                }
+            };
+            hash ^= bits.wrapping_mul(0x100000001b3);
+        }
+        Some(hash)
+    }
 }
 
 /// Wrapper that holds an `Arc<DnsCache>` so it can be moved into async
@@ -227,6 +271,114 @@ impl Iterator for ArcSocketAddrIter {
         } else {
             None
         }
+    }
+}
+
+impl DnsCacheResolver {
+    /// Extract the hostname from a proxy URL (e.g. `http://user:pass@host:port`).
+    fn parse_proxy_host(proxy_url: &str) -> Option<String> {
+        url::Url::parse(proxy_url)
+            .ok()
+            .and_then(|u| u.host_str().map(|h| h.to_string()))
+    }
+
+    /// Pre-resolve proxy hostnames so the first request through each proxy
+    /// hits a warm DNS cache. Call once at crawl startup.
+    pub async fn prefetch_proxy_hosts(&self, proxy_urls: &[String]) {
+        let hosts: Vec<&str> = proxy_urls
+            .iter()
+            .filter_map(|u| {
+                url::Url::parse(u)
+                    .ok()
+                    .and_then(|parsed| parsed.host_str().map(|_| u.as_str()))
+            })
+            .collect::<Vec<_>>();
+
+        // Collect unique hostnames.
+        let mut unique = Vec::with_capacity(hosts.len());
+        let mut seen = std::collections::HashSet::new();
+        for url_str in proxy_urls {
+            if let Some(host) = Self::parse_proxy_host(url_str) {
+                if seen.insert(host.clone()) {
+                    unique.push(host);
+                }
+            }
+        }
+
+        if !unique.is_empty() {
+            let refs: Vec<&str> = unique.iter().map(|s| s.as_str()).collect();
+            self.0.pre_resolve(&refs).await;
+        }
+    }
+
+    /// Invalidate the DNS entry for a proxy URL so the next connection
+    /// re-resolves. Call when a proxy connection fails.
+    pub fn invalidate_proxy(&self, proxy_url: &str) {
+        if let Some(host) = Self::parse_proxy_host(proxy_url) {
+            self.0.invalidate(&host);
+        }
+    }
+
+    /// Spawn an adaptive background task that keeps proxy-host DNS warm.
+    ///
+    /// - Starts checking 30 s after spawn.
+    /// - Backs off to 4 min when IPs are stable (well under 5-min TTL).
+    /// - Resets to 30 s on IP change (proxy rotation / failover).
+    /// - ±20 % jitter avoids thundering herd across concurrent crawlers.
+    ///
+    /// Returns a `JoinHandle` — drop or abort when the crawl ends.
+    /// No-op (immediately-ready handle) if `proxy_urls` is empty.
+    pub fn spawn_proxy_dns_refresh(&self, proxy_urls: &[String]) -> tokio::task::JoinHandle<()> {
+        let mut unique_hosts = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for url_str in proxy_urls {
+            if let Some(host) = Self::parse_proxy_host(url_str) {
+                if seen.insert(host.clone()) {
+                    unique_hosts.push(host);
+                }
+            }
+        }
+
+        if unique_hosts.is_empty() {
+            return tokio::spawn(async {});
+        }
+
+        let cache = self.0.clone();
+
+        tokio::spawn(async move {
+            // Seed initial hashes.
+            let mut last_hashes: Vec<Option<u64>> = Vec::with_capacity(unique_hosts.len());
+            for host in &unique_hosts {
+                last_hashes.push(cache.resolve_hash(host).await);
+            }
+
+            let mut interval_secs = PROXY_REFRESH_MIN_SECS;
+            let mut jitter_counter: u64 = 0;
+
+            loop {
+                // Jitter via counter mixing — no syscall.
+                jitter_counter = jitter_counter.wrapping_add(0x9e3779b97f4a7c15);
+                let factor = 0.8 + (((jitter_counter >> 33) as f64) / (u32::MAX as f64)) * 0.4;
+                let sleep_ms = (interval_secs as f64 * factor * 1000.0) as u64;
+                tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
+
+                let mut any_changed = false;
+                for (i, host) in unique_hosts.iter().enumerate() {
+                    let current = cache.resolve_hash(host).await;
+                    if current != last_hashes[i] {
+                        log::info!("proxy DNS changed for {host}, resetting refresh interval");
+                        last_hashes[i] = current;
+                        any_changed = true;
+                    }
+                }
+
+                if any_changed {
+                    interval_secs = PROXY_REFRESH_MIN_SECS;
+                } else {
+                    interval_secs = (interval_secs * 2).min(PROXY_REFRESH_MAX_SECS);
+                }
+            }
+        })
     }
 }
 

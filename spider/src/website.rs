@@ -747,6 +747,10 @@ pub struct Website {
     client: Option<Client>,
     /// Round-robin client rotator for proxy rotation. Built when 2+ proxies are configured.
     client_rotator: Option<Arc<ClientRotator>>,
+    /// Background proxy-DNS refresh task abort handle.
+    /// Shared via Arc so the Website stays Clone-able.
+    #[cfg(feature = "dns_cache")]
+    proxy_dns_abort: Option<Arc<tokio::task::AbortHandle>>,
     /// The disk handler to use.
     #[cfg(feature = "disk")]
     sqlite: Option<Box<DatabaseHandler>>,
@@ -2891,6 +2895,32 @@ impl Website {
         #[cfg(not(feature = "decentralized"))]
         {
             self.client_rotator = self.build_rotated_clients();
+        }
+
+        // Prefetch proxy hostnames + start adaptive background refresh.
+        #[cfg(feature = "dns_cache")]
+        {
+            // Abort any prior refresh task (e.g. from a previous crawl run).
+            if let Some(ref h) = self.proxy_dns_abort {
+                h.abort();
+            }
+            self.proxy_dns_abort = None;
+
+            if let Some(ref proxies) = self.configuration.proxies {
+                let addrs: Vec<String> = proxies.iter().map(|p| p.addr.clone()).collect();
+                if !addrs.is_empty() {
+                    let dns = crate::utils::dns_cache::shared_dns_cache();
+                    // Fire-and-forget prefetch — warms cache before first request.
+                    let dns_clone = dns.clone();
+                    let addrs_clone = addrs.clone();
+                    tokio::spawn(async move {
+                        dns_clone.prefetch_proxy_hosts(&addrs_clone).await;
+                    });
+                    // Adaptive refresh keeps proxy DNS warm for the crawl duration.
+                    let handle = dns.spawn_proxy_dns_refresh(&addrs);
+                    self.proxy_dns_abort = Some(Arc::new(handle.abort_handle()));
+                }
+            }
         }
 
         #[cfg(feature = "parallel_backends")]
