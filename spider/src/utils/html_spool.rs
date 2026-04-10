@@ -101,17 +101,21 @@ pub fn queue_spool_delete(path: PathBuf) {
 }
 
 /// Wait for the cleanup task to process all pending deletes.
-/// Used in tests to assert file deletion.
+/// Used in tests to assert file deletion.  Sends a marker file,
+/// then polls until the cleanup task has removed it.
 #[cfg(test)]
 pub fn flush_cleanup() {
-    let marker = spool_dir().join(".flush_marker");
+    let marker = spool_dir().join(format!(
+        ".flush_{}",
+        SPOOL_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
     let _ = std::fs::write(&marker, b"");
     let _ = cleanup_sender().send(marker.clone());
-    for _ in 0..200 {
-        if !marker.exists() {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(1));
+    // Bounded spin+yield — the cleanup task processes in order,
+    // so once the marker is gone all prior deletes are done.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while marker.exists() && std::time::Instant::now() < deadline {
+        std::thread::yield_now();
     }
 }
 
