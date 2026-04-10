@@ -21,7 +21,7 @@
 //! lock-free (one file per page, unique names via atomic counter).
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicI8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 // ── Global byte accounting ─────────────────────────────────────────────────
@@ -34,6 +34,29 @@ static PAGES_ON_DISK: AtomicUsize = AtomicUsize::new(0);
 
 /// Monotonic counter for generating unique spool file names.
 static SPOOL_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Cached memory pressure state — updated by the background monitor in
+/// `detect_system`, read here with a single atomic load instead of
+/// re-querying sysinfo on every `should_spool` call.
+static CACHED_MEM_STATE: AtomicI8 = AtomicI8::new(0);
+
+/// Exponential moving average of observed page sizes (in bytes).
+/// Used to auto-tune the spool threshold for the current workload.
+/// EMA formula: `(old * 7 + new) / 8`  (α ≈ 0.125, smooth).
+static PAGE_SIZE_EMA: AtomicUsize = AtomicUsize::new(0);
+
+/// Pages smaller than this are *never* spooled regardless of pressure,
+/// because the overhead of disk I/O exceeds the memory saved.
+/// Default: 16 KiB.  Override: `SPIDER_HTML_SPOOL_MIN_SIZE`.
+fn spool_min_size() -> usize {
+    static VAL: OnceLock<usize> = OnceLock::new();
+    *VAL.get_or_init(|| {
+        std::env::var("SPIDER_HTML_SPOOL_MIN_SIZE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(16 * 1024)
+    })
+}
 
 /// Lazily-initialized spool directory.
 ///
@@ -146,36 +169,103 @@ pub fn pages_on_disk() -> usize {
     PAGES_ON_DISK.load(Ordering::Relaxed)
 }
 
+/// Update the cached memory state.  Called from the hot path in
+/// `channel_send_page` is unnecessary — the background monitor in
+/// `detect_system` calls this periodically.
+#[inline]
+pub fn refresh_cached_mem_state() {
+    CACHED_MEM_STATE.store(
+        crate::utils::detect_system::get_process_memory_state_sync(),
+        Ordering::Relaxed,
+    );
+}
+
+/// Update the page-size EMA with a new observation.
+/// Uses the formula `(old * 7 + new) / 8` for smooth tracking.
+#[inline]
+pub fn update_page_size_ema(page_len: usize) {
+    let _ = PAGE_SIZE_EMA.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |old| {
+        if old == 0 {
+            Some(page_len)
+        } else {
+            Some((old.saturating_mul(7).saturating_add(page_len)) / 8)
+        }
+    });
+}
+
+/// Current page-size EMA.
+#[inline]
+pub fn page_size_ema() -> usize {
+    PAGE_SIZE_EMA.load(Ordering::Relaxed)
+}
+
 // ── Spool decision logic ───────────────────────────────────────────────────
 
 /// Decide whether a page with `html_len` bytes should be spooled to disk.
 ///
-/// The decision tree adapts to the current memory pressure level:
+/// **Performance**: designed for the hot path (`channel_send_page`).  Most
+/// pages hit the small-page fast-path (a single comparison, no atomics
+/// beyond the one load of `CACHED_MEM_STATE`).
 ///
-/// 1. **Critical** (state 2) → always spool (effective budget & threshold = 0).
-/// 2. Total in-memory HTML exceeds *effective* budget → spool.
-/// 3. **Pressure** (state 1) AND page > *effective* per-page threshold → spool.
-/// 4. **Normal** (state 0) AND budget exceeded → spool.
+/// Decision tree (first match wins):
+///
+/// 1. Page ≤ `spool_min_size` (16 KiB default) → **never spool** (fast-path).
+/// 2. **Critical** (state 2) → always spool.
+/// 3. Total in-memory HTML exceeds *effective* budget → spool.
+/// 4. **Pressure** (state 1) AND page > *effective* per-page threshold → spool.
+///    The per-page threshold adapts: if the page-size EMA is known, use
+///    `max(static_threshold, ema * 2)` so the threshold scales with the
+///    workload rather than relying on a one-size-fits-all constant.
 /// 5. Otherwise → keep in memory.
+#[inline]
 pub fn should_spool(html_len: usize) -> bool {
-    let mem_state = crate::utils::detect_system::get_process_memory_state_sync();
+    // ① Small-page fast-path: disk I/O overhead > memory saved.
+    if html_len <= spool_min_size() {
+        return false;
+    }
 
-    // Critical pressure — spool everything.
+    // Single atomic load for the cached pressure level.
+    let mem_state = CACHED_MEM_STATE.load(Ordering::Relaxed);
+
+    // If the cached state is 0 (normal / uninitialised), do one direct
+    // read to bootstrap.  After the background monitor starts this path
+    // is never taken again.
+    let mem_state = if mem_state == 0 {
+        let fresh = crate::utils::detect_system::get_process_memory_state_sync();
+        if fresh != 0 {
+            CACHED_MEM_STATE.store(fresh, Ordering::Relaxed);
+        }
+        fresh
+    } else {
+        mem_state
+    };
+
+    // ② Critical pressure — spool everything above min size.
     if mem_state >= 2 {
         return true;
     }
 
+    // ③ Global byte budget exceeded.
     let budget = effective_budget(mem_state);
     let current = total_bytes_in_memory();
-
-    // Global byte budget exceeded (budget adapts to pressure level).
     if current.saturating_add(html_len) > budget {
         return true;
     }
 
-    // Pressure + page exceeds the (halved) per-page threshold.
-    if mem_state >= 1 && html_len > effective_per_page_threshold(mem_state) {
-        return true;
+    // ④ Pressure + page exceeds adaptive per-page threshold.
+    if mem_state >= 1 {
+        let static_threshold = effective_per_page_threshold(mem_state);
+        // Adapt: if we've observed page sizes, use 2× EMA as an
+        // alternative floor so the threshold tracks the workload.
+        let ema = page_size_ema();
+        let threshold = if ema > 0 {
+            static_threshold.max(ema.saturating_mul(2))
+        } else {
+            static_threshold
+        };
+        if html_len > threshold {
+            return true;
+        }
     }
 
     false

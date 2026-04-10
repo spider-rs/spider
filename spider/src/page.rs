@@ -652,63 +652,46 @@ pub enum AntiBotTech {
     None,
 }
 
+/// Inner state for a spool file, protected by `Arc` so that clones (e.g.
+/// from broadcast channels) share the same file without copying it.
+/// The file is deleted only when the *last* reference drops.
+#[cfg(feature = "balance")]
+#[derive(Debug)]
+struct SpoolInner {
+    path: std::path::PathBuf,
+}
+
+#[cfg(feature = "balance")]
+impl Drop for SpoolInner {
+    fn drop(&mut self) {
+        crate::utils::html_spool::spool_delete(&self.path);
+        crate::utils::html_spool::track_page_unspooled();
+    }
+}
+
 /// RAII guard for a temporary HTML spool file on disk.
 ///
-/// On `Drop`, the file is deleted and the global in-memory byte counter is
-/// left unchanged (the bytes were already subtracted when the HTML was
-/// spooled).  Cloning creates a *new* copy of the file so each guard owns
-/// its own path.
+/// Internally reference-counted via `Arc` — cloning a guard is a cheap
+/// pointer bump (no file copy, no I/O).  The spool file is deleted when
+/// the last clone drops, making this safe for broadcast channels where
+/// one page may be cloned for N subscribers.
 #[cfg(feature = "balance")]
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct HtmlSpoolGuard {
-    /// Path to the spool file (set once, read many).
-    pub path: Option<std::path::PathBuf>,
+    inner: Option<Arc<SpoolInner>>,
 }
 
 #[cfg(feature = "balance")]
 impl HtmlSpoolGuard {
     pub fn new(path: std::path::PathBuf) -> Self {
-        Self { path: Some(path) }
+        Self {
+            inner: Some(Arc::new(SpoolInner { path })),
+        }
     }
 
     #[inline]
     pub fn path(&self) -> Option<&std::path::Path> {
-        self.path.as_deref()
-    }
-}
-
-#[cfg(feature = "balance")]
-impl Drop for HtmlSpoolGuard {
-    fn drop(&mut self) {
-        if let Some(path) = self.path.take() {
-            crate::utils::html_spool::spool_delete(&path);
-            crate::utils::html_spool::track_page_unspooled();
-        }
-    }
-}
-
-#[cfg(feature = "balance")]
-impl Clone for HtmlSpoolGuard {
-    fn clone(&self) -> Self {
-        // Copy the spool file so both the original and the clone own
-        // independent temp files.  If the copy fails, the clone simply
-        // has no spool (the content accessor will return empty / fall
-        // through to the default path).
-        match &self.path {
-            Some(src) => {
-                let dst = crate::utils::html_spool::next_spool_path();
-                if std::fs::copy(src, &dst).is_ok() {
-                    // Mirror the track_page_spooled from spool_html_to_disk
-                    // so the counter stays consistent when the clone is
-                    // eventually dropped.
-                    crate::utils::html_spool::track_page_spooled();
-                    Self { path: Some(dst) }
-                } else {
-                    Self::default()
-                }
-            }
-            None => Self::default(),
-        }
+        self.inner.as_ref().map(|s| s.path.as_path())
     }
 }
 

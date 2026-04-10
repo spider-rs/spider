@@ -11469,8 +11469,12 @@ pub fn channel_send_page(
     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
     {
         let html_len = page.html.as_ref().map_or(0, |b| b.len());
-        if html_len > 0 && crate::utils::html_spool::should_spool(html_len) {
-            page.spool_html_to_disk();
+        if html_len > 0 {
+            // Feed the page-size EMA so adaptive thresholds can learn.
+            crate::utils::html_spool::update_page_size_ema(html_len);
+            if crate::utils::html_spool::should_spool(html_len) {
+                page.spool_html_to_disk();
+            }
         }
     }
     if let Some(c) = channel {
@@ -13579,8 +13583,8 @@ fn test_spool_concurrent_pages() {
 #[cfg(all(test, feature = "balance"))]
 #[test]
 fn test_spool_clone_byte_counter_consistency() {
-    // Verify that cloning a spooled page produces independent spool files
-    // and all copies remain accessible after dropping others.
+    // Clones now share the same spool file via Arc — no file copy.
+    // The file is deleted only when the last clone drops.
     let mut page = Page::default();
     page.html = Some(bytes::Bytes::from("clone counter"));
     page.spool_html_to_disk();
@@ -13588,28 +13592,31 @@ fn test_spool_clone_byte_counter_consistency() {
     let clone1 = page.clone();
     let clone2 = clone1.clone();
 
-    // All three have independent spool files and readable content.
+    // All three share the same file and are readable.
     assert_eq!(page.get_html(), "clone counter");
     assert_eq!(clone1.get_html(), "clone counter");
     assert_eq!(clone2.get_html(), "clone counter");
 
-    // The spool paths should be distinct files.
-    let path_orig = page.get_html_spool_path().unwrap().to_path_buf();
-    let path_c1 = clone1.get_html_spool_path().unwrap().to_path_buf();
-    let path_c2 = clone2.get_html_spool_path().unwrap().to_path_buf();
-    assert_ne!(path_orig, path_c1);
-    assert_ne!(path_c1, path_c2);
+    // All point to the same spool path (Arc shared).
+    let shared_path = page.get_html_spool_path().unwrap().to_path_buf();
+    assert_eq!(clone1.get_html_spool_path().unwrap(), shared_path);
+    assert_eq!(clone2.get_html_spool_path().unwrap(), shared_path);
 
-    // Drop two, verify the surviving clone still works.
+    // Drop two — file should still exist (last Arc alive in clone1).
     drop(clone2);
     drop(page);
-    assert!(!path_orig.exists(), "original spool should be cleaned up");
-    assert!(!path_c2.exists(), "clone2 spool should be cleaned up");
+    assert!(
+        shared_path.exists(),
+        "file should survive while clone1 lives"
+    );
     assert_eq!(clone1.get_html(), "clone counter");
-    assert!(path_c1.exists(), "clone1 spool should still exist");
 
+    // Drop the last clone — file should be cleaned up.
     drop(clone1);
-    assert!(!path_c1.exists(), "clone1 spool should be cleaned up");
+    assert!(
+        !shared_path.exists(),
+        "file should be deleted after last clone drops"
+    );
 }
 
 #[cfg(all(test, feature = "balance"))]

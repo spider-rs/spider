@@ -161,6 +161,9 @@ async fn update_cpu_usage() {
             update_cpu(&mut sys);
             update_memory(&mut sys);
             update_process_memory(&mut sys);
+            // Push the latest memory state into the html_spool cache so
+            // should_spool() reads a single atomic instead of re-querying.
+            crate::utils::html_spool::refresh_cached_mem_state();
             sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL).await;
         }
     }
