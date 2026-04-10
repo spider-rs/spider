@@ -273,6 +273,7 @@ macro_rules! chrome_page_post_process {
                                     if let Some(ref mut s) = $pb_backend_set {
                                         s.abort_all();
                                     }
+                                    $pb_backend_set = None;
                                     _cancel_backends = true;
                                     log::debug!("[parallel_backends] cancelled backends for binary content-type (chrome): {}", ct_str);
                                 }
@@ -334,6 +335,13 @@ macro_rules! chrome_page_post_process {
                     pb_trk.record_win(0);
                 }
             }
+        }
+        // Drop the JoinSet immediately so any completed-but-unread backend
+        // responses (carrying full Page data) are freed before downstream
+        // processing (multimodal extraction, channel send, etc.).
+        #[cfg(feature = "parallel_backends")]
+        {
+            $pb_backend_set = None;
         }
 
         if $add_external {
@@ -6481,6 +6489,10 @@ impl Website {
                                             }
                                         }
                                     }
+                                    // Drop the JoinSet so completed-but-unread backend
+                                    // responses are freed before downstream processing.
+                                    #[cfg(feature = "parallel_backends")]
+                                    drop(pb_backend_set);
 
                                     // Record latency for auto-throttle.
                                     #[cfg(feature = "auto_throttle")]
@@ -7164,6 +7176,10 @@ impl Website {
                                                                     }
                                                                 }
                                                             }
+                                                            // Drop the JoinSet so completed-but-unread backend
+                                                            // responses are freed before downstream processing.
+                                                            #[cfg(feature = "parallel_backends")]
+                                                            drop(pb_backend_set);
 
                                                             chrome_page_post_process!(page, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit)
                                                         }

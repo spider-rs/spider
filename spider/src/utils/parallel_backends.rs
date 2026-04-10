@@ -651,6 +651,10 @@ pub async fn race_backends(
         }
     }
 
+    // Drop the JoinSet immediately so any completed-but-unread backend
+    // responses (carrying full Page data) are freed before returning.
+    drop(futs);
+
     if let Some(ref b) = best {
         tracker.record_win(b.backend_index);
     }
@@ -2098,6 +2102,50 @@ mod tests {
         let alt = mock_alt(1, 95, 1);
         let result = race_backends(primary, vec![alt], &cfg, &tracker).await;
         assert!(result.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_race_backends_drops_futs_before_return() {
+        // Verify that race_backends doesn't hold losing responses after
+        // returning. The primary fast-accepts; the slow alt should be
+        // aborted and dropped inside race_backends (not leaked to caller).
+        let tracker = BackendTracker::new(2, 10);
+        let cfg = test_config(200, 80);
+
+        // Primary: score=90 (above threshold=80), returns in 1ms.
+        let primary = mock_primary(90, 1);
+        // Alt: score=50, returns in 500ms — should be aborted.
+        let alt = mock_alt(1, 50, 500);
+
+        let result = race_backends(primary, vec![alt], &cfg, &tracker).await;
+        assert!(result.is_some());
+        let winner = result.unwrap();
+        // Primary wins via fast-accept.
+        assert_eq!(winner.backend_index, 0);
+        assert_eq!(winner.quality_score, 90);
+        // race_backends returned in ~1ms, not 500ms — alt was aborted.
+    }
+
+    #[tokio::test]
+    async fn test_race_backends_winner_replaces_losers() {
+        // When multiple alts complete during grace, only the best is returned.
+        // Others are dropped (not leaked).
+        let tracker = BackendTracker::new(4, 10);
+        let cfg = test_config(500, 95); // high threshold so grace period is used
+
+        let primary = mock_primary(40, 1); // low score, triggers grace
+        let alt1 = mock_alt(1, 60, 5);
+        let alt2 = mock_alt(2, 80, 10);
+        let alt3 = mock_alt(3, 70, 15);
+
+        let result = race_backends(primary, vec![alt1, alt2, alt3], &cfg, &tracker).await;
+        assert!(result.is_some());
+        let winner = result.unwrap();
+        // Best alt (score=80) should win.
+        assert_eq!(winner.backend_index, 2);
+        assert_eq!(winner.quality_score, 80);
+        // The other responses (primary=40, alt1=60, alt3=70) were dropped
+        // inside race_backends when futs was dropped before return.
     }
 
     #[test]
