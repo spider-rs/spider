@@ -5582,7 +5582,7 @@ impl Website {
     /// Each spool file is deleted as soon as the content is reloaded
     /// (via `ensure_html_loaded`) or when the `Page` is dropped — the disk
     /// is a short-lived buffer, not persistent storage.
-    #[cfg(feature = "balance")]
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
     fn shed_page_html(pages: &mut Vec<Page>) {
         let keep_recent = 100;
         let len = pages.len();
@@ -5639,7 +5639,7 @@ impl Website {
                                 { let url: CaseInsensitiveString = page.get_url().into(); self.insert_link(&url).await; }
                                 if let Some(p) = self.pages.as_mut() {
                                     p.push(page);
-                                    #[cfg(feature = "balance")]
+                                    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                                     if crate::utils::detect_system::get_process_memory_state_sync() >= 1 {
                                         Self::shed_page_html(p);
                                     }
@@ -5689,7 +5689,7 @@ impl Website {
                                 { let url: CaseInsensitiveString = page.get_url().into(); self.insert_link(&url).await; }
                                 if let Some(p) = self.pages.as_mut() {
                                     p.push(page);
-                                    #[cfg(feature = "balance")]
+                                    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                                     if crate::utils::detect_system::get_process_memory_state_sync() >= 1 {
                                         Self::shed_page_html(p);
                                     }
@@ -5738,7 +5738,7 @@ impl Website {
                                 { let url: CaseInsensitiveString = page.get_url().into(); self.insert_link(&url).await; }
                                 if let Some(p) = self.pages.as_mut() {
                                     p.push(page);
-                                    #[cfg(feature = "balance")]
+                                    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                                     if crate::utils::detect_system::get_process_memory_state_sync() >= 1 {
                                         Self::shed_page_html(p);
                                     }
@@ -5787,7 +5787,7 @@ impl Website {
                                 { let url: CaseInsensitiveString = page.get_url().into(); self.insert_link(&url).await; }
                                 if let Some(p) = self.pages.as_mut() {
                                     p.push(page);
-                                    #[cfg(feature = "balance")]
+                                    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                                     if crate::utils::detect_system::get_process_memory_state_sync() >= 1 {
                                         Self::shed_page_html(p);
                                     }
@@ -11462,11 +11462,11 @@ pub fn channel_send_page(
         tokio::sync::broadcast::Sender<Page>,
         std::sync::Arc<tokio::sync::broadcast::Receiver<Page>>,
     )>,
-    #[cfg(feature = "balance")] mut page: Page,
-    #[cfg(not(feature = "balance"))] page: Page,
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))] mut page: Page,
+    #[cfg(any(not(feature = "balance"), feature = "decentralized"))] page: Page,
     channel_guard: &Option<ChannelGuard>,
 ) {
-    #[cfg(feature = "balance")]
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
     {
         let html_len = page.html.as_ref().map_or(0, |b| b.len());
         if html_len > 0 && crate::utils::html_spool::should_spool(html_len) {

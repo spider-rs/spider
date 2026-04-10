@@ -2988,7 +2988,7 @@ impl Page {
     pub fn is_empty(&self) -> bool {
         match self.html.as_deref() {
             None => {
-                #[cfg(feature = "balance")]
+                #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                 if self.html_spool_path.is_some() {
                     return false;
                 }
@@ -3070,7 +3070,7 @@ impl Page {
 
     /// Set the html directly of the page
     pub fn set_html_bytes(&mut self, html: Option<Vec<u8>>) {
-        #[cfg(feature = "balance")]
+        #[cfg(all(feature = "balance", not(feature = "decentralized")))]
         {
             // Subtract old tracked bytes.
             if let Some(old) = &self.html {
@@ -3080,7 +3080,7 @@ impl Page {
             self.html_spool_path = None;
         }
         self.html = html.map(bytes::Bytes::from);
-        #[cfg(feature = "balance")]
+        #[cfg(all(feature = "balance", not(feature = "decentralized")))]
         if let Some(ref h) = self.html {
             crate::utils::html_spool::track_bytes_add(h.len());
         }
@@ -3092,7 +3092,7 @@ impl Page {
     /// The spool file lives under `{SPIDER_HTML_SPOOL_DIR || /tmp}/spider_html_<pid>/`
     /// and is deleted as soon as the content is consumed (via
     /// [`ensure_html_loaded`](Self::ensure_html_loaded) or link extraction).
-    #[cfg(feature = "balance")]
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
     pub fn spool_html_to_disk(&mut self) -> bool {
         let html = match self.html.as_ref() {
             Some(h) if !h.is_empty() => h,
@@ -3118,7 +3118,7 @@ impl Page {
     /// Reload HTML from disk spool into memory.  Returns `true` if content
     /// was reloaded (or was already in memory).  The spool file is deleted
     /// after a successful reload to keep temporary storage short-lived.
-    #[cfg(feature = "balance")]
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
     pub fn ensure_html_loaded(&mut self) -> bool {
         if self.html.is_some() {
             return true;
@@ -3151,15 +3151,16 @@ impl Page {
 
     /// Whether this page's HTML currently lives on disk rather than in memory.
     /// Always returns `false` when the `balance` feature is not enabled.
-    #[cfg(feature = "balance")]
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
     #[inline]
     pub fn is_html_on_disk(&self) -> bool {
         self.html.is_none() && self.html_spool_path.is_some()
     }
 
     /// Whether this page's HTML currently lives on disk rather than in memory.
-    /// Always returns `false` when the `balance` feature is not enabled.
-    #[cfg(not(feature = "balance"))]
+    /// Always returns `false` when the `balance` feature is not enabled or
+    /// the `decentralized` feature is active.
+    #[cfg(any(not(feature = "balance"), feature = "decentralized"))]
     #[inline]
     pub fn is_html_on_disk(&self) -> bool {
         false
@@ -3173,7 +3174,7 @@ impl Page {
     ///
     /// The path is valid as long as this `Page` (or its clone) is alive.
     /// Once the page is dropped the spool file is automatically deleted.
-    #[cfg(feature = "balance")]
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
     #[inline]
     pub fn get_html_spool_path(&self) -> Option<&std::path::Path> {
         self.html_spool_path.as_ref().and_then(|guard| guard.path())
@@ -3197,7 +3198,7 @@ impl Page {
     /// });
     /// let _ = rewriter.end();
     /// ```
-    #[cfg(feature = "balance")]
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
     pub fn stream_html_bytes<F>(&self, chunk_size: usize, mut cb: F) -> usize
     where
         F: FnMut(&[u8]) -> bool,
@@ -3229,7 +3230,7 @@ impl Page {
     /// callback.  Works the same as
     /// [`stream_html_bytes`](Self::stream_html_bytes) but is available
     /// without the `balance` feature — it simply chunks the in-memory HTML.
-    #[cfg(not(feature = "balance"))]
+    #[cfg(any(not(feature = "balance"), feature = "decentralized"))]
     pub fn stream_html_bytes<F>(&self, chunk_size: usize, mut cb: F) -> usize
     where
         F: FnMut(&[u8]) -> bool,
@@ -3352,7 +3353,7 @@ impl Page {
                 Err(_) => auto_encoder::auto_encode_bytes(bytes),
             };
         }
-        #[cfg(feature = "balance")]
+        #[cfg(all(feature = "balance", not(feature = "decentralized")))]
         if let Some(guard) = &self.html_spool_path {
             if let Some(path) = guard.path() {
                 if let Ok(bytes) = crate::utils::html_spool::spool_read(path) {
@@ -3385,7 +3386,7 @@ impl Page {
                 Err(_) => std::borrow::Cow::Owned(auto_encoder::auto_encode_bytes(bytes)),
             },
             None => {
-                #[cfg(feature = "balance")]
+                #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                 if let Some(guard) = &self.html_spool_path {
                     if let Some(path) = guard.path() {
                         if let Ok(bytes) = crate::utils::html_spool::spool_read(path) {
@@ -4352,7 +4353,7 @@ impl Page {
         } else {
             // When HTML is on disk, stream from the spool file without
             // loading the entire contents into memory.
-            #[cfg(feature = "balance")]
+            #[cfg(all(feature = "balance", not(feature = "decentralized")))]
             if let Some(ref guard) = self.html_spool_path {
                 if let Some(path) = guard.path() {
                     return self
@@ -5310,7 +5311,7 @@ impl Page {
             let html_bytes_taken = self.html.take();
 
             // When HTML lives on disk, stream from spool to avoid full load.
-            #[cfg(feature = "balance")]
+            #[cfg(all(feature = "balance", not(feature = "decentralized")))]
             if html_bytes_taken.is_none() {
                 if let Some(ref guard) = self.html_spool_path {
                     if let Some(path) = guard.path() {
@@ -5519,7 +5520,7 @@ impl Page {
     ) -> HashSet<CaseInsensitiveString> {
         let has_html = self.html.is_some();
 
-        #[cfg(feature = "balance")]
+        #[cfg(all(feature = "balance", not(feature = "decentralized")))]
         let has_html = has_html || self.html_spool_path.is_some();
 
         match has_html {
@@ -5541,7 +5542,7 @@ impl Page {
     ) -> HashSet<CaseInsensitiveString> {
         let has_html = self.html.is_some();
 
-        #[cfg(feature = "balance")]
+        #[cfg(all(feature = "balance", not(feature = "decentralized")))]
         let has_html = has_html || self.html_spool_path.is_some();
 
         match has_html {
@@ -5569,14 +5570,14 @@ impl Page {
     ) -> (HashSet<CaseInsensitiveString>, Option<f64>) {
         let has_html = self.html.is_some();
 
-        #[cfg(feature = "balance")]
+        #[cfg(all(feature = "balance", not(feature = "decentralized")))]
         let has_html = has_html || self.html_spool_path.is_some();
 
         match has_html {
             false => Default::default(),
             true => {
                 // When spooled to disk, reload for smart analysis (needs Chrome).
-                #[cfg(feature = "balance")]
+                #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                 if self.html.is_none() && self.html_spool_path.is_some() {
                     self.ensure_html_loaded();
                 }
