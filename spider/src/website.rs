@@ -13753,3 +13753,76 @@ fn test_spool_adaptive_threshold_levels() {
         "small page under budget should not spool"
     );
 }
+
+#[cfg(all(test, feature = "balance"))]
+#[tokio::test]
+async fn test_spool_subscription_stream_from_disk() {
+    // Simulate the subscription pattern: crawl sends pages via broadcast,
+    // subscriber receives them, some are spooled, and we stream bytes from
+    // both memory and disk pages — verifying the full e2e path.
+    let mut website = Website::new("https://example.com");
+    let mut rx = website.subscribe(16);
+
+    // Manually send pages through the channel to simulate crawl output.
+    if let Some(ref channel) = website.channel {
+        for i in 0..10 {
+            let mut page = Page::default();
+            page.url = format!("https://example.com/page/{i}");
+            let html =
+                format!("<html><body><a href=\"/link/{i}\">link</a> content {i}</body></html>");
+            page.html = Some(bytes::Bytes::from(html));
+
+            // Spool even-numbered pages to disk before sending.
+            if i % 2 == 0 {
+                page.spool_html_to_disk();
+                assert!(page.is_html_on_disk());
+            }
+
+            let _ = channel.0.send(page);
+        }
+    }
+
+    // Receive and verify all pages from the subscription.
+    let mut received = 0;
+    while let Ok(page) = rx.try_recv() {
+        let url = page.get_url().to_string();
+        assert!(url.starts_with("https://example.com/page/"));
+
+        // get_html() should work regardless of memory or disk.
+        let html = page.get_html();
+        assert!(html.contains("content"), "html should have content: {url}");
+
+        // stream_html_bytes should produce the same content.
+        let mut streamed = Vec::new();
+        let total = page.stream_html_bytes(16, |chunk| {
+            streamed.extend_from_slice(chunk);
+            true
+        });
+        assert_eq!(
+            total,
+            html.len(),
+            "streamed bytes should match html length for {url}"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&streamed),
+            html,
+            "streamed content should match get_html() for {url}"
+        );
+
+        // Verify is_html_on_disk marker is correct.
+        let idx: usize = url.rsplit('/').next().unwrap().parse().unwrap();
+        if idx % 2 == 0 {
+            assert!(page.is_html_on_disk(), "even page should be on disk: {url}");
+        } else {
+            assert!(
+                !page.is_html_on_disk(),
+                "odd page should be in memory: {url}"
+            );
+        }
+
+        received += 1;
+    }
+    assert_eq!(received, 10, "should receive all 10 pages");
+
+    website.unsubscribe();
+}
