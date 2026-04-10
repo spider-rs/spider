@@ -44,47 +44,36 @@ static CACHED_MEM_STATE: AtomicI8 = AtomicI8::new(0);
 /// send paths here instead of deleting files directly — the send is a
 /// non-blocking channel push (~10ns, never blocks, never spawns per-file).
 ///
-/// Uses `std::sync::mpsc::Sender` so it works from any context (async
-/// Drop, sync Drop, any thread) without requiring a tokio runtime handle.
-/// The receiver is a tokio task that uses `tokio::fs::remove_file` for
-/// non-blocking deletion — zero sync I/O on any thread.
-static CLEANUP_TX: OnceLock<std::sync::mpsc::Sender<PathBuf>> = OnceLock::new();
+/// Uses `tokio::sync::mpsc::UnboundedSender` — `send()` is non-blocking,
+/// does not require an active runtime, and works from any thread including
+/// sync Drop impls.  The receiver awaits inside a spawned tokio task.
+static CLEANUP_TX: OnceLock<tokio::sync::mpsc::UnboundedSender<PathBuf>> = OnceLock::new();
 
 /// Initialize the cleanup task and return the sender.
 ///
-/// When inside a tokio runtime: spawns a lightweight tokio task that
-/// drains the channel with `tokio::fs::remove_file` (non-blocking).
-/// Outside tokio (tests, CLI): falls back to a dedicated OS thread
-/// with `std::fs::remove_file`.
-fn cleanup_sender() -> &'static std::sync::mpsc::Sender<PathBuf> {
+/// When inside a tokio runtime: spawns a task that `recv().await`s on
+/// the channel — sleeps with zero CPU when idle, wakes instantly on send.
+/// Outside tokio (tests, CLI): falls back to a dedicated OS thread.
+fn cleanup_sender() -> &'static tokio::sync::mpsc::UnboundedSender<PathBuf> {
     CLEANUP_TX.get_or_init(|| {
-        let (tx, rx) = std::sync::mpsc::channel::<PathBuf>();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<PathBuf>();
 
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             // Tokio runtime available — spawn async cleanup task.
+            // `rx.recv().await` parks with zero CPU until a path arrives.
+            let mut rx = rx;
             handle.spawn(async move {
-                loop {
-                    // Drain all pending paths in a batch, then yield.
-                    let mut drained = false;
-                    while let Ok(path) = rx.try_recv() {
-                        let _ = tokio::fs::remove_file(&path).await;
-                        drained = true;
-                    }
-                    if !drained {
-                        // Nothing to do — yield then brief sleep to avoid
-                        // busy-spinning when idle.  Under load, the batch
-                        // drain above fires immediately with no sleep.
-                        tokio::task::yield_now().await;
-                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                    }
+                while let Some(path) = rx.recv().await {
+                    let _ = tokio::fs::remove_file(&path).await;
                 }
             });
         } else {
-            // No tokio runtime — fallback to OS thread.
+            // No tokio runtime — fallback to OS thread with blocking recv.
+            let mut rx = rx;
             std::thread::Builder::new()
                 .name("spider-spool-cleanup".into())
                 .spawn(move || {
-                    while let Ok(path) = rx.recv() {
+                    while let Some(path) = rx.blocking_recv() {
                         let _ = std::fs::remove_file(&path);
                     }
                 })
