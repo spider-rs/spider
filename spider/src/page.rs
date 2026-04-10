@@ -3490,6 +3490,9 @@ impl Page {
     }
 
     /// Html getter for bytes on the page.
+    ///
+    /// Returns `None` when HTML is spooled to disk.  Use [`get_html`],
+    /// [`get_html_async`], or [`stream_html_bytes`] for disk-aware access.
     pub fn get_bytes(&self) -> Option<&[u8]> {
         self.html.as_deref()
     }
