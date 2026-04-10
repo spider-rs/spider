@@ -1146,8 +1146,8 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion 0.8.2",
- "spider 2.48.53",
- "spider_utils 2.48.53",
+ "spider 2.49.0",
+ "spider_utils 2.49.0",
 ]
 
 [[package]]
@@ -1621,9 +1621,9 @@ dependencies = [
 
 [[package]]
 name = "chromey"
-version = "2.43.0"
+version = "2.45.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13c9b3702cc016b9b41b46b138db8b0dc627cf105b1ae26f91440152ab2a080d"
+checksum = "5f1c02555125829f1cbbace308f72517307c27d601b97e45991943adb7ebe9ae"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -1644,6 +1644,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "lol_html",
+ "native-tls",
  "phf 0.13.1",
  "pin-project-lite",
  "rand 0.10.0",
@@ -4289,12 +4290,12 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "system-configuration 0.7.0",
  "tokio",
  "tower-service",
  "tracing",
- "windows-registry 0.5.3",
+ "windows-registry 0.6.1",
 ]
 
 [[package]]
@@ -6605,7 +6606,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.2",
  "rustls 0.23.37",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -6643,7 +6644,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -8064,7 +8065,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.48.53"
+version = "2.49.0"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -8121,7 +8122,7 @@ dependencies = [
  "smallvec",
  "sonic-rs",
  "spider_agent",
- "spider_agent_types 2.48.53",
+ "spider_agent_types 2.49.0",
  "spider_fingerprint",
  "spider_firewall",
  "sqlx",
@@ -8147,7 +8148,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent"
-version = "2.48.53"
+version = "2.49.0"
 dependencies = [
  "aho-corasick",
  "async-openai 0.33.1",
@@ -8170,7 +8171,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spider_agent_html",
- "spider_agent_types 2.48.53",
+ "spider_agent_types 2.49.0",
  "spider_skills",
  "tempfile",
  "thirtyfour",
@@ -8181,13 +8182,13 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_html"
-version = "2.48.53"
+version = "2.49.0"
 dependencies = [
  "aho-corasick",
  "lol_html",
  "serde",
  "serde_json",
- "spider_agent_types 2.48.53",
+ "spider_agent_types 2.49.0",
 ]
 
 [[package]]
@@ -8205,7 +8206,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.48.53"
+version = "2.49.0"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8255,7 +8256,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.48.53"
+version = "2.49.0"
 dependencies = [
  "clap",
  "env_logger",
@@ -8264,7 +8265,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.48.53",
+ "spider 2.49.0",
  "spider_transformations",
  "tikv-jemallocator",
  "tokio",
@@ -8281,7 +8282,7 @@ dependencies = [
  "flexbuffers",
  "htr",
  "serde_json",
- "spider 2.48.53",
+ "spider 2.49.0",
  "spider_transformations",
  "spider_utils 2.48.25",
 ]
@@ -8322,7 +8323,7 @@ dependencies = [
 
 [[package]]
 name = "spider_mcp"
-version = "2.48.53"
+version = "2.49.0"
 dependencies = [
  "clap",
  "dashmap",
@@ -8331,7 +8332,7 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
- "spider 2.48.53",
+ "spider 2.49.0",
  "spider_transformations",
  "tokio",
  "uuid",
@@ -8424,7 +8425,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.48.53"
+version = "2.49.0"
 dependencies = [
  "hashbrown 0.16.1",
  "indexmap 2.13.0",
@@ -8439,14 +8440,14 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.48.53"
+version = "2.49.0"
 dependencies = [
  "env_logger",
  "hyper 1.9.0",
  "hyper-util",
  "lazy_static",
  "rustls-pemfile",
- "spider 2.48.53",
+ "spider 2.49.0",
  "tokio-rustls 0.26.4",
  "warp",
 ]
@@ -10227,7 +10228,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
