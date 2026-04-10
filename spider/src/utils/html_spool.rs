@@ -351,6 +351,40 @@ pub fn spool_delete(path: &Path) {
     let _ = std::fs::remove_file(path);
 }
 
+// ── Async I/O helpers (tokio) ──────────────────────────────────────────────
+//
+// These avoid blocking the tokio runtime on disk reads.  Used by internal
+// async crawl paths (link extraction, ensure_html_loaded_async).  The sync
+// variants above are kept for non-async consumers and Drop impls.
+
+/// Async read of a spool file into `bytes::Bytes`.
+/// Uses `spawn_blocking` to keep the runtime non-blocking.
+pub async fn spool_read_bytes_async(path: std::path::PathBuf) -> std::io::Result<bytes::Bytes> {
+    tokio::task::spawn_blocking(move || std::fs::read(&path).map(bytes::Bytes::from))
+        .await
+        .unwrap_or_else(|_| Err(std::io::Error::other("join error")))
+}
+
+/// Async read of a spool file into `Vec<u8>`.
+pub async fn spool_read_async(path: std::path::PathBuf) -> std::io::Result<Vec<u8>> {
+    tokio::task::spawn_blocking(move || std::fs::read(&path))
+        .await
+        .unwrap_or_else(|_| Err(std::io::Error::other("join error")))
+}
+
+/// Async streaming read of a spool file in chunks.
+/// Runs the blocking loop on `spawn_blocking`, sends chunks back via a
+/// callback that is invoked on the blocking thread.
+pub async fn spool_stream_chunks_async(
+    path: std::path::PathBuf,
+    chunk_size: usize,
+    cb: impl FnMut(&[u8]) -> bool + Send + 'static,
+) -> std::io::Result<usize> {
+    tokio::task::spawn_blocking(move || spool_stream_chunks(&path, chunk_size, cb))
+        .await
+        .unwrap_or_else(|_| Err(std::io::Error::other("join error")))
+}
+
 /// Remove the entire spool directory.  Best-effort; useful for process exit.
 /// Individual spool files are already cleaned by `HtmlSpoolGuard::Drop`,
 /// so this only handles the directory itself and any orphaned files.

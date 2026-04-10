@@ -3098,9 +3098,12 @@ impl Page {
         }
     }
 
-    /// Reload HTML from disk spool into memory.  Returns `true` if content
-    /// was reloaded (or was already in memory).  The spool file is deleted
-    /// after a successful reload to keep temporary storage short-lived.
+    /// Reload HTML from disk spool into memory (sync).  Returns `true` if
+    /// content was reloaded (or was already in memory).  The spool file is
+    /// deleted after a successful reload.
+    ///
+    /// **Prefer [`ensure_html_loaded_async`](Self::ensure_html_loaded_async)**
+    /// in async crawl paths to avoid blocking the tokio runtime on disk I/O.
     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
     pub fn ensure_html_loaded(&mut self) -> bool {
         if self.html.is_some() {
@@ -3112,13 +3115,42 @@ impl Page {
                     Ok(bytes) => {
                         crate::utils::html_spool::track_bytes_add(bytes.len());
                         self.html = Some(bytes);
-                        // Drop guard → deletes the temp file + decrements page counter.
                         self.html_spool_path = None;
                         true
                     }
                     Err(_) => {
-                        // Spool file disappeared (race / disk error).
-                        // Drop guard still decrements the page counter.
+                        self.html_spool_path = None;
+                        false
+                    }
+                }
+            } else {
+                self.html_spool_path = None;
+                false
+            }
+        } else {
+            false
+        }
+    }
+
+    /// Async variant of [`ensure_html_loaded`](Self::ensure_html_loaded).
+    /// Uses `spawn_blocking` so the disk read doesn't block the tokio
+    /// runtime.  Used internally by async crawl paths.
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+    pub async fn ensure_html_loaded_async(&mut self) -> bool {
+        if self.html.is_some() {
+            return true;
+        }
+        if let Some(guard) = self.html_spool_path.as_ref() {
+            if let Some(path) = guard.path() {
+                let path_buf = path.to_path_buf();
+                match crate::utils::html_spool::spool_read_bytes_async(path_buf).await {
+                    Ok(bytes) => {
+                        crate::utils::html_spool::track_bytes_add(bytes.len());
+                        self.html = Some(bytes);
+                        self.html_spool_path = None;
+                        true
+                    }
+                    Err(_) => {
                         self.html_spool_path = None;
                         false
                     }
@@ -3866,17 +3898,22 @@ impl Page {
         let mut meta_og_image: Option<_> = None;
 
         // Peek at the first few bytes to detect XML without reading the whole file.
-        let is_xml = std::fs::File::open(&spool_path)
-            .and_then(|mut f| {
+        // Use tokio::fs to avoid blocking the runtime.
+        let is_xml = match tokio::fs::File::open(&spool_path).await {
+            Ok(mut f) => {
                 let mut peek = [0u8; 5];
-                std::io::Read::read_exact(&mut f, &mut peek)?;
-                Ok(peek.starts_with(b"<?xml"))
-            })
-            .unwrap_or(false);
+                matches!(
+                    tokio::io::AsyncReadExt::read_exact(&mut f, &mut peek).await,
+                    Ok(_) if peek.starts_with(b"<?xml")
+                )
+            }
+            Err(_) => false,
+        };
 
         if is_xml {
-            // XML sitemaps are typically small; load fully for the quick-xml parser.
-            if let Ok(bytes) = crate::utils::html_spool::spool_read(&spool_path) {
+            // XML sitemaps are typically small; load fully via async read.
+            if let Ok(bytes) = crate::utils::html_spool::spool_read_async(spool_path.clone()).await
+            {
                 let html = String::from_utf8_lossy(&bytes);
                 self.links_stream_xml_links_stream_base(selectors, &html, &mut map, base)
                     .await;
@@ -3962,22 +3999,37 @@ impl Page {
             let chunk_size = *STREAMING_CHUNK_SIZE;
             let mut chunk_idx = 0usize;
 
-            // Stream from disk in fixed-size chunks — never holds more than
-            // one chunk in memory at a time.
-            let stream_result =
-                crate::utils::html_spool::spool_stream_chunks(&spool_path, chunk_size, |chunk| {
-                    if rewriter.write(chunk).is_err() {
-                        wrote_error = true;
-                        return false;
+            // Stream from disk using tokio async I/O — never holds more
+            // than one chunk in memory and yields to the runtime between
+            // chunks so other tasks can make progress.
+            match tokio::fs::File::open(&spool_path).await {
+                Ok(mut file) => {
+                    let mut buf = vec![0u8; chunk_size];
+                    loop {
+                        match tokio::io::AsyncReadExt::read(&mut file, &mut buf).await {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                if rewriter.write(&buf[..n]).is_err() {
+                                    wrote_error = true;
+                                    break;
+                                }
+                                chunk_idx += 1;
+                                if chunk_idx % REWRITER_YIELD_INTERVAL
+                                    == REWRITER_YIELD_INTERVAL - 1
+                                {
+                                    tokio::task::yield_now().await;
+                                }
+                            }
+                            Err(_) => {
+                                wrote_error = true;
+                                break;
+                            }
+                        }
                     }
-                    chunk_idx += 1;
-                    // Cooperative yielding can't happen inside the sync callback,
-                    // but this keeps the hot loop short by stopping on error.
-                    true
-                });
-
-            if stream_result.is_err() {
-                wrote_error = true;
+                }
+                Err(_) => {
+                    wrote_error = true;
+                }
             }
 
             if !wrote_error {
@@ -5562,7 +5614,7 @@ impl Page {
                 // When spooled to disk, reload for smart analysis (needs Chrome).
                 #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                 if self.html.is_none() && self.html_spool_path.is_some() {
-                    self.ensure_html_loaded();
+                    self.ensure_html_loaded_async().await;
                 }
                 if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
                     return Default::default();
