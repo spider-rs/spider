@@ -64,15 +64,18 @@ fn cleanup_sender() -> &'static std::sync::mpsc::Sender<PathBuf> {
             // Tokio runtime available — spawn async cleanup task.
             handle.spawn(async move {
                 loop {
-                    // try_recv is non-blocking; yield between batches.
-                    match rx.try_recv() {
-                        Ok(path) => {
-                            let _ = tokio::fs::remove_file(&path).await;
-                        }
-                        Err(std::sync::mpsc::TryRecvError::Empty) => {
-                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                        }
-                        Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                    // Drain all pending paths in a batch, then yield.
+                    let mut drained = false;
+                    while let Ok(path) = rx.try_recv() {
+                        let _ = tokio::fs::remove_file(&path).await;
+                        drained = true;
+                    }
+                    if !drained {
+                        // Nothing to do — yield then brief sleep to avoid
+                        // busy-spinning when idle.  Under load, the batch
+                        // drain above fires immediately with no sleep.
+                        tokio::task::yield_now().await;
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                     }
                 }
             });
