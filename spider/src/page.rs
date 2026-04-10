@@ -3150,10 +3150,19 @@ impl Page {
     }
 
     /// Whether this page's HTML currently lives on disk rather than in memory.
+    /// Always returns `false` when the `balance` feature is not enabled.
     #[cfg(feature = "balance")]
     #[inline]
     pub fn is_html_on_disk(&self) -> bool {
         self.html.is_none() && self.html_spool_path.is_some()
+    }
+
+    /// Whether this page's HTML currently lives on disk rather than in memory.
+    /// Always returns `false` when the `balance` feature is not enabled.
+    #[cfg(not(feature = "balance"))]
+    #[inline]
+    pub fn is_html_on_disk(&self) -> bool {
+        false
     }
 
     /// Return the path to the disk-spooled HTML file, if any.
