@@ -799,6 +799,10 @@ pub struct Page {
     /// Whether a proxy was configured for this request.
     /// When true, 401 responses are retried (proxy rotation may fix auth).
     pub proxy_configured: bool,
+    /// Whether the content is a binary file (image, PDF, etc.).
+    /// Set once when HTML bytes are first available so the flag remains
+    /// accurate after content is spooled to disk.
+    pub binary_file: bool,
     #[cfg(feature = "parallel_backends")]
     /// Identifies which backend produced this page (e.g. "primary",
     /// "lightpanda", "servo"). `None` when parallel backends are not active.
@@ -898,6 +902,10 @@ pub struct Page {
     /// Whether a proxy was configured for this request.
     /// When true, 401 responses are retried (proxy rotation may fix auth).
     pub proxy_configured: bool,
+    /// Whether the content is a binary file (image, PDF, etc.).
+    /// Set once when HTML bytes are first available so the flag remains
+    /// accurate after content is spooled to disk.
+    pub binary_file: bool,
     #[cfg(feature = "parallel_backends")]
     /// Identifies which backend produced this page (e.g. "primary",
     /// "lightpanda", "servo"). `None` when parallel backends are not active.
@@ -1549,8 +1557,14 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
         should_retry = false;
     }
 
+    let binary_file = res
+        .content
+        .as_deref()
+        .is_some_and(|c| auto_encoder::is_binary_file(c));
+
     Page {
         html: res.content.map(bytes::Bytes::from),
+        binary_file,
         headers: res.headers,
         #[cfg(feature = "remote_addr")]
         remote_addr: res.remote_addr,
@@ -3075,6 +3089,10 @@ impl Page {
             self.html_spool_path = None;
         }
         self.html = html.map(bytes::Bytes::from);
+        self.binary_file = self
+            .html
+            .as_deref()
+            .is_some_and(|c| auto_encoder::is_binary_file(c));
         #[cfg(all(feature = "balance", not(feature = "decentralized")))]
         if let Some(ref h) = self.html {
             crate::utils::html_spool::track_bytes_add(h.len());
@@ -4462,7 +4480,7 @@ impl Page {
         client: &Client,
         prior_domain: &Option<Box<Url>>,
     ) -> HashSet<A> {
-        if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
+        if self.binary_file || auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             Default::default()
         } else if let Some(html_bytes) = self.html.take() {
             let html = match std::str::from_utf8(&html_bytes) {
@@ -4517,7 +4535,7 @@ impl Page {
         selectors: &RelativeSelectors,
         base: &Option<Box<Url>>,
     ) -> HashSet<A> {
-        if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
+        if self.binary_file || auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             Default::default()
         } else if let Some(html_bytes) = self.html.take() {
             let html = match std::str::from_utf8(&html_bytes) {
@@ -5658,7 +5676,7 @@ impl Page {
         selectors: &RelativeSelectors,
         base: &Option<Box<Url>>,
     ) -> HashSet<A> {
-        if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
+        if self.binary_file || auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             Default::default()
         } else {
             self.links_stream_full_resource(selectors, base).await
@@ -5725,7 +5743,7 @@ impl Page {
         match has_html {
             false => Default::default(),
             true => {
-                if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
+                if self.binary_file || auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
                     return Default::default();
                 }
                 self.links_stream_full_resource::<CaseInsensitiveString>(selectors, base)
@@ -5769,7 +5787,7 @@ impl Page {
                     }
                     return Default::default();
                 }
-                if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
+                if self.binary_file || auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
                     return Default::default();
                 }
                 self.links_stream_smart::<CaseInsensitiveString>(
