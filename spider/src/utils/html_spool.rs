@@ -40,11 +40,6 @@ static SPOOL_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// re-querying sysinfo on every `should_spool` call.
 static CACHED_MEM_STATE: AtomicI8 = AtomicI8::new(0);
 
-/// Exponential moving average of observed page sizes (in bytes).
-/// Used to auto-tune the spool threshold for the current workload.
-/// EMA formula: `(old * 7 + new) / 8`  (α ≈ 0.125, smooth).
-static PAGE_SIZE_EMA: AtomicUsize = AtomicUsize::new(0);
-
 /// Pages smaller than this are *never* spooled regardless of pressure,
 /// because the overhead of disk I/O exceeds the memory saved.
 /// Default: 16 KiB.  Override: `SPIDER_HTML_SPOOL_MIN_SIZE`.
@@ -99,30 +94,6 @@ fn base_per_page_threshold() -> usize {
             .and_then(|v| v.parse().ok())
             .unwrap_or(2 * 1024 * 1024)
     })
-}
-
-/// Compute the *effective* per-page spool threshold for the current memory
-/// state.  Under pressure the threshold halves so smaller pages start
-/// spilling earlier.  Under critical pressure the threshold drops to 0
-/// (spool everything).
-#[inline]
-fn effective_per_page_threshold(mem_state: i8) -> usize {
-    match mem_state {
-        s if s >= 2 => 0,
-        1 => base_per_page_threshold() / 2,
-        _ => base_per_page_threshold(),
-    }
-}
-
-/// Compute the *effective* global budget for the current memory state.
-/// Under pressure the budget tightens to ¾; under critical it drops to 0.
-#[inline]
-fn effective_budget(mem_state: i8) -> usize {
-    match mem_state {
-        s if s >= 2 => 0,
-        1 => base_memory_budget() * 3 / 4,
-        _ => base_memory_budget(),
-    }
 }
 
 // ── Public accounting API ──────────────────────────────────────────────────
@@ -180,92 +151,42 @@ pub fn refresh_cached_mem_state() {
     );
 }
 
-/// Update the page-size EMA with a new observation.
-/// Uses the formula `(old * 7 + new) / 8` for smooth tracking.
-#[inline]
-pub fn update_page_size_ema(page_len: usize) {
-    let _ = PAGE_SIZE_EMA.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |old| {
-        if old == 0 {
-            Some(page_len)
-        } else {
-            Some((old.saturating_mul(7).saturating_add(page_len)) / 8)
-        }
-    });
-}
-
-/// Current page-size EMA.
-#[inline]
-pub fn page_size_ema() -> usize {
-    PAGE_SIZE_EMA.load(Ordering::Relaxed)
-}
-
 // ── Spool decision logic ───────────────────────────────────────────────────
 
 /// Decide whether a page with `html_len` bytes should be spooled to disk.
 ///
-/// **Performance**: designed for the hot path (`channel_send_page`).  Most
-/// pages hit the small-page fast-path (a single comparison, no atomics
-/// beyond the one load of `CACHED_MEM_STATE`).
+/// **Performance**: designed for the hot path (`channel_send_page`).
+/// Small pages (≤ 16 KiB) hit a fast-path with a single comparison.
 ///
 /// Decision tree (first match wins):
 ///
-/// 1. Page ≤ `spool_min_size` (16 KiB default) → **never spool** (fast-path).
-/// 2. **Critical** (state 2) → always spool.
-/// 3. Total in-memory HTML exceeds *effective* budget → spool.
-/// 4. **Pressure** (state 1) AND page > *effective* per-page threshold → spool.
-///    The per-page threshold adapts: if the page-size EMA is known, use
-///    `max(static_threshold, ema * 2)` so the threshold scales with the
-///    workload rather than relying on a one-size-fits-all constant.
+/// 1. Page ≤ `spool_min_size` (16 KiB) → **keep in memory** (fast-path).
+/// 2. Page > per-page threshold (2 MiB) → **always spool** (large resource).
+/// 3. Total in-memory HTML exceeds budget → **spool** (memory pressure).
+/// 4. Process memory **pressure** (state ≥ 1) → **spool** (system pressure).
 /// 5. Otherwise → keep in memory.
 #[inline]
 pub fn should_spool(html_len: usize) -> bool {
-    // ① Small-page fast-path: disk I/O overhead > memory saved.
+    // ① Small-page fast-path — disk I/O cost exceeds memory saved.
     if html_len <= spool_min_size() {
         return false;
     }
 
-    // Single atomic load for the cached pressure level.
-    let mem_state = CACHED_MEM_STATE.load(Ordering::Relaxed);
-
-    // If the cached state is 0 (normal / uninitialised), do one direct
-    // read to bootstrap.  After the background monitor starts this path
-    // is never taken again.
-    let mem_state = if mem_state == 0 {
-        let fresh = crate::utils::detect_system::get_process_memory_state_sync();
-        if fresh != 0 {
-            CACHED_MEM_STATE.store(fresh, Ordering::Relaxed);
-        }
-        fresh
-    } else {
-        mem_state
-    };
-
-    // ② Critical pressure — spool everything above min size.
-    if mem_state >= 2 {
+    // ② Large page — always spool regardless of pressure.
+    if html_len > base_per_page_threshold() {
         return true;
     }
 
     // ③ Global byte budget exceeded.
-    let budget = effective_budget(mem_state);
     let current = total_bytes_in_memory();
-    if current.saturating_add(html_len) > budget {
+    if current.saturating_add(html_len) > base_memory_budget() {
         return true;
     }
 
-    // ④ Pressure + page exceeds adaptive per-page threshold.
+    // ④ System under any memory pressure — spool to keep headroom.
+    let mem_state = CACHED_MEM_STATE.load(Ordering::Relaxed);
     if mem_state >= 1 {
-        let static_threshold = effective_per_page_threshold(mem_state);
-        // Adapt: if we've observed page sizes, use 2× EMA as an
-        // alternative floor so the threshold tracks the workload.
-        let ema = page_size_ema();
-        let threshold = if ema > 0 {
-            static_threshold.max(ema.saturating_mul(2))
-        } else {
-            static_threshold
-        };
-        if html_len > threshold {
-            return true;
-        }
+        return true;
     }
 
     false
@@ -428,14 +349,6 @@ pub(crate) mod tests {
     use super::*;
 
     /// Expose base_per_page_threshold for cross-module tests.
-    pub fn base_per_page_helper() -> usize {
-        base_per_page_threshold()
-    }
-
-    /// Expose base_memory_budget for cross-module tests.
-    pub fn base_budget_helper() -> usize {
-        base_memory_budget()
-    }
 
     #[test]
     fn test_byte_accounting_saturating() {
@@ -473,25 +386,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn test_adaptive_thresholds() {
-        let base_pp = base_per_page_threshold();
-        let base_budget = base_memory_budget();
+    fn test_should_spool_decision() {
+        // Tiny pages never spool.
+        assert!(!should_spool(100));
+        assert!(!should_spool(spool_min_size()));
 
-        // State 0 — full thresholds.
-        assert_eq!(effective_per_page_threshold(0), base_pp);
-        assert_eq!(effective_budget(0), base_budget);
-
-        // State 1 — halved per-page, ¾ budget.
-        assert_eq!(effective_per_page_threshold(1), base_pp / 2);
-        assert_eq!(effective_budget(1), base_budget * 3 / 4);
-
-        // State 2 — zero thresholds (everything spools).
-        assert_eq!(effective_per_page_threshold(2), 0);
-        assert_eq!(effective_budget(2), 0);
-
-        // State 3+ — same as critical.
-        assert_eq!(effective_per_page_threshold(3), 0);
-        assert_eq!(effective_budget(3), 0);
+        // Large pages always spool.
+        assert!(should_spool(base_per_page_threshold() + 1));
+        assert!(should_spool(10 * 1024 * 1024));
     }
 
     #[test]

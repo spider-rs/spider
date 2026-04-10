@@ -664,8 +664,20 @@ struct SpoolInner {
 #[cfg(feature = "balance")]
 impl Drop for SpoolInner {
     fn drop(&mut self) {
-        crate::utils::html_spool::spool_delete(&self.path);
         crate::utils::html_spool::track_page_unspooled();
+        // Dispatch the file delete to the tokio runtime as a lightweight
+        // async task when possible, avoiding any blocking on worker threads.
+        // Outside async contexts (tests, CLI) falls back to sync delete.
+        let path = std::mem::take(&mut self.path);
+        if !path.as_os_str().is_empty() {
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let _ = tokio::fs::remove_file(&path).await;
+                });
+            } else {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
     }
 }
 
@@ -3075,18 +3087,44 @@ impl Page {
     /// The spool file lives under `{SPIDER_HTML_SPOOL_DIR || /tmp}/spider_html_<pid>/`
     /// and is deleted as soon as the content is consumed (via
     /// [`ensure_html_loaded`](Self::ensure_html_loaded) or link extraction).
+    /// Offload HTML to disk synchronously.  Used by tests and non-async
+    /// consumers.  **Prefer [`spool_html_to_disk_async`]** in async paths.
     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
     pub fn spool_html_to_disk(&mut self) -> bool {
         let html = match self.html.as_ref() {
             Some(h) if !h.is_empty() => h,
             _ => return false,
         };
-        // Already spooled — nothing to do.
         if self.html_spool_path.is_some() {
             return false;
         }
         let path = crate::utils::html_spool::next_spool_path();
         if crate::utils::html_spool::spool_write(&path, html).is_ok() {
+            let len = html.len();
+            self.html = None;
+            crate::utils::html_spool::track_bytes_sub(len);
+            crate::utils::html_spool::track_page_spooled();
+            self.html_spool_path = Some(HtmlSpoolGuard::new(path));
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Offload HTML to disk using `tokio::fs` — fully async, never blocks
+    /// a tokio worker thread.  Used by `channel_send_page` and all internal
+    /// crawl paths.
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+    pub async fn spool_html_to_disk_async(&mut self) -> bool {
+        let html = match self.html.as_ref() {
+            Some(h) if !h.is_empty() => h,
+            _ => return false,
+        };
+        if self.html_spool_path.is_some() {
+            return false;
+        }
+        let path = crate::utils::html_spool::next_spool_path();
+        if tokio::fs::write(&path, html.as_ref()).await.is_ok() {
             let len = html.len();
             self.html = None;
             crate::utils::html_spool::track_bytes_sub(len);
@@ -5611,10 +5649,21 @@ impl Page {
         match has_html {
             false => Default::default(),
             true => {
-                // When spooled to disk, reload for smart analysis (needs Chrome).
+                // When HTML is on disk, stream link extraction directly
+                // without loading the full content into memory.  The smart
+                // Chrome-upgrade heuristic is skipped for disk pages — they
+                // already have rendered content.
                 #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                 if self.html.is_none() && self.html_spool_path.is_some() {
-                    self.ensure_html_loaded_async().await;
+                    if let Some(ref guard) = self.html_spool_path {
+                        if let Some(path) = guard.path() {
+                            let links = self
+                                .links_stream_base_from_disk(selectors, path.to_path_buf(), base)
+                                .await;
+                            return (links, None);
+                        }
+                    }
+                    return Default::default();
                 }
                 if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
                     return Default::default();

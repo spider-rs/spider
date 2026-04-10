@@ -245,13 +245,13 @@ macro_rules! chrome_page_post_process {
         if let Some(ref cb) = $on_should_crawl_callback {
             if !cb.call(&page) {
                 page.blocked_crawl = true;
-                channel_send_page(&$shared.2, page, &$shared.4);
+                channel_send_page(&$shared.2, page, &$shared.4).await;
                 drop($permit);
                 return Default::default();
             }
         }
         let signature = page.signature;
-        channel_send_page(&$shared.2, page, &$shared.4);
+        channel_send_page(&$shared.2, page, &$shared.4).await;
         (links, signature)
     }};
     // Variant with parallel backends support.
@@ -366,13 +366,13 @@ macro_rules! chrome_page_post_process {
         if let Some(ref cb) = $on_should_crawl_callback {
             if !cb.call(&page) {
                 page.blocked_crawl = true;
-                channel_send_page(&$shared.2, page, &$shared.4);
+                channel_send_page(&$shared.2, page, &$shared.4).await;
                 drop($permit);
                 return Default::default();
             }
         }
         let signature = page.signature;
-        channel_send_page(&$shared.2, page, &$shared.4);
+        channel_send_page(&$shared.2, page, &$shared.4).await;
         (links, signature)
     }};
 }
@@ -3204,12 +3204,12 @@ impl Website {
         if let Some(ref cb) = self.on_should_crawl_callback {
             if !cb.call(&page) {
                 page.blocked_crawl = true;
-                channel_send_page(&self.channel, page, &self.channel_guard);
+                channel_send_page(&self.channel, page, &self.channel_guard).await;
                 return Default::default();
             }
         }
 
-        channel_send_page(&self.channel, page, &self.channel_guard);
+        channel_send_page(&self.channel, page, &self.channel_guard).await;
 
         links
     }
@@ -3393,12 +3393,12 @@ impl Website {
             if let Some(ref cb) = self.on_should_crawl_callback {
                 if !cb.call(&page) {
                     page.blocked_crawl = true;
-                    channel_send_page(&self.channel, page, &self.channel_guard);
+                    channel_send_page(&self.channel, page, &self.channel_guard).await;
                     return Default::default();
                 }
             }
 
-            channel_send_page(&self.channel, page, &self.channel_guard);
+            channel_send_page(&self.channel, page, &self.channel_guard).await;
 
             links
         } else {
@@ -3496,7 +3496,7 @@ impl Website {
                     {
                         page.error_status = Some(_err.to_string());
                     }
-                    channel_send_page(&self.channel, page, &self.channel_guard);
+                    channel_send_page(&self.channel, page, &self.channel_guard).await;
                     return;
                 }
             };
@@ -3521,7 +3521,7 @@ impl Website {
             )
             .await;
 
-            channel_send_page(&self.channel, page, &self.channel_guard);
+            channel_send_page(&self.channel, page, &self.channel_guard).await;
             return;
         }
 
@@ -3702,14 +3702,14 @@ impl Website {
                                 if let Some(ref cb) = on_should_crawl_callback {
                                     if !cb.call(&page) {
                                         page.blocked_crawl = true;
-                                        channel_send_page(&shared.3, page, &shared.5);
+                                        channel_send_page(&shared.3, page, &shared.5).await;
                                         drop(permit);
                                         return Default::default();
                                     }
                                 }
 
                                 let signature = page.signature;
-                                channel_send_page(&shared.3, page, &shared.5);
+                                channel_send_page(&shared.3, page, &shared.5).await;
                                 drop(permit);
 
                                 (out_links, signature)
@@ -4027,12 +4027,12 @@ impl Website {
             if let Some(ref cb) = self.on_should_crawl_callback {
                 if !cb.call(&page) {
                     page.blocked_crawl = true;
-                    channel_send_page(&self.channel, page, &self.channel_guard);
+                    channel_send_page(&self.channel, page, &self.channel_guard).await;
                     return Default::default();
                 }
             }
 
-            channel_send_page(&self.channel, page, &self.channel_guard);
+            channel_send_page(&self.channel, page, &self.channel_guard).await;
 
             links
         } else {
@@ -4220,12 +4220,12 @@ impl Website {
             if let Some(ref cb) = self.on_should_crawl_callback {
                 if !cb.call(&page) {
                     page.blocked_crawl = true;
-                    channel_send_page(&self.channel, page, &self.channel_guard);
+                    channel_send_page(&self.channel, page, &self.channel_guard).await;
                     return Default::default();
                 }
             }
 
-            channel_send_page(&self.channel, page, &self.channel_guard);
+            channel_send_page(&self.channel, page, &self.channel_guard).await;
 
             links
         } else {
@@ -4329,12 +4329,12 @@ impl Website {
             if let Some(ref cb) = self.on_should_crawl_callback {
                 if !cb.call(&page) {
                     page.blocked_crawl = true;
-                    channel_send_page(&self.channel, page, &self.channel_guard);
+                    channel_send_page(&self.channel, page, &self.channel_guard).await;
                     return Default::default();
                 }
             }
 
-            channel_send_page(&self.channel, page, &self.channel_guard);
+            channel_send_page(&self.channel, page, &self.channel_guard).await;
 
             links
         } else {
@@ -4401,7 +4401,7 @@ impl Website {
 
             self.set_crawl_initial_status(&page, &links);
 
-            channel_send_page(&self.channel, page, &self.channel_guard);
+            channel_send_page(&self.channel, page, &self.channel_guard).await;
 
             links
         } else {
@@ -4465,7 +4465,7 @@ impl Website {
             }
 
             let page_links = page.links.clone();
-            channel_send_page(&self.channel, page, &self.channel_guard);
+            channel_send_page(&self.channel, page, &self.channel_guard).await;
             links.extend(page_links);
         }
 
@@ -4544,7 +4544,7 @@ impl Website {
             } else {
                 HashSet::from(page.links(&base, &self.domain_parsed).await)
             };
-            channel_send_page(&self.channel, page, &self.channel_guard);
+            channel_send_page(&self.channel, page, &self.channel_guard).await;
             links.extend(next_links);
         }
 
@@ -4711,12 +4711,12 @@ impl Website {
                 if let Some(ref cb) = self.on_should_crawl_callback {
                     if !cb.call(&page) {
                         page.blocked_crawl = true;
-                        channel_send_page(&self.channel, page, &self.channel_guard);
+                        channel_send_page(&self.channel, page, &self.channel_guard).await;
                         return Default::default();
                     }
                 }
 
-                channel_send_page(&self.channel, page, &self.channel_guard);
+                channel_send_page(&self.channel, page, &self.channel_guard).await;
             }
         }
 
@@ -4889,12 +4889,12 @@ impl Website {
             if let Some(cb) = &mut self.on_should_crawl_callback {
                 if !cb.call(&page) {
                     page.blocked_crawl = true;
-                    channel_send_page(&self.channel, page, &self.channel_guard);
+                    channel_send_page(&self.channel, page, &self.channel_guard).await;
                     return Default::default();
                 }
             }
 
-            channel_send_page(&self.channel, page, &self.channel_guard);
+            channel_send_page(&self.channel, page, &self.channel_guard).await;
 
             links
         } else {
@@ -5044,7 +5044,7 @@ impl Website {
             };
             self.links_visited
                 .insert(CaseInsensitiveString::from(target_url.as_str()));
-            channel_send_page(&self.channel, page, &self.channel_guard);
+            channel_send_page(&self.channel, page, &self.channel_guard).await;
             self.subscription_guard().await;
             return true;
         }
@@ -5153,7 +5153,7 @@ impl Website {
         if normalize {
             if let Some(sig) = page.signature {
                 if !self.is_signature_allowed(sig).await {
-                    channel_send_page(&self.channel, page, &self.channel_guard);
+                    channel_send_page(&self.channel, page, &self.channel_guard).await;
                     self.subscription_guard().await;
                     return true;
                 }
@@ -5166,13 +5166,13 @@ impl Website {
         if let Some(ref cb) = self.on_should_crawl_callback {
             if !cb.call(&page) {
                 page.blocked_crawl = true;
-                channel_send_page(&self.channel, page, &self.channel_guard);
+                channel_send_page(&self.channel, page, &self.channel_guard).await;
                 self.subscription_guard().await;
                 return true; // blocked, but cache phase handled it
             }
         }
 
-        channel_send_page(&self.channel, page, &self.channel_guard);
+        channel_send_page(&self.channel, page, &self.channel_guard).await;
 
         // If single_page, we're done
         if self.single_page() {
@@ -5247,12 +5247,12 @@ impl Website {
                         if let Some(ref cb) = self.on_should_crawl_callback {
                             if !cb.call(&page) {
                                 page.blocked_crawl = true;
-                                channel_send_page(&self.channel, page, &self.channel_guard);
+                                channel_send_page(&self.channel, page, &self.channel_guard).await;
                                 continue;
                             }
                         }
 
-                        channel_send_page(&self.channel, page, &self.channel_guard);
+                        channel_send_page(&self.channel, page, &self.channel_guard).await;
                         // Add newly discovered links for further cache processing
                         links.extend(new_links);
                     }
@@ -5571,33 +5571,14 @@ impl Website {
         }
     }
 
-    /// Shed HTML from older pages under memory pressure to prevent OOM.
-    ///
-    /// Under *critical* pressure (state 2), older pages have their HTML
-    /// spooled to a temporary file on disk so the bytes can be reclaimed.
-    /// Under *pressure* (state 1), only pages above the per-page spool
-    /// threshold are offloaded.  The most recent `keep_recent` pages are
-    /// always left in memory so the hot working set stays fast.
-    ///
-    /// Each spool file is deleted as soon as the content is reloaded
-    /// (via `ensure_html_loaded`) or when the `Page` is dropped — the disk
-    /// is a short-lived buffer, not persistent storage.
+    /// Safety net: spool any accumulated pages that still have in-memory
+    /// HTML.  `channel_send_page` handles most pages, but direct pushes
+    /// (e.g. `pages.push(page.clone())`) may bypass the channel path.
     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
     fn shed_page_html(pages: &mut Vec<Page>) {
-        let keep_recent = 100;
-        let len = pages.len();
-        if len <= keep_recent {
-            return;
-        }
-        let mem_state = crate::utils::detect_system::get_process_memory_state_sync();
-        for page in &mut pages[..len - keep_recent] {
-            // Skip pages that are already spooled or have no HTML.
-            if page.html.is_none() {
-                continue;
-            }
-            let page_len = page.html.as_ref().map_or(0, |b| b.len());
-            let should_shed = mem_state >= 2 || crate::utils::html_spool::should_spool(page_len);
-            if should_shed {
+        for page in pages.iter_mut() {
+            let html_len = page.html.as_ref().map_or(0, |b| b.len());
+            if html_len > 0 && crate::utils::html_spool::should_spool(html_len) {
                 page.spool_html_to_disk();
             }
         }
@@ -6133,13 +6114,13 @@ impl Website {
                                                 if let Some(ref cb) = on_should_crawl_callback {
                                                     if !cb.call(&page) {
                                                         page.blocked_crawl = true;
-                                                        channel_send_page(&shared.2, page, &shared.4);
+                                                        channel_send_page(&shared.2, page, &shared.4).await;
                                                         drop(permit);
                                                         return Default::default();
                                                     }
                                                 }
                                                 let signature = page.signature;
-                                                channel_send_page(&shared.2, page, &shared.4);
+                                                channel_send_page(&shared.2, page, &shared.4).await;
                                                 drop(permit);
                                                 return (links, signature);
                                             }
@@ -6581,7 +6562,7 @@ impl Website {
                                     if let Some(ref cb) = on_should_crawl_callback {
                                         if !cb.call(&page) {
                                             page.blocked_crawl = true;
-                                            channel_send_page(&shared.2, page, &shared.4);
+                                            channel_send_page(&shared.2, page, &shared.4).await;
                                             drop(permit);
                                             return Default::default()
                                         }
@@ -6589,7 +6570,7 @@ impl Website {
 
                                     let signature = page.signature;
 
-                                    channel_send_page(&shared.2, page, &shared.4);
+                                    channel_send_page(&shared.2, page, &shared.4).await;
 
                                     drop(permit);
 
@@ -6891,13 +6872,13 @@ impl Website {
                                                                 if let Some(ref cb) = on_should_crawl_callback {
                                                                     if !cb.call(&page) {
                                                                         page.blocked_crawl = true;
-                                                                        channel_send_page(&shared.2, page, &shared.4);
+                                                                        channel_send_page(&shared.2, page, &shared.4).await;
                                                                         drop(permit);
                                                                         return Default::default();
                                                                     }
                                                                 }
                                                                 let signature = page.signature;
-                                                                channel_send_page(&shared.2, page, &shared.4);
+                                                                channel_send_page(&shared.2, page, &shared.4).await;
                                                                 drop(permit);
                                                                 return (links, signature);
                                                             }
@@ -7699,7 +7680,7 @@ impl Website {
                                     if let Some(ref cb) = on_should_crawl_callback {
                                         if !cb.call(&page) {
                                             page.blocked_crawl = true;
-                                            channel_send_page(&shared.2, page, &shared.4);
+                                            channel_send_page(&shared.2, page, &shared.4).await;
                                             drop(permit);
                                             return Default::default()
                                         }
@@ -7707,7 +7688,7 @@ impl Website {
 
                                     let signature = page.signature;
 
-                                    channel_send_page(&shared.2, page, &shared.4);
+                                    channel_send_page(&shared.2, page, &shared.4).await;
 
                                     drop(permit);
 
@@ -8465,7 +8446,7 @@ impl Website {
                                             if let Some(ref cb) = on_should_crawl_callback {
                                                 if !cb.call(&page) {
                                                     page.blocked_crawl = true;
-                                                    channel_send_page(&shared.2, page, &shared.4);
+                                                    channel_send_page(&shared.2, page, &shared.4).await;
                                                     drop(permit);
                                                     return Default::default();
                                                 }
@@ -8473,7 +8454,7 @@ impl Website {
 
                                             let signature = page.signature;
 
-                                            channel_send_page(&shared.2, page, &shared.4);
+                                            channel_send_page(&shared.2, page, &shared.4).await;
 
                                             drop(permit);
 
@@ -8964,7 +8945,7 @@ impl Website {
                                     if let Some(ref cb) = on_should_crawl_callback {
                                         if !cb.call(&page) {
                                             page.blocked_crawl = true;
-                                            channel_send_page(&shared.2, page, &shared.3);
+                                            channel_send_page(&shared.2, page, &shared.3).await;
                                             drop(permit);
                                             return Default::default()
                                         }
@@ -8972,7 +8953,7 @@ impl Website {
 
                                     let signature = page.signature;
 
-                                    channel_send_page(&shared.2, page, &shared.3);
+                                    channel_send_page(&shared.2, page, &shared.3).await;
 
                                     drop(permit);
 
@@ -9167,7 +9148,7 @@ impl Website {
                             };
 
                             if shared.0.is_some() {
-                                channel_send_page(&shared.0, page, &shared.1);
+                                channel_send_page(&shared.0, page, &shared.1).await;
                             }
                         }
 
@@ -9739,7 +9720,7 @@ impl Website {
                                             self.extra_links_extend(*links)
                                         }
                                         self.insert_signature(signature).await;
-                                        channel_send_page(&shared.0, page.clone(), &shared.1);
+                                        channel_send_page(&shared.0, page.clone(), &shared.1).await;
                                         if scrape || persist_links {
                                             if let Some(p) = self.pages.as_mut() {
                                                 p.push(page);
@@ -9752,7 +9733,7 @@ impl Website {
                                             .await;
                                         self.extra_links_extend(*links)
                                     }
-                                    channel_send_page(&shared.0, page.clone(), &shared.1);
+                                    channel_send_page(&shared.0, page.clone(), &shared.1).await;
                                     if scrape || persist_links {
                                         if let Some(p) = self.pages.as_mut() {
                                             p.push(page);
@@ -11457,7 +11438,7 @@ impl Website {
 /// from accumulating in memory across all channel subscribers.
 /// Receivers can transparently access the content via `page.get_html()`,
 /// `page.stream_html_bytes()`, or `page.ensure_html_loaded()`.
-pub fn channel_send_page(
+pub async fn channel_send_page(
     channel: &Option<(
         tokio::sync::broadcast::Sender<Page>,
         std::sync::Arc<tokio::sync::broadcast::Receiver<Page>>,
@@ -11466,15 +11447,15 @@ pub fn channel_send_page(
     #[cfg(any(not(feature = "balance"), feature = "decentralized"))] page: Page,
     channel_guard: &Option<ChannelGuard>,
 ) {
+    // When `balance` is enabled, HTML always goes to disk before
+    // broadcasting.  Subscribers stream from disk — HTML never accumulates
+    // When `balance` is enabled: large pages, high memory load, or system
+    // pressure → spool to disk automatically.  Small pages stay in memory.
     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
     {
         let html_len = page.html.as_ref().map_or(0, |b| b.len());
-        if html_len > 0 {
-            // Feed the page-size EMA so adaptive thresholds can learn.
-            crate::utils::html_spool::update_page_size_ema(html_len);
-            if crate::utils::html_spool::should_spool(html_len) {
-                page.spool_html_to_disk();
-            }
+        if html_len > 0 && crate::utils::html_spool::should_spool(html_len) {
+            page.spool_html_to_disk_async().await;
         }
     }
     if let Some(c) = channel {
@@ -13745,19 +13726,16 @@ fn test_spool_page_through_channel() {
 
 #[cfg(all(test, feature = "balance"))]
 #[test]
-fn test_spool_adaptive_threshold_levels() {
-    // Verify the adaptive threshold functions are accessible and consistent.
-    let base_pp = crate::utils::html_spool::tests::base_per_page_helper();
-    let base_budget = crate::utils::html_spool::tests::base_budget_helper();
-
-    assert!(base_pp > 0, "per-page threshold should be > 0");
-    assert!(base_budget > 0, "memory budget should be > 0");
-
-    // With mem_state = 0 (default in tests), only budget overflow triggers.
-    // Under budget: no spool.
+fn test_spool_decision_logic() {
+    // Small pages never spool.
     assert!(
         !crate::utils::html_spool::should_spool(100),
-        "small page under budget should not spool"
+        "small page should not spool"
+    );
+    // Large pages always spool.
+    assert!(
+        crate::utils::html_spool::should_spool(3 * 1024 * 1024),
+        "3 MiB page should always spool"
     );
 }
 
