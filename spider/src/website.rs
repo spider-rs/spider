@@ -13738,8 +13738,8 @@ fn test_spool_decision_logic() {
     );
     // Large pages always spool.
     assert!(
-        crate::utils::html_spool::should_spool(3 * 1024 * 1024),
-        "3 MiB page should always spool"
+        crate::utils::html_spool::should_spool(4 * 1024 * 1024),
+        "4 MiB page should always spool"
     );
 }
 

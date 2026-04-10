@@ -166,7 +166,7 @@ fn base_memory_budget() -> usize {
 }
 
 /// Base per-page byte threshold.  Pages larger than the *effective*
-/// threshold are spooled under pressure.  Default: 2 MiB.
+/// threshold are spooled under pressure.  Default: 3 MiB.
 /// Override: `SPIDER_HTML_PAGE_SPOOL_SIZE`.
 fn base_per_page_threshold() -> usize {
     static VAL: OnceLock<usize> = OnceLock::new();
@@ -174,7 +174,7 @@ fn base_per_page_threshold() -> usize {
         std::env::var("SPIDER_HTML_PAGE_SPOOL_SIZE")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(2 * 1024 * 1024)
+            .unwrap_or(3 * 1024 * 1024)
     })
 }
 
@@ -237,37 +237,52 @@ pub fn refresh_cached_mem_state() {
 
 /// Decide whether a page with `html_len` bytes should be spooled to disk.
 ///
+/// **Design principle**: memory is faster than disk.  Only spool when the
+/// memory savings are significant enough to justify the I/O cost.  Small
+/// and medium pages stay in memory even under light pressure.
+///
 /// **Performance**: designed for the hot path (`channel_send_page`).
-/// Small pages (≤ 16 KiB) hit a fast-path with a single comparison.
+/// Most pages (≤ 256 KiB under normal conditions) stay in memory with
+/// at most 2 atomic loads.
 ///
 /// Decision tree (first match wins):
 ///
-/// 1. Page ≤ `spool_min_size` (16 KiB) → **keep in memory** (fast-path).
-/// 2. Page > per-page threshold (2 MiB) → **always spool** (large resource).
-/// 3. Total in-memory HTML exceeds budget → **spool** (memory pressure).
-/// 4. Process memory **pressure** (state ≥ 1) → **spool** (system pressure).
-/// 5. Otherwise → keep in memory.
+/// 1. Page ≤ `spool_min_size` (16 KiB) → **keep in memory** (always).
+/// 2. Page > per-page threshold (3 MiB) → **spool** (large resource).
+/// 3. **Critical** pressure (state 2) AND page > min → **spool** (emergency).
+/// 4. **Pressure** (state 1) AND page > 256 KiB → **spool** (medium+ only).
+/// 5. Total in-memory HTML exceeds budget → **spool** (budget overflow).
+/// 6. Otherwise → **keep in memory**.
 #[inline]
 pub fn should_spool(html_len: usize) -> bool {
-    // ① Small-page fast-path — disk I/O cost exceeds memory saved.
+    // ① Small pages always stay in memory — disk I/O cost > memory saved.
     if html_len <= spool_min_size() {
         return false;
     }
 
-    // ② Large page — always spool regardless of pressure.
+    // ② Large pages always spool — significant memory savings.
     if html_len > base_per_page_threshold() {
         return true;
     }
 
-    // ③ Global byte budget exceeded.
-    let current = total_bytes_in_memory();
-    if current.saturating_add(html_len) > base_memory_budget() {
+    // ③ Check system memory pressure (single atomic load).
+    let mem_state = CACHED_MEM_STATE.load(Ordering::Relaxed);
+
+    // Critical pressure (≥85% RSS) — spool everything above min size.
+    if mem_state >= 2 {
         return true;
     }
 
-    // ④ System under any memory pressure — spool to keep headroom.
-    let mem_state = CACHED_MEM_STATE.load(Ordering::Relaxed);
-    if mem_state >= 1 {
+    // Pressure (70-85% RSS) — only spool medium+ pages (>256 KiB).
+    // Small pages (16-256 KiB) stay in memory — the disk overhead isn't
+    // worth it for pages this size.
+    if mem_state >= 1 && html_len > 256 * 1024 {
+        return true;
+    }
+
+    // ④ Budget overflow — spool regardless of page size to stay in budget.
+    let current = total_bytes_in_memory();
+    if current.saturating_add(html_len) > base_memory_budget() {
         return true;
     }
 
@@ -472,6 +487,10 @@ pub(crate) mod tests {
         // Tiny pages never spool.
         assert!(!should_spool(100));
         assert!(!should_spool(spool_min_size()));
+
+        // Medium pages stay in memory under normal conditions.
+        assert!(!should_spool(64 * 1024)); // 64 KiB — in memory
+        assert!(!should_spool(200 * 1024)); // 200 KiB — in memory
 
         // Large pages always spool.
         assert!(should_spool(base_per_page_threshold() + 1));
