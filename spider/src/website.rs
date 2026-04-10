@@ -5575,11 +5575,11 @@ impl Website {
     /// HTML.  `channel_send_page` handles most pages, but direct pushes
     /// (e.g. `pages.push(page.clone())`) may bypass the channel path.
     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
-    fn shed_page_html(pages: &mut Vec<Page>) {
+    async fn shed_page_html(pages: &mut Vec<Page>) {
         for page in pages.iter_mut() {
             let html_len = page.html.as_ref().map_or(0, |b| b.len());
             if html_len > 0 && crate::utils::html_spool::should_spool(html_len) {
-                page.spool_html_to_disk();
+                page.spool_html_to_disk_async().await;
             }
         }
     }
@@ -5622,7 +5622,7 @@ impl Website {
                                     p.push(page);
                                     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                                     if crate::utils::detect_system::get_process_memory_state_sync() >= 1 {
-                                        Self::shed_page_html(p);
+                                        Self::shed_page_html(p).await;
                                     }
                                 }
                             } else {
@@ -5672,7 +5672,7 @@ impl Website {
                                     p.push(page);
                                     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                                     if crate::utils::detect_system::get_process_memory_state_sync() >= 1 {
-                                        Self::shed_page_html(p);
+                                        Self::shed_page_html(p).await;
                                     }
                                 }
                             } else {
@@ -5721,7 +5721,7 @@ impl Website {
                                     p.push(page);
                                     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                                     if crate::utils::detect_system::get_process_memory_state_sync() >= 1 {
-                                        Self::shed_page_html(p);
+                                        Self::shed_page_html(p).await;
                                     }
                                 }
                             } else {
@@ -5770,7 +5770,7 @@ impl Website {
                                     p.push(page);
                                     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                                     if crate::utils::detect_system::get_process_memory_state_sync() >= 1 {
-                                        Self::shed_page_html(p);
+                                        Self::shed_page_html(p).await;
                                     }
                                 }
                             } else {
@@ -13299,8 +13299,8 @@ impl crate::traits::CrawlerSubscription for Website {
 }
 
 #[cfg(all(test, feature = "balance"))]
-#[test]
-fn test_shed_page_html() {
+#[tokio::test]
+async fn test_shed_page_html() {
     let make_page = |url: &str| {
         let mut page = Page::default();
         page.url = url.to_string();
@@ -13312,7 +13312,7 @@ fn test_shed_page_html() {
     let mut pages: Vec<Page> = (0..50)
         .map(|i| make_page(&format!("https://a.com/{i}")))
         .collect();
-    Website::shed_page_html(&mut pages);
+    Website::shed_page_html(&mut pages).await;
     assert!(pages.iter().all(|p| p.html.is_some()));
 
     // All pages should preserve url.
