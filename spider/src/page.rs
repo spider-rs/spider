@@ -652,6 +652,66 @@ pub enum AntiBotTech {
     None,
 }
 
+/// RAII guard for a temporary HTML spool file on disk.
+///
+/// On `Drop`, the file is deleted and the global in-memory byte counter is
+/// left unchanged (the bytes were already subtracted when the HTML was
+/// spooled).  Cloning creates a *new* copy of the file so each guard owns
+/// its own path.
+#[cfg(feature = "balance")]
+#[derive(Debug, Default)]
+pub(crate) struct HtmlSpoolGuard {
+    /// Path to the spool file (set once, read many).
+    pub path: Option<std::path::PathBuf>,
+}
+
+#[cfg(feature = "balance")]
+impl HtmlSpoolGuard {
+    pub fn new(path: std::path::PathBuf) -> Self {
+        Self { path: Some(path) }
+    }
+
+    #[inline]
+    pub fn path(&self) -> Option<&std::path::Path> {
+        self.path.as_deref()
+    }
+}
+
+#[cfg(feature = "balance")]
+impl Drop for HtmlSpoolGuard {
+    fn drop(&mut self) {
+        if let Some(path) = self.path.take() {
+            crate::utils::html_spool::spool_delete(&path);
+            crate::utils::html_spool::track_page_unspooled();
+        }
+    }
+}
+
+#[cfg(feature = "balance")]
+impl Clone for HtmlSpoolGuard {
+    fn clone(&self) -> Self {
+        // Copy the spool file so both the original and the clone own
+        // independent temp files.  If the copy fails, the clone simply
+        // has no spool (the content accessor will return empty / fall
+        // through to the default path).
+        match &self.path {
+            Some(src) => {
+                let dst = crate::utils::html_spool::next_spool_path();
+                if std::fs::copy(src, &dst).is_ok() {
+                    // Mirror the track_page_spooled from spool_html_to_disk
+                    // so the counter stays consistent when the clone is
+                    // eventually dropped.
+                    crate::utils::html_spool::track_page_spooled();
+                    Self { path: Some(dst) }
+                } else {
+                    Self::default()
+                }
+            }
+            None => Self::default(),
+        }
+    }
+}
+
 /// Represent a page visited.
 #[derive(Debug, Clone, Default)]
 #[cfg(not(feature = "decentralized"))]
@@ -748,6 +808,12 @@ pub struct Page {
     /// Identifies which backend produced this page (e.g. "primary",
     /// "lightpanda", "servo"). `None` when parallel backends are not active.
     pub backend_source: Option<crate::compact_str::CompactString>,
+    #[cfg(feature = "balance")]
+    /// Guard holding the path to a disk-spooled HTML file.  When the guard
+    /// is dropped the temporary file is automatically deleted and the global
+    /// byte counter stays consistent.  When set, `html` is `None` and
+    /// content accessors transparently reload from this path.
+    pub(crate) html_spool_path: Option<HtmlSpoolGuard>,
 }
 
 /// Represent a page visited.
@@ -2916,10 +2982,18 @@ impl Page {
     pub async fn close_page(&mut self) {}
 
     /// Page request is empty. On chrome an empty page has bare html markup.
+    /// When the `balance` feature is active, a page whose HTML has been
+    /// spooled to disk is *not* considered empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
         match self.html.as_deref() {
-            None => true,
+            None => {
+                #[cfg(feature = "balance")]
+                if self.html_spool_path.is_some() {
+                    return false;
+                }
+                true
+            }
             Some(html) => {
                 let html = html.trim_ascii();
                 html.is_empty() || html.eq(*EMPTY_HTML) || html.eq(*EMPTY_HTML_BASIC)
@@ -2996,7 +3070,172 @@ impl Page {
 
     /// Set the html directly of the page
     pub fn set_html_bytes(&mut self, html: Option<Vec<u8>>) {
+        #[cfg(feature = "balance")]
+        {
+            // Subtract old tracked bytes.
+            if let Some(old) = &self.html {
+                crate::utils::html_spool::track_bytes_sub(old.len());
+            }
+            // Drop the spool guard (deletes the temp file automatically).
+            self.html_spool_path = None;
+        }
         self.html = html.map(bytes::Bytes::from);
+        #[cfg(feature = "balance")]
+        if let Some(ref h) = self.html {
+            crate::utils::html_spool::track_bytes_add(h.len());
+        }
+    }
+
+    /// Offload this page's HTML to a temporary file on disk and release the
+    /// in-memory buffer.  Returns `true` if the spool succeeded.
+    ///
+    /// The spool file lives under `{SPIDER_HTML_SPOOL_DIR || /tmp}/spider_html_<pid>/`
+    /// and is deleted as soon as the content is consumed (via
+    /// [`ensure_html_loaded`](Self::ensure_html_loaded) or link extraction).
+    #[cfg(feature = "balance")]
+    pub fn spool_html_to_disk(&mut self) -> bool {
+        let html = match self.html.as_ref() {
+            Some(h) if !h.is_empty() => h,
+            _ => return false,
+        };
+        // Already spooled — nothing to do.
+        if self.html_spool_path.is_some() {
+            return false;
+        }
+        let path = crate::utils::html_spool::next_spool_path();
+        if crate::utils::html_spool::spool_write(&path, html).is_ok() {
+            let len = html.len();
+            self.html = None;
+            crate::utils::html_spool::track_bytes_sub(len);
+            crate::utils::html_spool::track_page_spooled();
+            self.html_spool_path = Some(HtmlSpoolGuard::new(path));
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Reload HTML from disk spool into memory.  Returns `true` if content
+    /// was reloaded (or was already in memory).  The spool file is deleted
+    /// after a successful reload to keep temporary storage short-lived.
+    #[cfg(feature = "balance")]
+    pub fn ensure_html_loaded(&mut self) -> bool {
+        if self.html.is_some() {
+            return true;
+        }
+        if let Some(guard) = self.html_spool_path.as_ref() {
+            if let Some(path) = guard.path() {
+                match crate::utils::html_spool::spool_read_bytes(path) {
+                    Ok(bytes) => {
+                        crate::utils::html_spool::track_bytes_add(bytes.len());
+                        self.html = Some(bytes);
+                        // Drop guard → deletes the temp file + decrements page counter.
+                        self.html_spool_path = None;
+                        true
+                    }
+                    Err(_) => {
+                        // Spool file disappeared (race / disk error).
+                        // Drop guard still decrements the page counter.
+                        self.html_spool_path = None;
+                        false
+                    }
+                }
+            } else {
+                self.html_spool_path = None;
+                false
+            }
+        } else {
+            false
+        }
+    }
+
+    /// Whether this page's HTML currently lives on disk rather than in memory.
+    #[cfg(feature = "balance")]
+    #[inline]
+    pub fn is_html_on_disk(&self) -> bool {
+        self.html.is_none() && self.html_spool_path.is_some()
+    }
+
+    /// Return the path to the disk-spooled HTML file, if any.
+    ///
+    /// Useful for consumers that receive a `Page` via a broadcast channel
+    /// and want to stream the HTML directly (e.g. feeding chunks to
+    /// `lol_html::HtmlRewriter::write()`).
+    ///
+    /// The path is valid as long as this `Page` (or its clone) is alive.
+    /// Once the page is dropped the spool file is automatically deleted.
+    #[cfg(feature = "balance")]
+    #[inline]
+    pub fn get_html_spool_path(&self) -> Option<&std::path::Path> {
+        self.html_spool_path.as_ref().and_then(|guard| guard.path())
+    }
+
+    /// Stream the HTML content in fixed-size chunks to a caller-supplied
+    /// callback, regardless of whether the HTML lives in memory or on disk.
+    ///
+    /// This is the recommended way for channel subscribers to process large
+    /// pages without loading the entire content into memory at once.
+    ///
+    /// The callback receives each chunk as `&[u8]` and returns `true` to
+    /// continue or `false` to stop early.  Returns the total number of
+    /// bytes fed to the callback, or `0` if the page has no content.
+    ///
+    /// ```rust,ignore
+    /// // Example: streaming to lol_html
+    /// let mut rewriter = lol_html::HtmlRewriter::new(settings, |_| {});
+    /// page.stream_html_bytes(65536, |chunk| {
+    ///     rewriter.write(chunk).is_ok()
+    /// });
+    /// let _ = rewriter.end();
+    /// ```
+    #[cfg(feature = "balance")]
+    pub fn stream_html_bytes<F>(&self, chunk_size: usize, mut cb: F) -> usize
+    where
+        F: FnMut(&[u8]) -> bool,
+    {
+        // Fast path: HTML is in memory — chunk it directly.
+        if let Some(ref html) = self.html {
+            let mut total = 0usize;
+            for chunk in html.chunks(chunk_size.max(1)) {
+                total = total.saturating_add(chunk.len());
+                if !cb(chunk) {
+                    break;
+                }
+            }
+            return total;
+        }
+
+        // Disk path: stream from spool file.
+        if let Some(ref guard) = self.html_spool_path {
+            if let Some(path) = guard.path() {
+                return crate::utils::html_spool::spool_stream_chunks(path, chunk_size, cb)
+                    .unwrap_or(0);
+            }
+        }
+
+        0
+    }
+
+    /// Stream the HTML content in fixed-size chunks to a caller-supplied
+    /// callback.  Works the same as
+    /// [`stream_html_bytes`](Self::stream_html_bytes) but is available
+    /// without the `balance` feature — it simply chunks the in-memory HTML.
+    #[cfg(not(feature = "balance"))]
+    pub fn stream_html_bytes<F>(&self, chunk_size: usize, mut cb: F) -> usize
+    where
+        F: FnMut(&[u8]) -> bool,
+    {
+        if let Some(ref html) = self.html {
+            let mut total = 0usize;
+            for chunk in html.chunks(chunk_size.max(1)) {
+                total = total.saturating_add(chunk.len());
+                if !cb(chunk) {
+                    break;
+                }
+            }
+            return total;
+        }
+        0
     }
 
     /// Set the url directly of the page. Useful for transforming the content and rewriting the url.
@@ -3092,11 +3331,28 @@ impl Page {
     }
 
     /// Html getter for bytes on the page as string.
+    ///
+    /// When the `balance` feature is active and the HTML was spooled to disk,
+    /// this transparently reads from the temporary file and returns the
+    /// content.  The spool file is **not** deleted here (use
+    /// [`ensure_html_loaded`](Self::ensure_html_loaded) to reload + delete).
     pub fn get_html(&self) -> String {
-        match self.get_html_cow() {
-            std::borrow::Cow::Borrowed(s) => s.to_string(),
-            std::borrow::Cow::Owned(s) => s,
+        if let Some(bytes) = self.html.as_deref() {
+            return match std::str::from_utf8(bytes) {
+                Ok(s) => s.to_string(),
+                Err(_) => auto_encoder::auto_encode_bytes(bytes),
+            };
         }
+        #[cfg(feature = "balance")]
+        if let Some(guard) = &self.html_spool_path {
+            if let Some(path) = guard.path() {
+                if let Ok(bytes) = crate::utils::html_spool::spool_read(path) {
+                    return String::from_utf8(bytes)
+                        .unwrap_or_else(|e| auto_encoder::auto_encode_bytes(&e.into_bytes()));
+                }
+            }
+        }
+        String::new()
     }
 
     /// Content getter — returns the page body as a string.
@@ -3112,14 +3368,28 @@ impl Page {
 
     /// Html getter that avoids allocation when the content is already valid UTF-8.
     /// Returns `Cow::Borrowed` for UTF-8 content (common case), `Cow::Owned` when
-    /// encoding conversion is needed.
+    /// encoding conversion is needed or content is loaded from a disk spool.
     pub fn get_html_cow(&self) -> std::borrow::Cow<'_, str> {
         match self.html.as_deref() {
             Some(bytes) => match std::str::from_utf8(bytes) {
                 Ok(s) => std::borrow::Cow::Borrowed(s),
                 Err(_) => std::borrow::Cow::Owned(auto_encoder::auto_encode_bytes(bytes)),
             },
-            None => std::borrow::Cow::Borrowed(""),
+            None => {
+                #[cfg(feature = "balance")]
+                if let Some(guard) = &self.html_spool_path {
+                    if let Some(path) = guard.path() {
+                        if let Ok(bytes) = crate::utils::html_spool::spool_read(path) {
+                            return std::borrow::Cow::Owned(
+                                String::from_utf8(bytes).unwrap_or_else(|e| {
+                                    auto_encoder::auto_encode_bytes(&e.into_bytes())
+                                }),
+                            );
+                        }
+                    }
+                }
+                std::borrow::Cow::Borrowed("")
+            }
         }
     }
 
@@ -3565,6 +3835,191 @@ impl Page {
         map
     }
 
+    /// Stream link extraction from a disk-spooled HTML file without loading
+    /// the entire file into memory.  Uses the same lol_html rewriter setup
+    /// as [`links_stream_base`] but feeds it buffered disk reads.
+    ///
+    /// The spool file is **not** deleted here — the caller or Drop handles
+    /// cleanup so the same spool can serve multiple consumers if needed.
+    #[cfg(all(not(feature = "decentralized"), feature = "balance"))]
+    pub async fn links_stream_base_from_disk<
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + ToString
+            + std::hash::Hash
+            + From<String>
+            + Into<CaseInsensitiveString>
+            + for<'a> From<&'a str>,
+    >(
+        &mut self,
+        selectors: &RelativeSelectors,
+        spool_path: std::path::PathBuf,
+        base: &Option<Box<Url>>,
+    ) -> HashSet<A> {
+        let mut map: HashSet<A> = HashSet::with_capacity(link_set_capacity());
+        let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
+            Some(HashSet::new())
+        } else {
+            None
+        };
+
+        let mut metadata: Option<Box<Metadata>> = None;
+        let mut meta_title: Option<_> = None;
+        let mut meta_description: Option<_> = None;
+        let mut meta_og_image: Option<_> = None;
+
+        // Peek at the first few bytes to detect XML without reading the whole file.
+        let is_xml = std::fs::File::open(&spool_path)
+            .and_then(|mut f| {
+                let mut peek = [0u8; 5];
+                std::io::Read::read_exact(&mut f, &mut peek)?;
+                Ok(peek.starts_with(b"<?xml"))
+            })
+            .unwrap_or(false);
+
+        if is_xml {
+            // XML sitemaps are typically small; load fully for the quick-xml parser.
+            if let Ok(bytes) = crate::utils::html_spool::spool_read(&spool_path) {
+                let html = String::from_utf8_lossy(&bytes);
+                self.links_stream_xml_links_stream_base(selectors, &html, &mut map, base)
+                    .await;
+            }
+        } else {
+            let base_input_url = tokio::sync::OnceCell::new();
+
+            let parent_host = &selectors.1[0];
+            let parent_host_scheme = &selectors.1[1];
+            let base_input_domain = &selectors.2;
+            let sub_matcher = &selectors.0;
+
+            let base = base.as_deref();
+
+            let original_page = {
+                self.set_url_parsed_direct_empty();
+                self.get_url_parsed_ref().as_ref()
+            };
+
+            let xml_file = self.get_url().ends_with(".xml");
+
+            let mut element_content_handlers =
+                metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
+
+            element_content_handlers.push(element_precompiled!(
+                compiled_base_element_selector(),
+                |el| {
+                    if let Some(href) = el.get_attribute("href") {
+                        if let Ok(parsed_base) = Url::parse(&href) {
+                            let _ = base_input_url.set(parsed_base);
+                        }
+                    }
+                    Ok(())
+                }
+            ));
+
+            element_content_handlers.push(element_precompiled!(
+                if xml_file {
+                    compiled_xml_selector()
+                } else {
+                    compiled_selector()
+                },
+                |el| {
+                    if let Some(href) = el.get_attribute("href") {
+                        let base = if relative_directory_url(&href) || base.is_none() {
+                            original_page
+                        } else {
+                            base
+                        };
+                        let base = if base_input_url.initialized() {
+                            base_input_url.get()
+                        } else {
+                            base
+                        };
+
+                        push_link(
+                            &base,
+                            &href,
+                            &mut map,
+                            &selectors.0,
+                            parent_host,
+                            parent_host_scheme,
+                            base_input_domain,
+                            sub_matcher,
+                            &self.external_domains_caseless,
+                            &mut links_pages,
+                        );
+                    }
+                    Ok(())
+                }
+            ));
+
+            let rewriter_settings = lol_html::Settings {
+                element_content_handlers,
+                adjust_charset_on_meta_tag: true,
+                ..lol_html::send::Settings::new_for_handler_types()
+            };
+
+            let mut wrote_error = false;
+
+            let mut rewriter = lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
+
+            let chunk_size = *STREAMING_CHUNK_SIZE;
+            let mut chunk_idx = 0usize;
+
+            // Stream from disk in fixed-size chunks — never holds more than
+            // one chunk in memory at a time.
+            let stream_result =
+                crate::utils::html_spool::spool_stream_chunks(&spool_path, chunk_size, |chunk| {
+                    if rewriter.write(chunk).is_err() {
+                        wrote_error = true;
+                        return false;
+                    }
+                    chunk_idx += 1;
+                    // Cooperative yielding can't happen inside the sync callback,
+                    // but this keeps the hot loop short by stopping on error.
+                    true
+                });
+
+            if stream_result.is_err() {
+                wrote_error = true;
+            }
+
+            if !wrote_error {
+                let _ = rewriter.end();
+            }
+        }
+
+        if let Some(lp) = links_pages {
+            let page_links = self.page_links.get_or_insert_with(Default::default);
+            page_links.extend(lp.into_iter().map(Into::into));
+        }
+
+        let valid_meta =
+            meta_title.is_some() || meta_description.is_some() || meta_og_image.is_some();
+
+        if valid_meta {
+            let mut metadata_inner = Metadata::default();
+            metadata_inner.title = meta_title;
+            metadata_inner.description = meta_description;
+            metadata_inner.image = meta_og_image;
+
+            if metadata_inner.exist() {
+                metadata.replace(Box::new(metadata_inner));
+            }
+
+            if metadata.is_some() {
+                self.metadata = metadata;
+            }
+        }
+
+        update_link_capacity_hint(map.len());
+
+        map
+    }
+
     /// Find the links as a stream using string resource validation
     #[inline(always)]
     #[cfg(not(feature = "decentralized"))]
@@ -3886,6 +4341,16 @@ impl Page {
             self.html = Some(html_bytes);
             result
         } else {
+            // When HTML is on disk, stream from the spool file without
+            // loading the entire contents into memory.
+            #[cfg(feature = "balance")]
+            if let Some(ref guard) = self.html_spool_path {
+                if let Some(path) = guard.path() {
+                    return self
+                        .links_stream_base_from_disk(selectors, path.to_path_buf(), base)
+                        .await;
+                }
+            }
             Default::default()
         }
     }
@@ -4834,6 +5299,19 @@ impl Page {
 
         if !self.is_empty() {
             let html_bytes_taken = self.html.take();
+
+            // When HTML lives on disk, stream from spool to avoid full load.
+            #[cfg(feature = "balance")]
+            if html_bytes_taken.is_none() {
+                if let Some(ref guard) = self.html_spool_path {
+                    if let Some(path) = guard.path() {
+                        return self
+                            .links_stream_base_from_disk(selectors, path.to_path_buf(), base)
+                            .await;
+                    }
+                }
+            }
+
             let html = match html_bytes_taken.as_deref() {
                 Some(b) => match std::str::from_utf8(b) {
                     Ok(s) => std::borrow::Cow::Borrowed(s),
@@ -5030,7 +5508,12 @@ impl Page {
         selectors: &RelativeSelectors,
         base: &Option<Box<Url>>,
     ) -> HashSet<CaseInsensitiveString> {
-        match self.html.is_some() {
+        let has_html = self.html.is_some();
+
+        #[cfg(feature = "balance")]
+        let has_html = has_html || self.html_spool_path.is_some();
+
+        match has_html {
             false => Default::default(),
             true => {
                 self.links_stream::<CaseInsensitiveString>(selectors, base)
@@ -5047,7 +5530,12 @@ impl Page {
         selectors: &RelativeSelectors,
         base: &Option<Box<Url>>,
     ) -> HashSet<CaseInsensitiveString> {
-        match self.html.is_some() {
+        let has_html = self.html.is_some();
+
+        #[cfg(feature = "balance")]
+        let has_html = has_html || self.html_spool_path.is_some();
+
+        match has_html {
             false => Default::default(),
             true => {
                 if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
@@ -5070,9 +5558,19 @@ impl Page {
         page: &crate::features::chrome::OnceBrowser,
         jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     ) -> (HashSet<CaseInsensitiveString>, Option<f64>) {
-        match self.html.is_some() {
+        let has_html = self.html.is_some();
+
+        #[cfg(feature = "balance")]
+        let has_html = has_html || self.html_spool_path.is_some();
+
+        match has_html {
             false => Default::default(),
             true => {
+                // When spooled to disk, reload for smart analysis (needs Chrome).
+                #[cfg(feature = "balance")]
+                if self.html.is_none() && self.html_spool_path.is_some() {
+                    self.ensure_html_loaded();
+                }
                 if auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
                     return Default::default();
                 }

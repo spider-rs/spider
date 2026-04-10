@@ -43,6 +43,9 @@ pub mod header_utils;
 #[cfg(feature = "hedge")]
 /// Work-stealing (hedged requests) for slow crawl requests.
 pub mod hedge;
+#[cfg(feature = "balance")]
+/// Disk-backed HTML spool for memory-balanced crawling.
+pub mod html_spool;
 /// String interner.
 pub mod interner;
 #[cfg(feature = "numa")]

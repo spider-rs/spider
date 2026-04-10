@@ -5571,15 +5571,34 @@ impl Website {
         }
     }
 
-    /// Shed HTML from older pages under critical memory pressure to prevent OOM.
-    /// Keeps the most recent pages intact and preserves all metadata.
+    /// Shed HTML from older pages under memory pressure to prevent OOM.
+    ///
+    /// Under *critical* pressure (state 2), older pages have their HTML
+    /// spooled to a temporary file on disk so the bytes can be reclaimed.
+    /// Under *pressure* (state 1), only pages above the per-page spool
+    /// threshold are offloaded.  The most recent `keep_recent` pages are
+    /// always left in memory so the hot working set stays fast.
+    ///
+    /// Each spool file is deleted as soon as the content is reloaded
+    /// (via `ensure_html_loaded`) or when the `Page` is dropped — the disk
+    /// is a short-lived buffer, not persistent storage.
     #[cfg(feature = "balance")]
     fn shed_page_html(pages: &mut Vec<Page>) {
         let keep_recent = 100;
         let len = pages.len();
-        if len > keep_recent {
-            for page in &mut pages[..len - keep_recent] {
-                page.set_html_bytes(None);
+        if len <= keep_recent {
+            return;
+        }
+        let mem_state = crate::utils::detect_system::get_process_memory_state_sync();
+        for page in &mut pages[..len - keep_recent] {
+            // Skip pages that are already spooled or have no HTML.
+            if page.html.is_none() {
+                continue;
+            }
+            let page_len = page.html.as_ref().map_or(0, |b| b.len());
+            let should_shed = mem_state >= 2 || crate::utils::html_spool::should_spool(page_len);
+            if should_shed {
+                page.spool_html_to_disk();
             }
         }
     }
@@ -5621,7 +5640,7 @@ impl Website {
                                 if let Some(p) = self.pages.as_mut() {
                                     p.push(page);
                                     #[cfg(feature = "balance")]
-                                    if crate::utils::detect_system::get_process_memory_state_sync() >= 2 {
+                                    if crate::utils::detect_system::get_process_memory_state_sync() >= 1 {
                                         Self::shed_page_html(p);
                                     }
                                 }
@@ -5670,6 +5689,10 @@ impl Website {
                                 { let url: CaseInsensitiveString = page.get_url().into(); self.insert_link(&url).await; }
                                 if let Some(p) = self.pages.as_mut() {
                                     p.push(page);
+                                    #[cfg(feature = "balance")]
+                                    if crate::utils::detect_system::get_process_memory_state_sync() >= 1 {
+                                        Self::shed_page_html(p);
+                                    }
                                 }
                             } else {
                                 break;
@@ -5715,6 +5738,10 @@ impl Website {
                                 { let url: CaseInsensitiveString = page.get_url().into(); self.insert_link(&url).await; }
                                 if let Some(p) = self.pages.as_mut() {
                                     p.push(page);
+                                    #[cfg(feature = "balance")]
+                                    if crate::utils::detect_system::get_process_memory_state_sync() >= 1 {
+                                        Self::shed_page_html(p);
+                                    }
                                 }
                             } else {
                                 break;
@@ -5760,6 +5787,10 @@ impl Website {
                                 { let url: CaseInsensitiveString = page.get_url().into(); self.insert_link(&url).await; }
                                 if let Some(p) = self.pages.as_mut() {
                                     p.push(page);
+                                    #[cfg(feature = "balance")]
+                                    if crate::utils::detect_system::get_process_memory_state_sync() >= 1 {
+                                        Self::shed_page_html(p);
+                                    }
                                 }
                             } else {
                                 break;
@@ -11419,14 +11450,29 @@ impl Website {
 }
 
 /// Channel broadcast send the Page to receivers.
+///
+/// When the `balance` feature is active and memory pressure is detected,
+/// the page's HTML is spooled to a temporary file before broadcasting.
+/// This prevents large responses (including parallel_backends winners)
+/// from accumulating in memory across all channel subscribers.
+/// Receivers can transparently access the content via `page.get_html()`,
+/// `page.stream_html_bytes()`, or `page.ensure_html_loaded()`.
 pub fn channel_send_page(
     channel: &Option<(
         tokio::sync::broadcast::Sender<Page>,
         std::sync::Arc<tokio::sync::broadcast::Receiver<Page>>,
     )>,
-    page: Page,
+    #[cfg(feature = "balance")] mut page: Page,
+    #[cfg(not(feature = "balance"))] page: Page,
     channel_guard: &Option<ChannelGuard>,
 ) {
+    #[cfg(feature = "balance")]
+    {
+        let html_len = page.html.as_ref().map_or(0, |b| b.len());
+        if html_len > 0 && crate::utils::html_spool::should_spool(html_len) {
+            page.spool_html_to_disk();
+        }
+    }
     if let Some(c) = channel {
         if c.0.send(page).is_ok() {
             if let Some(guard) = channel_guard {
@@ -13277,27 +13323,433 @@ fn test_shed_page_html() {
         page
     };
 
-    // Under threshold: nothing shed
+    // Under threshold: nothing shed (fewer than 100 pages).
     let mut pages: Vec<Page> = (0..50)
         .map(|i| make_page(&format!("https://a.com/{i}")))
         .collect();
     Website::shed_page_html(&mut pages);
     assert!(pages.iter().all(|p| p.html.is_some()));
 
-    // Over threshold: older pages shed, recent 100 kept
-    let mut pages: Vec<Page> = (0..200)
-        .map(|i| make_page(&format!("https://a.com/{i}")))
-        .collect();
-    Website::shed_page_html(&mut pages);
-    // First 100 should have html=None
-    for page in &pages[..100] {
-        assert!(page.html.is_none(), "old page should have html shed");
-    }
-    // Last 100 should still have html
-    for page in &pages[100..] {
-        assert!(page.html.is_some(), "recent page should keep html");
-    }
-    // All pages should preserve url
+    // All pages should preserve url.
     assert_eq!(pages[0].url, "https://a.com/0");
-    assert_eq!(pages[199].url, "https://a.com/199");
+    assert_eq!(pages[49].url, "https://a.com/49");
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_spool_html_to_disk_and_reload() {
+    let mut page = Page::default();
+    page.url = "https://example.com".to_string();
+    let html = b"<html><body>test content</body></html>";
+    page.html = Some(bytes::Bytes::from(html.as_slice()));
+
+    // Spool to disk.
+    assert!(page.spool_html_to_disk());
+    assert!(page.html.is_none(), "in-memory html should be cleared");
+    assert!(page.is_html_on_disk(), "should report as on-disk");
+    assert!(!page.is_empty(), "page with disk content is not empty");
+
+    // get_html() transparently reads from disk.
+    let content = page.get_html();
+    assert_eq!(content, "<html><body>test content</body></html>");
+
+    // Reload into memory and verify the spool file is cleaned up.
+    assert!(page.ensure_html_loaded());
+    assert!(page.html.is_some(), "html should be back in memory");
+    assert!(
+        page.html_spool_path.is_none(),
+        "spool guard should be cleared after reload"
+    );
+    assert_eq!(page.get_html(), "<html><body>test content</body></html>");
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_spool_guard_clone_independence() {
+    let mut page = Page::default();
+    page.url = "https://example.com/clone".to_string();
+    page.html = Some(bytes::Bytes::from("clone test"));
+
+    page.spool_html_to_disk();
+    let cloned = page.clone();
+
+    // Both should be able to independently read content.
+    assert_eq!(page.get_html(), "clone test");
+    assert_eq!(cloned.get_html(), "clone test");
+
+    // Dropping original shouldn't affect the clone.
+    drop(page);
+    assert_eq!(cloned.get_html(), "clone test");
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_spool_drop_cleans_up_file() {
+    let path;
+    {
+        let mut page = Page::default();
+        page.html = Some(bytes::Bytes::from("temporary"));
+        page.spool_html_to_disk();
+        path = page
+            .html_spool_path
+            .as_ref()
+            .unwrap()
+            .path()
+            .unwrap()
+            .to_path_buf();
+        assert!(path.exists(), "spool file should exist");
+    }
+    // After drop, the file should be cleaned up.
+    assert!(!path.exists(), "spool file should be deleted on drop");
+}
+
+// ── Deep end-to-end spool tests ────────────────────────────────────────────
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_spool_empty_html_noop() {
+    // Empty HTML should not be spooled.
+    let mut page = Page::default();
+    page.html = Some(bytes::Bytes::new());
+    assert!(!page.spool_html_to_disk(), "empty HTML should not spool");
+    assert!(!page.is_html_on_disk());
+
+    // No HTML at all.
+    let mut page2 = Page::default();
+    assert!(!page2.spool_html_to_disk());
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_spool_double_spool_is_noop() {
+    let mut page = Page::default();
+    page.html = Some(bytes::Bytes::from("content"));
+    assert!(page.spool_html_to_disk());
+    // Second spool should be a no-op (html is already None, spool exists).
+    assert!(!page.spool_html_to_disk());
+    // Content still accessible.
+    assert_eq!(page.get_html(), "content");
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_spool_set_html_bytes_replaces_spool() {
+    let mut page = Page::default();
+    page.html = Some(bytes::Bytes::from("original"));
+    page.spool_html_to_disk();
+    let spool_path = page.get_html_spool_path().unwrap().to_path_buf();
+    assert!(spool_path.exists());
+
+    // Setting new html should clean up the spool file.
+    page.set_html_bytes(Some(b"replacement".to_vec()));
+    assert!(!spool_path.exists(), "old spool file should be deleted");
+    assert!(!page.is_html_on_disk());
+    assert_eq!(page.get_html(), "replacement");
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_spool_set_html_bytes_none_clears_spool() {
+    let mut page = Page::default();
+    page.html = Some(bytes::Bytes::from("to clear"));
+    page.spool_html_to_disk();
+    let spool_path = page.get_html_spool_path().unwrap().to_path_buf();
+
+    page.set_html_bytes(None);
+    assert!(!spool_path.exists());
+    assert!(!page.is_html_on_disk());
+    assert!(page.is_empty());
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_spool_get_html_cow_from_disk() {
+    let mut page = Page::default();
+    page.html = Some(bytes::Bytes::from("<html>cow</html>"));
+    page.spool_html_to_disk();
+
+    let cow = page.get_html_cow();
+    assert_eq!(cow.as_ref(), "<html>cow</html>");
+    // Since loaded from disk, it should be Owned.
+    assert!(matches!(cow, std::borrow::Cow::Owned(_)));
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_stream_html_bytes_from_memory() {
+    let mut page = Page::default();
+    page.html = Some(bytes::Bytes::from("abcdefghij"));
+
+    let mut collected = Vec::new();
+    let total = page.stream_html_bytes(4, |chunk| {
+        collected.extend_from_slice(chunk);
+        true
+    });
+    assert_eq!(total, 10);
+    assert_eq!(collected, b"abcdefghij");
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_stream_html_bytes_from_disk() {
+    let mut page = Page::default();
+    let html = b"<html><body>streamed from disk</body></html>";
+    page.html = Some(bytes::Bytes::from(html.as_slice()));
+    page.spool_html_to_disk();
+
+    let mut collected = Vec::new();
+    let total = page.stream_html_bytes(10, |chunk| {
+        collected.extend_from_slice(chunk);
+        true
+    });
+    assert_eq!(total, html.len());
+    assert_eq!(collected, html);
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_stream_html_bytes_early_stop() {
+    let mut page = Page::default();
+    page.html = Some(bytes::Bytes::from(vec![0u8; 100]));
+
+    let mut chunks = 0usize;
+    page.stream_html_bytes(10, |_| {
+        chunks += 1;
+        chunks < 3
+    });
+    assert_eq!(chunks, 3);
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_stream_html_bytes_empty_page() {
+    let page = Page::default();
+    let total = page.stream_html_bytes(10, |_| true);
+    assert_eq!(total, 0);
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_spool_concurrent_pages() {
+    // Simulate many pages being spooled/unspooled concurrently.
+    use std::sync::Arc;
+
+    let pages: Vec<_> = (0..50)
+        .map(|i| {
+            let mut page = Page::default();
+            page.url = format!("https://example.com/{i}");
+            page.html = Some(bytes::Bytes::from(format!("<html>{i}</html>")));
+            page.spool_html_to_disk();
+            Arc::new(std::sync::Mutex::new(page))
+        })
+        .collect();
+
+    // All should be on disk.
+    for p in &pages {
+        let page = p.lock().unwrap();
+        assert!(page.is_html_on_disk());
+    }
+
+    // Read content from all concurrently.
+    let handles: Vec<_> = pages
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let p = Arc::clone(p);
+            std::thread::spawn(move || {
+                let page = p.lock().unwrap();
+                let html = page.get_html();
+                assert_eq!(html, format!("<html>{i}</html>"));
+            })
+        })
+        .collect();
+
+    for h in handles {
+        h.join().expect("thread should not panic");
+    }
+
+    // Reload half of them.
+    for p in pages.iter().take(25) {
+        let mut page = p.lock().unwrap();
+        assert!(page.ensure_html_loaded());
+        assert!(!page.is_html_on_disk());
+    }
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_spool_clone_byte_counter_consistency() {
+    // Verify that cloning a spooled page produces independent spool files
+    // and all copies remain accessible after dropping others.
+    let mut page = Page::default();
+    page.html = Some(bytes::Bytes::from("clone counter"));
+    page.spool_html_to_disk();
+
+    let clone1 = page.clone();
+    let clone2 = clone1.clone();
+
+    // All three have independent spool files and readable content.
+    assert_eq!(page.get_html(), "clone counter");
+    assert_eq!(clone1.get_html(), "clone counter");
+    assert_eq!(clone2.get_html(), "clone counter");
+
+    // The spool paths should be distinct files.
+    let path_orig = page.get_html_spool_path().unwrap().to_path_buf();
+    let path_c1 = clone1.get_html_spool_path().unwrap().to_path_buf();
+    let path_c2 = clone2.get_html_spool_path().unwrap().to_path_buf();
+    assert_ne!(path_orig, path_c1);
+    assert_ne!(path_c1, path_c2);
+
+    // Drop two, verify the surviving clone still works.
+    drop(clone2);
+    drop(page);
+    assert!(!path_orig.exists(), "original spool should be cleaned up");
+    assert!(!path_c2.exists(), "clone2 spool should be cleaned up");
+    assert_eq!(clone1.get_html(), "clone counter");
+    assert!(path_c1.exists(), "clone1 spool should still exist");
+
+    drop(clone1);
+    assert!(!path_c1.exists(), "clone1 spool should be cleaned up");
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_spool_large_html_link_extraction() {
+    // Generate a large HTML page with many links, spool it, then extract
+    // links from disk without loading the full content.
+    let mut html = String::from("<html><body>");
+    for i in 0..500 {
+        html.push_str(&format!(
+            r#"<a href="https://example.com/page/{i}">link {i}</a>"#
+        ));
+    }
+    html.push_str("</body></html>");
+
+    let mut page = Page::default();
+    page.url = "https://example.com".to_string();
+    page.html = Some(bytes::Bytes::from(html.clone()));
+
+    // Extract links from memory first as a baseline.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let selectors = crate::page::get_page_selectors("https://example.com", false, false);
+
+    let expected_links = rt.block_on(async { page.links(&selectors, &None).await });
+    assert!(
+        expected_links.len() >= 400,
+        "should extract many links from memory: got {}",
+        expected_links.len()
+    );
+
+    // Now spool to disk and extract links from disk.
+    page.spool_html_to_disk();
+    assert!(page.is_html_on_disk());
+
+    let disk_links = rt.block_on(async { page.links(&selectors, &None).await });
+
+    assert_eq!(
+        expected_links.len(),
+        disk_links.len(),
+        "disk extraction should produce the same number of links as memory"
+    );
+    // Verify the sets match.
+    for link in &expected_links {
+        assert!(
+            disk_links.contains(link),
+            "disk links should contain all memory links: missing {link}"
+        );
+    }
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_spool_page_through_channel() {
+    // Simulate the scrape() pattern: send pages through a channel, receive
+    // them, spool under pressure, then read content back.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    rt.block_on(async {
+        let (tx, mut rx) = tokio::sync::broadcast::channel::<Page>(16);
+
+        // Spawn producer.
+        let producer = tokio::spawn(async move {
+            for i in 0..20 {
+                let mut page = Page::default();
+                page.url = format!("https://example.com/{i}");
+                page.html = Some(bytes::Bytes::from(format!("<html>page {i}</html>")));
+                let _ = tx.send(page);
+            }
+        });
+
+        // Collect pages, spool every other one.
+        let mut pages = Vec::new();
+        let consumer = async {
+            loop {
+                match rx.recv().await {
+                    Ok(mut page) => {
+                        let idx = pages.len();
+                        if idx % 2 == 0 {
+                            page.spool_html_to_disk();
+                        }
+                        pages.push(page);
+                        if pages.len() >= 20 {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    _ => {}
+                }
+            }
+        };
+
+        let _ = tokio::join!(producer, consumer);
+
+        // Verify all received pages have accessible content (some may be
+        // lost to broadcast lag, but those we did receive must be valid).
+        assert!(!pages.is_empty(), "should receive at least some pages");
+
+        for page in &pages {
+            let html = page.get_html();
+            assert!(
+                html.starts_with("<html>page ") && html.ends_with("</html>"),
+                "page content should be valid: {html}"
+            );
+
+            // Verify streaming produces the same content.
+            let mut collected = Vec::new();
+            page.stream_html_bytes(32, |chunk| {
+                collected.extend_from_slice(chunk);
+                true
+            });
+            assert_eq!(
+                String::from_utf8_lossy(&collected),
+                html,
+                "streamed content should match get_html()"
+            );
+        }
+    });
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_spool_adaptive_threshold_levels() {
+    // Verify the adaptive threshold functions are accessible and consistent.
+    let base_pp = crate::utils::html_spool::tests::base_per_page_helper();
+    let base_budget = crate::utils::html_spool::tests::base_budget_helper();
+
+    assert!(base_pp > 0, "per-page threshold should be > 0");
+    assert!(base_budget > 0, "memory budget should be > 0");
+
+    // With mem_state = 0 (default in tests), only budget overflow triggers.
+    // Under budget: no spool.
+    assert!(
+        !crate::utils::html_spool::should_spool(100),
+        "small page under budget should not spool"
+    );
 }
