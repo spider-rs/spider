@@ -1560,7 +1560,7 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
     let binary_file = res
         .content
         .as_deref()
-        .is_some_and(|c| auto_encoder::is_binary_file(c));
+        .is_some_and(auto_encoder::is_binary_file);
 
     Page {
         html: res.content.map(bytes::Bytes::from),
@@ -3092,7 +3092,7 @@ impl Page {
         self.binary_file = self
             .html
             .as_deref()
-            .is_some_and(|c| auto_encoder::is_binary_file(c));
+            .is_some_and(auto_encoder::is_binary_file);
         #[cfg(all(feature = "balance", not(feature = "decentralized")))]
         if let Some(ref h) = self.html {
             crate::utils::html_spool::track_bytes_add(h.len());
