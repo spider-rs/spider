@@ -3301,6 +3301,107 @@ impl Page {
         0
     }
 
+    /// Async version of [`stream_html_bytes`](Self::stream_html_bytes).
+    /// Uses `tokio::fs` for the disk path — never blocks a tokio worker.
+    ///
+    /// The callback receives each chunk as `&[u8]` and returns `true` to
+    /// continue or `false` to stop early.
+    ///
+    /// ```rust,ignore
+    /// // Example: fully async streaming
+    /// let mut rewriter = lol_html::HtmlRewriter::new(settings, |_| {});
+    /// page.stream_html_bytes_async(65536, |chunk| {
+    ///     rewriter.write(chunk).is_ok()
+    /// }).await;
+    /// let _ = rewriter.end();
+    /// ```
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+    pub async fn stream_html_bytes_async<F>(&self, chunk_size: usize, mut cb: F) -> usize
+    where
+        F: FnMut(&[u8]) -> bool,
+    {
+        // Fast path: HTML is in memory.
+        if let Some(ref html) = self.html {
+            let mut total = 0usize;
+            for chunk in html.chunks(chunk_size.max(1)) {
+                total = total.saturating_add(chunk.len());
+                if !cb(chunk) {
+                    break;
+                }
+            }
+            return total;
+        }
+
+        // Disk path: async streaming via tokio::fs.
+        if let Some(ref guard) = self.html_spool_path {
+            if let Some(path) = guard.path() {
+                match tokio::fs::File::open(path).await {
+                    Ok(mut file) => {
+                        let mut buf = vec![0u8; chunk_size.max(1)];
+                        let mut total = 0usize;
+                        loop {
+                            match tokio::io::AsyncReadExt::read(&mut file, &mut buf).await {
+                                Ok(0) => break,
+                                Ok(n) => {
+                                    total = total.saturating_add(n);
+                                    if !cb(&buf[..n]) {
+                                        break;
+                                    }
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                        return total;
+                    }
+                    Err(_) => return 0,
+                }
+            }
+        }
+
+        0
+    }
+
+    /// Async version of [`stream_html_bytes`](Self::stream_html_bytes).
+    /// Without the `balance` feature this simply chunks the in-memory HTML
+    /// (no disk path exists).
+    #[cfg(any(not(feature = "balance"), feature = "decentralized"))]
+    pub async fn stream_html_bytes_async<F>(&self, chunk_size: usize, cb: F) -> usize
+    where
+        F: FnMut(&[u8]) -> bool,
+    {
+        self.stream_html_bytes(chunk_size, cb)
+    }
+
+    /// Async version of [`get_html`](Self::get_html).  When HTML is on disk,
+    /// reads via `tokio::fs` instead of blocking.
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+    pub async fn get_html_async(&self) -> String {
+        if let Some(bytes) = self.html.as_deref() {
+            return match std::str::from_utf8(bytes) {
+                Ok(s) => s.to_string(),
+                Err(_) => auto_encoder::auto_encode_bytes(bytes),
+            };
+        }
+        if let Some(guard) = &self.html_spool_path {
+            if let Some(path) = guard.path() {
+                if let Ok(bytes) =
+                    crate::utils::html_spool::spool_read_async(path.to_path_buf()).await
+                {
+                    return String::from_utf8(bytes)
+                        .unwrap_or_else(|e| auto_encoder::auto_encode_bytes(&e.into_bytes()));
+                }
+            }
+        }
+        String::new()
+    }
+
+    /// Async version of [`get_html`](Self::get_html).  Without balance this
+    /// delegates to the sync version (no disk path).
+    #[cfg(any(not(feature = "balance"), feature = "decentralized"))]
+    pub async fn get_html_async(&self) -> String {
+        self.get_html()
+    }
+
     /// Set the url directly of the page. Useful for transforming the content and rewriting the url.
     #[cfg(not(feature = "decentralized"))]
     pub fn set_url(&mut self, url: String) {
