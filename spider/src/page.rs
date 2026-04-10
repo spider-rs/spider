@@ -663,20 +663,14 @@ struct SpoolInner {
 
 #[cfg(feature = "balance")]
 impl Drop for SpoolInner {
+    #[inline]
     fn drop(&mut self) {
         crate::utils::html_spool::track_page_unspooled();
-        // Dispatch the file delete to the tokio runtime as a lightweight
-        // async task when possible, avoiding any blocking on worker threads.
-        // Outside async contexts (tests, CLI) falls back to sync delete.
         let path = std::mem::take(&mut self.path);
         if !path.as_os_str().is_empty() {
-            if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                handle.spawn(async move {
-                    let _ = tokio::fs::remove_file(&path).await;
-                });
-            } else {
-                let _ = std::fs::remove_file(&path);
-            }
+            // Non-blocking channel send — the dedicated cleanup thread
+            // handles the actual file deletion in the background.
+            crate::utils::html_spool::queue_spool_delete(path);
         }
     }
 }

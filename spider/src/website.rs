@@ -13384,7 +13384,8 @@ fn test_spool_drop_cleans_up_file() {
             .to_path_buf();
         assert!(path.exists(), "spool file should exist");
     }
-    // After drop, the file should be cleaned up.
+    // Flush the background cleanup thread so the delete is processed.
+    crate::utils::html_spool::flush_cleanup();
     assert!(!path.exists(), "spool file should be deleted on drop");
 }
 
@@ -13427,6 +13428,7 @@ fn test_spool_set_html_bytes_replaces_spool() {
 
     // Setting new html should clean up the spool file.
     page.set_html_bytes(Some(b"replacement".to_vec()));
+    crate::utils::html_spool::flush_cleanup();
     assert!(!spool_path.exists(), "old spool file should be deleted");
     assert!(!page.is_html_on_disk());
     assert_eq!(page.get_html(), "replacement");
@@ -13441,6 +13443,7 @@ fn test_spool_set_html_bytes_none_clears_spool() {
     let spool_path = page.get_html_spool_path().unwrap().to_path_buf();
 
     page.set_html_bytes(None);
+    crate::utils::html_spool::flush_cleanup();
     assert!(!spool_path.exists());
     assert!(!page.is_html_on_disk());
     assert!(page.is_empty());
@@ -13594,6 +13597,7 @@ fn test_spool_clone_byte_counter_consistency() {
 
     // Drop the last clone — file should be cleaned up.
     drop(clone1);
+    crate::utils::html_spool::flush_cleanup();
     assert!(
         !shared_path.exists(),
         "file should be deleted after last clone drops"

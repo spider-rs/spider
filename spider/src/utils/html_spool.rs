@@ -40,6 +40,65 @@ static SPOOL_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// re-querying sysinfo on every `should_spool` call.
 static CACHED_MEM_STATE: AtomicI8 = AtomicI8::new(0);
 
+/// Global sender for the background spool cleanup task.  `Drop` impls
+/// send paths here instead of deleting files directly — the send is a
+/// non-blocking channel push (never blocks, never spawns per-file tasks).
+/// Initialized once on first spool write.
+static CLEANUP_TX: OnceLock<std::sync::mpsc::Sender<PathBuf>> = OnceLock::new();
+
+/// Initialize the background cleanup task and return the sender.
+/// Uses `std::sync::mpsc` so the sender is `Send + Sync` and works
+/// from any context (async Drop, sync Drop, any thread).
+/// The receiver runs on a dedicated OS thread — not on tokio — so
+/// cleanup never competes with crawl work for runtime threads.
+fn cleanup_sender() -> &'static std::sync::mpsc::Sender<PathBuf> {
+    CLEANUP_TX.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<PathBuf>();
+        // Dedicated cleanup thread — lightweight, sleeps when idle.
+        std::thread::Builder::new()
+            .name("spider-spool-cleanup".into())
+            .spawn(move || {
+                while let Ok(path) = rx.recv() {
+                    let _ = std::fs::remove_file(&path);
+                }
+            })
+            .expect("failed to spawn spool cleanup thread");
+        tx
+    })
+}
+
+/// Queue a spool file for background deletion.  Non-blocking — just a
+/// channel send.  If the cleanup thread has exited (channel closed),
+/// the path is silently dropped (OS temp cleanup handles it).
+#[inline]
+pub fn queue_spool_delete(path: PathBuf) {
+    let _ = cleanup_sender().send(path);
+}
+
+/// Wait for the cleanup thread to process all pending deletes.
+/// Used in tests to assert file deletion.  Sends a sentinel path and
+/// waits for it to be processed (round-trip through the channel).
+#[cfg(test)]
+pub fn flush_cleanup() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let flag = Arc::new(AtomicBool::new(false));
+    let flag2 = flag.clone();
+    // Send a marker file that doesn't exist — when the cleanup thread
+    // tries to delete it and moves on, we know all prior sends are done.
+    let marker = spool_dir().join(".flush_marker");
+    let _ = std::fs::write(&marker, b"");
+    let _ = cleanup_sender().send(marker);
+    // Spin briefly until the marker is gone.
+    for _ in 0..200 {
+        if !spool_dir().join(".flush_marker").exists() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
 /// Pages smaller than this are *never* spooled regardless of pressure,
 /// because the overhead of disk I/O exceeds the memory saved.
 /// Default: 16 KiB.  Override: `SPIDER_HTML_SPOOL_MIN_SIZE`.
