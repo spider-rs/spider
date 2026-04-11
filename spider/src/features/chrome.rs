@@ -1151,3 +1151,131 @@ impl Drop for BrowserController {
         self.dispose();
     }
 }
+
+/// A lightweight second WebSocket connection to the same Chrome instance,
+/// used for hedged requests. Owns its own handler task and cleans up on drop.
+#[cfg(feature = "hedge")]
+pub(crate) struct HedgeBrowser {
+    pub browser: Browser,
+    pub context_id: Option<BrowserContextId>,
+    handler: Option<JoinHandle<()>>,
+}
+
+#[cfg(feature = "hedge")]
+impl HedgeBrowser {
+    /// Probe the primary browser's WS connection with a lightweight CDP
+    /// round-trip (`Browser.getVersion`). Returns `true` if the connection
+    /// is alive and responsive within the timeout.
+    async fn is_primary_responsive(primary: &Browser) -> bool {
+        // 2 s is generous for a single CDP round-trip; if it doesn't
+        // respond in time the WS connection is likely stalled.
+        match tokio::time::timeout(Duration::from_secs(2), primary.version()).await {
+            Ok(Ok(_)) => true,
+            Ok(Err(e)) => {
+                log::info!("[hedge-chrome] primary WS probe failed: {:?}", e);
+                false
+            }
+            Err(_) => {
+                log::info!("[hedge-chrome] primary WS probe timed out (2s) — connection stalled");
+                false
+            }
+        }
+    }
+
+    /// Decide whether the hedge should use a new WS connection or reuse
+    /// the primary browser. Then optionally open a fresh WS.
+    ///
+    /// - If the primary WS is **responsive** → returns `None` (caller uses
+    ///   same-browser tab hedge — fast, no overhead).
+    /// - If the primary WS is **stalled** → opens a new WS connection and
+    ///   returns `Some(HedgeBrowser)`.
+    /// - If the new WS connection also fails → returns `None` (caller falls
+    ///   back to same-browser tab hedge).
+    pub async fn connect_if_stalled(primary: &Browser, config: &Configuration) -> Option<Self> {
+        // Fast path: primary is fine, no need for a new connection.
+        if Self::is_primary_responsive(primary).await {
+            log::debug!("[hedge-chrome] primary WS responsive, using same-browser tab hedge");
+            return None;
+        }
+
+        log::info!("[hedge-chrome] primary WS stalled, opening new WS connection");
+        Self::connect(primary, config).await
+    }
+
+    /// Open a fresh WS connection to the same Chrome process.
+    /// Returns `None` if the connection fails (non-fatal).
+    async fn connect(primary: &Browser, config: &Configuration) -> Option<Self> {
+        let ws_url = primary.websocket_address().clone();
+
+        let handler_config = create_handler_config(config);
+
+        let (mut browser, mut handler) = match tokio::time::timeout(
+            Duration::from_secs(10),
+            Browser::connect_with_config(ws_url, handler_config),
+        )
+        .await
+        {
+            Ok(Ok(pair)) => pair,
+            Ok(Err(e)) => {
+                log::warn!(
+                    "[hedge-chrome] failed to open second WS connection: {:?}",
+                    e
+                );
+                return None;
+            }
+            Err(_) => {
+                log::warn!("[hedge-chrome] second WS connection timed out (10s)");
+                return None;
+            }
+        };
+
+        // Spawn handler — lightweight, just polls CDP messages.
+        let handle = tokio::task::spawn(async move {
+            while let Some(k) = handler.next().await {
+                if let Err(e) = k {
+                    match e {
+                        CdpError::Ws(_)
+                        | CdpError::LaunchExit(_, _)
+                        | CdpError::LaunchTimeout(_)
+                        | CdpError::LaunchIo(_, _) => break,
+                        _ => continue,
+                    }
+                }
+            }
+        });
+
+        // Create an isolated browser context so tabs don't collide with primary.
+        let mut create_ctx =
+            chromiumoxide::cdp::browser_protocol::target::CreateBrowserContextParams::default();
+        create_ctx.dispose_on_detach = Some(true);
+
+        let context_id = match browser.create_browser_context(create_ctx).await {
+            Ok(id) => {
+                let _ = browser.send_new_context(id.clone()).await;
+                Some(id)
+            }
+            Err(e) => {
+                log::debug!(
+                    "[hedge-chrome] browser context creation failed (non-fatal): {:?}",
+                    e
+                );
+                None
+            }
+        };
+
+        Some(Self {
+            browser,
+            context_id,
+            handler: Some(handle),
+        })
+    }
+}
+
+#[cfg(feature = "hedge")]
+impl Drop for HedgeBrowser {
+    fn drop(&mut self) {
+        if let Some(h) = self.handler.take() {
+            h.abort();
+        }
+    }
+}

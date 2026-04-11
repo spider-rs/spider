@@ -56,6 +56,16 @@ pub(crate) const MAX_PRE_ALLOCATED_HTML_PAGE_SIZE: u64 = 128 * 1024;
 pub(crate) const MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE: usize =
     MAX_PRE_ALLOCATED_HTML_PAGE_SIZE as usize;
 
+/// Maximum bytes to pre-allocate based on Content-Length (10 MB).
+/// Prevents a malicious server from triggering instant OOM by sending
+/// `Content-Length: 2147483648` with a tiny body. Vec grows naturally
+/// beyond this via doubling, so large legitimate responses still work.
+pub(crate) const MAX_PREALLOC: usize = 10 * 1024 * 1024;
+
+/// Reject responses whose Content-Length exceeds this hard ceiling (2 GB).
+/// Avoids even starting to stream a response that cannot fit in memory.
+pub(crate) const MAX_CONTENT_LENGTH: u64 = 2 * 1024 * 1024 * 1024;
+
 /// Allocate up to 16kb * 4 upfront for small pages.
 #[cfg(feature = "chrome")]
 pub(crate) const TURNSTILE_WALL_PAGE_SIZE: usize = MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE * 4;
@@ -2207,10 +2217,11 @@ impl Page {
                 let mut rewriter = lol_html::send::HtmlRewriter::new(settings, |_c: &[u8]| {});
 
                 let mut collected_bytes = match res.content_length() {
-                    Some(cap) if cap >= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE => {
-                        Vec::with_capacity(cap as usize)
+                    Some(cap) if cap > MAX_CONTENT_LENGTH => {
+                        log::warn!("{url} Content-Length {cap} exceeds 2 GB limit, rejecting");
+                        Vec::new()
                     }
-                    Some(cap) if cap > 0 => Vec::with_capacity(cap as usize),
+                    Some(cap) if cap > 0 => Vec::with_capacity((cap as usize).min(MAX_PREALLOC)),
                     _ => Vec::with_capacity(MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE),
                 };
 

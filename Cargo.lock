@@ -1146,8 +1146,8 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion 0.8.2",
- "spider 2.51.8",
- "spider_utils 2.51.8",
+ "spider 2.51.9",
+ "spider_utils 2.51.9",
 ]
 
 [[package]]
@@ -8065,7 +8065,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.51.8"
+version = "2.51.9"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -8123,7 +8123,7 @@ dependencies = [
  "smallvec",
  "sonic-rs",
  "spider_agent",
- "spider_agent_types 2.51.8",
+ "spider_agent_types 2.51.9",
  "spider_fingerprint",
  "spider_firewall",
  "sqlx",
@@ -8150,7 +8150,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent"
-version = "2.51.8"
+version = "2.51.9"
 dependencies = [
  "aho-corasick",
  "async-openai 0.33.1",
@@ -8173,7 +8173,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spider_agent_html",
- "spider_agent_types 2.51.8",
+ "spider_agent_types 2.51.9",
  "spider_skills",
  "tempfile",
  "thirtyfour",
@@ -8184,13 +8184,13 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_html"
-version = "2.51.8"
+version = "2.51.9"
 dependencies = [
  "aho-corasick",
  "lol_html",
  "serde",
  "serde_json",
- "spider_agent_types 2.51.8",
+ "spider_agent_types 2.51.9",
 ]
 
 [[package]]
@@ -8208,7 +8208,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.51.8"
+version = "2.51.9"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8258,7 +8258,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.51.8"
+version = "2.51.9"
 dependencies = [
  "clap",
  "env_logger",
@@ -8267,7 +8267,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.51.8",
+ "spider 2.51.9",
  "spider_transformations",
  "tikv-jemallocator",
  "tokio",
@@ -8284,7 +8284,7 @@ dependencies = [
  "flexbuffers",
  "htr",
  "serde_json",
- "spider 2.51.8",
+ "spider 2.51.9",
  "spider_transformations",
  "spider_utils 2.48.25",
 ]
@@ -8325,7 +8325,7 @@ dependencies = [
 
 [[package]]
 name = "spider_mcp"
-version = "2.51.8"
+version = "2.51.9"
 dependencies = [
  "clap",
  "dashmap",
@@ -8334,7 +8334,7 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
- "spider 2.51.8",
+ "spider 2.51.9",
  "spider_transformations",
  "tokio",
  "uuid",
@@ -8427,7 +8427,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.51.8"
+version = "2.51.9"
 dependencies = [
  "hashbrown 0.16.1",
  "indexmap 2.13.0",
@@ -8442,14 +8442,14 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.51.8"
+version = "2.51.9"
 dependencies = [
  "env_logger",
  "hyper 1.9.0",
  "hyper-util",
  "lazy_static",
  "rustls-pemfile",
- "spider 2.51.8",
+ "spider 2.51.9",
  "tokio-rustls 0.26.4",
  "warp",
 ]

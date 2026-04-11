@@ -110,7 +110,7 @@ use url::Url;
 
 #[cfg(feature = "chrome")]
 use crate::features::chrome_common::{AutomationScripts, ExecutionScripts};
-use crate::page::{MAX_PRE_ALLOCATED_HTML_PAGE_SIZE, MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE};
+use crate::page::{MAX_CONTENT_LENGTH, MAX_PREALLOC, MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE};
 use crate::tokio_stream::StreamExt;
 use crate::Client;
 
@@ -4398,10 +4398,22 @@ pub async fn handle_response_bytes(
     if !block_streaming(&res, only_html) {
         let expected_len = res.content_length();
         let mut data = match expected_len {
-            Some(cap) if cap >= MAX_PRE_ALLOCATED_HTML_PAGE_SIZE => {
-                Vec::with_capacity(cap as usize)
+            Some(cap) if cap > MAX_CONTENT_LENGTH => {
+                log::warn!("{target_url} Content-Length {cap} exceeds 2 GB limit, rejecting");
+                return PageResponse {
+                    headers: Some(headers),
+                    #[cfg(feature = "remote_addr")]
+                    remote_addr,
+                    #[cfg(feature = "cookies")]
+                    cookies,
+                    content: None,
+                    final_url: rd,
+                    status_code,
+                    anti_bot_tech,
+                    ..Default::default()
+                };
             }
-            Some(cap) if cap > 0 => Vec::with_capacity(cap as usize),
+            Some(cap) if cap > 0 => Vec::with_capacity((cap as usize).min(MAX_PREALLOC)),
             _ => Vec::with_capacity(MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE),
         };
         let mut stream = res.bytes_stream();
