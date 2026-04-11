@@ -1163,48 +1163,38 @@ pub(crate) struct HedgeBrowser {
 
 #[cfg(feature = "hedge")]
 impl HedgeBrowser {
-    /// Probe the primary browser's WS connection with a lightweight CDP
-    /// round-trip (`Browser.getVersion`). Returns `true` if the connection
-    /// is alive and responsive within the timeout.
-    async fn is_primary_responsive(primary: &Browser) -> bool {
-        // 2 s is generous for a single CDP round-trip; if it doesn't
-        // respond in time the WS connection is likely stalled.
-        match tokio::time::timeout(Duration::from_secs(2), primary.version()).await {
-            Ok(Ok(_)) => true,
-            Ok(Err(e)) => {
-                log::info!("[hedge-chrome] primary WS probe failed: {:?}", e);
-                false
-            }
-            Err(_) => {
-                log::info!("[hedge-chrome] primary WS probe timed out (2s) — connection stalled");
-                false
-            }
-        }
-    }
-
-    /// Decide whether the hedge should use a new WS connection or reuse
-    /// the primary browser. Then optionally open a fresh WS.
+    /// Pure-data check: should the hedge escalate to a new WS connection?
     ///
-    /// - If the primary WS is **responsive** → returns `None` (caller uses
-    ///   same-browser tab hedge — fast, no overhead).
-    /// - If the primary WS is **stalled** → opens a new WS connection and
-    ///   returns `Some(HedgeBrowser)`.
-    /// - If the new WS connection also fails → returns `None` (caller falls
-    ///   back to same-browser tab hedge).
-    pub async fn connect_if_stalled(primary: &Browser, config: &Configuration) -> Option<Self> {
-        // Fast path: primary is fine, no need for a new connection.
-        if Self::is_primary_responsive(primary).await {
-            log::debug!("[hedge-chrome] primary WS responsive, using same-browser tab hedge");
-            return None;
+    /// Uses signals already collected by HedgeTracker — zero extra latency,
+    /// no CDP round-trips, no probes. The logic:
+    ///
+    /// - **browser_dead** → connection confirmed gone, must use new WS.
+    /// - **3+ consecutive errors** → repeated failures point to a
+    ///   connection-level problem, not just one slow page.
+    /// - **hedge win rate > 60% with 8+ samples** → hedges consistently
+    ///   beat the primary, suggesting systemic primary-path issues.
+    ///
+    /// Returns `false` (use cheap same-browser tab hedge) in all other
+    /// cases — which is the overwhelmingly common path.
+    #[inline]
+    pub fn should_new_connection(
+        tracker: &crate::utils::hedge::HedgeTracker,
+        browser_dead: &std::sync::atomic::AtomicBool,
+    ) -> bool {
+        if browser_dead.load(std::sync::atomic::Ordering::Acquire) {
+            return true;
         }
-
-        log::info!("[hedge-chrome] primary WS stalled, opening new WS connection");
-        Self::connect(primary, config).await
+        if tracker.consecutive_errors() >= 3 {
+            return true;
+        }
+        let fires = tracker.hedge_fires();
+        fires >= 8 && tracker.hedge_win_rate_pct() > 60
     }
 
     /// Open a fresh WS connection to the same Chrome process.
-    /// Returns `None` if the connection fails (non-fatal).
-    async fn connect(primary: &Browser, config: &Configuration) -> Option<Self> {
+    /// Returns `None` if the connection fails (non-fatal — caller falls
+    /// back to same-browser tab hedge).
+    pub async fn connect(primary: &Browser, config: &Configuration) -> Option<Self> {
         let ws_url = primary.websocket_address().clone();
 
         let handler_config = create_handler_config(config);

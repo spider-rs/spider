@@ -193,6 +193,11 @@ impl HedgeTracker {
         self.samples.load(Ordering::Relaxed)
     }
 
+    /// Get the total number of hedge races fired.
+    pub fn hedge_fires(&self) -> u64 {
+        self.hedge_fires.load(Ordering::Relaxed)
+    }
+
     /// Get the hedge win rate as a percentage (0–100). Returns 0 if no hedges fired.
     pub fn hedge_win_rate_pct(&self) -> u64 {
         let fires = self.hedge_fires.load(Ordering::Relaxed);

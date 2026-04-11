@@ -7016,12 +7016,19 @@ impl Website {
                                                                         delay.as_millis(), hedge_trk.ema_ms(), hedge_trk.stddev_ms(),
                                                                         hedge_trk.hedge_win_rate_pct(), hedge_trk.consecutive_errors(), target_url);
 
-                                                                    // Probe primary WS health: if stalled, open a new
-                                                                    // WS connection; otherwise reuse the same browser
-                                                                    // (cheap same-connection tab hedge).
-                                                                    let hedge_browser = crate::features::chrome::HedgeBrowser::connect_if_stalled(
-                                                                        &shared.5, &shared.6,
-                                                                    ).await;
+                                                                    // Decide based on already-collected signals whether
+                                                                    // to escalate to a new WS connection (zero latency
+                                                                    // check — pure atomic reads, no CDP round-trip).
+                                                                    let hedge_browser = if crate::features::chrome::HedgeBrowser::should_new_connection(
+                                                                        &hedge_trk, &shared.11,
+                                                                    ) {
+                                                                        log::info!("[hedge-chrome] signals indicate connection-level issue, opening new WS");
+                                                                        crate::features::chrome::HedgeBrowser::connect(
+                                                                            &shared.5, &shared.6,
+                                                                        ).await
+                                                                    } else {
+                                                                        None
+                                                                    };
 
                                                                     let hedge_fut = async {
                                                                         match &hedge_browser {
@@ -8038,12 +8045,19 @@ impl Website {
                                                                         delay.as_millis(), hedge_trk.ema_ms(), hedge_trk.stddev_ms(),
                                                                         hedge_trk.hedge_win_rate_pct(), hedge_trk.consecutive_errors(), target_url);
 
-                                                                    // Probe primary WS health: if stalled, open a new
-                                                                    // WS connection; otherwise reuse the same browser
-                                                                    // (cheap same-connection tab hedge).
-                                                                    let hedge_browser = crate::features::chrome::HedgeBrowser::connect_if_stalled(
-                                                                        &shared.5, &shared.6,
-                                                                    ).await;
+                                                                    // Decide based on already-collected signals whether
+                                                                    // to escalate to a new WS connection (zero latency
+                                                                    // check — pure atomic reads, no CDP round-trip).
+                                                                    let hedge_browser = if crate::features::chrome::HedgeBrowser::should_new_connection(
+                                                                        &hedge_trk, &shared.11,
+                                                                    ) {
+                                                                        log::info!("[hedge-chrome] signals indicate connection-level issue, opening new WS");
+                                                                        crate::features::chrome::HedgeBrowser::connect(
+                                                                            &shared.5, &shared.6,
+                                                                        ).await
+                                                                    } else {
+                                                                        None
+                                                                    };
 
                                                                     let hedge_fut = async {
                                                                         match &hedge_browser {
