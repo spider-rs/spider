@@ -277,6 +277,7 @@ async fn test_race_fast_accept_under_load() {
         max_concurrent_sessions: 0,
         skip_extensions: Vec::new(),
         max_backend_bytes_in_flight: 0,
+        backend_timeout_ms: 0,
     };
 
     // Primary scores above threshold — should return immediately.

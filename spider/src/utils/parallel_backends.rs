@@ -1568,6 +1568,7 @@ mod tests {
             max_concurrent_sessions: 0,
             skip_extensions: Vec::new(),
             max_backend_bytes_in_flight: 0, // unlimited for test mocks
+            backend_timeout_ms: 0,          // disabled for test mocks
         }
     }
 
