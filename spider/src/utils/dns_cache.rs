@@ -1,5 +1,5 @@
 use dashmap::DashMap;
-use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -19,12 +19,28 @@ pub(crate) struct DnsEntry {
     expires: Instant,
 }
 
+/// Global async resolver — initialized once, reused across all lookups.
+/// Hickory's `TokioResolver` is fully async (no `spawn_blocking`).
+fn async_resolver() -> &'static hickory_resolver::TokioResolver {
+    use hickory_resolver::name_server::TokioConnectionProvider;
+    use std::sync::OnceLock;
+    static RESOLVER: OnceLock<hickory_resolver::TokioResolver> = OnceLock::new();
+    RESOLVER.get_or_init(|| {
+        hickory_resolver::Resolver::builder_with_config(
+            hickory_resolver::config::ResolverConfig::default(),
+            TokioConnectionProvider::default(),
+        )
+        .with_options(hickory_resolver::config::ResolverOpts::default())
+        .build()
+    })
+}
+
 /// Thread-safe DNS resolution cache with configurable TTL.
 ///
-/// Resolves hostnames via the system resolver and caches results
-/// for up to `ttl`. Expired entries are served as misses and
-/// re-resolved on next access. Capped at [`MAX_ENTRIES`]; overflow
-/// triggers expired-entry eviction followed by LRU-style trimming.
+/// Resolves hostnames via hickory-resolver (fully async, no blocking)
+/// and caches results for up to `ttl`. Expired entries are served as
+/// misses and re-resolved on next access. Capped at [`MAX_ENTRIES`];
+/// overflow triggers expired-entry eviction followed by LRU-style trimming.
 pub struct DnsCache {
     pub(crate) cache: DashMap<String, DnsEntry>,
     pub(crate) ttl: Duration,
@@ -41,8 +57,8 @@ impl DnsCache {
 
     /// Resolve a hostname, returning cached results if available and not expired.
     ///
-    /// On cache miss or expiry the system resolver is called on a blocking
-    /// thread so the async runtime is never stalled.
+    /// On cache miss or expiry, resolution is performed via hickory-resolver
+    /// which is fully async — no `spawn_blocking`, no thread-pool overhead.
     pub async fn resolve(&self, host: &str) -> Option<Vec<IpAddr>> {
         // Check cache first.
         if let Some(entry) = self.cache.get(host) {
@@ -51,89 +67,50 @@ impl DnsCache {
             }
         }
 
-        // Cache miss or expired — resolve via system resolver on a blocking thread.
-        let host_owned = format!("{}:0", host);
-        let result = tokio::task::spawn_blocking(move || {
-            host_owned
-                .to_socket_addrs()
-                .ok()
-                .map(|addrs| addrs.collect::<Vec<SocketAddr>>())
-        })
-        .await
-        .ok()
-        .flatten();
+        // Cache miss or expired — resolve via async hickory resolver.
+        let lookup = async_resolver().lookup_ip(host).await.ok()?;
 
-        match result {
-            Some(resolved) if !resolved.is_empty() => {
-                let ips: Vec<IpAddr> = resolved.iter().map(|s| s.ip()).collect();
-                // Evict overflow before inserting.
-                if self.cache.len() >= MAX_ENTRIES {
-                    self.evict_expired();
-                    // If still over capacity after eviction, remove oldest entries.
-                    if self.cache.len() >= MAX_ENTRIES {
-                        let to_remove = MAX_ENTRIES / 10;
-                        let keys_to_remove: Vec<String> = self
-                            .cache
-                            .iter()
-                            .take(to_remove)
-                            .map(|entry| entry.key().clone())
-                            .collect();
-                        for k in keys_to_remove {
-                            self.cache.remove(&k);
-                        }
-                    }
-                }
-
-                self.cache.insert(
-                    host.to_string(),
-                    DnsEntry {
-                        sockaddrs: resolved.into(),
-                        addrs: ips.clone(),
-                        expires: Instant::now() + self.ttl,
-                    },
-                );
-                Some(ips)
-            }
-            _ => None,
+        let ips: Vec<IpAddr> = lookup.iter().collect();
+        if ips.is_empty() {
+            return None;
         }
+
+        let sockaddrs: Vec<SocketAddr> = ips.iter().map(|ip| SocketAddr::new(*ip, 0)).collect();
+
+        // Evict overflow before inserting.
+        if self.cache.len() >= MAX_ENTRIES {
+            self.evict_expired();
+            // If still over capacity after eviction, remove oldest entries.
+            if self.cache.len() >= MAX_ENTRIES {
+                let to_remove = MAX_ENTRIES / 10;
+                let keys_to_remove: Vec<String> = self
+                    .cache
+                    .iter()
+                    .take(to_remove)
+                    .map(|entry| entry.key().clone())
+                    .collect();
+                for k in keys_to_remove {
+                    self.cache.remove(&k);
+                }
+            }
+        }
+
+        self.cache.insert(
+            host.to_string(),
+            DnsEntry {
+                sockaddrs: sockaddrs.into(),
+                addrs: ips.clone(),
+                expires: Instant::now() + self.ttl,
+            },
+        );
+        Some(ips)
     }
 
     /// Batch pre-resolve hostnames concurrently. Best-effort — errors are
     /// silently ignored.
     pub async fn pre_resolve(&self, hosts: &[&str]) {
-        let mut set = tokio::task::JoinSet::new();
         for &host in hosts {
-            let host_string = host.to_string();
-            let ttl = self.ttl;
-            // We cannot borrow `self` across spawn, so resolve inline after join.
-            set.spawn(async move {
-                let addr_str = format!("{}:0", host_string);
-                let result = tokio::task::spawn_blocking(move || {
-                    addr_str
-                        .to_socket_addrs()
-                        .ok()
-                        .map(|addrs| addrs.collect::<Vec<SocketAddr>>())
-                })
-                .await
-                .ok()
-                .flatten();
-                (host_string, result, ttl)
-            });
-        }
-        while let Some(Ok((host, result, ttl))) = set.join_next().await {
-            if let Some(resolved) = result {
-                if !resolved.is_empty() {
-                    let ips: Vec<IpAddr> = resolved.iter().map(|s| s.ip()).collect();
-                    self.cache.insert(
-                        host,
-                        DnsEntry {
-                            sockaddrs: resolved.into(),
-                            addrs: ips,
-                            expires: Instant::now() + ttl,
-                        },
-                    );
-                }
-            }
+            self.resolve(host).await;
         }
     }
 
@@ -218,33 +195,31 @@ impl crate::client::dns::Resolve for DnsCacheResolver {
                 }
             }
 
-            // Cache miss — resolve on blocking thread.
-            let host_for_resolve = format!("{}:0", host);
-            let result = tokio::task::spawn_blocking(move || {
-                host_for_resolve
-                    .to_socket_addrs()
-                    .ok()
-                    .map(|addrs| addrs.collect::<Vec<SocketAddr>>())
-            })
-            .await
-            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?
-            .ok_or_else(|| -> Box<dyn std::error::Error + Send + Sync> {
-                "dns resolution failed".into()
-            })?;
+            // Cache miss — resolve via async hickory resolver.
+            let lookup = async_resolver()
+                .lookup_ip(&host)
+                .await
+                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
 
-            // Store in cache.
-            let ips: Vec<IpAddr> = result.iter().map(|s| s.ip()).collect();
-            let sockaddrs: Arc<[SocketAddr]> = result.into();
-            if !ips.is_empty() {
-                cache.cache.insert(
-                    host,
-                    DnsEntry {
-                        sockaddrs: sockaddrs.clone(),
-                        addrs: ips,
-                        expires: Instant::now() + cache.ttl,
-                    },
-                );
+            let ips: Vec<IpAddr> = lookup.iter().collect();
+            if ips.is_empty() {
+                return Err("dns resolution returned no addresses".into());
             }
+
+            let sockaddrs: Arc<[SocketAddr]> = ips
+                .iter()
+                .map(|ip| SocketAddr::new(*ip, 0))
+                .collect::<Vec<_>>()
+                .into();
+
+            cache.cache.insert(
+                host,
+                DnsEntry {
+                    sockaddrs: sockaddrs.clone(),
+                    addrs: ips,
+                    expires: Instant::now() + cache.ttl,
+                },
+            );
 
             let iter: crate::client::dns::Addrs = Box::new(ArcSocketAddrIter {
                 inner: sockaddrs,

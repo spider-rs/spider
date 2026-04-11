@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.51.7"
+version = "2.51.8"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -55,6 +55,7 @@ quick-xml = { version = "0.39", features = [
 ] }
 moka = { version = "0.12", features = ["future"], optional = true }
 fastrand = { version = "2", optional = true }
+hickory-resolver = { version = "0.25", optional = true, default-features = false, features = ["tokio"] }
 http-cache-semantics = { version = "3", optional = true }
 http-cache = { version = "1.0.0-alpha.5", optional = true, default-features = false, features = ["url-standard"] }
 http-global-cache = { version = "0.2.0", optional = true, default-features = false, features = ["cache_request"] }
@@ -125,11 +126,11 @@ features = ["serde", "headers", "dynamic-versions"]
 
 [dependencies.spider_agent_types]
 path = "../spider_agent_types"
-version = "2.51.7"
+version = "2.51.8"
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.51.7"
+version = "2.51.8"
 optional = true
 default-features = false
 
@@ -304,7 +305,7 @@ gemini = [
 cache_gemini = ["dep:moka"]
 decentralized_headers = ["dep:const_format", "dep:itertools"]
 spoof = ["dep:fastrand"]
-dns_cache = ["dep:dashmap", "dep:fastrand"]
+dns_cache = ["dep:dashmap", "dep:fastrand", "dep:hickory-resolver"]
 reqwest_rustls_tls = ["reqwest/rustls"]
 reqwest_native_tls = ["reqwest/native-tls"]
 reqwest_native_tls_alpn = ["reqwest/native-tls"]

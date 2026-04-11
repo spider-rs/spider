@@ -64,7 +64,7 @@ fn cleanup_sender() -> &'static tokio::sync::mpsc::UnboundedSender<PathBuf> {
             let mut rx = rx;
             handle.spawn(async move {
                 while let Some(path) = rx.recv().await {
-                    let _ = tokio::fs::remove_file(&path).await;
+                    let _ = crate::utils::uring_fs::remove_file(path.display().to_string()).await;
                 }
             });
         } else {
@@ -365,31 +365,45 @@ pub fn spool_delete(path: &Path) {
 // variants above are kept for non-async consumers and Drop impls.
 
 /// Async read of a spool file into `bytes::Bytes`.
-/// Uses `spawn_blocking` to keep the runtime non-blocking.
+/// Routes through `uring_fs` for true kernel-async I/O on Linux;
+/// falls back to `tokio::fs` on other platforms.
 pub async fn spool_read_bytes_async(path: std::path::PathBuf) -> std::io::Result<bytes::Bytes> {
-    tokio::task::spawn_blocking(move || std::fs::read(&path).map(bytes::Bytes::from))
+    crate::utils::uring_fs::read_file(path.display().to_string())
         .await
-        .unwrap_or_else(|_| Err(std::io::Error::other("join error")))
+        .map(bytes::Bytes::from)
 }
 
 /// Async read of a spool file into `Vec<u8>`.
+/// Routes through `uring_fs` for true kernel-async I/O on Linux;
+/// falls back to `tokio::fs` on other platforms.
 pub async fn spool_read_async(path: std::path::PathBuf) -> std::io::Result<Vec<u8>> {
-    tokio::task::spawn_blocking(move || std::fs::read(&path))
-        .await
-        .unwrap_or_else(|_| Err(std::io::Error::other("join error")))
+    crate::utils::uring_fs::read_file(path.display().to_string()).await
+}
+
+/// Async write of data to a spool file.
+/// Routes through `uring_fs` for true kernel-async I/O on Linux;
+/// falls back to `tokio::fs` on other platforms.
+pub async fn spool_write_async(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    crate::utils::uring_fs::write_file(path.display().to_string(), data.to_vec()).await
 }
 
 /// Async streaming read of a spool file in chunks.
-/// Runs the blocking loop on `spawn_blocking`, sends chunks back via a
-/// callback that is invoked on the blocking thread.
+/// Reads via `uring_fs` then feeds chunks from memory — one I/O op,
+/// no `spawn_blocking`.
 pub async fn spool_stream_chunks_async(
     path: std::path::PathBuf,
     chunk_size: usize,
-    cb: impl FnMut(&[u8]) -> bool + Send + 'static,
+    mut cb: impl FnMut(&[u8]) -> bool,
 ) -> std::io::Result<usize> {
-    tokio::task::spawn_blocking(move || spool_stream_chunks(&path, chunk_size, cb))
-        .await
-        .unwrap_or_else(|_| Err(std::io::Error::other("join error")))
+    let data = crate::utils::uring_fs::read_file(path.display().to_string()).await?;
+    let mut total = 0usize;
+    for chunk in data.chunks(chunk_size.max(1)) {
+        total = total.saturating_add(chunk.len());
+        if !cb(chunk) {
+            break;
+        }
+    }
+    Ok(total)
 }
 
 /// Remove the entire spool directory.  Best-effort; useful for process exit.

@@ -3136,7 +3136,10 @@ impl Page {
             return false;
         }
         let path = crate::utils::html_spool::next_spool_path();
-        if tokio::fs::write(&path, html.as_ref()).await.is_ok() {
+        if crate::utils::html_spool::spool_write_async(&path, html.as_ref())
+            .await
+            .is_ok()
+        {
             let len = html.len();
             self.html = None;
             crate::utils::html_spool::track_bytes_sub(len);
@@ -3183,8 +3186,9 @@ impl Page {
     }
 
     /// Async variant of [`ensure_html_loaded`](Self::ensure_html_loaded).
-    /// Uses `spawn_blocking` so the disk read doesn't block the tokio
-    /// runtime.  Used internally by async crawl paths.
+    /// Routes through `uring_fs` for true kernel-async I/O on Linux;
+    /// falls back to `tokio::fs` on other platforms.  Used internally
+    /// by async crawl paths.
     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
     pub async fn ensure_html_loaded_async(&mut self) -> bool {
         if self.html.is_some() {
@@ -3344,29 +3348,23 @@ impl Page {
             return total;
         }
 
-        // Disk path: async streaming via tokio::fs.
+        // Disk path: single async read via uring_fs, then chunk from memory.
+        // One I/O op instead of N spawn_blocking round-trips per chunk.
         if let Some(ref guard) = self.html_spool_path {
             if let Some(path) = guard.path() {
-                match tokio::fs::File::open(path).await {
-                    Ok(mut file) => {
-                        let mut buf = vec![0u8; chunk_size.max(1)];
-                        let mut total = 0usize;
-                        loop {
-                            match tokio::io::AsyncReadExt::read(&mut file, &mut buf).await {
-                                Ok(0) => break,
-                                Ok(n) => {
-                                    total = total.saturating_add(n);
-                                    if !cb(&buf[..n]) {
-                                        break;
-                                    }
-                                }
-                                Err(_) => break,
-                            }
+                if let Ok(data) =
+                    crate::utils::uring_fs::read_file(path.display().to_string()).await
+                {
+                    let mut total = 0usize;
+                    for chunk in data.chunks(chunk_size.max(1)) {
+                        total = total.saturating_add(chunk.len());
+                        if !cb(chunk) {
+                            break;
                         }
-                        return total;
                     }
-                    Err(_) => return 0,
+                    return total;
                 }
+                return 0;
             }
         }
 
@@ -4051,27 +4049,25 @@ impl Page {
         let mut meta_description: Option<_> = None;
         let mut meta_og_image: Option<_> = None;
 
-        // Peek at the first few bytes to detect XML without reading the whole file.
-        // Use tokio::fs to avoid blocking the runtime.
-        let is_xml = match tokio::fs::File::open(&spool_path).await {
-            Ok(mut f) => {
-                let mut peek = [0u8; 5];
-                matches!(
-                    tokio::io::AsyncReadExt::read_exact(&mut f, &mut peek).await,
-                    Ok(_) if peek.starts_with(b"<?xml")
-                )
-            }
-            Err(_) => false,
-        };
+        // Single async read via uring_fs (true kernel-async on Linux,
+        // tokio::fs fallback elsewhere) — one I/O op instead of N
+        // spawn_blocking round-trips from tokio::fs::File chunked reads.
+        let file_data =
+            match crate::utils::uring_fs::read_file(spool_path.display().to_string()).await {
+                Ok(data) => data,
+                Err(_) => {
+                    if let Some(lp) = links_pages {
+                        let page_links = self.page_links.get_or_insert_with(Default::default);
+                        page_links.extend(lp.into_iter().map(Into::into));
+                    }
+                    return map;
+                }
+            };
 
-        if is_xml {
-            // XML sitemaps are typically small; load fully via async read.
-            if let Ok(bytes) = crate::utils::html_spool::spool_read_async(spool_path.clone()).await
-            {
-                let html = String::from_utf8_lossy(&bytes);
-                self.links_stream_xml_links_stream_base(selectors, &html, &mut map, base)
-                    .await;
-            }
+        if file_data.starts_with(b"<?xml") {
+            let html = String::from_utf8_lossy(&file_data);
+            self.links_stream_xml_links_stream_base(selectors, &html, &mut map, base)
+                .await;
         } else {
             let base_input_url = tokio::sync::OnceCell::new();
 
@@ -4146,43 +4142,22 @@ impl Page {
                 ..lol_html::send::Settings::new_for_handler_types()
             };
 
-            let mut wrote_error = false;
-
             let mut rewriter = lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
 
             let chunk_size = *STREAMING_CHUNK_SIZE;
+            let mut wrote_error = false;
             let mut chunk_idx = 0usize;
 
-            // Stream from disk using tokio async I/O — never holds more
-            // than one chunk in memory and yields to the runtime between
-            // chunks so other tasks can make progress.
-            match tokio::fs::File::open(&spool_path).await {
-                Ok(mut file) => {
-                    let mut buf = vec![0u8; chunk_size];
-                    loop {
-                        match tokio::io::AsyncReadExt::read(&mut file, &mut buf).await {
-                            Ok(0) => break,
-                            Ok(n) => {
-                                if rewriter.write(&buf[..n]).is_err() {
-                                    wrote_error = true;
-                                    break;
-                                }
-                                chunk_idx += 1;
-                                if chunk_idx % REWRITER_YIELD_INTERVAL
-                                    == REWRITER_YIELD_INTERVAL - 1
-                                {
-                                    tokio::task::yield_now().await;
-                                }
-                            }
-                            Err(_) => {
-                                wrote_error = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-                Err(_) => {
+            // Feed chunks from the already-loaded buffer to lol_html,
+            // yielding periodically so other tasks can make progress.
+            for chunk in file_data.chunks(chunk_size) {
+                if rewriter.write(chunk).is_err() {
                     wrote_error = true;
+                    break;
+                }
+                chunk_idx += 1;
+                if chunk_idx % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
+                    tokio::task::yield_now().await;
                 }
             }
 
