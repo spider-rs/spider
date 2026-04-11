@@ -370,22 +370,31 @@ macro_rules! chrome_page_post_process {
                             biased;
                             res = pb_set.join_next() => {
                                 match res {
-                                    Some(Ok(Some(resp))) => {
-                                        pb_trk.record_race(resp.backend_index);
-                                        pb_trk.record_duration(resp.backend_index, resp.duration);
-                                        pb_trk.record_success(resp.backend_index);
-                                        if resp.quality_score > primary_score {
-                                            let better = match &best_alt {
-                                                Some(b) => resp.quality_score > b.quality_score,
-                                                None => true,
-                                            };
-                                            if better { best_alt = Some(resp); }
-                                        }
-                                        if best_alt.as_ref().map_or(false, |b| b.quality_score >= pb_cfg.fast_accept_threshold) {
-                                            break;
+                                    Some(Ok(br)) => {
+                                        let idx = br.backend_index;
+                                        match br.response {
+                                            Some(resp) => {
+                                                pb_trk.record_race(idx);
+                                                pb_trk.record_duration(idx, resp.duration);
+                                                pb_trk.record_success(idx);
+                                                if resp.quality_score > primary_score {
+                                                    let better = match &best_alt {
+                                                        Some(b) => resp.quality_score > b.quality_score,
+                                                        None => true,
+                                                    };
+                                                    if better { best_alt = Some(resp); }
+                                                }
+                                                if best_alt.as_ref().is_some_and(|b| b.quality_score >= pb_cfg.fast_accept_threshold) {
+                                                    break;
+                                                }
+                                            }
+                                            None => {
+                                                pb_trk.record_race(idx);
+                                                pb_trk.record_error(idx);
+                                            }
                                         }
                                     }
-                                    Some(Ok(None)) | Some(Err(_)) => {}
+                                    Some(Err(_)) => {}
                                     None => break,
                                 }
                             }
@@ -6891,6 +6900,7 @@ impl Website {
                                                 #[cfg(feature = "parallel_backends")]
                                                 let pb_crawl_config_ref = pb_crawl_config_chrome.clone();
                                                 #[cfg(feature = "parallel_backends")]
+                                                #[allow(unused_variables)]
                                                 let pb_validator_ref = pb_validator_chrome.clone();
                                                 #[cfg(feature = "parallel_backends")]
                                                 let pb_semaphore_ref = pb_semaphore_chrome.clone();
@@ -7078,9 +7088,15 @@ impl Website {
                                                             result
                                                         };
 
+                                                        #[allow(unused_assignments)]
                                                         match page_opt {
-                                                            Some(page) => chrome_page_post_process!(page, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit),
-                                                            None => Default::default(),
+                                                            Some(page) => chrome_page_post_process!(page, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit, pb_backend_set, pb_config_ref, pb_tracker_ref),
+                                                            None => {
+                                                                // Abort any spawned parallel backend tasks on primary failure.
+                                                                #[cfg(feature = "parallel_backends")]
+                                                                drop(pb_backend_set);
+                                                                Default::default()
+                                                            },
                                                         }
                                                     };
 

@@ -87,13 +87,19 @@ impl HedgeTracker {
             self.ema_ms.store(ms, Ordering::Relaxed);
             self.ema_sq_ms.store(ms_sq, Ordering::Relaxed);
         } else {
-            // EMA with alpha ≈ 0.2 (integer math: new = old * 4/5 + sample * 1/5)
-            let old = self.ema_ms.load(Ordering::Relaxed);
-            self.ema_ms.store((old * 4 + ms) / 5, Ordering::Relaxed);
+            // EMA with alpha ≈ 0.2 (integer math: new = old * 4/5 + sample * 1/5).
+            // CAS loop ensures concurrent record() calls don't lose updates.
+            let _ = self
+                .ema_ms
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |old| {
+                    Some((old * 4 + ms) / 5)
+                });
 
-            let old_sq = self.ema_sq_ms.load(Ordering::Relaxed);
-            self.ema_sq_ms
-                .store((old_sq * 4 + ms_sq) / 5, Ordering::Relaxed);
+            let _ = self
+                .ema_sq_ms
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |old_sq| {
+                    Some((old_sq * 4 + ms_sq) / 5)
+                });
         }
     }
 

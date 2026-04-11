@@ -335,8 +335,12 @@ impl BackendTracker {
             if count <= 1 {
                 s.ema_ms.store(ms, Ordering::Relaxed);
             } else {
-                let old = s.ema_ms.load(Ordering::Relaxed);
-                s.ema_ms.store((old * 4 + ms) / 5, Ordering::Relaxed);
+                // CAS loop ensures concurrent record_duration() calls don't lose updates.
+                let _ = s
+                    .ema_ms
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |old| {
+                        Some((old * 4 + ms) / 5)
+                    });
             }
         }
     }
