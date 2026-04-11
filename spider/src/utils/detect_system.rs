@@ -82,11 +82,12 @@ fn process_memory_pressure_pct() -> u64 {
         std::env::var("SPIDER_MEMORY_PRESSURE_PCT")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(70)
+            .unwrap_or(90) // 90% — high but tolerable, start being selective
     })
 }
 
-/// The critical threshold percentage for process RSS (default 85%).
+/// The critical threshold percentage for process RSS (default 95%).
+/// At this level OOM is imminent — spool aggressively to survive.
 #[cfg(feature = "balance")]
 fn process_memory_critical_pct() -> u64 {
     static VAL: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
@@ -94,7 +95,7 @@ fn process_memory_critical_pct() -> u64 {
         std::env::var("SPIDER_MEMORY_CRITICAL_PCT")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(85)
+            .unwrap_or(95) // 95% — OOM imminent, spool everything
     })
 }
 
@@ -300,12 +301,12 @@ mod tests {
 
     #[test]
     fn test_determine_process_memory_state_all_states() {
-        // Default thresholds: pressure=70, critical=85
+        // Default thresholds: pressure=90, critical=95
         assert_eq!(determine_process_memory_state(0), 0);
-        assert_eq!(determine_process_memory_state(69), 0);
-        assert_eq!(determine_process_memory_state(70), 1);
-        assert_eq!(determine_process_memory_state(84), 1);
-        assert_eq!(determine_process_memory_state(85), 2);
+        assert_eq!(determine_process_memory_state(89), 0);
+        assert_eq!(determine_process_memory_state(90), 1);
+        assert_eq!(determine_process_memory_state(94), 1);
+        assert_eq!(determine_process_memory_state(95), 2);
         assert_eq!(determine_process_memory_state(100), 2);
     }
 

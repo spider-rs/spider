@@ -69,6 +69,9 @@ pub mod trie;
 pub mod uring_fs;
 /// Validate html false positives.
 pub mod validation;
+#[cfg(feature = "balance")]
+/// Lock-free crawl vitals for intelligent scaling (requests, bytes, pages, tabs).
+pub mod vitals;
 #[cfg(feature = "warc")]
 /// WARC 1.1 file writer for web archive output.
 pub mod warc;

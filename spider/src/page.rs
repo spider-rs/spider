@@ -2043,6 +2043,9 @@ impl Page {
             None
         };
 
+        #[cfg(feature = "balance")]
+        crate::utils::vitals::request_start();
+
         let mut page_response: PageResponse = match client.get(url).send().await {
             Ok(res)
                 if crate::utils::valid_parsing_status(&res)
@@ -2333,9 +2336,15 @@ impl Page {
 
                 page_response.error_for_status = Some(Err(err));
 
+                #[cfg(feature = "balance")]
+                crate::utils::vitals::request_error();
+
                 page_response
             }
         };
+
+        #[cfg(feature = "balance")]
+        crate::utils::vitals::request_end();
 
         let valid_meta = meta_title.is_some()
             || meta_description.is_some()

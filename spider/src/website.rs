@@ -13867,10 +13867,15 @@ fn test_spool_decision_logic() {
         !crate::utils::html_spool::should_spool(100),
         "small page should not spool"
     );
-    // Large pages always spool.
+    // Normal-sized pages stay in memory under normal conditions.
     assert!(
-        crate::utils::html_spool::should_spool(4 * 1024 * 1024),
-        "4 MiB page should always spool"
+        !crate::utils::html_spool::should_spool(4 * 1024 * 1024),
+        "4 MiB page should stay in memory under normal conditions"
+    );
+    // Truly massive pages always spool (outsized resources).
+    assert!(
+        crate::utils::html_spool::should_spool(100 * 1024 * 1024),
+        "100 MiB page should always spool"
     );
 }
 

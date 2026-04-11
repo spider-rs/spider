@@ -120,7 +120,7 @@ fn spool_min_size() -> usize {
         std::env::var("SPIDER_HTML_SPOOL_MIN_SIZE")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(16 * 1024)
+            .unwrap_or(64 * 1024) // 64 KiB — never spool small pages
     })
 }
 
@@ -142,28 +142,32 @@ struct SpoolDirHandle {
 
 // ── Configurable thresholds (env-overridable) ──────────────────────────────
 
-/// Base total in-memory HTML budget before pages are spooled.
-/// Default: 512 MiB.  Override: `SPIDER_HTML_MEMORY_BUDGET`.
+/// Hard cap on total in-memory HTML before pages are spooled.
+/// This is an OOM safety net, not a performance optimization — set it
+/// high so normal crawls never hit it.
+/// Default: 2 GiB.  Override: `SPIDER_HTML_MEMORY_BUDGET`.
 fn base_memory_budget() -> usize {
     static VAL: OnceLock<usize> = OnceLock::new();
     *VAL.get_or_init(|| {
         std::env::var("SPIDER_HTML_MEMORY_BUDGET")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(512 * 1024 * 1024)
+            .unwrap_or(2 * 1024 * 1024 * 1024) // 2 GiB
     })
 }
 
-/// Base per-page byte threshold.  Pages larger than the *effective*
-/// threshold are spooled under pressure.  Default: 3 MiB.
-/// Override: `SPIDER_HTML_PAGE_SPOOL_SIZE`.
+/// Per-page byte threshold.  Only truly massive pages (> 80 MiB) are
+/// unconditionally spooled — these are outsized resources that would
+/// dominate the memory budget.  Normal HTML pages (even large ones at
+/// 5-10 MiB) stay in memory for maximum throughput.
+/// Default: 80 MiB.  Override: `SPIDER_HTML_PAGE_SPOOL_SIZE`.
 fn base_per_page_threshold() -> usize {
     static VAL: OnceLock<usize> = OnceLock::new();
     *VAL.get_or_init(|| {
         std::env::var("SPIDER_HTML_PAGE_SPOOL_SIZE")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(3 * 1024 * 1024)
+            .unwrap_or(80 * 1024 * 1024) // 80 MiB
     })
 }
 
@@ -226,53 +230,66 @@ pub fn refresh_cached_mem_state() {
 
 /// Decide whether a page with `html_len` bytes should be spooled to disk.
 ///
-/// **Design principle**: memory is faster than disk.  Only spool when the
-/// memory savings are significant enough to justify the I/O cost.  Small
-/// and medium pages stay in memory even under light pressure.
+/// **Design principle**: memory is *always* faster than disk.  Spooling is
+/// purely a last-resort pressure reliever — it should only engage when
+/// the process is genuinely at risk of running out of memory and the
+/// system cannot absorb the page.  Under normal operation (even heavy
+/// crawls with high RSS) pages stay in memory for maximum throughput.
 ///
-/// **Performance**: designed for the hot path (`channel_send_page`).
-/// Most pages (≤ 256 KiB under normal conditions) stay in memory with
-/// at most 2 atomic loads.
+/// **Key insight**: high memory usage is fine if pages are being consumed
+/// quickly.  Only spool when pressure is real AND the page is large
+/// enough that spooling actually helps.  The budget cap only applies
+/// under pressure — if the OS has memory available, let it be used.
+///
+/// **Performance**: hot path (`channel_send_page`).  Under normal memory
+/// conditions the function exits after one atomic load (mem_state == 0)
+/// with zero disk I/O triggered.
 ///
 /// Decision tree (first match wins):
 ///
-/// 1. Page ≤ `spool_min_size` (16 KiB) → **keep in memory** (always).
-/// 2. Page > per-page threshold (3 MiB) → **spool** (large resource).
-/// 3. **Critical** pressure (state 2) AND page > min → **spool** (emergency).
-/// 4. **Pressure** (state 1) AND page > 256 KiB → **spool** (medium+ only).
-/// 5. Total in-memory HTML exceeds budget → **spool** (budget overflow).
-/// 6. Otherwise → **keep in memory**.
+/// 1. Page ≤ min size (64 KiB) → **keep** (always — I/O cost > savings).
+/// 2. **Normal** (< 90% RSS) → only spool truly massive pages (> threshold).
+/// 3. **Pressure** (90–95% RSS) → spool large pages (> threshold / 4)
+///    OR budget exceeded (memory genuinely filling up).
+/// 4. **Critical** (≥ 95% RSS) → spool everything above min size.
+/// 5. Otherwise → **keep in memory**.
 #[inline]
 pub fn should_spool(html_len: usize) -> bool {
-    // ① Small pages always stay in memory — disk I/O cost > memory saved.
+    // ① Small pages always stay in memory — never worth the I/O.
     if html_len <= spool_min_size() {
         return false;
     }
 
-    // ② Large pages always spool — significant memory savings.
-    if html_len > base_per_page_threshold() {
-        return true;
-    }
+    let threshold = base_per_page_threshold();
 
-    // ③ Check system memory pressure (single atomic load).
+    // ② Check system memory pressure (single atomic load — zero cost).
     let mem_state = CACHED_MEM_STATE.load(Ordering::Relaxed);
 
-    // Critical pressure (≥85% RSS) — spool everything above min size.
-    if mem_state >= 2 {
-        return true;
-    }
+    match mem_state {
+        // Critical (≥95% RSS): OOM imminent — spool everything above min.
+        s if s >= 2 => return true,
 
-    // Pressure (70-85% RSS) — only spool medium+ pages (>256 KiB).
-    // Small pages (16-256 KiB) stay in memory — the disk overhead isn't
-    // worth it for pages this size.
-    if mem_state >= 1 && html_len > 256 * 1024 {
-        return true;
-    }
+        // Pressure (90–95% RSS): spool large pages, or if the budget
+        // is exceeded (memory is genuinely filling up, not just high).
+        s if s >= 1 => {
+            if html_len > threshold / 4 {
+                return true;
+            }
+            // Budget check only under pressure — if the OS has room, let
+            // it be used even if we're over the soft budget.
+            let current = total_bytes_in_memory();
+            if current.saturating_add(html_len) > base_memory_budget() {
+                return true;
+            }
+        }
 
-    // ④ Budget overflow — spool regardless of page size to stay in budget.
-    let current = total_bytes_in_memory();
-    if current.saturating_add(html_len) > base_memory_budget() {
-        return true;
+        // Normal: only spool truly massive outlier pages. Budget is
+        // not enforced — high memory usage is fine when the OS has room.
+        _ => {
+            if html_len > threshold {
+                return true;
+            }
+        }
     }
 
     false
@@ -487,17 +504,18 @@ pub(crate) mod tests {
 
     #[test]
     fn test_should_spool_decision() {
-        // Tiny pages never spool.
+        // Tiny pages never spool (under min size).
         assert!(!should_spool(100));
         assert!(!should_spool(spool_min_size()));
 
-        // Medium pages stay in memory under normal conditions.
-        assert!(!should_spool(64 * 1024)); // 64 KiB — in memory
-        assert!(!should_spool(200 * 1024)); // 200 KiB — in memory
+        // Under normal memory conditions, nothing spools — spooling is
+        // an OOM safety net, not an optimization.
+        assert!(!should_spool(200 * 1024)); // 200 KiB
+        assert!(!should_spool(5 * 1024 * 1024)); // 5 MiB
+        assert!(!should_spool(10 * 1024 * 1024)); // 10 MiB
 
-        // Large pages always spool.
+        // Truly massive pages always spool (outsized resources).
         assert!(should_spool(base_per_page_threshold() + 1));
-        assert!(should_spool(10 * 1024 * 1024));
     }
 
     #[test]
