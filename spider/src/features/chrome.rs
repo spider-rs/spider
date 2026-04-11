@@ -425,6 +425,110 @@ lazy_static! {
     static ref CHROM_BASE: Option<String> = std::env::var("CHROME_URL").ok();
 }
 
+/// Lock-free failover across multiple remote Chrome endpoints.
+///
+/// Tracks per-endpoint consecutive errors with atomics. When an endpoint
+/// exceeds `max_retries` failures it is skipped and the next one is tried.
+/// Once all endpoints have been exhausted, returns `None`.
+///
+/// Zero overhead when only one endpoint is configured (inline fast-path).
+pub struct ChromeConnectionFailover {
+    urls: Vec<String>,
+    /// Per-endpoint consecutive error count.
+    errors: Vec<std::sync::atomic::AtomicU32>,
+    /// Max retries per endpoint before moving to the next.
+    max_retries: u32,
+}
+
+impl ChromeConnectionFailover {
+    /// Create a failover from a list of URLs.
+    pub fn new(urls: Vec<String>, max_retries: u32) -> Self {
+        let errors = urls
+            .iter()
+            .map(|_| std::sync::atomic::AtomicU32::new(0))
+            .collect();
+        Self {
+            urls,
+            errors,
+            max_retries,
+        }
+    }
+
+    /// Try to establish a browser connection, failing over across endpoints.
+    ///
+    /// For each endpoint: retry up to `max_retries` times with backoff.
+    /// If all retries fail, move to the next endpoint. Returns the first
+    /// successful connection or `None` if all endpoints are exhausted.
+    pub async fn connect(
+        &self,
+        config: &Configuration,
+    ) -> Option<(Browser, chromiumoxide::Handler)> {
+        let handler_config_base = create_handler_config(config);
+
+        for (idx, url) in self.urls.iter().enumerate() {
+            let err_count = &self.errors[idx];
+
+            for attempt in 0..=self.max_retries {
+                match Browser::connect_with_config(url.as_str(), handler_config_base.clone()).await
+                {
+                    Ok(pair) => {
+                        // Reset error count on success.
+                        err_count.store(0, std::sync::atomic::Ordering::Relaxed);
+                        if idx > 0 {
+                            log::info!(
+                                "[chrome-failover] connected to endpoint {} ({}) after skipping {}",
+                                idx,
+                                url,
+                                idx
+                            );
+                        }
+                        return Some(pair);
+                    }
+                    Err(e) => {
+                        let n = err_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                        log::warn!(
+                            "[chrome-failover] endpoint {} ({}) attempt {}/{} failed: {:?}",
+                            idx,
+                            url,
+                            attempt + 1,
+                            self.max_retries + 1,
+                            e
+                        );
+                        if attempt < self.max_retries {
+                            let backoff = crate::utils::backoff::backoff_delay(attempt, 100, 5_000);
+                            tokio::time::sleep(backoff).await;
+                        } else {
+                            log::warn!(
+                                "[chrome-failover] endpoint {} exhausted ({} errors), trying next",
+                                idx,
+                                n
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        log::error!(
+            "[chrome-failover] all {} endpoints exhausted",
+            self.urls.len()
+        );
+        None
+    }
+
+    /// Number of endpoints.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.urls.len()
+    }
+
+    /// Whether the failover list is empty.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.urls.is_empty()
+    }
+}
+
 /// Get the default viewport
 #[cfg(not(feature = "real_browser"))]
 pub fn default_viewport() -> Option<chromiumoxide::handler::viewport::Viewport> {
@@ -458,6 +562,15 @@ pub async fn setup_browser_configuration(
 ) -> Option<(Browser, chromiumoxide::Handler)> {
     let proxies = &config.proxies;
 
+    // ── Multi-endpoint failover path (priority) ──
+    if let Some(ref urls) = config.chrome_connection_urls {
+        if !urls.is_empty() {
+            let failover = ChromeConnectionFailover::new(urls.clone(), 3);
+            return failover.connect(config).await;
+        }
+    }
+
+    // ── Single-endpoint path (unchanged behavior) ──
     let chrome_connection = if config.chrome_connection_url.is_some() {
         config.chrome_connection_url.as_ref()
     } else {

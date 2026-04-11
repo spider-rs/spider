@@ -10950,6 +10950,12 @@ impl Website {
         self
     }
 
+    /// Set multiple remote Chrome connection URLs for failover. This method does nothing if the `chrome` is not enabled.
+    pub fn with_chrome_connections(&mut self, urls: Vec<String>) -> &mut Self {
+        self.configuration.with_chrome_connections(urls);
+        self
+    }
+
     /// Set JS to run on certain pages. This method does nothing if the `chrome` is not enabled.
     pub fn with_execution_scripts(
         &mut self,

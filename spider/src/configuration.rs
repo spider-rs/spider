@@ -458,6 +458,11 @@ pub struct Configuration {
     #[cfg(feature = "chrome")]
     /// The chrome connection url. Useful for targeting different headless instances. Defaults to using the env CHROME_URL.
     pub chrome_connection_url: Option<String>,
+    #[cfg(feature = "chrome")]
+    /// Multiple remote Chrome connection URLs for failover. When a connection
+    /// fails after retries, the next URL is tried automatically. Requires the
+    /// `chrome` feature. When set, takes priority over `chrome_connection_url`.
+    pub chrome_connection_urls: Option<Vec<String>>,
     /// Scripts to execute for individual pages, the full path of the url is required for an exact match. This is useful for running one off JS on pages like performing custom login actions.
     #[cfg(feature = "chrome")]
     pub execution_scripts: Option<ExecutionScripts>,
@@ -1624,6 +1629,21 @@ impl Configuration {
     #[cfg(not(feature = "chrome"))]
     /// Set the connection url for the chrome instance. This method does nothing if the `chrome` is not enabled.
     pub fn with_chrome_connection(&mut self, _chrome_connection_url: Option<String>) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "chrome")]
+    /// Set multiple remote Chrome connection URLs for failover. When a
+    /// connection fails after retries, the next URL is tried. Takes
+    /// priority over `chrome_connection_url` when set.
+    pub fn with_chrome_connections(&mut self, urls: Vec<String>) -> &mut Self {
+        self.chrome_connection_urls = if urls.is_empty() { None } else { Some(urls) };
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Set multiple remote Chrome connection URLs. This method does nothing if the `chrome` is not enabled.
+    pub fn with_chrome_connections(&mut self, _urls: Vec<String>) -> &mut Self {
         self
     }
 
