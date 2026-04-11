@@ -243,6 +243,12 @@ pub struct ParallelBackendsConfig {
     /// Works without the `balance` feature. `0` means unlimited.
     /// Default: 256 MiB (268_435_456).
     pub max_backend_bytes_in_flight: usize,
+    /// Hard deadline (ms) for an entire backend fetch (connect + navigate +
+    /// extract). If a backend exceeds this, the task is cancelled and returns
+    /// `None`. Prevents a single stalled backend from blocking the primary
+    /// Chrome result during the grace window. `0` means no outer timeout
+    /// (individual phase timeouts still apply). Default: 30_000 (30s).
+    pub backend_timeout_ms: u64,
 }
 
 #[cfg(feature = "parallel_backends")]
@@ -259,6 +265,7 @@ impl Default for ParallelBackendsConfig {
             max_concurrent_sessions: 8,
             skip_extensions: Vec::new(),
             max_backend_bytes_in_flight: 256 * 1024 * 1024, // 256 MiB
+            backend_timeout_ms: 30_000,
         }
     }
 }

@@ -1084,6 +1084,16 @@ pub fn build_backend_futures(
     }
     let mem_pressure = mem_state >= 1;
 
+    // Hard outer deadline: prevents a stalled backend from blocking the
+    // primary result during the grace window. 0 = disabled (phase timeouts
+    // still apply). Computed once outside the loop — pure Copy value.
+    let outer_timeout = if config.backend_timeout_ms > 0 {
+        Some(Duration::from_millis(config.backend_timeout_ms))
+    } else {
+        None
+    };
+    let backend_timeout_ms_log = config.backend_timeout_ms;
+
     #[allow(unused_mut)]
     let mut futs: Vec<Pin<Box<dyn Future<Output = BackendResult> + Send>>> = Vec::new();
 
@@ -1175,7 +1185,7 @@ pub fn build_backend_futures(
                         None
                     };
                     tokio::time::sleep(Duration::from_micros(jitter_us)).await;
-                    let response = fetch_cdp(
+                    let inner = fetch_cdp(
                         &url,
                         &resolved_endpoint,
                         &cfg,
@@ -1183,8 +1193,21 @@ pub fn build_backend_futures(
                         connect_timeout,
                         proxy,
                         &source,
-                    )
-                    .await;
+                    );
+                    let response =
+                        match outer_timeout {
+                            Some(deadline) => match tokio::time::timeout(deadline, inner).await {
+                                Ok(r) => r,
+                                Err(_) => {
+                                    log::warn!(
+                                    "[parallel_backends] {} backend {} hard timeout ({}ms) for {}",
+                                    source, backend_index, backend_timeout_ms_log, url
+                                );
+                                    None
+                                }
+                            },
+                            None => inner.await,
+                        };
                     BackendResult {
                         backend_index,
                         response,
@@ -1213,7 +1236,7 @@ pub fn build_backend_futures(
                         None
                     };
                     tokio::time::sleep(Duration::from_micros(jitter_us)).await;
-                    let response = fetch_webdriver(
+                    let inner = fetch_webdriver(
                         &url,
                         &resolved_endpoint,
                         &cfg,
@@ -1221,8 +1244,21 @@ pub fn build_backend_futures(
                         connect_timeout,
                         proxy,
                         &source,
-                    )
-                    .await;
+                    );
+                    let response =
+                        match outer_timeout {
+                            Some(deadline) => match tokio::time::timeout(deadline, inner).await {
+                                Ok(r) => r,
+                                Err(_) => {
+                                    log::warn!(
+                                    "[parallel_backends] {} backend {} hard timeout ({}ms) for {}",
+                                    source, backend_index, backend_timeout_ms_log, url
+                                );
+                                    None
+                                }
+                            },
+                            None => inner.await,
+                        };
                     BackendResult {
                         backend_index,
                         response,
