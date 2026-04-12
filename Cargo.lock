@@ -8009,9 +8009,9 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.51.17"
+version = "2.51.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d476510f2b40bdc84dd91312a512b45c10e843d177a7eb3d74e14223ec19dda"
+checksum = "4d0f218a305a4aaf0c7ea944bf2244a04fc7be0f738008acefa1f35e5075ab58"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -8035,8 +8035,9 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_regex",
+ "simdutf8",
  "smallvec",
- "spider_agent_types 2.51.18",
+ "spider_agent_types 2.51.19 (registry+https://github.com/rust-lang/crates.io-index)",
  "spider_fingerprint",
  "string-interner",
  "string_concat",
@@ -8180,9 +8181,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.51.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f51c4c122b9a2dd5c9335e8345b0f3f6264a1f9877e8c17ca32ef0dc5c6f9a2f"
+version = "2.51.19"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8194,6 +8193,8 @@ dependencies = [
 [[package]]
 name = "spider_agent_types"
 version = "2.51.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad34d12895560b236a6de1142c418784b6a68ede95a19bcf53ec910675a498bc"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8271,7 +8272,7 @@ dependencies = [
  "serde_json",
  "spider 2.51.19",
  "spider_transformations",
- "spider_utils 2.51.18",
+ "spider_utils 2.51.19 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -8388,26 +8389,12 @@ dependencies = [
  "phf_codegen 0.11.3",
  "regex",
  "serde",
- "spider 2.51.17",
+ "spider 2.51.18",
  "spider_scraper",
  "tendril",
  "thiserror 1.0.69",
  "unicode-width 0.2.2",
  "url",
-]
-
-[[package]]
-name = "spider_utils"
-version = "2.51.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff90b648aa4986105d85ae7ca94d8f8a5b5df1a903992ad7b35de63b644e8b4a"
-dependencies = [
- "hashbrown 0.16.1",
- "lazy_static",
- "log",
- "spider_scraper",
- "sxd-document",
- "sxd-xpath",
 ]
 
 [[package]]
@@ -8423,6 +8410,20 @@ dependencies = [
  "sxd-document",
  "sxd-xpath",
  "tokio",
+]
+
+[[package]]
+name = "spider_utils"
+version = "2.51.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d3e4fec66e0321d8fd15c6a47c330fbfd2bc0008a56ab619d6b50e220ba6cf9"
+dependencies = [
+ "hashbrown 0.16.1",
+ "lazy_static",
+ "log",
+ "spider_scraper",
+ "sxd-document",
+ "sxd-xpath",
 ]
 
 [[package]]
