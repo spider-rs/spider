@@ -3397,13 +3397,27 @@ impl Page {
             return total;
         }
 
-        // Disk path: true streaming — read one chunk at a time from disk
-        // so the full file is never loaded into memory.
+        // Disk path: on Linux with io_uring use single kernel-async read,
+        // otherwise stream via tokio::fs to keep memory bounded.
         if let Some(ref guard) = self.html_spool_path {
             if let Some(path) = guard.path() {
-                if let Ok(file) = tokio::fs::File::open(path).await {
+                let chunk_size = chunk_size.max(1);
+
+                if crate::utils::uring_fs::is_uring_enabled() {
+                    if let Ok(data) =
+                        crate::utils::uring_fs::read_file(path.display().to_string()).await
+                    {
+                        let mut total = 0usize;
+                        for chunk in data.chunks(chunk_size) {
+                            total = total.saturating_add(chunk.len());
+                            if !cb(chunk) {
+                                break;
+                            }
+                        }
+                        return total;
+                    }
+                } else if let Ok(file) = tokio::fs::File::open(path).await {
                     use tokio::io::AsyncReadExt;
-                    let chunk_size = chunk_size.max(1);
                     let mut reader = tokio::io::BufReader::with_capacity(chunk_size, file);
                     let mut buf = vec![0u8; chunk_size];
                     let mut total = 0usize;
@@ -4217,16 +4231,31 @@ impl Page {
             let mut rewriter = lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
 
             let chunk_size = *STREAMING_CHUNK_SIZE;
+            let mut wrote_error = false;
+            let mut chunk_idx = 0usize;
 
-            // True streaming from disk — read one chunk at a time via
-            // tokio::fs::File so the full file is never in memory.
-            // BufReader batches syscalls internally for efficiency.
-            if let Ok(file) = tokio::fs::File::open(&spool_path).await {
+            // On Linux with io_uring: single kernel-async read (zero
+            // spawn_blocking), then chunk from memory.  Elsewhere: stream
+            // from disk via tokio::fs to keep memory bounded.
+            if crate::utils::uring_fs::is_uring_enabled() {
+                if let Ok(file_data) =
+                    crate::utils::uring_fs::read_file(spool_path.display().to_string()).await
+                {
+                    for chunk in file_data.chunks(chunk_size) {
+                        if rewriter.write(chunk).is_err() {
+                            wrote_error = true;
+                            break;
+                        }
+                        chunk_idx += 1;
+                        if chunk_idx % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
+                            tokio::task::yield_now().await;
+                        }
+                    }
+                }
+            } else if let Ok(file) = tokio::fs::File::open(&spool_path).await {
                 use tokio::io::AsyncReadExt;
                 let mut reader = tokio::io::BufReader::with_capacity(chunk_size, file);
                 let mut buf = vec![0u8; chunk_size];
-                let mut wrote_error = false;
-                let mut chunk_idx = 0usize;
 
                 loop {
                     let n = match reader.read(&mut buf).await {
@@ -4243,10 +4272,10 @@ impl Page {
                         tokio::task::yield_now().await;
                     }
                 }
+            }
 
-                if !wrote_error {
-                    let _ = rewriter.end();
-                }
+            if !wrote_error {
+                let _ = rewriter.end();
             }
         }
 

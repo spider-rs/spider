@@ -106,11 +106,34 @@ impl DnsCache {
         Some(ips)
     }
 
-    /// Batch pre-resolve hostnames concurrently. Best-effort — errors are
-    /// silently ignored.
+    /// Batch pre-resolve hostnames. Best-effort — errors are silently
+    /// ignored.  Resolves concurrently via tokio tasks for parallel DNS.
     pub async fn pre_resolve(&self, hosts: &[&str]) {
+        let mut set = tokio::task::JoinSet::new();
         for &host in hosts {
-            self.resolve(host).await;
+            let host = host.to_string();
+            let ttl = self.ttl;
+            set.spawn(async move {
+                let lookup = async_resolver().lookup_ip(&host).await.ok()?;
+                let ips: Vec<IpAddr> = lookup.iter().collect();
+                if ips.is_empty() {
+                    return None;
+                }
+                let sockaddrs: Vec<SocketAddr> =
+                    ips.iter().map(|ip| SocketAddr::new(*ip, 0)).collect();
+                Some((host, sockaddrs, ips, ttl))
+            });
+        }
+        // Collect results back into the cache on the calling task.
+        while let Some(Ok(Some((host, sockaddrs, ips, ttl)))) = set.join_next().await {
+            self.cache.insert(
+                host,
+                DnsEntry {
+                    sockaddrs: sockaddrs.into(),
+                    addrs: ips,
+                    expires: Instant::now() + ttl,
+                },
+            );
         }
     }
 
