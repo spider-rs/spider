@@ -4633,8 +4633,13 @@ impl Page {
         // loading full bytes, then skip the HTML rewriter path entirely.
         if self.is_xml {
             if let Some(html_bytes_taken) = self.html.take() {
-                self.links_stream_xml_links_stream_base(selectors, html_bytes_taken.as_ref(), &mut map, &base)
-                    .await;
+                self.links_stream_xml_links_stream_base(
+                    selectors,
+                    html_bytes_taken.as_ref(),
+                    &mut map,
+                    &base,
+                )
+                .await;
                 self.html = Some(html_bytes_taken);
             } else {
                 #[cfg(all(feature = "balance", not(feature = "decentralized")))]
@@ -5106,8 +5111,13 @@ impl Page {
 
         if self.is_xml {
             if let Some(html_bytes_taken) = self.html.take() {
-                self.links_stream_xml_links_stream_base(selectors, html_bytes_taken.as_ref(), &mut map, &base)
-                    .await;
+                self.links_stream_xml_links_stream_base(
+                    selectors,
+                    html_bytes_taken.as_ref(),
+                    &mut map,
+                    base,
+                )
+                .await;
                 self.html = Some(html_bytes_taken);
             } else {
                 #[cfg(all(feature = "balance", not(feature = "decentralized")))]
@@ -5118,7 +5128,7 @@ impl Page {
                                 selectors,
                                 &disk_bytes,
                                 &mut map,
-                                &base,
+                                base,
                             )
                             .await;
                         }
@@ -5367,7 +5377,7 @@ impl Page {
                 if score >= SMART_UPGRADE_THRESHOLD {
                     if let Some(browser_controller) = browser
                         .get_or_init(|| {
-                            crate::website::Website::setup_browser_base(&configuration, &base, jar)
+                            crate::website::Website::setup_browser_base(configuration, base, jar)
                         })
                         .await
                     {
@@ -5386,11 +5396,11 @@ impl Page {
                                     configuration.chrome_intercept.enabled,
                                     &configuration.auth_challenge_response,
                                     configuration.chrome_intercept.block_visuals,
-                                    &parent_host,
+                                    parent_host,
                                 ),
                                 crate::features::chrome::setup_chrome_events(
                                     &new_page,
-                                    &configuration,
+                                    configuration,
                                 )
                             );
 
@@ -5401,12 +5411,12 @@ impl Page {
                                             crate::features::chrome::seed_jar_from_cookie_header(
                                                 cookie_jar,
                                                 &configuration.cookie_str,
-                                                &u,
+                                                u,
                                             );
                                     }
 
                                     if let Ok(cps) = crate::features::chrome::cookie_params_from_jar(
-                                        cookie_jar, &u,
+                                        cookie_jar, u,
                                     ) {
                                         let _ = crate::features::chrome::set_page_cookies(
                                             &new_page, cps,
@@ -5558,8 +5568,13 @@ impl Page {
 
         if self.is_xml {
             if let Some(html_bytes_taken) = self.html.take() {
-                self.links_stream_xml_links_stream_base(selectors, html_bytes_taken.as_ref(), &mut map, base)
-                    .await;
+                self.links_stream_xml_links_stream_base(
+                    selectors,
+                    html_bytes_taken.as_ref(),
+                    &mut map,
+                    base,
+                )
+                .await;
                 self.html = Some(html_bytes_taken);
             } else {
                 #[cfg(all(feature = "balance", not(feature = "decentralized")))]
@@ -5847,7 +5862,7 @@ impl Page {
                     return Default::default();
                 }
                 self.links_stream_smart::<CaseInsensitiveString>(
-                    &selectors,
+                    selectors,
                     configuration,
                     base,
                     page,

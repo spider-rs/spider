@@ -3241,10 +3241,10 @@ impl Website {
 
         if page.is_xml {
             if let Some(xml_bytes) = page.html.take() {
-                    page.links_stream_xml_links_stream_base(base, &xml_bytes, &mut links, &None)
-                        .await;
-                    page.html = Some(xml_bytes);
-                }
+                page.links_stream_xml_links_stream_base(base, &xml_bytes, &mut links, &None)
+                    .await;
+                page.html = Some(xml_bytes);
+            }
         }
 
         emit_log(url);
@@ -3344,7 +3344,12 @@ impl Website {
                     if !skip {
                         if let Some(html_bytes) = seeded_page.html.take() {
                             let extracted_links: HashSet<CaseInsensitiveString> = seeded_page
-                                .links_stream_base_ssg(base, &html_bytes, client, &self.domain_parsed)
+                                .links_stream_base_ssg(
+                                    base,
+                                    &html_bytes,
+                                    client,
+                                    &self.domain_parsed,
+                                )
                                 .await;
                             seeded_page.html = Some(html_bytes);
                             links.extend(extracted_links);
@@ -4826,7 +4831,7 @@ impl Website {
     pub async fn crawl_establish_smart(
         &mut self,
         client: &Client,
-        mut base: &mut RelativeSelectors,
+        base: &mut RelativeSelectors,
         browser: &crate::features::chrome::OnceBrowser,
     ) -> HashSet<CaseInsensitiveString> {
         if self.skip_initial {
@@ -4834,7 +4839,7 @@ impl Website {
         }
 
         let links: HashSet<CaseInsensitiveString> = if self
-            .is_allowed_default(&self.get_base_link())
+            .is_allowed_default(self.get_base_link())
             .eq(&ProcessLinkStatus::Allowed)
         {
             let url = self.url.inner();
@@ -4843,8 +4848,8 @@ impl Website {
                 seeded_page
             } else {
                 Page::new_page_with_cache(
-                    &url,
-                    &client,
+                    url,
+                    client,
                     self.configuration.get_cache_options(),
                     &self.configuration.cache_policy,
                     self.configuration.cache_namespace_str(),
@@ -4879,7 +4884,7 @@ impl Website {
                         } else {
                             let next_page = Page::new_page_with_cache(
                                 url,
-                                &client,
+                                client,
                                 self.configuration.get_cache_options(),
                                 &self.configuration.cache_policy,
                                 self.configuration.cache_namespace_str(),
@@ -4892,27 +4897,25 @@ impl Website {
                     {
                         log::warn!("backoff timeout {elasped}");
                     }
+                } else if retry_count.is_power_of_two() || client_error {
+                    Website::render_chrome_page(
+                        &self.configuration,
+                        client,
+                        &mut page,
+                        url,
+                        &self.domain_parsed,
+                        browser,
+                    )
+                    .await
                 } else {
-                    if retry_count.is_power_of_two() || client_error {
-                        Website::render_chrome_page(
-                            &self.configuration,
-                            client,
-                            &mut page,
-                            url,
-                            &self.domain_parsed,
-                            browser,
-                        )
-                        .await
-                    } else {
-                        page = Page::new_page_with_cache(
-                            url,
-                            &client,
-                            self.configuration.get_cache_options(),
-                            &self.configuration.cache_policy,
-                            self.configuration.cache_namespace_str(),
-                        )
-                        .await;
-                    }
+                    page = Page::new_page_with_cache(
+                        url,
+                        client,
+                        self.configuration.get_cache_options(),
+                        &self.configuration.cache_policy,
+                        self.configuration.cache_namespace_str(),
+                    )
+                    .await;
                 }
             }
 
@@ -4922,10 +4925,10 @@ impl Website {
                     (Default::default(), None)
                 } else {
                     page.smart_links(
-                        &base,
+                        base,
                         &self.configuration,
                         &self.domain_parsed,
-                        &browser,
+                        browser,
                         Some(&self.cookie_jar),
                     )
                     .await
@@ -4938,12 +4941,12 @@ impl Website {
                     domain,
                     &mut self.domain_parsed,
                     &mut self.url,
-                    &mut base,
+                    base,
                     AllowedDomainTypes::new(self.configuration.subdomains, self.configuration.tld),
                 );
             }
 
-            emit_log(&self.url.inner());
+            emit_log(self.url.inner());
 
             if let Some(sid) = page.signature {
                 self.insert_signature(sid).await;
@@ -5013,7 +5016,7 @@ impl Website {
         browser: &crate::features::chrome::OnceBrowser,
     ) {
         if let Some(browser_controller) = browser
-            .get_or_init(|| crate::website::Website::setup_browser_base(&config, &base, None))
+            .get_or_init(|| crate::website::Website::setup_browser_base(config, base, None))
             .await
         {
             if let Ok(chrome_page) = crate::features::chrome::attempt_navigation(
@@ -5026,19 +5029,19 @@ impl Website {
             .await
             {
                 let (_, intercept_handle) = tokio::join!(
-                    crate::features::chrome::setup_chrome_events(&chrome_page, &config),
+                    crate::features::chrome::setup_chrome_events(&chrome_page, config),
                     crate::features::chrome::setup_chrome_interception_base(
                         &chrome_page,
                         config.chrome_intercept.enabled,
                         &config.auth_challenge_response,
                         config.chrome_intercept.block_visuals,
-                        &url,
+                        url,
                     )
                 );
 
                 let next_page = Page::new(
-                    &url,
-                    &client,
+                    url,
+                    client,
                     &chrome_page,
                     &config.wait_for,
                     &config.screenshot,
@@ -8860,7 +8863,7 @@ impl Website {
         ) = self.setup_selectors();
 
         if self.single_page() {
-            self.crawl_establish_smart(&client, &mut selectors, &browser)
+            self.crawl_establish_smart(client, &mut selectors, &browser)
                 .await;
             self.subscription_guard().await;
         } else {
@@ -8873,7 +8876,7 @@ impl Website {
             let return_page_links = self.configuration.return_page_links;
 
             links.extend(
-                self.crawl_establish_smart(&client, &mut selectors, &browser)
+                self.crawl_establish_smart(client, &mut selectors, &browser)
                     .await,
             );
 
@@ -8894,7 +8897,7 @@ impl Website {
                 self.cookie_jar.clone(),
             ));
 
-            let add_external = self.configuration.external_domains_caseless.len() > 0;
+            let add_external = !self.configuration.external_domains_caseless.is_empty();
             let mut exceeded_budget = false;
             let concurrency = throttle.is_zero();
 
@@ -8928,7 +8931,7 @@ impl Website {
                                     handle,
                                     &mut interval,
                                     async {
-                                        emit_log_shutdown(&link.inner());
+                                        emit_log_shutdown(link.inner());
                                         let permits = set.len();
                                         set.shutdown().await;
                                         semaphore.add_permits(permits);
@@ -8950,7 +8953,7 @@ impl Website {
                                 continue;
                             }
 
-                            emit_log(&link.inner());
+                            emit_log(link.inner());
                             self.insert_link(&link).await;
 
                             if !concurrency {
@@ -8968,7 +8971,7 @@ impl Website {
 
                                     let url = link_result.0.as_ref();
                                     let mut page = Page::new_page_with_cache(
-                                        &url,
+                                        url,
                                         &shared.0,
                                         shared.4.get_cache_options(),
                                         &shared.4.cache_policy,
@@ -9017,26 +9020,23 @@ impl Website {
                                             break;
                                         }
 
+                                        } else if retry_count.is_power_of_two() {
+                                            Website::render_chrome_page(
+                                                &shared.4, &shared.0,
+                                                &mut page, url,
+                                                &shared.5,
+                                                &shared.6,
+                                            )
+                                            .await;
                                         } else {
-
-                                            if retry_count.is_power_of_two() {
-                                                Website::render_chrome_page(
-                                                    &shared.4, &shared.0,
-                                                    &mut page, url,
-                                                    &shared.5,
-                                                    &shared.6,
+                                            page = Page::new_page_with_cache(
+                                                    url,
+                                                    &shared.0,
+                                                    shared.4.get_cache_options(),
+                                                    &shared.4.cache_policy,
+                                            shared.4.cache_namespace_str(),
                                                 )
-                                                .await;
-                                            } else {
-                                                page = Page::new_page_with_cache(
-                                                        url,
-                                                        &shared.0,
-                                                        shared.4.get_cache_options(),
-                                                        &shared.4.cache_policy,
-                                                shared.4.cache_namespace_str(),
-                                                    )
-                                                        .await;
-                                            }
+                                                    .await;
                                         }
                                     }
 
@@ -9070,7 +9070,7 @@ impl Website {
                                     page.bytes_transferred = bytes_transferred;
 
                                     if shared.4.normalize {
-                                        page.signature.replace(crate::utils::hash_html(&page.get_html_bytes_u8()).await);
+                                        page.signature.replace(crate::utils::hash_html(page.get_html_bytes_u8()).await);
                                     }
 
                                     // Run remote multimodal extraction if configured (smart HTTP path)
