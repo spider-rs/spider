@@ -6265,6 +6265,12 @@ impl Website {
 
                                     let external_domains_caseless = &shared.3;
 
+                                    // Track whether the select!-based race ran so the
+                                    // downstream collection phase can skip its redundant
+                                    // grace-period loop and stat recording.
+                                    #[allow(unused_mut, unused_assignments)]
+                                    let mut pb_race_active = false;
+
                                     // Hedge-enabled path: race primary vs delayed hedge on different proxy
                                     #[cfg(feature = "hedge")]
                                     let (mut page, mut links, mut links_pages) = {
@@ -6409,12 +6415,11 @@ impl Website {
                                         // this is the core hedging value (a slow primary no longer
                                         // blocks the response).
                                         #[cfg(feature = "parallel_backends")]
-                                        let pb_race_active = pb_backend_set.is_some()
-                                            && pb_config_ref.as_ref().is_some_and(|c| c.enabled)
-                                            && pb_tracker_ref.is_some();
-
-                                        #[cfg(not(feature = "parallel_backends"))]
-                                        let pb_race_active = false;
+                                        {
+                                            pb_race_active = pb_backend_set.is_some()
+                                                && pb_config_ref.as_ref().is_some_and(|c| c.enabled)
+                                                && pb_tracker_ref.is_some();
+                                        }
 
                                         if pb_race_active {
                                             #[cfg(feature = "parallel_backends")]
@@ -6604,95 +6609,108 @@ impl Website {
 
                                     // ── Parallel backends: collect concurrent results ──
                                     //
-                                    // Backend futures were spawned BEFORE the primary fetch
-                                    // (see pb_backend_set above) and ran concurrently. Now
-                                    // we check if any produced a higher-quality result.
+                                    // When the race loop already ran (pb_race_active), primary
+                                    // stats are recorded and backends below threshold were
+                                    // drained. Just abort stragglers and tag the page.
+                                    // When the race loop did NOT run (hedge path, or PB
+                                    // disabled at runtime), fall through to the legacy
+                                    // grace-period collection.
                                     #[cfg(feature = "parallel_backends")]
                                     if let Some(ref mut pb_set) = pb_backend_set {
                                         if let (Some(ref pb_cfg), Some(ref pb_trk)) =
                                             (&pb_config_ref, &pb_tracker_ref)
                                         {
-                                            let primary_score = crate::utils::parallel_backends::html_quality_score_validated(
-                                                page.get_bytes(),
-                                                page.status_code,
-                                                &page.anti_bot_tech,
-                                                target_url,
-                                                "primary",
-                                                pb_validator_ref.as_ref(),
-                                            );
-                                            pb_trk.record_race(0);
-                                            pb_trk.record_success(0);
-
-                                            if primary_score < pb_cfg.fast_accept_threshold {
-                                                let grace = std::time::Duration::from_millis(pb_cfg.grace_period_ms);
-                                                let deadline = tokio::time::Instant::now() + grace;
-                                                let mut best_alt: Option<crate::utils::parallel_backends::BackendResponse> = None;
-
-                                                loop {
-                                                    tokio::select! {
-                                                        biased;
-                                                        res = pb_set.join_next() => {
-                                                            match res {
-                                                                Some(Ok(br)) => {
-                                                                    let idx = br.backend_index;
-                                                                    match br.response {
-                                                                        Some(resp) => {
-                                                                            pb_trk.record_race(idx);
-                                                                            pb_trk.record_duration(idx, resp.duration);
-                                                                            pb_trk.record_success(idx);
-                                                                            if resp.quality_score > primary_score {
-                                                                                let better = match &best_alt {
-                                                                                    Some(b) => resp.quality_score > b.quality_score,
-                                                                                    None => true,
-                                                                                };
-                                                                                if better {
-                                                                                    best_alt = Some(resp);
-                                                                                }
-                                                                            }
-                                                                            if best_alt.as_ref().is_some_and(|b| {
-                                                                                b.quality_score >= pb_cfg.fast_accept_threshold
-                                                                            }) {
-                                                                                break;
-                                                                            }
-                                                                        }
-                                                                        None => {
-                                                                            pb_trk.record_race(idx);
-                                                                            pb_trk.record_error(idx);
-                                                                        }
-                                                                    }
-                                                                }
-                                                                Some(Err(_)) => {}
-                                                                None => break,
-                                                            }
-                                                        }
-                                                        _ = tokio::time::sleep_until(deadline) => break,
-                                                    }
-                                                }
-
-                                                pb_set.abort_all();
-
-                                                if let Some(winner) = best_alt {
-                                                    log::info!("[parallel_backends] backend {} won for {} (score={}, primary_score={})",
-                                                        winner.backend_index, target_url, winner.quality_score, primary_score);
-                                                    pb_trk.record_win(winner.backend_index);
-                                                    page = winner.page;
-                                                    page.set_url_parsed_direct();
-                                                    let page_base = page.base.take().map(Box::new);
-                                                    let new_links = if shared.6 {
-                                                        page.links_full(&shared.1, &page_base).await
-                                                    } else {
-                                                        page.links(&shared.1, &page_base).await
-                                                    };
-                                                    page.base = page_base.map(|b| *b);
-                                                    links = new_links;
-                                                } else {
-                                                    pb_trk.record_win(0);
-                                                    crate::utils::parallel_backends::tag_page_source(&mut page, "primary");
-                                                }
-                                            } else {
+                                            if pb_race_active {
+                                                // Race loop already handled stats + quality
+                                                // comparison. Just clean up remaining tasks.
                                                 pb_set.abort_all();
                                                 pb_trk.record_win(0);
                                                 crate::utils::parallel_backends::tag_page_source(&mut page, "primary");
+                                            } else {
+                                                // Legacy path (hedge feature or runtime-disabled
+                                                // race): score primary, grace-period collect.
+                                                let primary_score = crate::utils::parallel_backends::html_quality_score_validated(
+                                                    page.get_bytes(),
+                                                    page.status_code,
+                                                    &page.anti_bot_tech,
+                                                    target_url,
+                                                    "primary",
+                                                    pb_validator_ref.as_ref(),
+                                                );
+                                                pb_trk.record_race(0);
+                                                pb_trk.record_success(0);
+
+                                                if primary_score < pb_cfg.fast_accept_threshold {
+                                                    let grace = std::time::Duration::from_millis(pb_cfg.grace_period_ms);
+                                                    let deadline = tokio::time::Instant::now() + grace;
+                                                    let mut best_alt: Option<crate::utils::parallel_backends::BackendResponse> = None;
+
+                                                    loop {
+                                                        tokio::select! {
+                                                            biased;
+                                                            res = pb_set.join_next() => {
+                                                                match res {
+                                                                    Some(Ok(br)) => {
+                                                                        let idx = br.backend_index;
+                                                                        match br.response {
+                                                                            Some(resp) => {
+                                                                                pb_trk.record_race(idx);
+                                                                                pb_trk.record_duration(idx, resp.duration);
+                                                                                pb_trk.record_success(idx);
+                                                                                if resp.quality_score > primary_score {
+                                                                                    let better = match &best_alt {
+                                                                                        Some(b) => resp.quality_score > b.quality_score,
+                                                                                        None => true,
+                                                                                    };
+                                                                                    if better {
+                                                                                        best_alt = Some(resp);
+                                                                                    }
+                                                                                }
+                                                                                if best_alt.as_ref().is_some_and(|b| {
+                                                                                    b.quality_score >= pb_cfg.fast_accept_threshold
+                                                                                }) {
+                                                                                    break;
+                                                                                }
+                                                                            }
+                                                                            None => {
+                                                                                pb_trk.record_race(idx);
+                                                                                pb_trk.record_error(idx);
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    Some(Err(_)) => {}
+                                                                    None => break,
+                                                                }
+                                                            }
+                                                            _ = tokio::time::sleep_until(deadline) => break,
+                                                        }
+                                                    }
+
+                                                    pb_set.abort_all();
+
+                                                    if let Some(winner) = best_alt {
+                                                        log::info!("[parallel_backends] backend {} won for {} (score={}, primary_score={})",
+                                                            winner.backend_index, target_url, winner.quality_score, primary_score);
+                                                        pb_trk.record_win(winner.backend_index);
+                                                        page = winner.page;
+                                                        page.set_url_parsed_direct();
+                                                        let page_base = page.base.take().map(Box::new);
+                                                        let new_links = if shared.6 {
+                                                            page.links_full(&shared.1, &page_base).await
+                                                        } else {
+                                                            page.links(&shared.1, &page_base).await
+                                                        };
+                                                        page.base = page_base.map(|b| *b);
+                                                        links = new_links;
+                                                    } else {
+                                                        pb_trk.record_win(0);
+                                                        crate::utils::parallel_backends::tag_page_source(&mut page, "primary");
+                                                    }
+                                                } else {
+                                                    pb_set.abort_all();
+                                                    pb_trk.record_win(0);
+                                                    crate::utils::parallel_backends::tag_page_source(&mut page, "primary");
+                                                }
                                             }
                                         }
                                     }
