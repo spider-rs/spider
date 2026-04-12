@@ -884,7 +884,7 @@ dependencies = [
  "hyper 0.14.32",
  "hyper 1.9.0",
  "hyper-rustls 0.24.2",
- "hyper-rustls 0.27.7",
+ "hyper-rustls 0.27.8",
  "hyper-util",
  "pin-project-lite",
  "rustls 0.21.12",
@@ -4234,16 +4234,15 @@ dependencies = [
 
 [[package]]
 name = "hyper-rustls"
-version = "0.27.7"
+version = "0.27.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3c93eb611681b207e1fe55d5a71ecf91572ec8a6705cdb6857f7d8d5242cf58"
+checksum = "c2b52f86d1d4bc0d6b4e6826d960b1b333217e07d36b882dca570a5e1c48895b"
 dependencies = [
  "http 1.4.0",
  "hyper 1.9.0",
  "hyper-util",
  "rustls 0.23.37",
  "rustls-native-certs",
- "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.26.4",
  "tower-service",
@@ -4953,9 +4952,9 @@ dependencies = [
 
 [[package]]
 name = "llm_models_spider"
-version = "0.1.71"
+version = "0.1.72"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a22b59531cd41f5a9621600a48651ec6e02fbe53d34efae19e1608125145d76e"
+checksum = "74c2d3e017c12b0e479a4ecaec6b811ac100a52820c585f199bd5b0c0774695e"
 
 [[package]]
 name = "llm_readability"
@@ -6240,9 +6239,9 @@ dependencies = [
 
 [[package]]
 name = "pkg-config"
-version = "0.3.32"
+version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
+checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "plain"
@@ -6995,7 +6994,7 @@ dependencies = [
  "http-body 1.0.1",
  "http-body-util",
  "hyper 1.9.0",
- "hyper-rustls 0.27.7",
+ "hyper-rustls 0.27.8",
  "hyper-tls",
  "hyper-util",
  "js-sys",
@@ -7047,7 +7046,7 @@ dependencies = [
  "http-body 1.0.1",
  "http-body-util",
  "hyper 1.9.0",
- "hyper-rustls 0.27.7",
+ "hyper-rustls 0.27.8",
  "hyper-tls",
  "hyper-util",
  "js-sys",
@@ -8009,9 +8008,9 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.51.19"
+version = "2.51.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66f370e3fd992683602d0207c51bee504dac0e53d8a6ca4136807e469b36e36c"
+checksum = "4e4fa66823a9381c456bcc1a49a013df50257136453f588b94cb8cb8417b33f6"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -8037,7 +8036,7 @@ dependencies = [
  "serde_regex",
  "simdutf8",
  "smallvec",
- "spider_agent_types 2.51.20",
+ "spider_agent_types 2.51.21 (registry+https://github.com/rust-lang/crates.io-index)",
  "spider_fingerprint",
  "string-interner",
  "string_concat",
@@ -8181,9 +8180,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.51.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3af9f3e1c39ab5c43681f4086ddef0b1cc02dab7f6af01024e9957122ae4f363"
+version = "2.51.21"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8195,6 +8192,8 @@ dependencies = [
 [[package]]
 name = "spider_agent_types"
 version = "2.51.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d0290365637ac0f6146f5bc0e688482de6f450536f7197c10bfea18c2ddef18"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8272,7 +8271,7 @@ dependencies = [
  "serde_json",
  "spider 2.51.21",
  "spider_transformations",
- "spider_utils 2.51.20",
+ "spider_utils 2.51.21 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -8389,26 +8388,12 @@ dependencies = [
  "phf_codegen 0.11.3",
  "regex",
  "serde",
- "spider 2.51.19",
+ "spider 2.51.20",
  "spider_scraper",
  "tendril",
  "thiserror 1.0.69",
  "unicode-width 0.2.2",
  "url",
-]
-
-[[package]]
-name = "spider_utils"
-version = "2.51.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0ac831065dd874893c3d06b78aa4b071fca6ea45986a416652c8e262f92e765"
-dependencies = [
- "hashbrown 0.16.1",
- "lazy_static",
- "log",
- "spider_scraper",
- "sxd-document",
- "sxd-xpath",
 ]
 
 [[package]]
@@ -8424,6 +8409,20 @@ dependencies = [
  "sxd-document",
  "sxd-xpath",
  "tokio",
+]
+
+[[package]]
+name = "spider_utils"
+version = "2.51.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4b67ada13402c25263ef078602196bab69a6ba0b8c0db6a404330f5a3c7a431"
+dependencies = [
+ "hashbrown 0.16.1",
+ "lazy_static",
+ "log",
+ "spider_scraper",
+ "sxd-document",
+ "sxd-xpath",
 ]
 
 [[package]]
