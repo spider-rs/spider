@@ -11649,18 +11649,20 @@ impl ChannelGuard {
         )))
     }
     /// Lock the channel until complete. This is only used for when storing the chrome page outside.
+    ///
+    /// Waits until consumed count (`.2`) has caught up to sent count (`.1`).
+    /// Both counters grow monotonically so this is safe to call repeatedly
+    /// across multiple crawl iterations.
     pub(crate) async fn lock(&self) {
         if self.0 .0.load(Ordering::Relaxed) {
-            let old = self.0 .1.load(Ordering::Relaxed);
+            let sent = self.0 .1.load(Ordering::Acquire);
 
-            while self
-                .0
-                 .2
-                .compare_exchange_weak(old, 0, Ordering::Acquire, Ordering::Relaxed)
-                .is_err()
-            {
+            // Spin until all sent pages have been consumed.
+            // Both counters are monotonically increasing — no reset needed.
+            while self.0 .2.load(Ordering::Acquire) < sent {
                 tokio::task::yield_now().await;
             }
+
             std::sync::atomic::fence(Ordering::Acquire);
         }
     }
@@ -13986,4 +13988,79 @@ async fn test_spool_subscription_stream_from_disk() {
     assert_eq!(received, 10, "should receive all 10 pages");
 
     website.unsubscribe();
+}
+
+/// Verify that ChannelGuard::lock() completes correctly when called
+/// multiple times — counters are monotonic and never reset.
+#[cfg(all(test, feature = "sync"))]
+#[tokio::test]
+async fn test_channel_guard_repeated_lock() {
+    let guard = ChannelGuard::new();
+
+    // Simulate first batch: send 3 pages.
+    for _ in 0..3 {
+        ChannelGuard::inc_guard(&guard.0 .1);
+    }
+    // Consume 3 pages.
+    let mut g = guard.clone();
+    for _ in 0..3 {
+        g.inc();
+    }
+    // First lock should resolve immediately.
+    tokio::time::timeout(std::time::Duration::from_millis(100), guard.lock())
+        .await
+        .expect("first lock should not timeout");
+
+    // Simulate second batch: send 2 more pages (counters keep growing).
+    for _ in 0..2 {
+        ChannelGuard::inc_guard(&guard.0 .1);
+    }
+    assert_eq!(guard.0 .1.load(Ordering::Relaxed), 5, "sent = 5 cumulative");
+
+    // Consume 2 more pages.
+    for _ in 0..2 {
+        g.inc();
+    }
+    assert_eq!(guard.0 .2.load(Ordering::Relaxed), 5, "consumed = 5 cumulative");
+
+    // Second lock must also resolve — this was a livelock before the fix.
+    tokio::time::timeout(std::time::Duration::from_millis(100), guard.lock())
+        .await
+        .expect("second lock should not timeout (livelock regression)");
+}
+
+/// Verify lock() returns immediately when no pages were sent.
+#[cfg(all(test, feature = "sync"))]
+#[tokio::test]
+async fn test_channel_guard_lock_empty() {
+    let guard = ChannelGuard::new();
+    tokio::time::timeout(std::time::Duration::from_millis(50), guard.lock())
+        .await
+        .expect("lock on empty guard should return immediately");
+}
+
+/// Verify lock() waits for consumers then resolves.
+#[cfg(all(test, feature = "sync"))]
+#[tokio::test]
+async fn test_channel_guard_lock_waits_for_consumers() {
+    let guard = ChannelGuard::new();
+    let mut g = guard.clone();
+
+    // Send 2 pages.
+    ChannelGuard::inc_guard(&guard.0 .1);
+    ChannelGuard::inc_guard(&guard.0 .1);
+
+    // lock() should NOT resolve yet (0 consumed, 2 sent).
+    let result =
+        tokio::time::timeout(std::time::Duration::from_millis(50), guard.lock()).await;
+    assert!(result.is_err(), "lock should timeout while consumers are behind");
+
+    // Consume both.
+    g.inc();
+    g.inc();
+
+    // Now lock() should resolve.
+    tokio::time::timeout(std::time::Duration::from_millis(100), guard.lock())
+        .await
+        .expect("lock should resolve after all pages consumed");
 }
