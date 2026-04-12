@@ -405,44 +405,14 @@ pub async fn spool_write_async(path: &Path, data: &[u8]) -> std::io::Result<()> 
 }
 
 /// Async streaming read of a spool file in chunks.
-/// On Linux with io_uring: single kernel-async read, then chunks from
-/// memory (zero spawn_blocking).  Elsewhere: streams via tokio::fs to
-/// keep memory bounded.
+/// Delegates to [`uring_fs::read_file_chunked`] which picks the
+/// optimal strategy per platform (io_uring or tokio::fs streaming).
 pub async fn spool_stream_chunks_async(
     path: std::path::PathBuf,
     chunk_size: usize,
-    mut cb: impl FnMut(&[u8]) -> bool,
+    cb: impl FnMut(&[u8]) -> bool,
 ) -> std::io::Result<usize> {
-    let chunk_size = chunk_size.max(1);
-
-    if crate::utils::uring_fs::is_uring_enabled() {
-        let data = crate::utils::uring_fs::read_file(path.display().to_string()).await?;
-        let mut total = 0usize;
-        for chunk in data.chunks(chunk_size) {
-            total = total.saturating_add(chunk.len());
-            if !cb(chunk) {
-                break;
-            }
-        }
-        return Ok(total);
-    }
-
-    use tokio::io::AsyncReadExt;
-    let file = tokio::fs::File::open(&path).await?;
-    let mut reader = tokio::io::BufReader::with_capacity(chunk_size, file);
-    let mut buf = vec![0u8; chunk_size];
-    let mut total = 0usize;
-    loop {
-        let n = reader.read(&mut buf).await?;
-        if n == 0 {
-            break;
-        }
-        total = total.saturating_add(n);
-        if !cb(&buf[..n]) {
-            break;
-        }
-    }
-    Ok(total)
+    crate::utils::uring_fs::read_file_chunked(path.display().to_string(), chunk_size, cb).await
 }
 
 /// Remove the entire spool directory.  Best-effort; useful for process exit.

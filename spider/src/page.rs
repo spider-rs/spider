@@ -3397,50 +3397,25 @@ impl Page {
             return total;
         }
 
-        // Disk path: prefer io_uring (single kernel-async read, zero
-        // spawn_blocking) with tokio::fs fallback.  Only entered when
+        // Disk path: unified read — io_uring fast path on Linux,
+        // tokio::fs streaming fallback elsewhere.  Only entered when
         // the page's HTML is spooled to disk.
         if let Some(ref guard) = self.html_spool_path {
             if let Some(path) = guard.path() {
                 let chunk_size = chunk_size.max(1);
+                let mut total = 0usize;
 
-                let file_data = if crate::utils::uring_fs::is_uring_enabled() {
-                    crate::utils::uring_fs::read_file(path.display().to_string())
-                        .await
-                        .ok()
-                } else {
-                    None
-                };
-
-                if let Some(data) = file_data {
-                    let mut total = 0usize;
-                    for chunk in data.chunks(chunk_size) {
+                let _ = crate::utils::uring_fs::read_file_chunked(
+                    path.display().to_string(),
+                    chunk_size,
+                    |chunk| {
                         total = total.saturating_add(chunk.len());
-                        if !cb(chunk) {
-                            break;
-                        }
-                    }
-                    return total;
-                } else if let Ok(file) = tokio::fs::File::open(path).await {
-                    use tokio::io::AsyncReadExt;
-                    let mut reader = tokio::io::BufReader::with_capacity(chunk_size, file);
-                    let mut buf = vec![0u8; chunk_size];
-                    let mut total = 0usize;
-                    loop {
-                        match reader.read(&mut buf).await {
-                            Ok(0) => break,
-                            Ok(n) => {
-                                total = total.saturating_add(n);
-                                if !cb(&buf[..n]) {
-                                    break;
-                                }
-                            }
-                            Err(_) => break,
-                        }
-                    }
-                    return total;
-                }
-                return 0;
+                        cb(chunk)
+                    },
+                )
+                .await;
+
+                return total;
             }
         }
 
@@ -4239,48 +4214,21 @@ impl Page {
             let mut wrote_error = false;
             let mut chunk_idx = 0usize;
 
-            // Prefer io_uring (single kernel-async read, zero spawn_blocking)
-            // with tokio::fs fallback for non-Linux or if uring read fails.
-            let file_data = if crate::utils::uring_fs::is_uring_enabled() {
-                crate::utils::uring_fs::read_file(spool_path.display().to_string())
-                    .await
-                    .ok()
-            } else {
-                None
-            };
-
-            if let Some(data) = file_data {
-                for chunk in data.chunks(chunk_size) {
+            // Unified disk read: io_uring fast path on Linux (single
+            // kernel-async read), tokio::fs streaming fallback elsewhere.
+            let _ = crate::utils::uring_fs::read_file_chunked(
+                spool_path.display().to_string(),
+                chunk_size,
+                |chunk| {
                     if rewriter.write(chunk).is_err() {
                         wrote_error = true;
-                        break;
+                        return false;
                     }
                     chunk_idx += 1;
-                    if chunk_idx % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
-                        tokio::task::yield_now().await;
-                    }
-                }
-            } else if let Ok(file) = tokio::fs::File::open(&spool_path).await {
-                use tokio::io::AsyncReadExt;
-                let mut reader = tokio::io::BufReader::with_capacity(chunk_size, file);
-                let mut buf = vec![0u8; chunk_size];
-
-                loop {
-                    let n = match reader.read(&mut buf).await {
-                        Ok(0) => break,
-                        Ok(n) => n,
-                        Err(_) => break,
-                    };
-                    if rewriter.write(&buf[..n]).is_err() {
-                        wrote_error = true;
-                        break;
-                    }
-                    chunk_idx += 1;
-                    if chunk_idx % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
-                        tokio::task::yield_now().await;
-                    }
-                }
-            }
+                    true
+                },
+            )
+            .await;
 
             if !wrote_error {
                 let _ = rewriter.end();

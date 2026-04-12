@@ -886,6 +886,65 @@ mod inner {
     pub fn is_uring_enabled() -> bool {
         URING_FS_ENABLED.load(Ordering::Acquire)
     }
+
+    /// Read a file and feed it chunk-by-chunk to a callback.
+    ///
+    /// **Optimal strategy per platform:**
+    /// - io_uring available: single kernel-async read, chunk from memory
+    ///   (1 syscall, zero spawn_blocking).
+    /// - Fallback: stream via `tokio::fs::File` + `BufReader` so the full
+    ///   file is never in memory (bounded by `chunk_size`).
+    ///
+    /// Returns total bytes read.  The callback can return `false` to stop
+    /// early (e.g. on a parse error).
+    pub async fn read_file_chunked(
+        path: String,
+        chunk_size: usize,
+        mut cb: impl FnMut(&[u8]) -> bool,
+    ) -> io::Result<usize> {
+        let chunk_size = chunk_size.max(1);
+
+        // Fast path: io_uring single read → chunk from memory.
+        if let Some(result) = try_uring(|tx| FileIoTask::ReadFile {
+            path: path.clone(),
+            tx,
+        })
+        .await
+        {
+            let data = result?;
+            let mut total = 0usize;
+            for (i, chunk) in data.chunks(chunk_size).enumerate() {
+                total += chunk.len();
+                if !cb(chunk) {
+                    break;
+                }
+                // Yield every 8 chunks (~512 KiB at 64 KiB chunks) so
+                // CPU-heavy consumers don't starve the executor.
+                if i & 7 == 7 {
+                    tokio::task::yield_now().await;
+                }
+            }
+            return Ok(total);
+        }
+
+        // Fallback: stream via tokio::fs, bounded memory.
+        use tokio::io::AsyncReadExt;
+        let file = tokio::fs::File::open(&path).await?;
+        let mut reader = tokio::io::BufReader::with_capacity(chunk_size, file);
+        let mut buf = vec![0u8; chunk_size];
+        let mut total = 0usize;
+        loop {
+            let n = reader.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            total += n;
+            if !cb(&buf[..n]) {
+                break;
+            }
+        }
+        Ok(total)
+    }
 }
 
 // ── Fallback implementation (non-Linux or no io_uring feature) ───────────────
@@ -1031,6 +1090,32 @@ mod inner {
     pub fn is_uring_enabled() -> bool {
         false
     }
+
+    /// Read a file and feed it chunk-by-chunk to a callback.
+    /// Non-uring fallback: streams via `tokio::fs::File` + `BufReader`.
+    pub async fn read_file_chunked(
+        path: String,
+        chunk_size: usize,
+        mut cb: impl FnMut(&[u8]) -> bool,
+    ) -> io::Result<usize> {
+        use tokio::io::AsyncReadExt;
+        let chunk_size = chunk_size.max(1);
+        let file = tokio::fs::File::open(&path).await?;
+        let mut reader = tokio::io::BufReader::with_capacity(chunk_size, file);
+        let mut buf = vec![0u8; chunk_size];
+        let mut total = 0usize;
+        loop {
+            let n = reader.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            total += n;
+            if !cb(&buf[..n]) {
+                break;
+            }
+        }
+        Ok(total)
+    }
 }
 
 // ── Re-exports ───────────────────────────────────────────────────────────────
@@ -1039,6 +1124,7 @@ pub use inner::create_dir_all;
 pub use inner::init_uring_fs;
 pub use inner::is_uring_enabled;
 pub use inner::read_file;
+pub use inner::read_file_chunked;
 pub use inner::remove_file;
 pub use inner::tcp_connect;
 pub use inner::write_file;
