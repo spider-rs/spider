@@ -10181,7 +10181,10 @@ impl Website {
     /// Guard the channel from closing until all subscription events complete.
     pub async fn subscription_guard(&self) {
         if let Some(channel) = &self.channel {
-            if !channel.1.is_empty() {
+            // Only wait if the broadcast channel still has active receivers.
+            // receiver_count() == 1 means only our internal Arc<Receiver>
+            // remains — no user subscribers are alive to call inc().
+            if channel.0.receiver_count() > 1 {
                 if let Some(guard_counter) = &self.channel_guard {
                     guard_counter.lock().await
                 }
