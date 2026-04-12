@@ -4950,10 +4950,8 @@ impl Page {
                                 }
                             }
 
-                            let html_str_for_chrome = simdutf8::basic::from_utf8(&html_bytes_taken)
-                                .unwrap_or_default();
                             let page_resource = crate::utils::fetch_page_html_chrome_base(
-                                html_str_for_chrome,
+                                &html_bytes_taken,
                                 &new_page,
                                 true,
                                 true,
@@ -5418,10 +5416,8 @@ impl Page {
                                 }
                             }
 
-                            let html_str_for_chrome = simdutf8::basic::from_utf8(&html_bytes_taken)
-                                .unwrap_or_default();
                             let page_resource = crate::utils::fetch_page_html_chrome_base(
-                                html_str_for_chrome,
+                                &html_bytes_taken,
                                 &new_page,
                                 true,
                                 true,

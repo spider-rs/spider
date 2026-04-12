@@ -2254,7 +2254,7 @@ fn is_timeout(e: &chromiumoxide::error::CdpError) -> bool {
 async fn goto_with_html_once(
     page: &chromiumoxide::Page,
     target_url: &str,
-    html: &str,
+    html: &[u8],
     block_bytes: &mut bool,
     resp_headers: &Option<reqwest::header::HeaderMap<reqwest::header::HeaderValue>>,
     chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
@@ -2318,7 +2318,7 @@ async fn goto_with_html_once(
                     continue;
                 }
 
-                let body_b64 = base64::engine::general_purpose::STANDARD.encode(html.as_bytes());
+                let body_b64 = base64::engine::general_purpose::STANDARD.encode(html);
 
                 let res = page.execute(FulfillRequestParams {
                     request_id: ev.request_id.clone(),
@@ -2376,7 +2376,7 @@ async fn goto_with_html_once(
 /// Set the document if requested.
 async fn set_document_content_if_requested(
     page: &chromiumoxide::Page,
-    source: &str,
+    source: &[u8],
     url_target: Option<&str>,
     block_bytes: &mut bool,
     resp_headers: &Option<HeaderMap<HeaderValue>>,
@@ -2399,7 +2399,7 @@ async fn set_document_content_if_requested(
 /// Set the document if requested cached.
 async fn set_document_content_if_requested_cached(
     page: &chromiumoxide::Page,
-    source: &str,
+    source: &[u8],
     url_target: Option<&str>,
     block_bytes: &mut bool,
     cache_options: &Option<CacheOptions>,
@@ -2537,7 +2537,7 @@ pub async fn run_navigate_or_content_set_core(
     page: &chromiumoxide::Page,
     page_set: bool,
     content: bool,
-    source: &str,
+    source: &[u8],
     url_target: Option<&str>,
     chrome_http_req_res: &mut ChromeHTTPReqRes,
     referrer: Option<String>,
@@ -2554,7 +2554,7 @@ pub async fn run_navigate_or_content_set_core(
 
     if content {
         // check cf for the antibot
-        if crate::features::solvers::detect_cf_turnstyle(source.as_bytes()) {
+        if crate::features::solvers::detect_cf_turnstyle(source) {
             chrome_http_req_res.anti_bot_tech = AntiBotTech::Cloudflare;
         }
         set_document_content_if_requested(
@@ -2569,9 +2569,11 @@ pub async fn run_navigate_or_content_set_core(
         return Ok(());
     }
 
+    // Navigate path: source is a URL — convert to &str for navigation APIs.
+    let source_url = simdutf8::basic::from_utf8(source).unwrap_or_default();
     navigate_if_requested(
         page,
-        source,
+        source_url,
         url_target,
         chrome_http_req_res,
         referrer,
@@ -2591,7 +2593,7 @@ pub async fn run_navigate_or_content_set_core(
     page: &chromiumoxide::Page,
     page_set: bool,
     content: bool,
-    source: &str,
+    source: &[u8],
     url_target: Option<&str>,
     chrome_http_req_res: &mut ChromeHTTPReqRes,
     referrer: Option<String>,
@@ -2610,7 +2612,7 @@ pub async fn run_navigate_or_content_set_core(
 
     if content {
         // check cf for the antibot
-        if crate::features::solvers::detect_cf_turnstyle(source.as_bytes()) {
+        if crate::features::solvers::detect_cf_turnstyle(source) {
             chrome_http_req_res.anti_bot_tech = AntiBotTech::Cloudflare;
         }
 
@@ -2641,10 +2643,12 @@ pub async fn run_navigate_or_content_set_core(
         return Ok(());
     }
 
+    // Navigate path: source is a URL — convert to &str for navigation APIs.
+    let source_url = simdutf8::basic::from_utf8(source).unwrap_or_default();
     if cache {
         navigate_if_requested_cache(
             page,
-            source,
+            source_url,
             url_target,
             chrome_http_req_res,
             referrer,
@@ -2657,7 +2661,7 @@ pub async fn run_navigate_or_content_set_core(
     } else {
         navigate_if_requested(
             page,
-            source,
+            source_url,
             url_target,
             chrome_http_req_res,
             referrer,
@@ -2769,7 +2773,7 @@ const SKIP_BYTES_AMOUNT: f64 = 17.0;
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
-    source: &str,
+    source: &[u8],
     page: &chromiumoxide::Page,
     content: bool,
     wait_for_navigation: bool,
@@ -2826,7 +2830,15 @@ pub async fn fetch_page_html_chrome_base(
 
     // track the initial base without modifying.
     let base_timeout_measurement = base_timeout;
-    let target_url = url_target.unwrap_or(source);
+    // When url_target is provided, use it directly. Otherwise source is a URL.
+    let source_as_url;
+    let target_url = match url_target {
+        Some(u) => u,
+        None => {
+            source_as_url = simdutf8::basic::from_utf8(source).unwrap_or_default();
+            source_as_url
+        }
+    };
     let asset = is_asset_url(target_url);
 
     let (tx1, rx1) = if asset {
@@ -2896,6 +2908,11 @@ pub async fn fetch_page_html_chrome_base(
     };
 
     let html_source_size = source.len();
+
+    // Lazily decode source to &str for internal APIs that require string
+    // semantics (logging, URL comparison, cache keys). The hot content path
+    // (set_document_content / base64 fulfillment) uses raw bytes directly.
+    let source_str = simdutf8::basic::from_utf8(source).unwrap_or_default();
 
     // Shutdown signal for CDP event listeners. Sent after page work is done
     // so listeners exit deterministically instead of relying on stream closure.
@@ -3283,7 +3300,7 @@ pub async fn fetch_page_html_chrome_base(
     // event, matching http_future()'s behavior. get_final_redirect resolves
     // instantly here (load already fired).
     let final_url = if wait_for_navigation && !request_cancelled && !block_bytes {
-        let last_redirect = get_final_redirect(page, source, base_timeout).await;
+        let last_redirect = get_final_redirect(page, source_str, base_timeout).await;
         base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
         last_redirect
     } else {
@@ -3343,7 +3360,7 @@ pub async fn fetch_page_html_chrome_base(
                 let target_url = final_url
                     .as_deref()
                     .or(url_target)
-                    .unwrap_or(source)
+                    .unwrap_or(source_str)
                     .to_string();
 
                 if let Err(elasped) = tokio::time::timeout(base_timeout, async {
@@ -3528,7 +3545,7 @@ pub async fn fetch_page_html_chrome_base(
                     .as_deref()
                     .filter(|u| !u.is_empty())
                     .or(url_target)
-                    .unwrap_or(source);
+                    .unwrap_or(source_str);
 
                 url::Url::parse(scope_url).ok()
             } else {
@@ -3547,7 +3564,7 @@ pub async fn fetch_page_html_chrome_base(
                 let openai_request = run_openai_request(
                     match &url_target {
                         Some(ut) => ut,
-                        _ => source,
+                        _ => source_str,
                     },
                     page,
                     wait_for,
@@ -3578,7 +3595,7 @@ pub async fn fetch_page_html_chrome_base(
                     page,
                     match &url_target {
                         Some(ut) => ut,
-                        _ => source,
+                        _ => source_str,
                     },
                 );
 
@@ -3647,7 +3664,7 @@ pub async fn fetch_page_html_chrome_base(
             if cfg!(feature = "chrome_screenshot") || screenshot.is_some() {
                 let _ = tokio::time::timeout(
                     base_timeout + tokio::time::Duration::from_secs(30),
-                    perform_screenshot(source, page, screenshot, &mut page_response),
+                    perform_screenshot(source_str, page, screenshot, &mut page_response),
                 )
                 .await;
             }
@@ -3697,7 +3714,7 @@ pub async fn fetch_page_html_chrome_base(
                         .as_deref()
                         .filter(|u| !u.is_empty())
                         .or(url_target)
-                        .unwrap_or(source);
+                        .unwrap_or(source_str);
 
                     url::Url::parse(scope_url).ok()
                 } else {
@@ -3769,7 +3786,7 @@ pub async fn fetch_page_html_chrome_base(
                 .as_deref()
                 .filter(|u| !u.is_empty())
                 .or(url_target)
-                .unwrap_or(source);
+                .unwrap_or(source_str);
 
               url::Url::parse(scope_url).ok()
             } else {
@@ -3792,7 +3809,7 @@ pub async fn fetch_page_html_chrome_base(
                         if !page_set && cache_request {
                             let _ = tokio::time::timeout(
                                 base_timeout,
-                                cache_chrome_response(source, &page_response, chrome_http_req_res1, &cache_options, cache_namespace),
+                                cache_chrome_response(source_str, &page_response, chrome_http_req_res1, &cache_options, cache_namespace),
                             )
                             .await;
                         }
@@ -4003,7 +4020,7 @@ pub async fn fetch_page_html_chrome_base(
                     let _ = tokio::time::timeout(
                         base_timeout,
                         cache_chrome_response(
-                            source,
+                            source_str,
                             &page_response,
                             chrome_http_req_res,
                             &cache_options,
@@ -5314,9 +5331,9 @@ pub async fn fetch_page_html(
         page => {
             match fetch_page_html_chrome_base(
                 if let Some(cached) = &cached_html {
-                    cached
+                    cached.as_bytes()
                 } else {
-                    target_url
+                    target_url.as_bytes()
                 },
                 page,
                 cached,
@@ -5923,9 +5940,9 @@ pub async fn fetch_page_html_base(
 
     match fetch_page_html_chrome_base(
         if let Some(cached) = &cached_html {
-            cached
+            cached.as_bytes()
         } else {
-            target_url
+            target_url.as_bytes()
         },
         page,
         cached,
@@ -6113,9 +6130,9 @@ async fn _fetch_page_html_chrome(
         page => {
             match fetch_page_html_chrome_base(
                 if let Some(cached) = &cached_html {
-                    cached
+                    cached.as_bytes()
                 } else {
-                    target_url
+                    target_url.as_bytes()
                 },
                 page,
                 cached,
