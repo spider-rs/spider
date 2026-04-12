@@ -7206,15 +7206,16 @@ pub(crate) fn get_path_from_url(url: &str) -> &str {
 
 /// Get the domain from a url.
 pub(crate) fn get_domain_from_url(url: &str) -> &str {
-    if let Some(start_pos) = url.find("//") {
+    let bytes = url.as_bytes();
+    if let Some(start_pos) = memchr::memmem::find(bytes, b"//") {
         let pos = start_pos + 2;
 
-        if let Some(first_slash_pos) = url[pos..].find('/') {
+        if let Some(first_slash_pos) = memchr::memchr(b'/', &bytes[pos..]) {
             &url[pos..pos + first_slash_pos]
         } else {
             &url[pos..]
         }
-    } else if let Some(first_slash_pos) = url.find('/') {
+    } else if let Some(first_slash_pos) = memchr::memchr(b'/', bytes) {
         &url[..first_slash_pos]
     } else {
         url
@@ -7231,7 +7232,7 @@ pub fn networking_capable(url: &str) -> bool {
 
 /// Prepare the url for parsing if it fails. Use this method if the url does not start with http or https.
 pub fn prepare_url(u: &str) -> String {
-    if let Some(index) = u.find("://") {
+    if let Some(index) = memchr::memmem::find(u.as_bytes(), b"://") {
         let split_index = index + 3;
         let rest = if split_index < u.len() {
             &u[split_index..]

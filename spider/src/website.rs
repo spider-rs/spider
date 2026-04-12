@@ -3239,9 +3239,12 @@ impl Website {
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         };
 
-        if page.get_html_bytes_u8().starts_with(b"<?xml") {
-            page.links_stream_xml_links_stream_base(base, &page.get_html(), &mut links, &None)
-                .await;
+        if page.is_xml {
+            if let Some(xml_bytes) = page.html.take() {
+                    page.links_stream_xml_links_stream_base(base, &xml_bytes, &mut links, &None)
+                        .await;
+                    page.html = Some(xml_bytes);
+                }
         }
 
         emit_log(url);
@@ -3334,13 +3337,18 @@ impl Website {
                 // Extract links and metadata from seeded HTML content if not binary
                 #[cfg(not(feature = "decentralized"))]
                 if !page_links_settings.skip_links {
-                    let html_bytes = seeded_page.get_html_bytes_u8();
-                    if !html_bytes.is_empty() && !auto_encoder::is_binary_file(html_bytes) {
-                        let html = seeded_page.get_html();
-                        let extracted_links: HashSet<CaseInsensitiveString> = seeded_page
-                            .links_stream_base_ssg(base, &html, client, &self.domain_parsed)
-                            .await;
-                        links.extend(extracted_links);
+                    let skip = {
+                        let html_bytes = seeded_page.get_html_bytes_u8();
+                        html_bytes.is_empty() || auto_encoder::is_binary_file(html_bytes)
+                    };
+                    if !skip {
+                        if let Some(html_bytes) = seeded_page.html.take() {
+                            let extracted_links: HashSet<CaseInsensitiveString> = seeded_page
+                                .links_stream_base_ssg(base, &html_bytes, client, &self.domain_parsed)
+                                .await;
+                            seeded_page.html = Some(html_bytes);
+                            links.extend(extracted_links);
+                        }
                     }
                 }
                 seeded_page
@@ -3361,9 +3369,12 @@ impl Website {
                 .await
             };
 
-            if !page_links_settings.skip_links && page.get_html_bytes_u8().starts_with(b"<?xml") {
-                page.links_stream_xml_links_stream_base(base, &page.get_html(), &mut links, &None)
-                    .await;
+            if !page_links_settings.skip_links && page.is_xml {
+                if let Some(xml_bytes) = page.html.take() {
+                    page.links_stream_xml_links_stream_base(base, &xml_bytes, &mut links, &None)
+                        .await;
+                    page.html = Some(xml_bytes);
+                }
             }
 
             if self.domain_parsed.is_none() {
@@ -4075,7 +4086,7 @@ impl Website {
 
             // Skip link extraction for single-page crawls unless the user wants page links.
             let skip_links = self.single_page() && !self.configuration.return_page_links;
-            let xml_file = page.get_html_bytes_u8().starts_with(b"<?xml");
+            let xml_file = page.is_xml;
 
             let mut links = if skip_links {
                 Default::default()
@@ -4086,8 +4097,11 @@ impl Website {
             };
 
             if !skip_links && xml_file {
-                page.links_stream_xml_links_stream_base(base, &page.get_html(), &mut links, &None)
-                    .await;
+                if let Some(xml_bytes) = page.html.take() {
+                    page.links_stream_xml_links_stream_base(base, &xml_bytes, &mut links, &None)
+                        .await;
+                    page.html = Some(xml_bytes);
+                }
             }
 
             self.initial_status_code = page.status_code;
@@ -4280,7 +4294,7 @@ impl Website {
 
             // Skip link extraction for single-page crawls unless the user wants page links.
             let skip_links = self.single_page() && !self.configuration.return_page_links;
-            let xml_file = page.get_html_bytes_u8().starts_with(b"<?xml");
+            let xml_file = page.is_xml;
 
             let mut links = if skip_links {
                 Default::default()
@@ -4291,8 +4305,11 @@ impl Website {
             };
 
             if !skip_links && xml_file {
-                page.links_stream_xml_links_stream_base(base, &page.get_html(), &mut links, &None)
-                    .await;
+                if let Some(xml_bytes) = page.html.take() {
+                    page.links_stream_xml_links_stream_base(base, &xml_bytes, &mut links, &None)
+                        .await;
+                    page.html = Some(xml_bytes);
+                }
             }
 
             if let Some(ref cb) = self.on_should_crawl_callback {
@@ -4389,7 +4406,7 @@ impl Website {
 
             // Skip link extraction for single-page crawls unless the user wants page links.
             let skip_links = self.single_page() && !self.configuration.return_page_links;
-            let xml_file = page.get_html_bytes_u8().starts_with(b"<?xml");
+            let xml_file = page.is_xml;
 
             let mut links = if skip_links {
                 Default::default()
@@ -4400,8 +4417,11 @@ impl Website {
             };
 
             if !skip_links && xml_file {
-                page.links_stream_xml_links_stream_base(base, &page.get_html(), &mut links, &None)
-                    .await;
+                if let Some(xml_bytes) = page.html.take() {
+                    page.links_stream_xml_links_stream_base(base, &xml_bytes, &mut links, &None)
+                        .await;
+                    page.html = Some(xml_bytes);
+                }
             }
 
             if let Some(ref cb) = self.on_should_crawl_callback {
@@ -9555,7 +9575,7 @@ impl Website {
 
                                     drop(new_page);
 
-                                    let is_xml_entry = page.get_html_bytes_u8().starts_with(b"<?xml");
+                                    let is_xml_entry = page.is_xml;
                                     let is_xml = is_xml_entry
                                         && !page.get_html_bytes_u8().ends_with(b"</html>");
 

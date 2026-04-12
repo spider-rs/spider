@@ -807,6 +807,14 @@ pub struct Page {
     /// Set once when HTML bytes are first available so the flag remains
     /// accurate after content is spooled to disk.
     pub binary_file: bool,
+    /// Whether the HTML bytes are valid UTF-8.
+    /// Set once when bytes are first available so subsequent accesses
+    /// (including after disk spool) can skip re-validation.
+    pub(crate) is_valid_utf8: bool,
+    /// Whether the content starts with an XML declaration (`<?xml`).
+    /// Set once when bytes are first available so the flag survives disk
+    /// spooling and we can route to the XML parser without re-checking bytes.
+    pub(crate) is_xml: bool,
     #[cfg(feature = "parallel_backends")]
     /// Identifies which backend produced this page (e.g. "primary",
     /// "lightpanda", "servo"). `None` when parallel backends are not active.
@@ -910,6 +918,14 @@ pub struct Page {
     /// Set once when HTML bytes are first available so the flag remains
     /// accurate after content is spooled to disk.
     pub binary_file: bool,
+    /// Whether the HTML bytes are valid UTF-8.
+    /// Set once when bytes are first available so subsequent accesses
+    /// (including after disk spool) can skip re-validation.
+    pub(crate) is_valid_utf8: bool,
+    /// Whether the content starts with an XML declaration (`<?xml`).
+    /// Set once when bytes are first available so the flag survives disk
+    /// spooling and we can route to the XML parser without re-checking bytes.
+    pub(crate) is_xml: bool,
     #[cfg(feature = "parallel_backends")]
     /// Identifies which backend produced this page (e.g. "primary",
     /// "lightpanda", "servo"). `None` when parallel backends are not active.
@@ -943,6 +959,8 @@ pub fn page_assign(page: &mut Page, new_page: Page) {
         page.bytes_transferred = new_page.bytes_transferred;
         if new_page.html.is_some() {
             page.html = new_page.html;
+            page.is_valid_utf8 = new_page.is_valid_utf8;
+            page.is_xml = new_page.is_xml;
         }
     } else {
         // Chrome returned 200 with no content — mark for retry so the outer
@@ -1199,28 +1217,19 @@ pub(crate) fn domain_name(domain: &Url) -> &str {
 /// "sub.example.com" → "example.com", "example.com" → "example", "localhost" → "localhost"
 #[inline]
 fn extract_root_domain(domain: &str) -> &str {
-    // Single-pass: find the second-to-last dot position by scanning from the end.
     let bytes = domain.as_bytes();
-    let mut dot_count = 0u8;
-    let mut second_last_dot = 0;
 
-    for i in (0..bytes.len()).rev() {
-        if bytes[i] == b'.' {
-            dot_count += 1;
-            if dot_count == 2 {
-                second_last_dot = i + 1;
-                break;
-            }
+    // SIMD reverse scan for dots via memchr.
+    if let Some(last_dot) = memchr::memrchr(b'.', bytes) {
+        if let Some(second_last_dot) = memchr::memrchr(b'.', &bytes[..last_dot]) {
+            // "sub.example.com" → "example.com"
+            &domain[second_last_dot + 1..]
+        } else {
+            // "example.com" → "example"
+            &domain[..last_dot]
         }
-    }
-
-    if dot_count >= 2 {
-        &domain[second_last_dot..]
-    } else if dot_count == 1 {
-        // "example.com" → "example"
-        let dot_pos = memchr::memchr(b'.', bytes).unwrap_or(domain.len());
-        &domain[..dot_pos]
     } else {
+        // no dots — "localhost"
         domain
     }
 }
@@ -1566,9 +1575,21 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
         .as_deref()
         .is_some_and(auto_encoder::is_binary_file);
 
+    let is_valid_utf8 = res
+        .content
+        .as_deref()
+        .is_some_and(|b| simdutf8::basic::from_utf8(b).is_ok());
+
+    let is_xml = res
+        .content
+        .as_deref()
+        .is_some_and(|b| b.starts_with(b"<?xml"));
+
     Page {
         html: res.content.map(bytes::Bytes::from),
         binary_file,
+        is_valid_utf8,
+        is_xml,
         headers: res.headers,
         #[cfg(feature = "remote_addr")]
         remote_addr: res.remote_addr,
@@ -3107,6 +3128,14 @@ impl Page {
             .html
             .as_deref()
             .is_some_and(auto_encoder::is_binary_file);
+        self.is_valid_utf8 = self
+            .html
+            .as_deref()
+            .is_some_and(|b| simdutf8::basic::from_utf8(b).is_ok());
+        self.is_xml = self
+            .html
+            .as_deref()
+            .is_some_and(|b| b.starts_with(b"<?xml"));
         #[cfg(all(feature = "balance", not(feature = "decentralized")))]
         if let Some(ref h) = self.html {
             crate::utils::html_spool::track_bytes_add(h.len());
@@ -3407,9 +3436,11 @@ impl Page {
     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
     pub async fn get_html_async(&self) -> String {
         if let Some(bytes) = self.html.as_deref() {
-            return match std::str::from_utf8(bytes) {
-                Ok(s) => s.to_string(),
-                Err(_) => auto_encoder::auto_encode_bytes(bytes),
+            return if self.is_valid_utf8 {
+                // Safety: UTF-8 validated once at construction time.
+                unsafe { std::str::from_utf8_unchecked(bytes) }.to_string()
+            } else {
+                auto_encoder::auto_encode_bytes(bytes)
             };
         }
         if let Some(guard) = &self.html_spool_path {
@@ -3417,8 +3448,15 @@ impl Page {
                 if let Ok(bytes) =
                     crate::utils::html_spool::spool_read_async(path.to_path_buf()).await
                 {
-                    return String::from_utf8(bytes)
-                        .unwrap_or_else(|e| auto_encoder::auto_encode_bytes(&e.into_bytes()));
+                    return if self.is_valid_utf8 {
+                        // Disk-spooled bytes preserve the encoding from
+                        // the original response, so the cached flag is
+                        // still valid.
+                        unsafe { String::from_utf8_unchecked(bytes) }
+                    } else {
+                        String::from_utf8(bytes)
+                            .unwrap_or_else(|e| auto_encoder::auto_encode_bytes(&e.into_bytes()))
+                    };
                 }
             }
         }
@@ -3535,17 +3573,22 @@ impl Page {
     /// [`ensure_html_loaded`](Self::ensure_html_loaded) to reload + delete).
     pub fn get_html(&self) -> String {
         if let Some(bytes) = self.html.as_deref() {
-            return match std::str::from_utf8(bytes) {
-                Ok(s) => s.to_string(),
-                Err(_) => auto_encoder::auto_encode_bytes(bytes),
+            return if self.is_valid_utf8 {
+                unsafe { std::str::from_utf8_unchecked(bytes) }.to_string()
+            } else {
+                auto_encoder::auto_encode_bytes(bytes)
             };
         }
         #[cfg(all(feature = "balance", not(feature = "decentralized")))]
         if let Some(guard) = &self.html_spool_path {
             if let Some(path) = guard.path() {
                 if let Ok(bytes) = crate::utils::html_spool::spool_read(path) {
-                    return String::from_utf8(bytes)
-                        .unwrap_or_else(|e| auto_encoder::auto_encode_bytes(&e.into_bytes()));
+                    return if self.is_valid_utf8 {
+                        unsafe { String::from_utf8_unchecked(bytes) }
+                    } else {
+                        String::from_utf8(bytes)
+                            .unwrap_or_else(|e| auto_encoder::auto_encode_bytes(&e.into_bytes()))
+                    };
                 }
             }
         }
@@ -3568,20 +3611,25 @@ impl Page {
     /// encoding conversion is needed or content is loaded from a disk spool.
     pub fn get_html_cow(&self) -> std::borrow::Cow<'_, str> {
         match self.html.as_deref() {
-            Some(bytes) => match std::str::from_utf8(bytes) {
-                Ok(s) => std::borrow::Cow::Borrowed(s),
-                Err(_) => std::borrow::Cow::Owned(auto_encoder::auto_encode_bytes(bytes)),
-            },
+            Some(bytes) => {
+                if self.is_valid_utf8 {
+                    std::borrow::Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(bytes) })
+                } else {
+                    std::borrow::Cow::Owned(auto_encoder::auto_encode_bytes(bytes))
+                }
+            }
             None => {
                 #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                 if let Some(guard) = &self.html_spool_path {
                     if let Some(path) = guard.path() {
                         if let Ok(bytes) = crate::utils::html_spool::spool_read(path) {
-                            return std::borrow::Cow::Owned(
+                            return std::borrow::Cow::Owned(if self.is_valid_utf8 {
+                                unsafe { String::from_utf8_unchecked(bytes) }
+                            } else {
                                 String::from_utf8(bytes).unwrap_or_else(|e| {
                                     auto_encoder::auto_encode_bytes(&e.into_bytes())
-                                }),
-                            );
+                                })
+                            });
                         }
                     }
                 }
@@ -3616,7 +3664,7 @@ impl Page {
     pub fn get_content_for(&self, format: &str) -> Option<String> {
         self.content_map.as_ref().and_then(|map| {
             map.get(format).map(|b| {
-                std::str::from_utf8(b)
+                simdutf8::basic::from_utf8(b)
                     .map(|s| s.to_string())
                     .unwrap_or_else(|_| auto_encoder::auto_encode_bytes(b))
             })
@@ -3666,7 +3714,7 @@ impl Page {
             const XML_DECL: &str = r#"<?xml version="1.0" encoding="UTF-8"?>"#;
 
             let xml = html_bytes.as_ref();
-            if let Ok(xml_str) = std::str::from_utf8(xml) {
+            if let Ok(xml_str) = simdutf8::basic::from_utf8(xml) {
                 let stripped = xml_str
                     .strip_prefix(XML_DECL)
                     .map(|f| f.trim_start())
@@ -3757,7 +3805,7 @@ impl Page {
             .unwrap_or_default()
     }
 
-    /// Find the links as a stream using string resource validation for XML files
+    /// Find the links as a stream using string resource validation for XML files.
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn links_stream_xml_links_stream_base<
         A: PartialEq
@@ -3774,14 +3822,14 @@ impl Page {
     >(
         &mut self,
         selectors: &RelativeSelectors,
-        xml: &str,
+        xml: &[u8],
         map: &mut HashSet<A>,
         base: &Option<Box<Url>>,
     ) {
         use quick_xml::events::Event;
         use quick_xml::reader::NsReader;
 
-        let mut reader = NsReader::from_reader(xml.as_bytes());
+        let mut reader = NsReader::from_reader(xml);
 
         reader.config_mut().trim_text(true);
 
@@ -3884,7 +3932,7 @@ impl Page {
     >(
         &mut self,
         selectors: &RelativeSelectors,
-        html: &str,
+        html: &[u8],
         base: &Option<Box<Url>>,
     ) -> HashSet<A> {
         let mut map: HashSet<A> = HashSet::with_capacity(link_set_capacity());
@@ -3900,7 +3948,7 @@ impl Page {
         let mut meta_og_image: Option<_> = None;
 
         if !html.is_empty() {
-            if html.starts_with("<?xml") {
+            if self.is_xml {
                 self.links_stream_xml_links_stream_base(selectors, html, &mut map, base)
                     .await;
             } else {
@@ -3985,10 +4033,9 @@ impl Page {
                 let mut rewriter =
                     lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
 
-                let html_bytes = html.as_bytes();
-                let should_yield = html_bytes.len() > REWRITER_YIELD_THRESHOLD;
+                let should_yield = html.len() > REWRITER_YIELD_THRESHOLD;
 
-                for (i, chunk) in html_bytes.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
+                for (i, chunk) in html.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
                     if rewriter.write(chunk).is_err() {
                         wrote_error = true;
                         break;
@@ -4084,9 +4131,8 @@ impl Page {
                 }
             };
 
-        if file_data.starts_with(b"<?xml") {
-            let html = String::from_utf8_lossy(&file_data);
-            self.links_stream_xml_links_stream_base(selectors, &html, &mut map, base)
+        if self.is_xml {
+            self.links_stream_xml_links_stream_base(selectors, &file_data, &mut map, base)
                 .await;
         } else {
             let base_input_url = tokio::sync::OnceCell::new();
@@ -4233,12 +4279,10 @@ impl Page {
     >(
         &mut self,
         selectors: &RelativeSelectors,
-        html: &str,
+        html: &[u8],
         client: &Client,
         base: &Option<Box<Url>>,
     ) -> HashSet<A> {
-        use auto_encoder::auto_encode_bytes;
-
         let mut map: HashSet<A> = HashSet::with_capacity(link_set_capacity());
         let mut map_ssg: HashSet<A> = HashSet::new();
         let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
@@ -4253,7 +4297,7 @@ impl Page {
         let mut meta_og_image: Option<_> = None;
 
         if !html.is_empty() {
-            if html.starts_with("<?xml") {
+            if self.is_xml {
                 self.links_stream_xml_links_stream_base(selectors, html, &mut map, base)
                     .await;
             } else {
@@ -4351,11 +4395,10 @@ impl Page {
                 let mut rewriter =
                     lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
 
-                let html_bytes = html.as_bytes();
                 let mut wrote_error = false;
-                let should_yield = html_bytes.len() > REWRITER_YIELD_THRESHOLD;
+                let should_yield = html.len() > REWRITER_YIELD_THRESHOLD;
 
-                for (i, chunk) in html_bytes.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
+                for (i, chunk) in html.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
                     if rewriter.write(chunk).is_err() {
                         wrote_error = true;
                         break;
@@ -4472,12 +4515,8 @@ impl Page {
         if self.binary_file || auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             Default::default()
         } else if let Some(html_bytes) = self.html.take() {
-            let html = match std::str::from_utf8(&html_bytes) {
-                Ok(s) => std::borrow::Cow::Borrowed(s),
-                Err(_) => std::borrow::Cow::Owned(auto_encoder::auto_encode_bytes(&html_bytes)),
-            };
             let result = self
-                .links_stream_base_ssg(selectors, &html, client, prior_domain)
+                .links_stream_base_ssg(selectors, &html_bytes, client, prior_domain)
                 .await;
             self.html = Some(html_bytes);
             result
@@ -4527,11 +4566,7 @@ impl Page {
         if self.binary_file || auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             Default::default()
         } else if let Some(html_bytes) = self.html.take() {
-            let html = match std::str::from_utf8(&html_bytes) {
-                Ok(s) => std::borrow::Cow::Borrowed(s),
-                Err(_) => std::borrow::Cow::Owned(auto_encoder::auto_encode_bytes(&html_bytes)),
-            };
-            let result = self.links_stream_base(selectors, &html, base).await;
+            let result = self.links_stream_base(selectors, &html_bytes, base).await;
             self.html = Some(html_bytes);
             result
         } else {
@@ -4577,7 +4612,6 @@ impl Page {
         browser: &crate::features::chrome::OnceBrowser,
         jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     ) -> (HashSet<A>, Option<f64>) {
-        use auto_encoder::auto_encode_bytes;
         use lol_html::{element, text};
         use std::sync::atomic::Ordering;
 
@@ -4595,20 +4629,39 @@ impl Page {
         let mut meta_description: Option<_> = None;
         let mut meta_og_image: Option<_> = None;
 
-        if !self.is_empty() {
-            let html_bytes_taken = self.html.take();
-            let html_resource = match html_bytes_taken.as_deref() {
-                Some(b) => match std::str::from_utf8(b) {
-                    Ok(s) => std::borrow::Cow::Borrowed(s),
-                    Err(_) => std::borrow::Cow::Owned(auto_encode_bytes(b)),
-                },
-                None => std::borrow::Cow::Borrowed(""),
-            };
-
-            if html_resource.starts_with("<?xml") {
-                self.links_stream_xml_links_stream_base(selectors, &html_resource, &mut map, &base)
+        // Handle XML streaming first — can stream from memory or disk without
+        // loading full bytes, then skip the HTML rewriter path entirely.
+        if self.is_xml {
+            if let Some(html_bytes_taken) = self.html.take() {
+                self.links_stream_xml_links_stream_base(selectors, html_bytes_taken.as_ref(), &mut map, &base)
                     .await;
+                self.html = Some(html_bytes_taken);
             } else {
+                #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+                if let Some(ref guard) = self.html_spool_path {
+                    if let Some(path) = guard.path() {
+                        if let Ok(disk_bytes) = crate::utils::html_spool::spool_read_bytes(path) {
+                            self.links_stream_xml_links_stream_base(
+                                selectors,
+                                &disk_bytes,
+                                &mut map,
+                                &base,
+                            )
+                            .await;
+                        }
+                    }
+                }
+            }
+        } else if let Some(html_bytes_taken) = self.html.take().or_else(|| {
+            #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+            if let Some(ref guard) = self.html_spool_path {
+                if let Some(path) = guard.path() {
+                    return crate::utils::html_spool::spool_read_bytes(path).ok();
+                }
+            }
+            None
+        }) {
+            {
                 let base_input_url = tokio::sync::OnceCell::new();
 
                 let base_input_domain = &selectors.2;
@@ -4820,11 +4873,10 @@ impl Page {
                 let mut rewriter =
                     lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |_c: &[u8]| {});
 
-                let html_bytes = html_resource.as_bytes();
                 let mut wrote_error = false;
-                let should_yield = html_bytes.len() > REWRITER_YIELD_THRESHOLD;
+                let should_yield = html_bytes_taken.len() > REWRITER_YIELD_THRESHOLD;
 
-                for (i, chunk) in html_bytes.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
+                for (i, chunk) in html_bytes_taken.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
                     if rewriter.write(chunk).is_err() {
                         wrote_error = true;
                         break;
@@ -4841,7 +4893,7 @@ impl Page {
                 // Anti-bot detection is a strong signal (immediate upgrade).
                 let mut score = upgrade_score.load(Ordering::Relaxed);
                 if score < SMART_UPGRADE_THRESHOLD {
-                    if crate::utils::detect_anti_bot_from_body(html_resource.as_bytes()).is_some() {
+                    if crate::utils::detect_anti_bot_from_body(&html_bytes_taken).is_some() {
                         score = SMART_UPGRADE_THRESHOLD;
                     }
                 }
@@ -4898,8 +4950,10 @@ impl Page {
                                 }
                             }
 
+                            let html_str_for_chrome = simdutf8::basic::from_utf8(&html_bytes_taken)
+                                .unwrap_or_default();
                             let page_resource = crate::utils::fetch_page_html_chrome_base(
-                                &html_resource,
+                                html_str_for_chrome,
                                 &new_page,
                                 true,
                                 true,
@@ -4952,13 +5006,13 @@ impl Page {
                                     base1.as_deref().cloned().map(Box::new)
                                 };
 
-                                let page_resource = match &resource.content {
-                                    Some(h) => auto_encode_bytes(&h),
-                                    _ => Default::default(),
+                                let page_resource_bytes: &[u8] = match &resource.content {
+                                    Some(h) => h,
+                                    _ => &[],
                                 };
 
                                 let extended_map = self
-                                    .links_stream_base::<A>(selectors, &page_resource, &base)
+                                    .links_stream_base::<A>(selectors, page_resource_bytes, &base)
                                     .await;
 
                                 bytes_transferred = resource.bytes_transferred;
@@ -4975,8 +5029,7 @@ impl Page {
             }
 
             map.extend(inner_map);
-            drop(html_resource);
-            self.html = html_bytes_taken;
+            self.html = Some(html_bytes_taken);
         }
 
         if let Some(lp) = links_pages {
@@ -5036,7 +5089,6 @@ impl Page {
         browser: &crate::features::chrome::OnceBrowser,
         jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     ) -> (HashSet<A>, Option<f64>) {
-        use auto_encoder::auto_encode_bytes;
         use lol_html::{element, text};
         use std::sync::atomic::Ordering;
 
@@ -5054,20 +5106,37 @@ impl Page {
         let mut meta_description: Option<_> = None;
         let mut meta_og_image: Option<_> = None;
 
-        if !self.is_empty() {
-            let html_bytes_taken = self.html.take();
-            let html_resource = match html_bytes_taken.as_deref() {
-                Some(b) => match std::str::from_utf8(b) {
-                    Ok(s) => std::borrow::Cow::Borrowed(s),
-                    Err(_) => std::borrow::Cow::Owned(auto_encode_bytes(b)),
-                },
-                None => std::borrow::Cow::Borrowed(""),
-            };
-
-            if html_resource.starts_with("<?xml") {
-                self.links_stream_xml_links_stream_base(selectors, &html_resource, &mut map, &base)
+        if self.is_xml {
+            if let Some(html_bytes_taken) = self.html.take() {
+                self.links_stream_xml_links_stream_base(selectors, html_bytes_taken.as_ref(), &mut map, &base)
                     .await;
+                self.html = Some(html_bytes_taken);
             } else {
+                #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+                if let Some(ref guard) = self.html_spool_path {
+                    if let Some(path) = guard.path() {
+                        if let Ok(disk_bytes) = crate::utils::html_spool::spool_read_bytes(path) {
+                            self.links_stream_xml_links_stream_base(
+                                selectors,
+                                &disk_bytes,
+                                &mut map,
+                                &base,
+                            )
+                            .await;
+                        }
+                    }
+                }
+            }
+        } else if let Some(html_bytes_taken) = self.html.take().or_else(|| {
+            #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+            if let Some(ref guard) = self.html_spool_path {
+                if let Some(path) = guard.path() {
+                    return crate::utils::html_spool::spool_read_bytes(path).ok();
+                }
+            }
+            None
+        }) {
+            {
                 let base_input_url = tokio::sync::OnceCell::new();
 
                 let base_input_domain = &selectors.2;
@@ -5272,11 +5341,10 @@ impl Page {
                 let mut rewriter =
                     lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |_c: &[u8]| {});
 
-                let html_bytes = html_resource.as_bytes();
                 let mut wrote_error = false;
-                let should_yield = html_bytes.len() > REWRITER_YIELD_THRESHOLD;
+                let should_yield = html_bytes_taken.len() > REWRITER_YIELD_THRESHOLD;
 
-                for (i, chunk) in html_bytes.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
+                for (i, chunk) in html_bytes_taken.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
                     if rewriter.write(chunk).is_err() {
                         wrote_error = true;
                         break;
@@ -5293,7 +5361,7 @@ impl Page {
                 // Anti-bot detection is a strong signal (immediate upgrade).
                 let mut score = upgrade_score.load(Ordering::Relaxed);
                 if score < SMART_UPGRADE_THRESHOLD {
-                    if crate::utils::detect_anti_bot_from_body(html_resource.as_bytes()).is_some() {
+                    if crate::utils::detect_anti_bot_from_body(&html_bytes_taken).is_some() {
                         score = SMART_UPGRADE_THRESHOLD;
                     }
                 }
@@ -5350,8 +5418,10 @@ impl Page {
                                 }
                             }
 
+                            let html_str_for_chrome = simdutf8::basic::from_utf8(&html_bytes_taken)
+                                .unwrap_or_default();
                             let page_resource = crate::utils::fetch_page_html_chrome_base(
-                                &html_resource,
+                                html_str_for_chrome,
                                 &new_page,
                                 true,
                                 true,
@@ -5398,15 +5468,15 @@ impl Page {
                             }
 
                             if let Ok(v) = page_resource {
-                                let resource = match &v.content {
-                                    Some(h) => auto_encode_bytes(&h),
-                                    _ => Default::default(),
+                                let resource_bytes: &[u8] = match &v.content {
+                                    Some(h) => h,
+                                    _ => &[],
                                 };
 
                                 let extended_map = self
                                     .links_stream_base::<A>(
                                         selectors,
-                                        &resource,
+                                        resource_bytes,
                                         &base.as_deref().cloned().map(Box::new),
                                     )
                                     .await;
@@ -5425,8 +5495,7 @@ impl Page {
             }
 
             map.extend(inner_map);
-            drop(html_resource);
-            self.html = html_bytes_taken;
+            self.html = Some(html_bytes_taken);
         }
 
         if let Some(lp) = links_pages {
@@ -5491,33 +5560,37 @@ impl Page {
         let mut meta_description: Option<_> = None;
         let mut meta_og_image: Option<_> = None;
 
-        if !self.is_empty() {
-            let html_bytes_taken = self.html.take();
-
-            // When HTML lives on disk, stream from spool to avoid full load.
-            #[cfg(all(feature = "balance", not(feature = "decentralized")))]
-            if html_bytes_taken.is_none() {
+        if self.is_xml {
+            if let Some(html_bytes_taken) = self.html.take() {
+                self.links_stream_xml_links_stream_base(selectors, html_bytes_taken.as_ref(), &mut map, base)
+                    .await;
+                self.html = Some(html_bytes_taken);
+            } else {
+                #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                 if let Some(ref guard) = self.html_spool_path {
                     if let Some(path) = guard.path() {
-                        return self
-                            .links_stream_base_from_disk(selectors, path.to_path_buf(), base)
+                        if let Ok(disk_bytes) = crate::utils::html_spool::spool_read_bytes(path) {
+                            self.links_stream_xml_links_stream_base(
+                                selectors,
+                                &disk_bytes,
+                                &mut map,
+                                base,
+                            )
                             .await;
+                        }
                     }
                 }
             }
-
-            let html = match html_bytes_taken.as_deref() {
-                Some(b) => match std::str::from_utf8(b) {
-                    Ok(s) => std::borrow::Cow::Borrowed(s),
-                    Err(_) => std::borrow::Cow::Owned(auto_encoder::auto_encode_bytes(b)),
-                },
-                None => std::borrow::Cow::Borrowed(""),
-            };
-
-            if html.starts_with("<?xml") {
-                self.links_stream_xml_links_stream_base(selectors, &html, &mut map, base)
-                    .await;
-            } else {
+        } else if let Some(html_bytes_taken) = self.html.take().or_else(|| {
+            #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+            if let Some(ref guard) = self.html_spool_path {
+                if let Some(path) = guard.path() {
+                    return crate::utils::html_spool::spool_read_bytes(path).ok();
+                }
+            }
+            None
+        }) {
+            {
                 // let base_domain = &selectors.0;
                 let parent_host = &selectors.1[0];
                 // the host schemes
@@ -5599,11 +5672,10 @@ impl Page {
 
                 let mut rewriter = lol_html::send::HtmlRewriter::new(settings, |_c: &[u8]| {});
 
-                let html_bytes = html.as_bytes();
                 let mut wrote_error = false;
-                let should_yield = html_bytes.len() > REWRITER_YIELD_THRESHOLD;
+                let should_yield = html_bytes_taken.len() > REWRITER_YIELD_THRESHOLD;
 
-                for (i, chunk) in html_bytes.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
+                for (i, chunk) in html_bytes_taken.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
                     if rewriter.write(chunk).is_err() {
                         wrote_error = true;
                         break;
@@ -5618,8 +5690,7 @@ impl Page {
                 }
             }
 
-            drop(html);
-            self.html = html_bytes_taken;
+            self.html = Some(html_bytes_taken);
         }
 
         let valid_meta =

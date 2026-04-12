@@ -62,6 +62,7 @@ http-global-cache = { version = "0.2.0", optional = true, default-features = fal
 http = { version = "1", optional = true }
 phf = "0.13"
 auto_encoder = { version = "0.1" }
+simdutf8 = "0.1"
 base64 = { version = "0.22", optional = true }
 string-interner = { version = "0.19", default-features = false, features = [
     "std",
