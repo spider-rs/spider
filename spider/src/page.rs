@@ -3397,25 +3397,30 @@ impl Page {
             return total;
         }
 
-        // Disk path: on Linux with io_uring use single kernel-async read,
-        // otherwise stream via tokio::fs to keep memory bounded.
+        // Disk path: prefer io_uring (single kernel-async read, zero
+        // spawn_blocking) with tokio::fs fallback.  Only entered when
+        // the page's HTML is spooled to disk.
         if let Some(ref guard) = self.html_spool_path {
             if let Some(path) = guard.path() {
                 let chunk_size = chunk_size.max(1);
 
-                if crate::utils::uring_fs::is_uring_enabled() {
-                    if let Ok(data) =
-                        crate::utils::uring_fs::read_file(path.display().to_string()).await
-                    {
-                        let mut total = 0usize;
-                        for chunk in data.chunks(chunk_size) {
-                            total = total.saturating_add(chunk.len());
-                            if !cb(chunk) {
-                                break;
-                            }
+                let file_data = if crate::utils::uring_fs::is_uring_enabled() {
+                    crate::utils::uring_fs::read_file(path.display().to_string())
+                        .await
+                        .ok()
+                } else {
+                    None
+                };
+
+                if let Some(data) = file_data {
+                    let mut total = 0usize;
+                    for chunk in data.chunks(chunk_size) {
+                        total = total.saturating_add(chunk.len());
+                        if !cb(chunk) {
+                            break;
                         }
-                        return total;
                     }
+                    return total;
                 } else if let Ok(file) = tokio::fs::File::open(path).await {
                     use tokio::io::AsyncReadExt;
                     let mut reader = tokio::io::BufReader::with_capacity(chunk_size, file);
@@ -4234,22 +4239,25 @@ impl Page {
             let mut wrote_error = false;
             let mut chunk_idx = 0usize;
 
-            // On Linux with io_uring: single kernel-async read (zero
-            // spawn_blocking), then chunk from memory.  Elsewhere: stream
-            // from disk via tokio::fs to keep memory bounded.
-            if crate::utils::uring_fs::is_uring_enabled() {
-                if let Ok(file_data) =
-                    crate::utils::uring_fs::read_file(spool_path.display().to_string()).await
-                {
-                    for chunk in file_data.chunks(chunk_size) {
-                        if rewriter.write(chunk).is_err() {
-                            wrote_error = true;
-                            break;
-                        }
-                        chunk_idx += 1;
-                        if chunk_idx % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
-                            tokio::task::yield_now().await;
-                        }
+            // Prefer io_uring (single kernel-async read, zero spawn_blocking)
+            // with tokio::fs fallback for non-Linux or if uring read fails.
+            let file_data = if crate::utils::uring_fs::is_uring_enabled() {
+                crate::utils::uring_fs::read_file(spool_path.display().to_string())
+                    .await
+                    .ok()
+            } else {
+                None
+            };
+
+            if let Some(data) = file_data {
+                for chunk in data.chunks(chunk_size) {
+                    if rewriter.write(chunk).is_err() {
+                        wrote_error = true;
+                        break;
+                    }
+                    chunk_idx += 1;
+                    if chunk_idx % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
+                        tokio::task::yield_now().await;
                     }
                 }
             } else if let Ok(file) = tokio::fs::File::open(&spool_path).await {
