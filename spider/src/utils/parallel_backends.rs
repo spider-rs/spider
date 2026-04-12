@@ -544,24 +544,11 @@ pub async fn race_backends(
 
     let total = 1 + alternatives.len();
 
-    // Randomise launch order: sometimes the primary goes first, sometimes
-    // a backend does. This prevents predictable timing patterns that could
-    // be fingerprinted. The primary gets a random 0–3ms jitter; backends
-    // already have their own jitter from build_backend_futures.
-    let primary_jitter_us = {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut h = DefaultHasher::new();
-        std::time::SystemTime::now().hash(&mut h);
-        0u16.hash(&mut h); // primary marker
-        h.finish() % 3000 // 0–3ms
-    };
-
+    // Primary fires immediately — no jitter. Only backends carry jitter
+    // (from build_backend_futures) to prevent fingerprint correlation.
+    // Delaying the primary defeats the purpose of hedging.
     let primary_wrapped: Pin<Box<dyn Future<Output = BackendResult> + Send>> =
         Box::pin(async move {
-            if primary_jitter_us > 0 {
-                tokio::time::sleep(Duration::from_micros(primary_jitter_us)).await;
-            }
             let response = primary.await;
             BackendResult {
                 backend_index: 0,
@@ -758,7 +745,6 @@ impl Clone for ProxyRotator {
 /// Fresh CDP connection per fetch with the **same handler config** as the
 /// primary Chrome path — network interception, resource blocking, viewport,
 /// timeouts all pass through transparently via `connect_with_config()`.
-/// Fully lock-free: no mutexes, no semaphores, no locks.
 #[cfg(feature = "chrome")]
 pub async fn fetch_cdp(
     url: &str,
@@ -1148,9 +1134,9 @@ pub fn build_backend_futures(
             None
         };
 
-        // Random sub-ms to 5ms jitter before each backend launch to prevent
-        // fingerprint correlation from simultaneous requests. Uses a cheap
-        // hash-based PRNG (no allocations, no syscalls).
+        // Sub-ms jitter before each backend launch to prevent fingerprint
+        // correlation from simultaneous requests. Kept small so backends
+        // start quickly — the value of hedging drops with launch delay.
         let jitter_us = {
             use std::collections::hash_map::DefaultHasher;
             use std::hash::{Hash, Hasher};
@@ -1158,7 +1144,7 @@ pub fn build_backend_futures(
             url.hash(&mut hasher);
             backend_index.hash(&mut hasher);
             std::time::SystemTime::now().hash(&mut hasher);
-            hasher.finish() % 5000 + 100 // 100µs – 5100µs (~0.1ms – 5ms)
+            hasher.finish() % 1000 // 0–999µs (~0–1ms)
         };
 
         let connect_timeout = Duration::from_millis(config.connect_timeout_ms);

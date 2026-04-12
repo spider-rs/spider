@@ -6231,7 +6231,6 @@ impl Website {
                                     // ── Parallel backends: spawn alternatives NOW ──
                                     // These run concurrently with the primary fetch below.
                                     // Results are collected after the primary completes.
-                                    // Fully lock-free: JoinSet + atomics only, no mutexes.
                                     #[cfg(feature = "parallel_backends")]
                                     let mut pb_backend_set: Option<tokio::task::JoinSet<crate::utils::parallel_backends::BackendResult>> = {
                                         if let (Some(ref pb_cfg), Some(ref pb_trk)) =
@@ -6403,28 +6402,124 @@ impl Website {
                                             Some(r) => r.next(),
                                             None => &shared.0,
                                         };
-                                        let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
-                                        let mut links_pages = if return_page_links {
-                                            Some(HashSet::new())
+
+                                        // When parallel_backends is enabled and we have spawned
+                                        // backends, race the primary fetch against them. A backend
+                                        // that finishes first with high quality wins immediately —
+                                        // this is the core hedging value (a slow primary no longer
+                                        // blocks the response).
+                                        #[cfg(feature = "parallel_backends")]
+                                        let pb_race_active = pb_backend_set.is_some()
+                                            && pb_config_ref.as_ref().is_some_and(|c| c.enabled)
+                                            && pb_tracker_ref.is_some();
+
+                                        #[cfg(not(feature = "parallel_backends"))]
+                                        let pb_race_active = false;
+
+                                        if pb_race_active {
+                                            #[cfg(feature = "parallel_backends")]
+                                            {
+                                                let mut pb_set = pb_backend_set.take().unwrap();
+                                                let pb_cfg = pb_config_ref.as_ref().unwrap();
+                                                let pb_trk = pb_tracker_ref.as_ref().unwrap();
+
+                                                let primary_fut = async {
+                                                    let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
+                                                    let mut links_pages = if return_page_links { Some(HashSet::new()) } else { None };
+                                                    let mut selectors = shared.1.clone();
+                                                    let mut r_settings = shared.7;
+                                                    r_settings.ssg_build = true;
+                                                    let mut domain_parsed = None;
+                                                    let page = Page::new_page_streaming(
+                                                        target_url, client, only_html,
+                                                        &mut selectors, external_domains_caseless,
+                                                        &r_settings, &mut links, None, &shared.8,
+                                                        &mut domain_parsed, &mut links_pages).await;
+                                                    (page, links, links_pages)
+                                                };
+                                                tokio::pin!(primary_fut);
+
+                                                loop {
+                                                    tokio::select! {
+                                                        biased;
+                                                        result = &mut primary_fut => {
+                                                            pb_trk.record_race(0);
+                                                            pb_trk.record_success(0);
+                                                            // Put JoinSet back for post-primary collection.
+                                                            pb_backend_set = Some(pb_set);
+                                                            break result;
+                                                        }
+                                                        res = pb_set.join_next() => {
+                                                            match res {
+                                                                Some(Ok(br)) => {
+                                                                    let idx = br.backend_index;
+                                                                    if let Some(resp) = br.response {
+                                                                        pb_trk.record_race(idx);
+                                                                        pb_trk.record_duration(idx, resp.duration);
+                                                                        pb_trk.record_success(idx);
+                                                                        if resp.quality_score >= pb_cfg.fast_accept_threshold {
+                                                                            log::info!(
+                                                                                "[parallel_backends] backend {} won race for {} (score={})",
+                                                                                idx, target_url, resp.quality_score
+                                                                            );
+                                                                            pb_trk.record_win(idx);
+                                                                            pb_set.abort_all();
+                                                                            let mut page = resp.page;
+                                                                            page.set_url_parsed_direct();
+                                                                            let page_base = page.base.take().map(Box::new);
+                                                                            let new_links = if shared.6 {
+                                                                                page.links_full(&shared.1, &page_base).await
+                                                                            } else {
+                                                                                page.links(&shared.1, &page_base).await
+                                                                            };
+                                                                            page.base = page_base.map(|b| *b);
+                                                                            break (page, new_links, if return_page_links { Some(HashSet::new()) } else { None });
+                                                                        }
+                                                                    } else {
+                                                                        pb_trk.record_race(idx);
+                                                                        pb_trk.record_error(idx);
+                                                                    }
+                                                                }
+                                                                Some(Err(_)) => {} // JoinError
+                                                                None => {
+                                                                    // All backends done, none good — wait for primary.
+                                                                    let result = primary_fut.await;
+                                                                    pb_trk.record_race(0);
+                                                                    pb_trk.record_success(0);
+                                                                    break result;
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            #[cfg(not(feature = "parallel_backends"))]
+                                            unreachable!()
                                         } else {
-                                            None
-                                        };
-                                        let mut relative_selectors = shared.1.clone();
-                                        let mut r_settings = shared.7;
-                                        r_settings.ssg_build = true;
-                                        let mut domain_parsed = None;
-                                        let page = Page::new_page_streaming(
-                                            target_url,
-                                            client, only_html,
-                                            &mut relative_selectors,
-                                            external_domains_caseless,
-                                            &r_settings,
-                                            &mut links,
-                                            None,
-                                            &shared.8,
-                                            &mut domain_parsed,
-                                            &mut links_pages).await;
-                                        (page, links, links_pages)
+                                            let mut links: HashSet<CaseInsensitiveString> = HashSet::with_capacity(32);
+                                            let mut links_pages = if return_page_links {
+                                                Some(HashSet::new())
+                                            } else {
+                                                None
+                                            };
+                                            let mut relative_selectors = shared.1.clone();
+                                            let mut r_settings = shared.7;
+                                            r_settings.ssg_build = true;
+                                            let mut domain_parsed = None;
+                                            let page = Page::new_page_streaming(
+                                                target_url,
+                                                client, only_html,
+                                                &mut relative_selectors,
+                                                external_domains_caseless,
+                                                &r_settings,
+                                                &mut links,
+                                                None,
+                                                &shared.8,
+                                                &mut domain_parsed,
+                                                &mut links_pages).await;
+                                            (page, links, links_pages)
+                                        }
                                     };
 
                                     let mut retry_count = shared.5;
@@ -6512,7 +6607,6 @@ impl Website {
                                     // Backend futures were spawned BEFORE the primary fetch
                                     // (see pb_backend_set above) and ran concurrently. Now
                                     // we check if any produced a higher-quality result.
-                                    // Fully lock-free: JoinSet + atomics only, zero mutexes.
                                     #[cfg(feature = "parallel_backends")]
                                     if let Some(ref mut pb_set) = pb_backend_set {
                                         if let (Some(ref pb_cfg), Some(ref pb_trk)) =
