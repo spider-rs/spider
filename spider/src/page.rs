@@ -4514,7 +4514,15 @@ impl Page {
     ) -> HashSet<A> {
         if self.binary_file || auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             Default::default()
-        } else if let Some(html_bytes) = self.html.take() {
+        } else if let Some(html_bytes) = self.html.take().or_else(|| {
+            #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+            if let Some(ref guard) = self.html_spool_path {
+                if let Some(path) = guard.path() {
+                    return crate::utils::html_spool::spool_read_bytes(path).ok();
+                }
+            }
+            None
+        }) {
             let result = self
                 .links_stream_base_ssg(selectors, &html_bytes, client, prior_domain)
                 .await;
@@ -4534,7 +4542,12 @@ impl Page {
         client: &Client,
         prior_domain: &Option<Box<Url>>,
     ) -> HashSet<CaseInsensitiveString> {
-        match self.html.is_some() {
+        let has_html = self.html.is_some();
+
+        #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+        let has_html = has_html || self.html_spool_path.is_some();
+
+        match has_html {
             false => Default::default(),
             true => {
                 self.links_stream_ssg::<CaseInsensitiveString>(selectors, client, prior_domain)
