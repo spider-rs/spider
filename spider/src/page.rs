@@ -3397,18 +3397,26 @@ impl Page {
             return total;
         }
 
-        // Disk path: single async read via uring_fs, then chunk from memory.
-        // One I/O op instead of N spawn_blocking round-trips per chunk.
+        // Disk path: true streaming — read one chunk at a time from disk
+        // so the full file is never loaded into memory.
         if let Some(ref guard) = self.html_spool_path {
             if let Some(path) = guard.path() {
-                if let Ok(data) =
-                    crate::utils::uring_fs::read_file(path.display().to_string()).await
-                {
+                if let Ok(file) = tokio::fs::File::open(path).await {
+                    use tokio::io::AsyncReadExt;
+                    let chunk_size = chunk_size.max(1);
+                    let mut reader = tokio::io::BufReader::with_capacity(chunk_size, file);
+                    let mut buf = vec![0u8; chunk_size];
                     let mut total = 0usize;
-                    for chunk in data.chunks(chunk_size.max(1)) {
-                        total = total.saturating_add(chunk.len());
-                        if !cb(chunk) {
-                            break;
+                    loop {
+                        match reader.read(&mut buf).await {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                total = total.saturating_add(n);
+                                if !cb(&buf[..n]) {
+                                    break;
+                                }
+                            }
+                            Err(_) => break,
                         }
                     }
                     return total;
@@ -4116,12 +4124,14 @@ impl Page {
         let mut meta_description: Option<_> = None;
         let mut meta_og_image: Option<_> = None;
 
-        // Single async read via uring_fs (true kernel-async on Linux,
-        // tokio::fs fallback elsewhere) — one I/O op instead of N
-        // spawn_blocking round-trips from tokio::fs::File chunked reads.
-        let file_data =
+        // XML path: full read required because quick_xml NsReader needs a
+        // contiguous &[u8] slice.  HTML path below uses true streaming.
+        if self.is_xml {
             match crate::utils::uring_fs::read_file(spool_path.display().to_string()).await {
-                Ok(data) => data,
+                Ok(file_data) => {
+                    self.links_stream_xml_links_stream_base(selectors, &file_data, &mut map, base)
+                        .await;
+                }
                 Err(_) => {
                     if let Some(lp) = links_pages {
                         let page_links = self.page_links.get_or_insert_with(Default::default);
@@ -4129,11 +4139,7 @@ impl Page {
                     }
                     return map;
                 }
-            };
-
-        if self.is_xml {
-            self.links_stream_xml_links_stream_base(selectors, &file_data, &mut map, base)
-                .await;
+            }
         } else {
             let base_input_url = tokio::sync::OnceCell::new();
 
@@ -4211,24 +4217,36 @@ impl Page {
             let mut rewriter = lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
 
             let chunk_size = *STREAMING_CHUNK_SIZE;
-            let mut wrote_error = false;
-            let mut chunk_idx = 0usize;
 
-            // Feed chunks from the already-loaded buffer to lol_html,
-            // yielding periodically so other tasks can make progress.
-            for chunk in file_data.chunks(chunk_size) {
-                if rewriter.write(chunk).is_err() {
-                    wrote_error = true;
-                    break;
-                }
-                chunk_idx += 1;
-                if chunk_idx % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
-                    tokio::task::yield_now().await;
-                }
-            }
+            // True streaming from disk — read one chunk at a time via
+            // tokio::fs::File so the full file is never in memory.
+            // BufReader batches syscalls internally for efficiency.
+            if let Ok(file) = tokio::fs::File::open(&spool_path).await {
+                use tokio::io::AsyncReadExt;
+                let mut reader = tokio::io::BufReader::with_capacity(chunk_size, file);
+                let mut buf = vec![0u8; chunk_size];
+                let mut wrote_error = false;
+                let mut chunk_idx = 0usize;
 
-            if !wrote_error {
-                let _ = rewriter.end();
+                loop {
+                    let n = match reader.read(&mut buf).await {
+                        Ok(0) => break,
+                        Ok(n) => n,
+                        Err(_) => break,
+                    };
+                    if rewriter.write(&buf[..n]).is_err() {
+                        wrote_error = true;
+                        break;
+                    }
+                    chunk_idx += 1;
+                    if chunk_idx % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
+                        tokio::task::yield_now().await;
+                    }
+                }
+
+                if !wrote_error {
+                    let _ = rewriter.end();
+                }
             }
         }
 
@@ -4892,7 +4910,7 @@ impl Page {
                 };
 
                 let mut rewriter =
-                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |_c: &[u8]| {});
+                    lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
 
                 let mut wrote_error = false;
                 let should_yield = html_bytes_taken.len() > REWRITER_YIELD_THRESHOLD;
@@ -4913,10 +4931,10 @@ impl Page {
 
                 // Anti-bot detection is a strong signal (immediate upgrade).
                 let mut score = upgrade_score.load(Ordering::Relaxed);
-                if score < SMART_UPGRADE_THRESHOLD {
-                    if crate::utils::detect_anti_bot_from_body(&html_bytes_taken).is_some() {
-                        score = SMART_UPGRADE_THRESHOLD;
-                    }
+                if score < SMART_UPGRADE_THRESHOLD
+                    && crate::utils::detect_anti_bot_from_body(&html_bytes_taken).is_some()
+                {
+                    score = SMART_UPGRADE_THRESHOLD;
                 }
 
                 if score >= SMART_UPGRADE_THRESHOLD {
@@ -5298,10 +5316,10 @@ impl Page {
                         }
                     ),
                     text!("noscript", |el| {
-                        if upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD {
-                            if NO_SCRIPT_JS_REQUIRED.find(el.as_str()).is_some() {
-                                upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
-                            }
+                        if upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD
+                            && NO_SCRIPT_JS_REQUIRED.find(el.as_str()).is_some()
+                        {
+                            upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
                         }
                         Ok(())
                     }),
@@ -5309,14 +5327,13 @@ impl Page {
                         let s = el.as_str();
                         if !s.is_empty()
                             && upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD
+                            && DOM_SCRIPT_WATCH_METHODS.find(s).is_some()
                         {
-                            if DOM_SCRIPT_WATCH_METHODS.find(s).is_some() {
-                                let _ = upgrade_score.fetch_update(
-                                    Ordering::Relaxed,
-                                    Ordering::Relaxed,
-                                    |v| Some(v.saturating_add(7)),
-                                );
-                            }
+                            let _ = upgrade_score.fetch_update(
+                                Ordering::Relaxed,
+                                Ordering::Relaxed,
+                                |v| Some(v.saturating_add(7)),
+                            );
                         }
                         Ok(())
                     }),
@@ -5358,7 +5375,7 @@ impl Page {
                 };
 
                 let mut rewriter =
-                    lol_html::send::HtmlRewriter::new(rewriter_settings.into(), |_c: &[u8]| {});
+                    lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
 
                 let mut wrote_error = false;
                 let should_yield = html_bytes_taken.len() > REWRITER_YIELD_THRESHOLD;
@@ -5379,10 +5396,10 @@ impl Page {
 
                 // Anti-bot detection is a strong signal (immediate upgrade).
                 let mut score = upgrade_score.load(Ordering::Relaxed);
-                if score < SMART_UPGRADE_THRESHOLD {
-                    if crate::utils::detect_anti_bot_from_body(&html_bytes_taken).is_some() {
-                        score = SMART_UPGRADE_THRESHOLD;
-                    }
+                if score < SMART_UPGRADE_THRESHOLD
+                    && crate::utils::detect_anti_bot_from_body(&html_bytes_taken).is_some()
+                {
+                    score = SMART_UPGRADE_THRESHOLD;
                 }
 
                 if score >= SMART_UPGRADE_THRESHOLD {

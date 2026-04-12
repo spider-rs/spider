@@ -14021,7 +14021,11 @@ async fn test_channel_guard_repeated_lock() {
     for _ in 0..2 {
         g.inc();
     }
-    assert_eq!(guard.0 .2.load(Ordering::Relaxed), 5, "consumed = 5 cumulative");
+    assert_eq!(
+        guard.0 .2.load(Ordering::Relaxed),
+        5,
+        "consumed = 5 cumulative"
+    );
 
     // Second lock must also resolve — this was a livelock before the fix.
     tokio::time::timeout(std::time::Duration::from_millis(100), guard.lock())
@@ -14051,9 +14055,11 @@ async fn test_channel_guard_lock_waits_for_consumers() {
     ChannelGuard::inc_guard(&guard.0 .1);
 
     // lock() should NOT resolve yet (0 consumed, 2 sent).
-    let result =
-        tokio::time::timeout(std::time::Duration::from_millis(50), guard.lock()).await;
-    assert!(result.is_err(), "lock should timeout while consumers are behind");
+    let result = tokio::time::timeout(std::time::Duration::from_millis(50), guard.lock()).await;
+    assert!(
+        result.is_err(),
+        "lock should timeout while consumers are behind"
+    );
 
     // Consume both.
     g.inc();
