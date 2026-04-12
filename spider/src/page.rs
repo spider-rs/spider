@@ -4514,21 +4514,29 @@ impl Page {
     ) -> HashSet<A> {
         if self.binary_file || auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             Default::default()
-        } else if let Some(html_bytes) = self.html.take().or_else(|| {
-            #[cfg(all(feature = "balance", not(feature = "decentralized")))]
-            if let Some(ref guard) = self.html_spool_path {
-                if let Some(path) = guard.path() {
-                    return crate::utils::html_spool::spool_read_bytes(path).ok();
-                }
-            }
-            None
-        }) {
+        } else if let Some(html_bytes) = self.html.take() {
             let result = self
                 .links_stream_base_ssg(selectors, &html_bytes, client, prior_domain)
                 .await;
             self.html = Some(html_bytes);
             result
         } else {
+            // When HTML is on disk, read via async I/O to avoid blocking
+            // the tokio runtime.  The bytes are used transiently for SSG
+            // parsing and NOT stored back into self.html so the spool
+            // continues to own the data on disk.
+            #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+            if let Some(ref guard) = self.html_spool_path {
+                if let Some(path) = guard.path() {
+                    if let Ok(disk_bytes) =
+                        crate::utils::html_spool::spool_read_bytes_async(path.to_path_buf()).await
+                    {
+                        return self
+                            .links_stream_base_ssg(selectors, &disk_bytes, client, prior_domain)
+                            .await;
+                    }
+                }
+            }
             Default::default()
         }
     }
@@ -4658,7 +4666,10 @@ impl Page {
                 #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                 if let Some(ref guard) = self.html_spool_path {
                     if let Some(path) = guard.path() {
-                        if let Ok(disk_bytes) = crate::utils::html_spool::spool_read_bytes(path) {
+                        if let Ok(disk_bytes) =
+                            crate::utils::html_spool::spool_read_bytes_async(path.to_path_buf())
+                                .await
+                        {
                             self.links_stream_xml_links_stream_base(
                                 selectors,
                                 &disk_bytes,
@@ -4670,15 +4681,7 @@ impl Page {
                     }
                 }
             }
-        } else if let Some(html_bytes_taken) = self.html.take().or_else(|| {
-            #[cfg(all(feature = "balance", not(feature = "decentralized")))]
-            if let Some(ref guard) = self.html_spool_path {
-                if let Some(path) = guard.path() {
-                    return crate::utils::html_spool::spool_read_bytes(path).ok();
-                }
-            }
-            None
-        }) {
+        } else if let Some(html_bytes_taken) = self.html.take() {
             {
                 let base_input_url = tokio::sync::OnceCell::new();
 
@@ -5136,7 +5139,10 @@ impl Page {
                 #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                 if let Some(ref guard) = self.html_spool_path {
                     if let Some(path) = guard.path() {
-                        if let Ok(disk_bytes) = crate::utils::html_spool::spool_read_bytes(path) {
+                        if let Ok(disk_bytes) =
+                            crate::utils::html_spool::spool_read_bytes_async(path.to_path_buf())
+                                .await
+                        {
                             self.links_stream_xml_links_stream_base(
                                 selectors,
                                 &disk_bytes,
@@ -5148,15 +5154,7 @@ impl Page {
                     }
                 }
             }
-        } else if let Some(html_bytes_taken) = self.html.take().or_else(|| {
-            #[cfg(all(feature = "balance", not(feature = "decentralized")))]
-            if let Some(ref guard) = self.html_spool_path {
-                if let Some(path) = guard.path() {
-                    return crate::utils::html_spool::spool_read_bytes(path).ok();
-                }
-            }
-            None
-        }) {
+        } else if let Some(html_bytes_taken) = self.html.take() {
             {
                 let base_input_url = tokio::sync::OnceCell::new();
 
@@ -5593,7 +5591,10 @@ impl Page {
                 #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                 if let Some(ref guard) = self.html_spool_path {
                     if let Some(path) = guard.path() {
-                        if let Ok(disk_bytes) = crate::utils::html_spool::spool_read_bytes(path) {
+                        if let Ok(disk_bytes) =
+                            crate::utils::html_spool::spool_read_bytes_async(path.to_path_buf())
+                                .await
+                        {
                             self.links_stream_xml_links_stream_base(
                                 selectors,
                                 &disk_bytes,
@@ -5605,15 +5606,7 @@ impl Page {
                     }
                 }
             }
-        } else if let Some(html_bytes_taken) = self.html.take().or_else(|| {
-            #[cfg(all(feature = "balance", not(feature = "decentralized")))]
-            if let Some(ref guard) = self.html_spool_path {
-                if let Some(path) = guard.path() {
-                    return crate::utils::html_spool::spool_read_bytes(path).ok();
-                }
-            }
-            None
-        }) {
+        } else if let Some(html_bytes_taken) = self.html.take() {
             {
                 // let base_domain = &selectors.0;
                 let parent_host = &selectors.1[0];
@@ -5763,6 +5756,19 @@ impl Page {
         if self.binary_file || auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
             Default::default()
         } else {
+            // When HTML is on disk, stream from disk without loading full
+            // content into memory.
+            #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+            if self.html.is_none() && self.html_spool_path.is_some() {
+                if let Some(ref guard) = self.html_spool_path {
+                    if let Some(path) = guard.path() {
+                        return self
+                            .links_stream_base_from_disk(selectors, path.to_path_buf(), base)
+                            .await;
+                    }
+                }
+                return Default::default();
+            }
             self.links_stream_full_resource(selectors, base).await
         }
     }
@@ -5827,6 +5833,19 @@ impl Page {
         match has_html {
             false => Default::default(),
             true => {
+                // When HTML is on disk, stream link extraction directly
+                // without loading the full content into memory.
+                #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+                if self.html.is_none() && self.html_spool_path.is_some() {
+                    if let Some(ref guard) = self.html_spool_path {
+                        if let Some(path) = guard.path() {
+                            return self
+                                .links_stream_base_from_disk(selectors, path.to_path_buf(), base)
+                                .await;
+                        }
+                    }
+                    return Default::default();
+                }
                 if self.binary_file || auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
                     return Default::default();
                 }
