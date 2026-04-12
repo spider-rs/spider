@@ -544,11 +544,24 @@ pub async fn race_backends(
 
     let total = 1 + alternatives.len();
 
-    // Primary fires immediately — no jitter. Only backends carry jitter
-    // (from build_backend_futures) to prevent fingerprint correlation.
-    // Delaying the primary defeats the purpose of hedging.
+    // Randomise launch order: sometimes the primary goes first, sometimes
+    // a backend does. This prevents predictable timing patterns that could
+    // be fingerprinted. Uses a tighter jitter range (0–1ms) than backends
+    // so the primary is rarely meaningfully delayed.
+    let primary_jitter_us = {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut h = DefaultHasher::new();
+        std::time::SystemTime::now().hash(&mut h);
+        0u16.hash(&mut h); // primary marker
+        h.finish() % 1000 // 0–999µs (~0–1ms)
+    };
+
     let primary_wrapped: Pin<Box<dyn Future<Output = BackendResult> + Send>> =
         Box::pin(async move {
+            if primary_jitter_us > 0 {
+                tokio::time::sleep(Duration::from_micros(primary_jitter_us)).await;
+            }
             let response = primary.await;
             BackendResult {
                 backend_index: 0,
