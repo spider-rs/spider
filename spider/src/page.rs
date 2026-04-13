@@ -367,46 +367,7 @@ lazy_static! {
         "application/ogg",          // ogx
     };
 
-    /// Visual assets to ignore.
-    pub(crate) static ref IGNORE_ASSETS: HashSet<CaseInsensitiveString> = {
-        let mut m: HashSet<CaseInsensitiveString> = HashSet::with_capacity(90);
-
-        m.extend([
-            "jpg", "jpeg", "png", "gif", "svg", "webp",      // Image files
-            "mp4", "avi", "mov", "wmv", "flv",               // Video files
-            "mp3", "wav", "ogg",                             // Audio files
-            "woff", "woff2", "ttf", "otf",                   // Font files
-            "swf", "xap",                                    // Flash/Silverlight files
-            "ico", "eot",                                    // Other resource files
-            "bmp", "tiff", "tif", "heic", "heif",            // Additional Image files
-            "mkv", "webm", "m4v",                            // Additional Video files
-            "aac", "flac", "m4a", "aiff",                    // Additional Audio files
-            "pdf", "eps", "yaml", "yml", "rtf", "txt",       // Other additional files
-            "doc", "docx", "csv", "eot", "epub", "gz",
-            "ics", "md", "webmanifest",
-            "apng", "avif",
-            "cda", "mid", "midi", "oga", "ogv", "ogx", "opus", "weba", "mpeg", "ts", "3gp", "3g2",
-            "arc", "bin", "bz", "bz2", "jar", "mpkg", "rar", "tar", "zip", "7z",
-            "abw", "azw", "odt", "ods", "odp", "ppt", "pptx", "xls", "xlsx", "vsd",
-            ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
-            ".mp4", ".avi", ".mov", ".wmv", ".flv",
-            ".mp3", ".wav", ".ogg",
-            ".woff", ".woff2", ".ttf", ".otf",
-            ".swf", ".xap",
-            ".ico", ".eot",
-            ".bmp", ".tiff", ".tif", ".heic", ".heif",
-            ".mkv", ".webm", ".m4v",
-            ".aac", ".flac", ".m4a", ".aiff",
-            ".pdf", ".eps", ".yaml", ".yml", ".rtf", ".txt",
-            ".doc", ".docx", ".csv", ".eot", ".epub", ".gz",
-            ".apng", ".avif", ".ics", ".md", ".webmanifest",
-            ".cda", ".mid", ".midi", ".oga", ".ogv", ".ogx", ".opus", ".weba", ".mpeg", ".ts", ".3gp", ".3g2",
-            ".arc", ".bin", ".bz", ".bz2", ".jar", ".mpkg", ".rar", ".tar", ".zip", ".7z",
-            ".abw", ".azw", ".odt", ".ods", ".odp", ".ppt", ".pptx", ".xls", ".xlsx", ".vsd",
-        ].map(|s| s.into()));
-
-        m
-    };
+    // IGNORE_ASSETS moved to a compile-time phf::Set (IGNORE_EXTENSIONS) below.
 
     /// The chunk size for the rewriter. Can be adjusted using the env var "SPIDER_STREAMING_CHUNK_SIZE".
     pub(crate) static ref STREAMING_CHUNK_SIZE: usize = {
@@ -425,6 +386,56 @@ lazy_static! {
             })
             .unwrap_or(default_streaming_chunk_size)
     };
+}
+
+/// Compile-time perfect-hash set of ignored asset extensions (all lowercase, no dot prefix).
+/// Replaces the former `IGNORE_ASSETS` `HashSet<CaseInsensitiveString>` — zero allocation
+/// at init and at lookup time.
+pub(crate) static IGNORE_EXTENSIONS: phf::Set<&'static str> = phf_set! {
+    // Image
+    "jpg", "jpeg", "png", "gif", "svg", "webp", "bmp", "tiff", "tif",
+    "heic", "heif", "apng", "avif", "ico",
+    // Video
+    "mp4", "avi", "mov", "wmv", "flv", "mkv", "webm", "m4v", "mpeg",
+    "3gp", "3g2",
+    // Audio
+    "mp3", "wav", "ogg", "aac", "flac", "m4a", "aiff", "cda", "mid",
+    "midi", "oga", "opus", "weba",
+    // Font
+    "woff", "woff2", "ttf", "otf", "eot",
+    // Document
+    "pdf", "eps", "rtf", "txt", "doc", "docx", "csv", "epub",
+    "abw", "azw", "odt", "ods", "odp", "ppt", "pptx", "xls", "xlsx", "vsd",
+    // Data / config
+    "yaml", "yml", "ics", "md", "webmanifest",
+    // Archive / binary
+    "gz", "arc", "bin", "bz", "bz2", "jar", "mpkg", "rar", "tar", "zip", "7z",
+    // Legacy plugin
+    "swf", "xap",
+    // Ogg containers
+    "ogv", "ogx",
+    // Misc media
+    "ts",
+};
+
+/// Check whether `ext` (the substring *after* the last dot) is a known asset extension.
+/// Zero-allocation: lowercases into a stack buffer and looks up in the compile-time phf set.
+#[inline]
+pub(crate) fn is_ignored_extension(ext: &str) -> bool {
+    let bytes = ext.as_bytes();
+    // Longest known extension is "webmanifest" (11 bytes).
+    // Anything longer cannot match; empty cannot match either.
+    if bytes.len() > 16 || bytes.is_empty() {
+        return false;
+    }
+    let mut buf = [0u8; 16];
+    let dest = &mut buf[..bytes.len()];
+    dest.copy_from_slice(bytes);
+    dest.make_ascii_lowercase();
+    // ASCII lowercasing preserves UTF-8 validity; debug_assert guards the invariant.
+    debug_assert!(std::str::from_utf8(dest).is_ok());
+    let lowered = std::str::from_utf8(dest).unwrap_or_default();
+    IGNORE_EXTENSIONS.contains(lowered)
 }
 
 /// Global EMA of links-per-page. Used to pre-size extraction HashSets and
@@ -1167,13 +1178,12 @@ pub(crate) fn push_link_verify<
 
 /// Determine if a url is an asset.
 pub fn is_asset_url(url: &str) -> bool {
-    let mut asset = false;
     if let Some(position) = url.rfind('.') {
         if url.len() - position >= 3 {
-            asset = IGNORE_ASSETS.contains::<CaseInsensitiveString>(&url[position + 1..].into());
+            return is_ignored_extension(&url[position + 1..]);
         }
     }
-    asset
+    false
 }
 
 /// Validate link and push into the map checking if asset
@@ -1195,9 +1205,7 @@ pub(crate) fn push_link_check<
         if has_asset >= 3 {
             let next_position = position + 1;
 
-            if !full_resources
-                && IGNORE_ASSETS.contains::<CaseInsensitiveString>(&hchars[next_position..].into())
-            {
+            if !full_resources && is_ignored_extension(&hchars[next_position..]) {
                 *can_process = false;
             }
         }

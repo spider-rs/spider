@@ -7240,11 +7240,13 @@ pub(crate) fn get_domain_from_url(url: &str) -> &str {
 }
 
 /// Determine if networking is capable for a URL.
+/// Uses first-byte dispatch to avoid 4 redundant prefix scans.
 pub fn networking_capable(url: &str) -> bool {
-    url.starts_with("https://")
-        || url.starts_with("http://")
-        || url.starts_with("file://")
-        || url.starts_with("ftp://")
+    match url.as_bytes().first() {
+        Some(b'h') => url.starts_with("https://") || url.starts_with("http://"),
+        Some(b'f') => url.starts_with("file://") || url.starts_with("ftp://"),
+        _ => false,
+    }
 }
 
 /// Prepare the url for parsing if it fails. Use this method if the url does not start with http or https.

@@ -252,6 +252,7 @@ impl Default for Entry {
 /// extract the path of a string
 fn extract_path(url: &str) -> &str {
     if !url.is_empty() {
+        let bytes = url.as_bytes();
         let prefix = if url.starts_with("https://") {
             8
         } else if url.starts_with("http://") {
@@ -260,15 +261,15 @@ fn extract_path(url: &str) -> &str {
             0
         };
 
-        let url_slice = &url[prefix..];
+        let url_slice = &bytes[prefix..];
 
-        if let Some(path_start) = url_slice.find('/') {
-            let path = &url_slice[path_start..];
+        if let Some(path_start) = memchr::memchr(b'/', url_slice) {
+            let path_offset = prefix + path_start;
 
-            if let Some(query_start) = path.find('?') {
-                &path[..query_start]
+            if let Some(query_pos) = memchr::memchr(b'?', &bytes[path_offset..]) {
+                &url[path_offset..path_offset + query_pos]
             } else {
-                path
+                &url[path_offset..]
             }
         } else {
             "/"
@@ -370,9 +371,7 @@ impl RobotFileParser {
     pub async fn from_response(&mut self, response: crate::client::Response) {
         match response.text().await {
             Ok(buf) => {
-                let lines: Vec<&str> = buf.split('\n').collect();
-
-                self.parse(&lines);
+                self.parse_str(&buf);
             }
             _ => {
                 self.allow_all = true;
@@ -390,6 +389,26 @@ impl RobotFileParser {
         } else {
             self.entries.push(entry);
         }
+    }
+
+    ///
+    /// Parse a robots.txt string directly, splitting lines via memchr
+    /// to avoid allocating an intermediate `Vec<&str>`.
+    pub fn parse_str(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        let bytes = text.as_bytes();
+        let mut lines = Vec::with_capacity(bytes.len() / 20 + 1);
+        let mut start = 0;
+        for pos in memchr::memchr_iter(b'\n', bytes) {
+            lines.push(&text[start..pos]);
+            start = pos + 1;
+        }
+        if start < text.len() {
+            lines.push(&text[start..]);
+        }
+        self.parse(&lines);
     }
 
     ///
@@ -427,7 +446,7 @@ impl RobotFileParser {
                 }
             }
             // remove optional comment and strip line
-            if let Some(i) = ln.find('#') {
+            if let Some(i) = memchr::memchr(b'#', ln.as_bytes()) {
                 ln = &ln[0..i];
             }
             ln = ln.trim();
@@ -435,7 +454,9 @@ impl RobotFileParser {
                 continue;
             }
 
-            if let Some((left, right)) = ln.split_once(':') {
+            let colon_pos = memchr::memchr(b':', ln.as_bytes());
+            if let Some(colon) = colon_pos {
+                let (left, right) = (&ln[..colon], &ln[colon + 1..]);
                 let part0 = left.trim();
                 let part1_raw = right.trim();
                 let part1 = String::from_utf8(percent_decode(part1_raw.as_bytes()).collect())
