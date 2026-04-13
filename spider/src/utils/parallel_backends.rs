@@ -1176,47 +1176,68 @@ pub fn build_backend_futures(
                 let proxy = resolved_proxy.clone();
                 let source = backend_source_name(backend).to_string();
                 futs.push(Box::pin(async move {
-                    // Acquire semaphore permit before doing any real work.
-                    let _permit = if let Some(ref s) = sem {
-                        match s.acquire().await {
-                            Ok(p) => Some(p),
+                    // Wrap the ENTIRE backend future (including semaphore
+                    // acquire) in the outer timeout.  Previously the timeout
+                    // only covered fetch_cdp — if all permits were held by
+                    // other backends or leaked tabs, acquire() would block
+                    // forever and stall the crawl.
+                    let work = async {
+                        // Acquire semaphore permit with a bounded wait.
+                        // 10s is generous — if permits are still held after
+                        // that, the backends are likely stalled or leaked.
+                        let _permit = if let Some(ref s) = sem {
+                            match tokio::time::timeout(
+                                Duration::from_secs(10),
+                                s.acquire(),
+                            )
+                            .await
+                            {
+                                Ok(Ok(p)) => Some(p),
+                                _ => {
+                                    log::warn!(
+                                        "[parallel_backends] {} backend {} semaphore timeout for {}",
+                                        source, backend_index, url
+                                    );
+                                    return BackendResult {
+                                        backend_index,
+                                        response: None,
+                                    };
+                                }
+                            }
+                        } else {
+                            None
+                        };
+                        tokio::time::sleep(Duration::from_micros(jitter_us)).await;
+                        let response = fetch_cdp(
+                            &url,
+                            &resolved_endpoint,
+                            &cfg,
+                            backend_index,
+                            connect_timeout,
+                            proxy,
+                            &source,
+                        )
+                        .await;
+                        BackendResult {
+                            backend_index,
+                            response,
+                        }
+                    };
+                    match outer_timeout {
+                        Some(deadline) => match tokio::time::timeout(deadline, work).await {
+                            Ok(r) => r,
                             Err(_) => {
-                                return BackendResult {
+                                log::warn!(
+                                    "[parallel_backends] {} backend {} hard timeout ({}ms) for {}",
+                                    source, backend_index, backend_timeout_ms_log, url
+                                );
+                                BackendResult {
                                     backend_index,
                                     response: None,
                                 }
                             }
-                        }
-                    } else {
-                        None
-                    };
-                    tokio::time::sleep(Duration::from_micros(jitter_us)).await;
-                    let inner = fetch_cdp(
-                        &url,
-                        &resolved_endpoint,
-                        &cfg,
-                        backend_index,
-                        connect_timeout,
-                        proxy,
-                        &source,
-                    );
-                    let response =
-                        match outer_timeout {
-                            Some(deadline) => match tokio::time::timeout(deadline, inner).await {
-                                Ok(r) => r,
-                                Err(_) => {
-                                    log::warn!(
-                                    "[parallel_backends] {} backend {} hard timeout ({}ms) for {}",
-                                    source, backend_index, backend_timeout_ms_log, url
-                                );
-                                    None
-                                }
-                            },
-                            None => inner.await,
-                        };
-                    BackendResult {
-                        backend_index,
-                        response,
+                        },
+                        None => work.await,
                     }
                 }));
             }
@@ -1227,47 +1248,63 @@ pub fn build_backend_futures(
                 let proxy = resolved_proxy.clone();
                 let source = backend_source_name(backend).to_string();
                 futs.push(Box::pin(async move {
-                    // Acquire semaphore permit before doing any real work.
-                    let _permit = if let Some(ref s) = sem {
-                        match s.acquire().await {
-                            Ok(p) => Some(p),
+                    // Wrap the ENTIRE backend future (including semaphore
+                    // acquire) in the outer timeout — same fix as CDP path.
+                    let work = async {
+                        // Acquire semaphore permit with a bounded wait.
+                        let _permit = if let Some(ref s) = sem {
+                            match tokio::time::timeout(
+                                Duration::from_secs(10),
+                                s.acquire(),
+                            )
+                            .await
+                            {
+                                Ok(Ok(p)) => Some(p),
+                                _ => {
+                                    log::warn!(
+                                        "[parallel_backends] {} backend {} semaphore timeout for {}",
+                                        source, backend_index, url
+                                    );
+                                    return BackendResult {
+                                        backend_index,
+                                        response: None,
+                                    };
+                                }
+                            }
+                        } else {
+                            None
+                        };
+                        tokio::time::sleep(Duration::from_micros(jitter_us)).await;
+                        let response = fetch_webdriver(
+                            &url,
+                            &resolved_endpoint,
+                            &cfg,
+                            backend_index,
+                            connect_timeout,
+                            proxy,
+                            &source,
+                        )
+                        .await;
+                        BackendResult {
+                            backend_index,
+                            response,
+                        }
+                    };
+                    match outer_timeout {
+                        Some(deadline) => match tokio::time::timeout(deadline, work).await {
+                            Ok(r) => r,
                             Err(_) => {
-                                return BackendResult {
+                                log::warn!(
+                                    "[parallel_backends] {} backend {} hard timeout ({}ms) for {}",
+                                    source, backend_index, backend_timeout_ms_log, url
+                                );
+                                BackendResult {
                                     backend_index,
                                     response: None,
                                 }
                             }
-                        }
-                    } else {
-                        None
-                    };
-                    tokio::time::sleep(Duration::from_micros(jitter_us)).await;
-                    let inner = fetch_webdriver(
-                        &url,
-                        &resolved_endpoint,
-                        &cfg,
-                        backend_index,
-                        connect_timeout,
-                        proxy,
-                        &source,
-                    );
-                    let response =
-                        match outer_timeout {
-                            Some(deadline) => match tokio::time::timeout(deadline, inner).await {
-                                Ok(r) => r,
-                                Err(_) => {
-                                    log::warn!(
-                                    "[parallel_backends] {} backend {} hard timeout ({}ms) for {}",
-                                    source, backend_index, backend_timeout_ms_log, url
-                                );
-                                    None
-                                }
-                            },
-                            None => inner.await,
-                        };
-                    BackendResult {
-                        backend_index,
-                        response,
+                        },
+                        None => work.await,
                     }
                 }));
             }

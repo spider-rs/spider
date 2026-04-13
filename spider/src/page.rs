@@ -4414,8 +4414,7 @@ impl Page {
             // SSG manifest detection — same as links_stream_base_ssg.
             element_content_handlers.push(lol_html::element!("script[src]", |el| {
                 if let Some(source) = el.get_attribute("src") {
-                    if source.starts_with("/_next/static/")
-                        && source.ends_with("/_ssgManifest.js")
+                    if source.starts_with("/_next/static/") && source.ends_with("/_ssgManifest.js")
                     {
                         if let Some(build_path) = base.map(|b| convert_abs_path(b, &source)) {
                             let _ = cell.set(build_path.to_string());
@@ -4988,374 +4987,392 @@ impl Page {
             }
 
             if let Some(html_bytes_taken) = self.html.take() {
-            {
-                let base_input_url = tokio::sync::OnceCell::new();
+                {
+                    let base_input_url = tokio::sync::OnceCell::new();
 
-                let base_input_domain = &selectors.2;
-                let parent_frags = &selectors.1; // todo: allow mix match tpt
-                let parent_host = &parent_frags[0];
-                let parent_host_scheme = &parent_frags[1];
-                let sub_matcher = &selectors.0;
+                    let base_input_domain = &selectors.2;
+                    let parent_frags = &selectors.1; // todo: allow mix match tpt
+                    let parent_host = &parent_frags[0];
+                    let parent_host_scheme = &parent_frags[1];
+                    let sub_matcher = &selectors.0;
 
-                let external_domains_caseless = self.external_domains_caseless.clone();
+                    let external_domains_caseless = self.external_domains_caseless.clone();
 
-                let base1 = base.as_deref();
+                    let base1 = base.as_deref();
 
-                // original domain to match local pages.
-                let original_page = {
-                    self.set_url_parsed_direct_empty();
-                    self.get_url_parsed_ref().as_ref().cloned()
-                };
-
-                // Weighted upgrade score: avoids Chrome on a single weak signal.
-                // Strong signals (framework markers, hydration IDs) set the score
-                // above the threshold immediately. Weak signals (script src) accumulate.
-                const SMART_UPGRADE_THRESHOLD: u8 = 10;
-                let upgrade_score = std::sync::atomic::AtomicU8::new(0);
-
-                let mut static_app = false;
-                let mut script_src_count: u8 = 0;
-                let xml_file = self.get_url().ends_with(".xml");
-
-                let mut element_content_handlers =
-                    metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
-
-                element_content_handlers.push(element_precompiled!(
-                    compiled_base_element_selector(),
-                    |el| {
-                        if let Some(href) = el.get_attribute("href") {
-                            if let Ok(parsed_base) = Url::parse(&href) {
-                                let _ = base_input_url.set(parsed_base);
-                            }
-                        }
-
-                        Ok(())
-                    }
-                ));
-
-                element_content_handlers.push(element!("script", |el| {
-                    if static_app
-                        || upgrade_score.load(Ordering::Relaxed) >= SMART_UPGRADE_THRESHOLD
-                    {
-                        return Ok(());
-                    }
-
-                    let id = el.get_attribute("id");
-
-                    if id.as_deref() == *NUXT_DATA {
-                        static_app = true;
-                        upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
-                        return Ok(());
-                    }
-
-                    if el.get_attribute("data-target").as_deref() == *REACT_SSR {
-                        upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
-                        return Ok(());
-                    }
-
-                    let Some(src) = el.get_attribute("src") else {
-                        return Ok(());
+                    // original domain to match local pages.
+                    let original_page = {
+                        self.set_url_parsed_direct_empty();
+                        self.get_url_parsed_ref().as_ref().cloned()
                     };
 
-                    // Skip known ad/tracker scripts — they don't indicate an SPA.
-                    if !is_tracker_script(&src) {
-                        script_src_count = script_src_count.saturating_add(1);
-                        if script_src_count >= 4 {
-                            let _ = upgrade_score.fetch_update(
-                                Ordering::Relaxed,
-                                Ordering::Relaxed,
-                                |v| Some(v.saturating_add(SMART_UPGRADE_THRESHOLD)),
-                            );
+                    // Weighted upgrade score: avoids Chrome on a single weak signal.
+                    // Strong signals (framework markers, hydration IDs) set the score
+                    // above the threshold immediately. Weak signals (script src) accumulate.
+                    const SMART_UPGRADE_THRESHOLD: u8 = 10;
+                    let upgrade_score = std::sync::atomic::AtomicU8::new(0);
+
+                    let mut static_app = false;
+                    let mut script_src_count: u8 = 0;
+                    let xml_file = self.get_url().ends_with(".xml");
+
+                    let mut element_content_handlers = metadata_handlers(
+                        &mut meta_title,
+                        &mut meta_description,
+                        &mut meta_og_image,
+                    );
+
+                    element_content_handlers.push(element_precompiled!(
+                        compiled_base_element_selector(),
+                        |el| {
+                            if let Some(href) = el.get_attribute("href") {
+                                if let Ok(parsed_base) = Url::parse(&href) {
+                                    let _ = base_input_url.set(parsed_base);
+                                }
+                            }
+
+                            Ok(())
                         }
-                    }
+                    ));
 
-                    if !src.starts_with('/') {
-                        return Ok(());
-                    }
+                    element_content_handlers.push(element!("script", |el| {
+                        if static_app
+                            || upgrade_score.load(Ordering::Relaxed) >= SMART_UPGRADE_THRESHOLD
+                        {
+                            return Ok(());
+                        }
 
-                    let is_next = src.starts_with("/_next/static/chunks/pages/")
-                        || src.starts_with("/webpack-runtime-");
-                    let is_gatsby = id.as_deref() == *GATSBY;
+                        let id = el.get_attribute("id");
 
-                    let is_nuxt_asset = src.starts_with("/_nuxt/");
-
-                    if is_next || is_gatsby || is_nuxt_asset {
-                        static_app = true;
-                    }
-
-                    if is_nuxt_asset {
-                        upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
-                        return Ok(());
-                    }
-
-                    if let Some(base) = base1.as_ref() {
-                        let abs = convert_abs_path(base, &src);
-
-                        if abs.path_segments().is_some_and(|mut segs| {
-                            segs.any(|p| {
-                                chromiumoxide::handler::network::ALLOWED_MATCHER.is_match(p)
-                            })
-                        }) {
+                        if id.as_deref() == *NUXT_DATA {
+                            static_app = true;
                             upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
-                        }
-                    }
-
-                    Ok(())
-                }));
-
-                element_content_handlers.push(element_precompiled!(
-                    if xml_file {
-                        compiled_xml_selector()
-                    } else {
-                        compiled_selector()
-                    },
-                    |el| {
-                        if let Some(href) = el.get_attribute("href") {
-                            let base = if relative_directory_url(&href) || base.is_none() {
-                                original_page.as_ref()
-                            } else {
-                                base.as_deref()
-                            };
-
-                            let base = if base_input_url.initialized() {
-                                base_input_url.get()
-                            } else {
-                                base
-                            };
-
-                            push_link(
-                                &base,
-                                &href,
-                                &mut inner_map,
-                                &selectors.0,
-                                parent_host,
-                                parent_host_scheme,
-                                base_input_domain,
-                                sub_matcher,
-                                &external_domains_caseless,
-                                &mut links_pages,
-                            );
+                            return Ok(());
                         }
 
-                        Ok(())
-                    }
-                ));
-
-                element_content_handlers.push(text!("noscript", |el| {
-                    if upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD {
-                        if NO_SCRIPT_JS_REQUIRED.find(el.as_str()).is_some() {
+                        if el.get_attribute("data-target").as_deref() == *REACT_SSR {
                             upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
+                            return Ok(());
                         }
-                    }
-                    Ok(())
-                }));
 
-                element_content_handlers.push(text!("script", |el| {
-                    let s = el.as_str();
-                    if !s.is_empty()
-                        && upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD
-                    {
-                        if DOM_SCRIPT_WATCH_METHODS.find(s).is_some() {
-                            // Inline DOM mutation is a medium signal (7 points).
-                            // Combined with script srcs it crosses the threshold.
-                            let _ = upgrade_score.fetch_update(
-                                Ordering::Relaxed,
-                                Ordering::Relaxed,
-                                |v| Some(v.saturating_add(7)),
-                            );
-                        }
-                    }
-                    Ok(())
-                }));
+                        let Some(src) = el.get_attribute("src") else {
+                            return Ok(());
+                        };
 
-                element_content_handlers.push(element!("body", |el| {
-                    if upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD {
-                        let mut matched = false;
-
-                        if let Some(id) = el.get_attribute("id") {
-                            if HYDRATION_IDS.contains(&id) {
-                                upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
-                                matched = true;
+                        // Skip known ad/tracker scripts — they don't indicate an SPA.
+                        if !is_tracker_script(&src) {
+                            script_src_count = script_src_count.saturating_add(1);
+                            if script_src_count >= 4 {
+                                let _ = upgrade_score.fetch_update(
+                                    Ordering::Relaxed,
+                                    Ordering::Relaxed,
+                                    |v| Some(v.saturating_add(SMART_UPGRADE_THRESHOLD)),
+                                );
                             }
                         }
 
-                        if !matched {
-                            for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
-                                if el.has_attribute(attr) {
+                        if !src.starts_with('/') {
+                            return Ok(());
+                        }
+
+                        let is_next = src.starts_with("/_next/static/chunks/pages/")
+                            || src.starts_with("/webpack-runtime-");
+                        let is_gatsby = id.as_deref() == *GATSBY;
+
+                        let is_nuxt_asset = src.starts_with("/_nuxt/");
+
+                        if is_next || is_gatsby || is_nuxt_asset {
+                            static_app = true;
+                        }
+
+                        if is_nuxt_asset {
+                            upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
+                            return Ok(());
+                        }
+
+                        if let Some(base) = base1.as_ref() {
+                            let abs = convert_abs_path(base, &src);
+
+                            if abs.path_segments().is_some_and(|mut segs| {
+                                segs.any(|p| {
+                                    chromiumoxide::handler::network::ALLOWED_MATCHER.is_match(p)
+                                })
+                            }) {
+                                upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
+                            }
+                        }
+
+                        Ok(())
+                    }));
+
+                    element_content_handlers.push(element_precompiled!(
+                        if xml_file {
+                            compiled_xml_selector()
+                        } else {
+                            compiled_selector()
+                        },
+                        |el| {
+                            if let Some(href) = el.get_attribute("href") {
+                                let base = if relative_directory_url(&href) || base.is_none() {
+                                    original_page.as_ref()
+                                } else {
+                                    base.as_deref()
+                                };
+
+                                let base = if base_input_url.initialized() {
+                                    base_input_url.get()
+                                } else {
+                                    base
+                                };
+
+                                push_link(
+                                    &base,
+                                    &href,
+                                    &mut inner_map,
+                                    &selectors.0,
+                                    parent_host,
+                                    parent_host_scheme,
+                                    base_input_domain,
+                                    sub_matcher,
+                                    &external_domains_caseless,
+                                    &mut links_pages,
+                                );
+                            }
+
+                            Ok(())
+                        }
+                    ));
+
+                    element_content_handlers.push(text!("noscript", |el| {
+                        if upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD {
+                            if NO_SCRIPT_JS_REQUIRED.find(el.as_str()).is_some() {
+                                upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
+                            }
+                        }
+                        Ok(())
+                    }));
+
+                    element_content_handlers.push(text!("script", |el| {
+                        let s = el.as_str();
+                        if !s.is_empty()
+                            && upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD
+                        {
+                            if DOM_SCRIPT_WATCH_METHODS.find(s).is_some() {
+                                // Inline DOM mutation is a medium signal (7 points).
+                                // Combined with script srcs it crosses the threshold.
+                                let _ = upgrade_score.fetch_update(
+                                    Ordering::Relaxed,
+                                    Ordering::Relaxed,
+                                    |v| Some(v.saturating_add(7)),
+                                );
+                            }
+                        }
+                        Ok(())
+                    }));
+
+                    element_content_handlers.push(element!("body", |el| {
+                        if upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD {
+                            let mut matched = false;
+
+                            if let Some(id) = el.get_attribute("id") {
+                                if HYDRATION_IDS.contains(&id) {
                                     upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
-                                    break;
+                                    matched = true;
+                                }
+                            }
+
+                            if !matched {
+                                for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
+                                    if el.has_attribute(attr) {
+                                        upgrade_score
+                                            .store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
+                                        break;
+                                    }
                                 }
                             }
                         }
-                    }
-                    Ok(())
-                }));
+                        Ok(())
+                    }));
 
-                let rewriter_settings = lol_html::Settings {
-                    element_content_handlers,
-                    adjust_charset_on_meta_tag: true,
-                    ..lol_html::send::Settings::new_for_handler_types()
-                };
+                    let rewriter_settings = lol_html::Settings {
+                        element_content_handlers,
+                        adjust_charset_on_meta_tag: true,
+                        ..lol_html::send::Settings::new_for_handler_types()
+                    };
 
-                let mut rewriter =
-                    lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
+                    let mut rewriter =
+                        lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
 
-                let mut wrote_error = false;
-                let should_yield = html_bytes_taken.len() > REWRITER_YIELD_THRESHOLD;
+                    let mut wrote_error = false;
+                    let should_yield = html_bytes_taken.len() > REWRITER_YIELD_THRESHOLD;
 
-                for (i, chunk) in html_bytes_taken.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
-                    if rewriter.write(chunk).is_err() {
-                        wrote_error = true;
-                        break;
-                    }
-                    if should_yield && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
-                        tokio::task::yield_now().await;
-                    }
-                }
-
-                if !wrote_error {
-                    let _ = rewriter.end();
-                }
-
-                // Anti-bot detection is a strong signal (immediate upgrade).
-                let mut score = upgrade_score.load(Ordering::Relaxed);
-                if score < SMART_UPGRADE_THRESHOLD
-                    && crate::utils::detect_anti_bot_from_body(&html_bytes_taken).is_some()
-                {
-                    score = SMART_UPGRADE_THRESHOLD;
-                }
-
-                if score >= SMART_UPGRADE_THRESHOLD {
-                    if let Some(browser_controller) = browser
-                        .get_or_init(|| {
-                            crate::website::Website::setup_browser_base(&configuration, &base, jar)
-                        })
-                        .await
-                    {
-                        if let Ok(new_page) = crate::features::chrome::attempt_navigation(
-                            "about:blank",
-                            &browser_controller.browser.0,
-                            &configuration.request_timeout,
-                            &browser_controller.browser.2,
-                            &configuration.viewport,
-                        )
-                        .await
+                    for (i, chunk) in html_bytes_taken.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
+                        if rewriter.write(chunk).is_err() {
+                            wrote_error = true;
+                            break;
+                        }
+                        if should_yield
+                            && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1
                         {
-                            let (intercept_handle, _) = tokio::join!(
-                                crate::features::chrome::setup_chrome_interception_base(
-                                    &new_page,
-                                    configuration.chrome_intercept.enabled,
-                                    &configuration.auth_challenge_response,
-                                    configuration.chrome_intercept.block_visuals,
-                                    &parent_host,
-                                ),
-                                crate::features::chrome::setup_chrome_events(
-                                    &new_page,
-                                    &configuration,
-                                ),
-                            );
+                            tokio::task::yield_now().await;
+                        }
+                    }
 
-                            if let Some(cookie_jar) = jar {
-                                if let Some(u) = &original_page {
-                                    if !configuration.cookie_str.is_empty() {
-                                        let _ =
+                    if !wrote_error {
+                        let _ = rewriter.end();
+                    }
+
+                    // Anti-bot detection is a strong signal (immediate upgrade).
+                    let mut score = upgrade_score.load(Ordering::Relaxed);
+                    if score < SMART_UPGRADE_THRESHOLD
+                        && crate::utils::detect_anti_bot_from_body(&html_bytes_taken).is_some()
+                    {
+                        score = SMART_UPGRADE_THRESHOLD;
+                    }
+
+                    if score >= SMART_UPGRADE_THRESHOLD {
+                        if let Some(browser_controller) = browser
+                            .get_or_init(|| {
+                                crate::website::Website::setup_browser_base(
+                                    &configuration,
+                                    &base,
+                                    jar,
+                                )
+                            })
+                            .await
+                        {
+                            if let Ok(new_page) = crate::features::chrome::attempt_navigation(
+                                "about:blank",
+                                &browser_controller.browser.0,
+                                &configuration.request_timeout,
+                                &browser_controller.browser.2,
+                                &configuration.viewport,
+                            )
+                            .await
+                            {
+                                let (intercept_handle, _) = tokio::join!(
+                                    crate::features::chrome::setup_chrome_interception_base(
+                                        &new_page,
+                                        configuration.chrome_intercept.enabled,
+                                        &configuration.auth_challenge_response,
+                                        configuration.chrome_intercept.block_visuals,
+                                        &parent_host,
+                                    ),
+                                    crate::features::chrome::setup_chrome_events(
+                                        &new_page,
+                                        &configuration,
+                                    ),
+                                );
+
+                                if let Some(cookie_jar) = jar {
+                                    if let Some(u) = &original_page {
+                                        if !configuration.cookie_str.is_empty() {
+                                            let _ =
                                             crate::features::chrome::seed_jar_from_cookie_header(
                                                 cookie_jar,
                                                 &configuration.cookie_str,
                                                 &u,
                                             );
-                                    }
+                                        }
 
-                                    if let Ok(cps) = crate::features::chrome::cookie_params_from_jar(
-                                        cookie_jar, &u,
-                                    ) {
-                                        let _ = crate::features::chrome::set_page_cookies(
-                                            &new_page, cps,
+                                        if let Ok(cps) =
+                                            crate::features::chrome::cookie_params_from_jar(
+                                                cookie_jar, &u,
+                                            )
+                                        {
+                                            let _ = crate::features::chrome::set_page_cookies(
+                                                &new_page, cps,
+                                            )
+                                            .await;
+                                        }
+                                    }
+                                }
+
+                                let page_resource = crate::utils::fetch_page_html_chrome_base(
+                                    &html_bytes_taken,
+                                    &new_page,
+                                    true,
+                                    true,
+                                    &configuration.wait_for,
+                                    &configuration.screenshot,
+                                    false,
+                                    &configuration.openai_config,
+                                    Some(&self.url),
+                                    &configuration.execution_scripts,
+                                    &configuration.automation_scripts,
+                                    &configuration.viewport,
+                                    &configuration.request_timeout,
+                                    &configuration.track_events,
+                                    configuration.referer.clone(),
+                                    configuration.max_page_bytes,
+                                    configuration.get_cache_options(),
+                                    &configuration.cache_policy,
+                                    {
+                                        #[cfg(feature = "headers")]
+                                        {
+                                            &self.headers
+                                        }
+                                        #[cfg(not(feature = "headers"))]
+                                        {
+                                            &None
+                                        }
+                                    },
+                                    &Some(&configuration.chrome_intercept),
+                                    jar,
+                                    &configuration.remote_multimodal,
+                                    configuration.cache_namespace_str(),
+                                )
+                                .await;
+
+                                if let Some(h) = intercept_handle {
+                                    let abort_handle = h.abort_handle();
+                                    if let Err(elasped) = tokio::time::timeout(
+                                        tokio::time::Duration::from_secs(15),
+                                        h,
+                                    )
+                                    .await
+                                    {
+                                        log::warn!("Handler timeout exceeded {elasped}");
+                                        abort_handle.abort();
+                                    }
+                                }
+
+                                if let Ok(resource) = page_resource {
+                                    let base = if base_input_url.initialized() {
+                                        base_input_url.get().cloned().map(Box::new)
+                                    } else {
+                                        base1.as_deref().cloned().map(Box::new)
+                                    };
+
+                                    let page_resource_bytes: &[u8] = match &resource.content {
+                                        Some(h) => h,
+                                        _ => &[],
+                                    };
+
+                                    let extended_map = self
+                                        .links_stream_base::<A>(
+                                            selectors,
+                                            page_resource_bytes,
+                                            &base,
                                         )
                                         .await;
-                                    }
-                                }
-                            }
 
-                            let page_resource = crate::utils::fetch_page_html_chrome_base(
-                                &html_bytes_taken,
-                                &new_page,
-                                true,
-                                true,
-                                &configuration.wait_for,
-                                &configuration.screenshot,
-                                false,
-                                &configuration.openai_config,
-                                Some(&self.url),
-                                &configuration.execution_scripts,
-                                &configuration.automation_scripts,
-                                &configuration.viewport,
-                                &configuration.request_timeout,
-                                &configuration.track_events,
-                                configuration.referer.clone(),
-                                configuration.max_page_bytes,
-                                configuration.get_cache_options(),
-                                &configuration.cache_policy,
-                                {
-                                    #[cfg(feature = "headers")]
-                                    {
-                                        &self.headers
-                                    }
-                                    #[cfg(not(feature = "headers"))]
-                                    {
-                                        &None
-                                    }
-                                },
-                                &Some(&configuration.chrome_intercept),
-                                jar,
-                                &configuration.remote_multimodal,
-                                configuration.cache_namespace_str(),
-                            )
-                            .await;
+                                    bytes_transferred = resource.bytes_transferred;
 
-                            if let Some(h) = intercept_handle {
-                                let abort_handle = h.abort_handle();
-                                if let Err(elasped) =
-                                    tokio::time::timeout(tokio::time::Duration::from_secs(15), h)
-                                        .await
-                                {
-                                    log::warn!("Handler timeout exceeded {elasped}");
-                                    abort_handle.abort();
-                                }
-                            }
+                                    let new_page = build(&self.url, resource);
 
-                            if let Ok(resource) = page_resource {
-                                let base = if base_input_url.initialized() {
-                                    base_input_url.get().cloned().map(Box::new)
-                                } else {
-                                    base1.as_deref().cloned().map(Box::new)
+                                    page_assign(self, new_page);
+
+                                    map.extend(extended_map);
                                 };
-
-                                let page_resource_bytes: &[u8] = match &resource.content {
-                                    Some(h) => h,
-                                    _ => &[],
-                                };
-
-                                let extended_map = self
-                                    .links_stream_base::<A>(selectors, page_resource_bytes, &base)
-                                    .await;
-
-                                bytes_transferred = resource.bytes_transferred;
-
-                                let new_page = build(&self.url, resource);
-
-                                page_assign(self, new_page);
-
-                                map.extend(extended_map);
-                            };
+                            }
                         }
                     }
                 }
-            }
 
-            map.extend(inner_map);
-            self.html = Some(html_bytes_taken);
-        }
+                map.extend(inner_map);
+                self.html = Some(html_bytes_taken);
+            }
         }
 
         if let Some(lp) = links_pages {
@@ -5476,364 +5493,379 @@ impl Page {
             }
 
             if let Some(html_bytes_taken) = self.html.take() {
-            {
-                let base_input_url = tokio::sync::OnceCell::new();
+                {
+                    let base_input_url = tokio::sync::OnceCell::new();
 
-                let base_input_domain = &selectors.2;
-                let parent_frags = &selectors.1; // todo: allow mix match tpt
-                let parent_host = &parent_frags[0];
-                let parent_host_scheme = &parent_frags[1];
-                let sub_matcher = &selectors.0;
+                    let base_input_domain = &selectors.2;
+                    let parent_frags = &selectors.1; // todo: allow mix match tpt
+                    let parent_host = &parent_frags[0];
+                    let parent_host_scheme = &parent_frags[1];
+                    let sub_matcher = &selectors.0;
 
-                let external_domains_caseless = self.external_domains_caseless.clone();
+                    let external_domains_caseless = self.external_domains_caseless.clone();
 
-                let base1 = base.as_deref();
+                    let base1 = base.as_deref();
 
-                // original domain to match local pages.
-                let original_page = {
-                    self.set_url_parsed_direct_empty();
-                    self.get_url_parsed_ref().as_ref().cloned()
-                };
+                    // original domain to match local pages.
+                    let original_page = {
+                        self.set_url_parsed_direct_empty();
+                        self.get_url_parsed_ref().as_ref().cloned()
+                    };
 
-                const SMART_UPGRADE_THRESHOLD: u8 = 10;
-                let upgrade_score = std::sync::atomic::AtomicU8::new(0);
+                    const SMART_UPGRADE_THRESHOLD: u8 = 10;
+                    let upgrade_score = std::sync::atomic::AtomicU8::new(0);
 
-                let mut static_app = false;
-                let mut script_src_count: u8 = 0;
+                    let mut static_app = false;
+                    let mut script_src_count: u8 = 0;
 
-                let mut element_content_handlers = vec![
-                    element_precompiled!(compiled_base_element_selector(), |el| {
-                        if let Some(href) = el.get_attribute("href") {
-                            if let Ok(parsed_base) = Url::parse(&href) {
-                                let _ = base_input_url.set(parsed_base);
-                            }
-                        }
-
-                        Ok(())
-                    }),
-                    element!("script", |el| {
-                        if static_app
-                            || upgrade_score.load(Ordering::Relaxed) >= SMART_UPGRADE_THRESHOLD
-                        {
-                            return Ok(());
-                        }
-
-                        let id = el.get_attribute("id");
-
-                        if id.as_deref() == *NUXT_DATA {
-                            static_app = true;
-                            upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
-                            return Ok(());
-                        }
-
-                        if el.get_attribute("data-target").as_deref() == *REACT_SSR {
-                            upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
-                            return Ok(());
-                        }
-
-                        let Some(src) = el.get_attribute("src") else {
-                            return Ok(());
-                        };
-
-                        if !src.starts_with('/') {
-                            return Ok(());
-                        }
-
-                        let is_next = src.starts_with("/_next/static/chunks/pages/")
-                            || src.starts_with("/webpack-runtime-");
-                        let is_gatsby = id.as_deref() == *GATSBY;
-
-                        let is_nuxt_asset = src.starts_with("/_nuxt/");
-
-                        if is_next || is_gatsby || is_nuxt_asset {
-                            static_app = true;
-                        }
-
-                        if is_nuxt_asset {
-                            upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
-                            return Ok(());
-                        }
-
-                        if let Some(base) = base1.as_ref() {
-                            let abs = convert_abs_path(base, &src);
-
-                            if abs.path_segments().is_some_and(|mut segs| {
-                                segs.any(|p| {
-                                    chromiumoxide::handler::network::ALLOWED_MATCHER.is_match(p)
-                                })
-                            }) {
-                                upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
-                            }
-                        }
-
-                        Ok(())
-                    }),
-                    element!(
-                        "a[href]:not([aria-hidden=\"true\"]),script[src],link[href]",
-                        |el| {
-                            let attribute = if el.tag_name() == "script" {
-                                if let Some(src) = el.get_attribute("src") {
-                                    if !is_tracker_script(&src) {
-                                        script_src_count = script_src_count.saturating_add(1);
-                                        if script_src_count >= 4 {
-                                            let _ = upgrade_score.fetch_update(
-                                                Ordering::Relaxed,
-                                                Ordering::Relaxed,
-                                                |v| Some(v.saturating_add(SMART_UPGRADE_THRESHOLD)),
-                                            );
-                                        }
-                                    }
+                    let mut element_content_handlers = vec![
+                        element_precompiled!(compiled_base_element_selector(), |el| {
+                            if let Some(href) = el.get_attribute("href") {
+                                if let Ok(parsed_base) = Url::parse(&href) {
+                                    let _ = base_input_url.set(parsed_base);
                                 }
-                                "src"
-                            } else {
-                                "href"
-                            };
-                            if let Some(href) = el.get_attribute(attribute) {
-                                let base = if relative_directory_url(&href) || base.is_none() {
-                                    original_page.as_ref()
-                                } else {
-                                    base.as_deref()
-                                };
-
-                                let base = if base_input_url.initialized() {
-                                    base_input_url.get()
-                                } else {
-                                    base
-                                };
-
-                                push_link(
-                                    &base,
-                                    &href,
-                                    &mut inner_map,
-                                    &selectors.0,
-                                    parent_host,
-                                    parent_host_scheme,
-                                    base_input_domain,
-                                    sub_matcher,
-                                    &external_domains_caseless,
-                                    &mut links_pages,
-                                );
                             }
 
                             Ok(())
-                        }
-                    ),
-                    text!("noscript", |el| {
-                        if upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD
-                            && NO_SCRIPT_JS_REQUIRED.find(el.as_str()).is_some()
-                        {
-                            upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
-                        }
-                        Ok(())
-                    }),
-                    text!("script", |el| {
-                        let s = el.as_str();
-                        if !s.is_empty()
-                            && upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD
-                            && DOM_SCRIPT_WATCH_METHODS.find(s).is_some()
-                        {
-                            let _ = upgrade_score.fetch_update(
-                                Ordering::Relaxed,
-                                Ordering::Relaxed,
-                                |v| Some(v.saturating_add(7)),
-                            );
-                        }
-                        Ok(())
-                    }),
-                    element!("body", |el| {
-                        if upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD {
-                            let mut matched = false;
+                        }),
+                        element!("script", |el| {
+                            if static_app
+                                || upgrade_score.load(Ordering::Relaxed) >= SMART_UPGRADE_THRESHOLD
+                            {
+                                return Ok(());
+                            }
 
-                            if let Some(id) = el.get_attribute("id") {
-                                if HYDRATION_IDS.contains(&id) {
+                            let id = el.get_attribute("id");
+
+                            if id.as_deref() == *NUXT_DATA {
+                                static_app = true;
+                                upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
+                                return Ok(());
+                            }
+
+                            if el.get_attribute("data-target").as_deref() == *REACT_SSR {
+                                upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
+                                return Ok(());
+                            }
+
+                            let Some(src) = el.get_attribute("src") else {
+                                return Ok(());
+                            };
+
+                            if !src.starts_with('/') {
+                                return Ok(());
+                            }
+
+                            let is_next = src.starts_with("/_next/static/chunks/pages/")
+                                || src.starts_with("/webpack-runtime-");
+                            let is_gatsby = id.as_deref() == *GATSBY;
+
+                            let is_nuxt_asset = src.starts_with("/_nuxt/");
+
+                            if is_next || is_gatsby || is_nuxt_asset {
+                                static_app = true;
+                            }
+
+                            if is_nuxt_asset {
+                                upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
+                                return Ok(());
+                            }
+
+                            if let Some(base) = base1.as_ref() {
+                                let abs = convert_abs_path(base, &src);
+
+                                if abs.path_segments().is_some_and(|mut segs| {
+                                    segs.any(|p| {
+                                        chromiumoxide::handler::network::ALLOWED_MATCHER.is_match(p)
+                                    })
+                                }) {
                                     upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
-                                    matched = true;
                                 }
                             }
 
-                            if !matched {
-                                for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
-                                    if el.has_attribute(attr) {
+                            Ok(())
+                        }),
+                        element!(
+                            "a[href]:not([aria-hidden=\"true\"]),script[src],link[href]",
+                            |el| {
+                                let attribute = if el.tag_name() == "script" {
+                                    if let Some(src) = el.get_attribute("src") {
+                                        if !is_tracker_script(&src) {
+                                            script_src_count = script_src_count.saturating_add(1);
+                                            if script_src_count >= 4 {
+                                                let _ = upgrade_score.fetch_update(
+                                                    Ordering::Relaxed,
+                                                    Ordering::Relaxed,
+                                                    |v| {
+                                                        Some(v.saturating_add(
+                                                            SMART_UPGRADE_THRESHOLD,
+                                                        ))
+                                                    },
+                                                );
+                                            }
+                                        }
+                                    }
+                                    "src"
+                                } else {
+                                    "href"
+                                };
+                                if let Some(href) = el.get_attribute(attribute) {
+                                    let base = if relative_directory_url(&href) || base.is_none() {
+                                        original_page.as_ref()
+                                    } else {
+                                        base.as_deref()
+                                    };
+
+                                    let base = if base_input_url.initialized() {
+                                        base_input_url.get()
+                                    } else {
+                                        base
+                                    };
+
+                                    push_link(
+                                        &base,
+                                        &href,
+                                        &mut inner_map,
+                                        &selectors.0,
+                                        parent_host,
+                                        parent_host_scheme,
+                                        base_input_domain,
+                                        sub_matcher,
+                                        &external_domains_caseless,
+                                        &mut links_pages,
+                                    );
+                                }
+
+                                Ok(())
+                            }
+                        ),
+                        text!("noscript", |el| {
+                            if upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD
+                                && NO_SCRIPT_JS_REQUIRED.find(el.as_str()).is_some()
+                            {
+                                upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
+                            }
+                            Ok(())
+                        }),
+                        text!("script", |el| {
+                            let s = el.as_str();
+                            if !s.is_empty()
+                                && upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD
+                                && DOM_SCRIPT_WATCH_METHODS.find(s).is_some()
+                            {
+                                let _ = upgrade_score.fetch_update(
+                                    Ordering::Relaxed,
+                                    Ordering::Relaxed,
+                                    |v| Some(v.saturating_add(7)),
+                                );
+                            }
+                            Ok(())
+                        }),
+                        element!("body", |el| {
+                            if upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD {
+                                let mut matched = false;
+
+                                if let Some(id) = el.get_attribute("id") {
+                                    if HYDRATION_IDS.contains(&id) {
                                         upgrade_score
                                             .store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
-                                        break;
+                                        matched = true;
+                                    }
+                                }
+
+                                if !matched {
+                                    for attr in DOM_WATCH_ATTRIBUTE_PATTERNS.iter() {
+                                        if el.has_attribute(attr) {
+                                            upgrade_score
+                                                .store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
+                                            break;
+                                        }
                                     }
                                 }
                             }
+                            Ok(())
+                        }),
+                    ];
+
+                    element_content_handlers.extend(metadata_handlers(
+                        &mut meta_title,
+                        &mut meta_description,
+                        &mut meta_og_image,
+                    ));
+
+                    let rewriter_settings = lol_html::Settings {
+                        element_content_handlers,
+                        adjust_charset_on_meta_tag: true,
+                        ..lol_html::send::Settings::new_for_handler_types()
+                    };
+
+                    let mut rewriter =
+                        lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
+
+                    let mut wrote_error = false;
+                    let should_yield = html_bytes_taken.len() > REWRITER_YIELD_THRESHOLD;
+
+                    for (i, chunk) in html_bytes_taken.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
+                        if rewriter.write(chunk).is_err() {
+                            wrote_error = true;
+                            break;
                         }
-                        Ok(())
-                    }),
-                ];
-
-                element_content_handlers.extend(metadata_handlers(
-                    &mut meta_title,
-                    &mut meta_description,
-                    &mut meta_og_image,
-                ));
-
-                let rewriter_settings = lol_html::Settings {
-                    element_content_handlers,
-                    adjust_charset_on_meta_tag: true,
-                    ..lol_html::send::Settings::new_for_handler_types()
-                };
-
-                let mut rewriter =
-                    lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
-
-                let mut wrote_error = false;
-                let should_yield = html_bytes_taken.len() > REWRITER_YIELD_THRESHOLD;
-
-                for (i, chunk) in html_bytes_taken.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
-                    if rewriter.write(chunk).is_err() {
-                        wrote_error = true;
-                        break;
-                    }
-                    if should_yield && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
-                        tokio::task::yield_now().await;
-                    }
-                }
-
-                if !wrote_error {
-                    let _ = rewriter.end();
-                }
-
-                // Anti-bot detection is a strong signal (immediate upgrade).
-                let mut score = upgrade_score.load(Ordering::Relaxed);
-                if score < SMART_UPGRADE_THRESHOLD
-                    && crate::utils::detect_anti_bot_from_body(&html_bytes_taken).is_some()
-                {
-                    score = SMART_UPGRADE_THRESHOLD;
-                }
-
-                if score >= SMART_UPGRADE_THRESHOLD {
-                    if let Some(browser_controller) = browser
-                        .get_or_init(|| {
-                            crate::website::Website::setup_browser_base(configuration, base, jar)
-                        })
-                        .await
-                    {
-                        if let Ok(new_page) = crate::features::chrome::attempt_navigation(
-                            "about:blank",
-                            &browser_controller.browser.0,
-                            &configuration.request_timeout,
-                            &browser_controller.browser.2,
-                            &configuration.viewport,
-                        )
-                        .await
+                        if should_yield
+                            && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1
                         {
-                            let (intercept_handle, _) = tokio::join!(
-                                crate::features::chrome::setup_chrome_interception_base(
-                                    &new_page,
-                                    configuration.chrome_intercept.enabled,
-                                    &configuration.auth_challenge_response,
-                                    configuration.chrome_intercept.block_visuals,
-                                    parent_host,
-                                ),
-                                crate::features::chrome::setup_chrome_events(
-                                    &new_page,
-                                    configuration,
-                                )
-                            );
+                            tokio::task::yield_now().await;
+                        }
+                    }
 
-                            if let Some(cookie_jar) = jar {
-                                if let Some(u) = &original_page {
-                                    if !configuration.cookie_str.is_empty() {
-                                        let _ =
+                    if !wrote_error {
+                        let _ = rewriter.end();
+                    }
+
+                    // Anti-bot detection is a strong signal (immediate upgrade).
+                    let mut score = upgrade_score.load(Ordering::Relaxed);
+                    if score < SMART_UPGRADE_THRESHOLD
+                        && crate::utils::detect_anti_bot_from_body(&html_bytes_taken).is_some()
+                    {
+                        score = SMART_UPGRADE_THRESHOLD;
+                    }
+
+                    if score >= SMART_UPGRADE_THRESHOLD {
+                        if let Some(browser_controller) = browser
+                            .get_or_init(|| {
+                                crate::website::Website::setup_browser_base(
+                                    configuration,
+                                    base,
+                                    jar,
+                                )
+                            })
+                            .await
+                        {
+                            if let Ok(new_page) = crate::features::chrome::attempt_navigation(
+                                "about:blank",
+                                &browser_controller.browser.0,
+                                &configuration.request_timeout,
+                                &browser_controller.browser.2,
+                                &configuration.viewport,
+                            )
+                            .await
+                            {
+                                let (intercept_handle, _) = tokio::join!(
+                                    crate::features::chrome::setup_chrome_interception_base(
+                                        &new_page,
+                                        configuration.chrome_intercept.enabled,
+                                        &configuration.auth_challenge_response,
+                                        configuration.chrome_intercept.block_visuals,
+                                        parent_host,
+                                    ),
+                                    crate::features::chrome::setup_chrome_events(
+                                        &new_page,
+                                        configuration,
+                                    )
+                                );
+
+                                if let Some(cookie_jar) = jar {
+                                    if let Some(u) = &original_page {
+                                        if !configuration.cookie_str.is_empty() {
+                                            let _ =
                                             crate::features::chrome::seed_jar_from_cookie_header(
                                                 cookie_jar,
                                                 &configuration.cookie_str,
                                                 u,
                                             );
-                                    }
+                                        }
 
-                                    if let Ok(cps) = crate::features::chrome::cookie_params_from_jar(
-                                        cookie_jar, u,
-                                    ) {
-                                        let _ = crate::features::chrome::set_page_cookies(
-                                            &new_page, cps,
+                                        if let Ok(cps) =
+                                            crate::features::chrome::cookie_params_from_jar(
+                                                cookie_jar, u,
+                                            )
+                                        {
+                                            let _ = crate::features::chrome::set_page_cookies(
+                                                &new_page, cps,
+                                            )
+                                            .await;
+                                        }
+                                    }
+                                }
+
+                                let page_resource = crate::utils::fetch_page_html_chrome_base(
+                                    &html_bytes_taken,
+                                    &new_page,
+                                    true,
+                                    true,
+                                    &configuration.wait_for,
+                                    &configuration.screenshot,
+                                    false,
+                                    &configuration.openai_config,
+                                    Some(&self.url),
+                                    &configuration.execution_scripts,
+                                    &configuration.automation_scripts,
+                                    &configuration.viewport,
+                                    &configuration.request_timeout,
+                                    &configuration.track_events,
+                                    configuration.referer.clone(),
+                                    configuration.max_page_bytes,
+                                    configuration.get_cache_options(),
+                                    &configuration.cache_policy,
+                                    {
+                                        #[cfg(feature = "headers")]
+                                        {
+                                            &self.headers
+                                        }
+                                        #[cfg(not(feature = "headers"))]
+                                        {
+                                            &None
+                                        }
+                                    },
+                                    &Some(&configuration.chrome_intercept),
+                                    jar,
+                                    &configuration.remote_multimodal,
+                                    configuration.cache_namespace_str(),
+                                )
+                                .await;
+
+                                if let Some(h) = intercept_handle {
+                                    let abort_handle = h.abort_handle();
+                                    if let Err(elasped) = tokio::time::timeout(
+                                        tokio::time::Duration::from_secs(15),
+                                        h,
+                                    )
+                                    .await
+                                    {
+                                        log::warn!("Handler timeout exceeded {elasped}");
+                                        abort_handle.abort();
+                                    }
+                                }
+
+                                if let Ok(v) = page_resource {
+                                    let resource_bytes: &[u8] = match &v.content {
+                                        Some(h) => h,
+                                        _ => &[],
+                                    };
+
+                                    let extended_map = self
+                                        .links_stream_base::<A>(
+                                            selectors,
+                                            resource_bytes,
+                                            &base.as_deref().cloned().map(Box::new),
                                         )
                                         .await;
-                                    }
+
+                                    bytes_transferred = v.bytes_transferred;
+
+                                    let new_page = build(&self.url, v);
+
+                                    page_assign(self, new_page);
+
+                                    map.extend(extended_map)
                                 }
-                            }
-
-                            let page_resource = crate::utils::fetch_page_html_chrome_base(
-                                &html_bytes_taken,
-                                &new_page,
-                                true,
-                                true,
-                                &configuration.wait_for,
-                                &configuration.screenshot,
-                                false,
-                                &configuration.openai_config,
-                                Some(&self.url),
-                                &configuration.execution_scripts,
-                                &configuration.automation_scripts,
-                                &configuration.viewport,
-                                &configuration.request_timeout,
-                                &configuration.track_events,
-                                configuration.referer.clone(),
-                                configuration.max_page_bytes,
-                                configuration.get_cache_options(),
-                                &configuration.cache_policy,
-                                {
-                                    #[cfg(feature = "headers")]
-                                    {
-                                        &self.headers
-                                    }
-                                    #[cfg(not(feature = "headers"))]
-                                    {
-                                        &None
-                                    }
-                                },
-                                &Some(&configuration.chrome_intercept),
-                                jar,
-                                &configuration.remote_multimodal,
-                                configuration.cache_namespace_str(),
-                            )
-                            .await;
-
-                            if let Some(h) = intercept_handle {
-                                let abort_handle = h.abort_handle();
-                                if let Err(elasped) =
-                                    tokio::time::timeout(tokio::time::Duration::from_secs(15), h)
-                                        .await
-                                {
-                                    log::warn!("Handler timeout exceeded {elasped}");
-                                    abort_handle.abort();
-                                }
-                            }
-
-                            if let Ok(v) = page_resource {
-                                let resource_bytes: &[u8] = match &v.content {
-                                    Some(h) => h,
-                                    _ => &[],
-                                };
-
-                                let extended_map = self
-                                    .links_stream_base::<A>(
-                                        selectors,
-                                        resource_bytes,
-                                        &base.as_deref().cloned().map(Box::new),
-                                    )
-                                    .await;
-
-                                bytes_transferred = v.bytes_transferred;
-
-                                let new_page = build(&self.url, v);
-
-                                page_assign(self, new_page);
-
-                                map.extend(extended_map)
                             }
                         }
                     }
                 }
-            }
 
-            map.extend(inner_map);
-            self.html = Some(html_bytes_taken);
-        }
+                map.extend(inner_map);
+                self.html = Some(html_bytes_taken);
+            }
         }
 
         if let Some(lp) = links_pages {
@@ -5943,108 +5975,113 @@ impl Page {
             }
 
             if let Some(html_bytes_taken) = self.html.take() {
-            {
-                // let base_domain = &selectors.0;
-                let parent_host = &selectors.1[0];
-                // the host schemes
-                let parent_host_scheme = &selectors.1[1];
-                let base_input_domain = &selectors.2; // the domain after redirects
-                let sub_matcher = &selectors.0;
-                let base_input_url = tokio::sync::OnceCell::new();
+                {
+                    // let base_domain = &selectors.0;
+                    let parent_host = &selectors.1[0];
+                    // the host schemes
+                    let parent_host_scheme = &selectors.1[1];
+                    let base_input_domain = &selectors.2; // the domain after redirects
+                    let sub_matcher = &selectors.0;
+                    let base_input_url = tokio::sync::OnceCell::new();
 
-                let base = base.as_deref();
+                    let base = base.as_deref();
 
-                // original domain to match local pages.
-                let original_page = {
-                    self.set_url_parsed_direct_empty();
-                    self.get_url_parsed_ref().as_ref().cloned()
-                };
+                    // original domain to match local pages.
+                    let original_page = {
+                        self.set_url_parsed_direct_empty();
+                        self.get_url_parsed_ref().as_ref().cloned()
+                    };
 
-                let external_domains_caseless = self.external_domains_caseless.clone();
+                    let external_domains_caseless = self.external_domains_caseless.clone();
 
-                let base_links_settings = lol_html::element!(
-                    "a[href]:not([aria-hidden=\"true\"]),script[src],link[href]",
-                    |el| {
-                        let attribute = if el.tag_name() == "script" {
-                            "src"
-                        } else {
-                            "href"
-                        };
-                        if let Some(href) = el.get_attribute(attribute) {
-                            let base = if relative_directory_url(&href) || base.is_none() {
-                                original_page.as_ref()
+                    let base_links_settings = lol_html::element!(
+                        "a[href]:not([aria-hidden=\"true\"]),script[src],link[href]",
+                        |el| {
+                            let attribute = if el.tag_name() == "script" {
+                                "src"
                             } else {
-                                base
+                                "href"
                             };
-                            let base = if base_input_url.initialized() {
-                                base_input_url.get()
-                            } else {
-                                base
-                            };
+                            if let Some(href) = el.get_attribute(attribute) {
+                                let base = if relative_directory_url(&href) || base.is_none() {
+                                    original_page.as_ref()
+                                } else {
+                                    base
+                                };
+                                let base = if base_input_url.initialized() {
+                                    base_input_url.get()
+                                } else {
+                                    base
+                                };
 
-                            push_link(
-                                &base,
-                                &href,
-                                &mut map,
-                                &selectors.0,
-                                parent_host,
-                                parent_host_scheme,
-                                base_input_domain,
-                                sub_matcher,
-                                &external_domains_caseless,
-                                &mut links_pages,
-                            );
-                        }
-                        Ok(())
-                    }
-                );
-
-                let mut element_content_handlers =
-                    metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
-
-                element_content_handlers.push(element_precompiled!(
-                    compiled_base_element_selector(),
-                    |el| {
-                        if let Some(href) = el.get_attribute("href") {
-                            if let Ok(parsed_base) = Url::parse(&href) {
-                                let _ = base_input_url.set(parsed_base);
+                                push_link(
+                                    &base,
+                                    &href,
+                                    &mut map,
+                                    &selectors.0,
+                                    parent_host,
+                                    parent_host_scheme,
+                                    base_input_domain,
+                                    sub_matcher,
+                                    &external_domains_caseless,
+                                    &mut links_pages,
+                                );
                             }
+                            Ok(())
                         }
+                    );
 
-                        Ok(())
+                    let mut element_content_handlers = metadata_handlers(
+                        &mut meta_title,
+                        &mut meta_description,
+                        &mut meta_og_image,
+                    );
+
+                    element_content_handlers.push(element_precompiled!(
+                        compiled_base_element_selector(),
+                        |el| {
+                            if let Some(href) = el.get_attribute("href") {
+                                if let Ok(parsed_base) = Url::parse(&href) {
+                                    let _ = base_input_url.set(parsed_base);
+                                }
+                            }
+
+                            Ok(())
+                        }
+                    ));
+
+                    element_content_handlers.push(base_links_settings);
+
+                    let settings = lol_html::send::Settings {
+                        element_content_handlers,
+                        adjust_charset_on_meta_tag: true,
+                        ..lol_html::send::Settings::new_for_handler_types()
+                    };
+
+                    let mut rewriter = lol_html::send::HtmlRewriter::new(settings, |_c: &[u8]| {});
+
+                    let mut wrote_error = false;
+                    let should_yield = html_bytes_taken.len() > REWRITER_YIELD_THRESHOLD;
+
+                    for (i, chunk) in html_bytes_taken.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
+                        if rewriter.write(chunk).is_err() {
+                            wrote_error = true;
+                            break;
+                        }
+                        if should_yield
+                            && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1
+                        {
+                            tokio::task::yield_now().await;
+                        }
                     }
-                ));
 
-                element_content_handlers.push(base_links_settings);
-
-                let settings = lol_html::send::Settings {
-                    element_content_handlers,
-                    adjust_charset_on_meta_tag: true,
-                    ..lol_html::send::Settings::new_for_handler_types()
-                };
-
-                let mut rewriter = lol_html::send::HtmlRewriter::new(settings, |_c: &[u8]| {});
-
-                let mut wrote_error = false;
-                let should_yield = html_bytes_taken.len() > REWRITER_YIELD_THRESHOLD;
-
-                for (i, chunk) in html_bytes_taken.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
-                    if rewriter.write(chunk).is_err() {
-                        wrote_error = true;
-                        break;
-                    }
-                    if should_yield && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
-                        tokio::task::yield_now().await;
+                    if !wrote_error {
+                        let _ = rewriter.end();
                     }
                 }
 
-                if !wrote_error {
-                    let _ = rewriter.end();
-                }
+                self.html = Some(html_bytes_taken);
             }
-
-            self.html = Some(html_bytes_taken);
-        }
         }
 
         let valid_meta =
