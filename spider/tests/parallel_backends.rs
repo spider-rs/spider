@@ -1,8 +1,8 @@
 //! Integration tests for the `parallel_backends` feature.
 //!
 //! These tests verify configuration, builder logic, and graceful handling
-//! without requiring real LightPanda / Servo instances. Tests that need
-//! live endpoints are gated behind env vars `LIGHTPANDA_CDP_URL` and
+//! without requiring real CDP / Servo instances. Tests that need
+//! live endpoints are gated behind env vars `CDP_URL` and
 //! `SERVO_WEBDRIVER_URL`.
 #![cfg(feature = "parallel_backends")]
 
@@ -37,7 +37,7 @@ fn test_config_serde_roundtrip() {
     let cfg = ParallelBackendsConfig {
         backends: vec![
             BackendEndpoint {
-                engine: BackendEngine::LightPanda,
+                engine: BackendEngine::Cdp,
                 endpoint: Some("ws://127.0.0.1:9222".to_string()),
                 binary_path: None,
                 protocol: None,
@@ -88,7 +88,7 @@ fn test_build_backend_futures_empty_config() {
 fn test_build_backend_futures_skips_disabled() {
     let cfg = ParallelBackendsConfig {
         backends: vec![BackendEndpoint {
-            engine: BackendEngine::LightPanda,
+            engine: BackendEngine::Cdp,
             endpoint: Some("ws://localhost:9222".to_string()),
             binary_path: None,
             protocol: None,
@@ -386,7 +386,7 @@ fn test_bytes_guard_integration_all() {
     let hold = BackendBytesGuard::acquire_unchecked(2000);
     let cfg = ParallelBackendsConfig {
         backends: vec![spider::configuration::BackendEndpoint {
-            engine: spider::configuration::BackendEngine::LightPanda,
+            engine: spider::configuration::BackendEngine::Cdp,
             endpoint: Some("ws://localhost:9222".to_string()),
             binary_path: None,
             protocol: None,

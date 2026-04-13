@@ -1,5 +1,5 @@
-/// Parallel crawl backends — race alternative browser engines (LightPanda, Servo)
-/// alongside the primary crawl path. Lock-free, panic-free, zero overhead when disabled.
+/// Parallel crawl backends — race alternative browser engines alongside the
+/// primary crawl path. Lock-free, panic-free, zero overhead when disabled.
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -153,7 +153,7 @@ pub struct ValidationResult {
 
 /// User-supplied quality validator. Called after the built-in scorer for
 /// every backend response. Receives the raw HTML bytes, status code, URL,
-/// and the backend source name ("primary", "lightpanda", "servo", "custom").
+/// and the backend source name ("primary", "cdp", "servo", "custom").
 ///
 /// Must be `Send + Sync` so it can be shared across async tasks.
 pub type QualityValidator = std::sync::Arc<
@@ -476,7 +476,7 @@ pub struct BackendResult {
 /// Return a human-readable backend source name for the given config entry.
 pub fn backend_source_name(endpoint: &BackendEndpoint) -> &'static str {
     match endpoint.engine {
-        BackendEngine::LightPanda => "lightpanda",
+        BackendEngine::Cdp => "cdp",
         BackendEngine::Servo => "servo",
         BackendEngine::Custom => "custom",
     }
@@ -488,7 +488,7 @@ pub fn resolve_protocol(endpoint: &BackendEndpoint) -> BackendProtocol {
         return p.clone();
     }
     match endpoint.engine {
-        BackendEngine::LightPanda => BackendProtocol::Cdp,
+        BackendEngine::Cdp => BackendProtocol::Cdp,
         BackendEngine::Servo => BackendProtocol::WebDriver,
         BackendEngine::Custom => {
             // Infer from URL scheme if possible.
@@ -672,7 +672,7 @@ pub async fn race_backends(
 
 /// Round-robin proxy address selector for parallel backends.
 ///
-/// Pre-filters proxy lists for CDP (LightPanda) and WebDriver (Servo)
+/// Pre-filters proxy lists for CDP and WebDriver backends
 /// based on [`ProxyIgnore`]. Lock-free via [`AtomicUsize`].
 pub struct ProxyRotator {
     /// Proxies for CDP backends (filtered: `ProxyIgnore != Chrome`).
@@ -753,7 +753,7 @@ impl Clone for ProxyRotator {
 // Backend Fetch Functions
 // ---------------------------------------------------------------------------
 
-/// Fetch a page via a remote CDP endpoint (LightPanda, custom, or any CDP-speaking browser).
+/// Fetch a page via a remote CDP endpoint (any CDP-speaking browser).
 ///
 /// Fresh CDP connection per fetch with the **same handler config** as the
 /// primary Chrome path — network interception, resource blocking, viewport,
@@ -772,7 +772,7 @@ pub async fn fetch_cdp(
     let timeout = config.request_timeout.unwrap_or(Duration::from_secs(15));
 
     // Build the same handler config as the primary Chrome crawl path.
-    // This gives LightPanda identical network interception: block_visuals,
+    // This gives CDP backends identical network interception: block_visuals,
     // block_javascript, block_stylesheets, block_ads, block_analytics,
     // whitelist/blacklist patterns, extra headers, viewport, etc.
     let handler_config = crate::features::chrome::create_handler_config(config);
@@ -2081,7 +2081,7 @@ mod tests {
         let _hold = BackendBytesGuard::acquire_unchecked(1_000_000);
         let cfg = ParallelBackendsConfig {
             backends: vec![crate::configuration::BackendEndpoint {
-                engine: crate::configuration::BackendEngine::LightPanda,
+                engine: crate::configuration::BackendEngine::Cdp,
                 endpoint: Some("ws://localhost:9222".to_string()),
                 binary_path: None,
                 protocol: None,
@@ -2192,7 +2192,7 @@ mod tests {
     fn test_build_backend_futures_allows_when_byte_limit_not_exceeded() {
         let cfg = ParallelBackendsConfig {
             backends: vec![crate::configuration::BackendEndpoint {
-                engine: crate::configuration::BackendEngine::LightPanda,
+                engine: crate::configuration::BackendEngine::Cdp,
                 endpoint: Some("ws://localhost:9222".to_string()),
                 binary_path: None,
                 protocol: None,

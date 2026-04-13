@@ -1,8 +1,8 @@
-//! Chrome (primary) vs LightPanda (backend) on a JS-heavy site.
+//! Chrome (primary) vs CDP backend on a JS-heavy site.
 //!
 //! ```bash
-//! # Start LightPanda:
-//! #   .tools/lightpanda serve --host 127.0.0.1 --port 9222
+//! # Start a CDP server first (e.g. navi, Chrome, etc.):
+//! #   navi --listen 127.0.0.1:9222
 //!
 //! cargo run --example parallel_backends_chrome --features "spider/parallel_backends spider/sync spider/chrome"
 //! ```
@@ -22,16 +22,16 @@ async fn main() {
         .build()
         .unwrap();
 
-    // LightPanda races alongside Chrome.
+    // CDP backend races alongside Chrome.
     website.configuration.parallel_backends = Some(ParallelBackendsConfig {
         backends: vec![BackendEndpoint {
-            engine: BackendEngine::LightPanda,
+            engine: BackendEngine::Cdp,
             endpoint: Some("ws://127.0.0.1:9222".to_string()),
             binary_path: None,
             protocol: None,
             proxy: None,
         }],
-        grace_period_ms: 2000, // 2s grace — give LightPanda time on JS-heavy pages
+        grace_period_ms: 2000, // 2s grace for JS-heavy pages
         enabled: true,
         fast_accept_threshold: 85,
         max_consecutive_errors: 10,
@@ -71,7 +71,7 @@ async fn main() {
 
     if let Ok((primary_wins, backend_wins)) = handle.await {
         println!(
-            "\nDone in {:?} — Chrome won: {}, LightPanda won: {}",
+            "\nDone in {:?} — Chrome won: {}, CDP backend won: {}",
             duration, primary_wins, backend_wins
         );
     }

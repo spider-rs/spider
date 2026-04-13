@@ -1,8 +1,8 @@
-//! Race a LightPanda backend alongside the primary HTTP crawl.
+//! Race a CDP backend alongside the primary HTTP crawl.
 //!
 //! ```bash
-//! # Start LightPanda first:
-//! #   .tools/lightpanda serve --host 127.0.0.1 --port 9222
+//! # Start a CDP server first (e.g. navi, Chrome, etc.):
+//! #   navi --listen 127.0.0.1:9222
 //!
 //! cargo run --example parallel_backends --features "spider/parallel_backends_full spider/sync"
 //! ```
@@ -19,10 +19,10 @@ async fn main() {
 
     let mut website = Website::new("https://choosealicense.com");
 
-    // Configure a LightPanda CDP backend running on localhost:9222.
+    // Configure a CDP backend running on localhost:9222.
     website.configuration.parallel_backends = Some(ParallelBackendsConfig {
         backends: vec![BackendEndpoint {
-            engine: BackendEngine::LightPanda,
+            engine: BackendEngine::Cdp,
             endpoint: Some("ws://127.0.0.1:9222".to_string()),
             binary_path: None,
             protocol: None, // inferred as CDP from engine

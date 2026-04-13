@@ -817,7 +817,7 @@ pub struct Page {
     pub(crate) is_xml: bool,
     #[cfg(feature = "parallel_backends")]
     /// Identifies which backend produced this page (e.g. "primary",
-    /// "lightpanda", "servo"). `None` when parallel backends are not active.
+    /// "cdp", "servo"). `None` when parallel backends are not active.
     pub backend_source: Option<crate::compact_str::CompactString>,
     #[cfg(feature = "balance")]
     /// Guard holding the path to a disk-spooled HTML file.  When the guard
@@ -928,7 +928,7 @@ pub struct Page {
     pub(crate) is_xml: bool,
     #[cfg(feature = "parallel_backends")]
     /// Identifies which backend produced this page (e.g. "primary",
-    /// "lightpanda", "servo"). `None` when parallel backends are not active.
+    /// "cdp", "servo"). `None` when parallel backends are not active.
     pub backend_source: Option<crate::compact_str::CompactString>,
 }
 

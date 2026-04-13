@@ -155,8 +155,8 @@ pub enum BackendProtocol {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BackendEngine {
     #[default]
-    /// LightPanda — communicates via CDP (same protocol as Chrome).
-    LightPanda,
+    /// CDP backend — communicates via the Chrome DevTools Protocol.
+    Cdp,
     /// Servo — communicates via WebDriver protocol.
     Servo,
     /// A custom backend. Set `protocol` on [`BackendEndpoint`] to tell
@@ -176,7 +176,7 @@ pub enum BackendEngine {
 pub struct BackendEndpoint {
     /// The browser engine to use.
     pub engine: BackendEngine,
-    /// Remote endpoint URL. For LightPanda: a CDP WebSocket URL
+    /// Remote endpoint URL. For CDP backends: a WebSocket URL
     /// (e.g. `"ws://127.0.0.1:9222"`). For Servo: a WebDriver HTTP URL
     /// (e.g. `"http://localhost:4444"`). When set, the engine is assumed to
     /// be already running at this address.
@@ -186,7 +186,7 @@ pub struct BackendEndpoint {
     /// lookup if empty string.
     pub binary_path: Option<String>,
     /// Explicit protocol override. When `None`, inferred from `engine`:
-    /// `LightPanda` → CDP, `Servo` → WebDriver, `Custom` → **required**.
+    /// `Cdp` → CDP, `Servo` → WebDriver, `Custom` → **required**.
     /// For custom backends, set this to tell spider how to communicate.
     pub protocol: Option<BackendProtocol>,
     /// Per-backend proxy address. When set, this backend routes its outbound
@@ -199,7 +199,7 @@ pub struct BackendEndpoint {
 
 /// Configuration for parallel crawl backends.
 ///
-/// When enabled, races alternative browser engines (LightPanda, Servo) alongside
+/// When enabled, races alternative browser engines (CDP, Servo) alongside
 /// the primary crawl path. The best HTML response wins.
 #[cfg(feature = "parallel_backends")]
 #[derive(Debug, Clone, PartialEq)]
@@ -535,7 +535,7 @@ pub struct Configuration {
     /// containing all fetched pages as `response` records.
     pub warc: Option<crate::utils::warc::WarcConfig>,
     #[cfg(feature = "parallel_backends")]
-    /// Parallel crawl backend configuration. Race LightPanda / Servo alongside
+    /// Parallel crawl backend configuration. Race CDP / Servo backends alongside
     /// the primary crawl path. Requires the `parallel_backends` feature.
     pub parallel_backends: Option<ParallelBackendsConfig>,
 }

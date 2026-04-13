@@ -11047,8 +11047,8 @@ impl Website {
     ///     if content.map_or(true, |b| b.len() < 1024) {
     ///         result.reject = true;
     ///     }
-    ///     // Boost LightPanda by 10 points
-    ///     if source == "lightpanda" {
+    ///     // Boost CDP backend by 10 points
+    ///     if source == "cdp" {
     ///         result.score_adjust = 10;
     ///     }
     ///     result
