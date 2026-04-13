@@ -6914,10 +6914,10 @@ pub fn clean_html_base(html: &str) -> String {
 
     // catch_unwind guards against lol_html's internal
     // `String::from_utf8(output).unwrap()` panic on malformed encodings.
-    let html_owned = html.to_string();
-    match std::panic::catch_unwind(move || {
+    // AssertUnwindSafe avoids cloning html — zero overhead on success path.
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         rewrite_str(
-            &html_owned,
+            html,
             RewriteStrSettings {
                 element_content_handlers: vec![
                     element!("script, style, link, iframe", |el| {
@@ -6949,7 +6949,7 @@ pub fn clean_html_base(html: &str) -> String {
                 ..RewriteStrSettings::default()
             },
         )
-    }) {
+    })) {
         Ok(Ok(r)) => r,
         _ => html.into(),
     }
@@ -6959,10 +6959,9 @@ pub fn clean_html_base(html: &str) -> String {
 pub fn clean_html_slim(html: &str) -> String {
     use lol_html::{doc_comments, element, rewrite_str, RewriteStrSettings};
 
-    let html_owned = html.to_string();
-    match std::panic::catch_unwind(move || {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         rewrite_str(
-            &html_owned,
+            html,
             RewriteStrSettings {
                 element_content_handlers: vec![
                     element!(
@@ -7005,7 +7004,7 @@ pub fn clean_html_slim(html: &str) -> String {
                 ..RewriteStrSettings::default()
             },
         )
-    }) {
+    })) {
         Ok(Ok(r)) => r,
         _ => html.into(),
     }
@@ -7016,10 +7015,9 @@ pub fn clean_html_slim(html: &str) -> String {
 pub fn clean_html_full(html: &str) -> String {
     use lol_html::{doc_comments, element, rewrite_str, RewriteStrSettings};
 
-    let html_owned = html.to_string();
-    match std::panic::catch_unwind(move || {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         rewrite_str(
-            &html_owned,
+            html,
             RewriteStrSettings {
                 element_content_handlers: vec![
                     element!("nav, footer", |el| {
@@ -7062,7 +7060,7 @@ pub fn clean_html_full(html: &str) -> String {
                 ..RewriteStrSettings::default()
             },
         )
-    }) {
+    })) {
         Ok(Ok(r)) => r,
         _ => html.into(),
     }
