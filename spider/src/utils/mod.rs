@@ -6912,40 +6912,45 @@ pub fn clean_html_raw(html: &str) -> String {
 pub fn clean_html_base(html: &str) -> String {
     use lol_html::{doc_comments, element, rewrite_str, RewriteStrSettings};
 
-    match rewrite_str(
-        html,
-        RewriteStrSettings {
-            element_content_handlers: vec![
-                element!("script, style, link, iframe", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!(
-                    "[style*='display:none'], [id*='ad'], [class*='ad'], [id*='tracking'], [class*='tracking']",
-                    |el| {
+    // catch_unwind guards against lol_html's internal
+    // `String::from_utf8(output).unwrap()` panic on malformed encodings.
+    let html_owned = html.to_string();
+    match std::panic::catch_unwind(move || {
+        rewrite_str(
+            &html_owned,
+            RewriteStrSettings {
+                element_content_handlers: vec![
+                    element!("script, style, link, iframe", |el| {
                         el.remove();
                         Ok(())
-                    }
-                ),
-                element!("meta", |el| {
-                    if let Some(attribute) = el.get_attribute("name") {
-                        if attribute != "title" && attribute != "description" {
+                    }),
+                    element!(
+                        "[style*='display:none'], [id*='ad'], [class*='ad'], [id*='tracking'], [class*='tracking']",
+                        |el| {
+                            el.remove();
+                            Ok(())
+                        }
+                    ),
+                    element!("meta", |el| {
+                        if let Some(attribute) = el.get_attribute("name") {
+                            if attribute != "title" && attribute != "description" {
+                                el.remove();
+                            }
+                        } else {
                             el.remove();
                         }
-                    } else {
-                        el.remove();
-                    }
+                        Ok(())
+                    }),
+                ],
+                document_content_handlers: vec![doc_comments!(|c| {
+                    c.remove();
                     Ok(())
-                }),
-            ],
-            document_content_handlers: vec![doc_comments!(|c| {
-                c.remove();
-                Ok(())
-            })],
-            ..RewriteStrSettings::default()
-        },
-    ) {
-        Ok(r) => r,
+                })],
+                ..RewriteStrSettings::default()
+            },
+        )
+    }) {
+        Ok(Ok(r)) => r,
         _ => html.into(),
     }
 }
@@ -6954,51 +6959,54 @@ pub fn clean_html_base(html: &str) -> String {
 pub fn clean_html_slim(html: &str) -> String {
     use lol_html::{doc_comments, element, rewrite_str, RewriteStrSettings};
 
-    match rewrite_str(
-        html,
-        RewriteStrSettings {
-            element_content_handlers: vec![
-                element!(
-                    "script, style, svg, noscript, link, iframe, canvas, video",
-                    |el| {
-                        el.remove();
+    let html_owned = html.to_string();
+    match std::panic::catch_unwind(move || {
+        rewrite_str(
+            &html_owned,
+            RewriteStrSettings {
+                element_content_handlers: vec![
+                    element!(
+                        "script, style, svg, noscript, link, iframe, canvas, video",
+                        |el| {
+                            el.remove();
+                            Ok(())
+                        }
+                    ),
+                    element!("img, picture", |el| {
+                        if let Some(src) = el.get_attribute("src") {
+                            if src.starts_with("data:image") {
+                                el.remove();
+                            }
+                        }
                         Ok(())
-                    }
-                ),
-                element!("img, picture", |el| {
-                    if let Some(src) = el.get_attribute("src") {
-                        if src.starts_with("data:image") {
+                    }),
+                    element!(
+                        "[style*='display:none'], [id*='ad'], [class*='ad'], [id*='tracking'], [class*='tracking']",
+                        |el| {
+                            el.remove();
+                            Ok(())
+                        }
+                    ),
+                    element!("meta", |el| {
+                        if let Some(attribute) = el.get_attribute("name") {
+                            if attribute != "title" && attribute != "description" {
+                                el.remove();
+                            }
+                        } else {
                             el.remove();
                         }
-                    }
-                    Ok(())
-                }),
-                element!(
-                    "[style*='display:none'], [id*='ad'], [class*='ad'], [id*='tracking'], [class*='tracking']",
-                    |el| {
-                        el.remove();
                         Ok(())
-                    }
-                ),
-                element!("meta", |el| {
-                    if let Some(attribute) = el.get_attribute("name") {
-                        if attribute != "title" && attribute != "description" {
-                            el.remove();
-                        }
-                    } else {
-                        el.remove();
-                    }
+                    }),
+                ],
+                document_content_handlers: vec![doc_comments!(|c| {
+                    c.remove();
                     Ok(())
-                }),
-            ],
-            document_content_handlers: vec![doc_comments!(|c| {
-                c.remove();
-                Ok(())
-            })],
-            ..RewriteStrSettings::default()
-        },
-    ) {
-        Ok(r) => r,
+                })],
+                ..RewriteStrSettings::default()
+            },
+        )
+    }) {
+        Ok(Ok(r)) => r,
         _ => html.into(),
     }
 }
@@ -7008,51 +7016,54 @@ pub fn clean_html_slim(html: &str) -> String {
 pub fn clean_html_full(html: &str) -> String {
     use lol_html::{doc_comments, element, rewrite_str, RewriteStrSettings};
 
-    match rewrite_str(
-        html,
-        RewriteStrSettings {
-            element_content_handlers: vec![
-                element!("nav, footer", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-                element!("meta", |el| {
-                    let keep = el
-                        .get_attribute("name")
-                        .map(|n| {
-                            n.eq_ignore_ascii_case("viewport") || n.eq_ignore_ascii_case("charset")
-                        })
-                        .unwrap_or(false);
-                    if !keep {
+    let html_owned = html.to_string();
+    match std::panic::catch_unwind(move || {
+        rewrite_str(
+            &html_owned,
+            RewriteStrSettings {
+                element_content_handlers: vec![
+                    element!("nav, footer", |el| {
                         el.remove();
-                    }
-                    Ok(())
-                }),
-                element!("*", |el| {
-                    // Keep only: id, class, data-*
-                    // SmallVec avoids heap alloc for elements with ≤16 attributes (vast majority).
-                    let attrs = el.attributes();
-                    let mut to_remove: smallvec::SmallVec<[String; 16]> = smallvec::SmallVec::new();
-                    for attr in attrs.iter() {
-                        let n = attr.name();
-                        if n != "id" && n != "class" && !n.starts_with("data-") {
-                            to_remove.push(n);
+                        Ok(())
+                    }),
+                    element!("meta", |el| {
+                        let keep = el
+                            .get_attribute("name")
+                            .map(|n| {
+                                n.eq_ignore_ascii_case("viewport")
+                                    || n.eq_ignore_ascii_case("charset")
+                            })
+                            .unwrap_or(false);
+                        if !keep {
+                            el.remove();
                         }
-                    }
-                    for attr in to_remove {
-                        el.remove_attribute(&attr);
-                    }
+                        Ok(())
+                    }),
+                    element!("*", |el| {
+                        let attrs = el.attributes();
+                        let mut to_remove: smallvec::SmallVec<[String; 16]> =
+                            smallvec::SmallVec::new();
+                        for attr in attrs.iter() {
+                            let n = attr.name();
+                            if n != "id" && n != "class" && !n.starts_with("data-") {
+                                to_remove.push(n);
+                            }
+                        }
+                        for attr in to_remove {
+                            el.remove_attribute(&attr);
+                        }
+                        Ok(())
+                    }),
+                ],
+                document_content_handlers: vec![doc_comments!(|c| {
+                    c.remove();
                     Ok(())
-                }),
-            ],
-            document_content_handlers: vec![doc_comments!(|c| {
-                c.remove();
-                Ok(())
-            })],
-            ..RewriteStrSettings::default()
-        },
-    ) {
-        Ok(r) => r,
+                })],
+                ..RewriteStrSettings::default()
+            },
+        )
+    }) {
+        Ok(Ok(r)) => r,
         _ => html.into(),
     }
 }
