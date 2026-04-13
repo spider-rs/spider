@@ -1146,8 +1146,8 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion 0.8.2",
- "spider 2.51.30",
- "spider_utils 2.51.30",
+ "spider 2.51.31",
+ "spider_utils 2.51.31",
 ]
 
 [[package]]
@@ -8036,7 +8036,7 @@ dependencies = [
  "serde_regex",
  "simdutf8",
  "smallvec",
- "spider_agent_types 2.51.29",
+ "spider_agent_types 2.51.30",
  "spider_fingerprint",
  "string-interner",
  "string_concat",
@@ -8049,7 +8049,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.51.30"
+version = "2.51.31"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -8108,7 +8108,7 @@ dependencies = [
  "smallvec",
  "sonic-rs",
  "spider_agent",
- "spider_agent_types 2.51.30",
+ "spider_agent_types 2.51.31",
  "spider_fingerprint",
  "spider_firewall",
  "sqlx",
@@ -8135,7 +8135,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent"
-version = "2.51.30"
+version = "2.51.31"
 dependencies = [
  "aho-corasick",
  "async-openai 0.33.1",
@@ -8158,7 +8158,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spider_agent_html",
- "spider_agent_types 2.51.30",
+ "spider_agent_types 2.51.31",
  "spider_skills",
  "tempfile",
  "thirtyfour",
@@ -8169,20 +8169,20 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_html"
-version = "2.51.30"
+version = "2.51.31"
 dependencies = [
  "aho-corasick",
  "lol_html",
  "serde",
  "serde_json",
- "spider_agent_types 2.51.30",
+ "spider_agent_types 2.51.31",
 ]
 
 [[package]]
 name = "spider_agent_types"
-version = "2.51.29"
+version = "2.51.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "376532b208b149fd97a488171e1003a5af44d7648e0e38110f05c7c450e17acb"
+checksum = "3e8aeb1c854706c0dc923221174ed34ead110e1ab0ad16fb6500c98f3b8d2da1"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8193,7 +8193,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.51.30"
+version = "2.51.31"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8243,7 +8243,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.51.30"
+version = "2.51.31"
 dependencies = [
  "clap",
  "env_logger",
@@ -8252,7 +8252,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.51.30",
+ "spider 2.51.31",
  "spider_transformations",
  "tikv-jemallocator",
  "tokio",
@@ -8269,9 +8269,9 @@ dependencies = [
  "flexbuffers",
  "htr",
  "serde_json",
- "spider 2.51.30",
+ "spider 2.51.31",
  "spider_transformations",
- "spider_utils 2.51.29",
+ "spider_utils 2.51.30",
 ]
 
 [[package]]
@@ -8310,7 +8310,7 @@ dependencies = [
 
 [[package]]
 name = "spider_mcp"
-version = "2.51.30"
+version = "2.51.31"
 dependencies = [
  "clap",
  "dashmap",
@@ -8319,7 +8319,7 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
- "spider 2.51.30",
+ "spider 2.51.31",
  "spider_transformations",
  "tokio",
  "uuid",
@@ -8398,9 +8398,9 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.51.29"
+version = "2.51.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d887c17d550b34180e31bdb1f2cda1d1aebebf005a12b43c3974180d148f80f"
+checksum = "e5ff13d08d8331b1190c09870bd6c6c83b39589f750156f6c8d196a4c998ab8a"
 dependencies = [
  "hashbrown 0.16.1",
  "lazy_static",
@@ -8412,7 +8412,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.51.30"
+version = "2.51.31"
 dependencies = [
  "hashbrown 0.16.1",
  "indexmap 2.14.0",
@@ -8427,14 +8427,14 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.51.30"
+version = "2.51.31"
 dependencies = [
  "env_logger",
  "hyper 1.9.0",
  "hyper-util",
  "lazy_static",
  "rustls-pemfile",
- "spider 2.51.30",
+ "spider 2.51.31",
  "tokio-rustls 0.26.4",
  "warp",
 ]
