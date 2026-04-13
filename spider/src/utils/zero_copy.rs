@@ -209,55 +209,147 @@ pub fn classify_content_type(raw: &[u8]) -> ContentTypeClass {
     }
 }
 
+/// Classify `text/*` MIME types using first-discriminant dispatch on byte after `text/`.
 #[inline]
 fn classify_text(mime: &[u8]) -> ContentTypeClass {
-    if starts_with_ignore_case(mime, b"text/html") {
-        ContentTypeClass::Html
-    } else if starts_with_ignore_case(mime, b"text/xml") {
-        ContentTypeClass::Xml
-    } else if starts_with_ignore_case(mime, b"text/plain") {
-        ContentTypeClass::PlainText
-    } else if starts_with_ignore_case(mime, b"text/css")
-        || starts_with_ignore_case(mime, b"text/javascript")
-    {
-        ContentTypeClass::WebAsset
-    } else {
-        ContentTypeClass::Unknown
+    if mime.len() < 6 || !starts_with_ignore_case(&mime[..5], b"text/") {
+        return ContentTypeClass::Unknown;
+    }
+    match mime[5] | 0x20 {
+        b'h' => {
+            if starts_with_ignore_case(&mime[5..], b"html") {
+                ContentTypeClass::Html
+            } else {
+                ContentTypeClass::Unknown
+            }
+        }
+        b'x' => {
+            if starts_with_ignore_case(&mime[5..], b"xml") {
+                ContentTypeClass::Xml
+            } else {
+                ContentTypeClass::Unknown
+            }
+        }
+        b'p' => {
+            if starts_with_ignore_case(&mime[5..], b"plain") {
+                ContentTypeClass::PlainText
+            } else {
+                ContentTypeClass::Unknown
+            }
+        }
+        b'c' => {
+            if starts_with_ignore_case(&mime[5..], b"css") {
+                ContentTypeClass::WebAsset
+            } else {
+                ContentTypeClass::Unknown
+            }
+        }
+        b'j' => {
+            if starts_with_ignore_case(&mime[5..], b"javascript") {
+                ContentTypeClass::WebAsset
+            } else {
+                ContentTypeClass::Unknown
+            }
+        }
+        _ => ContentTypeClass::Unknown,
     }
 }
 
+/// Classify `application/*` MIME types using first-discriminant dispatch.
+///
+/// All entries share the `application/` prefix (12 bytes). After one prefix check
+/// we dispatch on the lowercased byte at offset 12 to reach at most 1–3
+/// `starts_with_ignore_case` calls instead of the previous worst-case 14.
 #[inline]
 fn classify_application(mime: &[u8]) -> ContentTypeClass {
-    if starts_with_ignore_case(mime, b"application/xhtml+xml")
-        || starts_with_ignore_case(mime, b"application/xhtml")
-    {
-        ContentTypeClass::Html
-    } else if starts_with_ignore_case(mime, b"application/xml")
-        || starts_with_ignore_case(mime, b"application/rss+xml")
-        || starts_with_ignore_case(mime, b"application/atom+xml")
-    {
-        ContentTypeClass::Xml
-    } else if starts_with_ignore_case(mime, b"application/json")
-        || starts_with_ignore_case(mime, b"application/ld+json")
-    {
-        ContentTypeClass::Json
-    } else if starts_with_ignore_case(mime, b"application/javascript")
-        || starts_with_ignore_case(mime, b"application/wasm")
-    {
-        ContentTypeClass::WebAsset
-    } else if starts_with_ignore_case(mime, b"application/pdf")
-        || starts_with_ignore_case(mime, b"application/zip")
-        || starts_with_ignore_case(mime, b"application/x-rar")
-        || starts_with_ignore_case(mime, b"application/x-tar")
-        || starts_with_ignore_case(mime, b"application/x-7z")
-        || starts_with_ignore_case(mime, b"application/x-rpm")
-        || starts_with_ignore_case(mime, b"application/x-shockwave-flash")
-        || starts_with_ignore_case(mime, b"application/octet-stream")
-        || starts_with_ignore_case(mime, b"application/vnd.")
-    {
-        ContentTypeClass::Binary
-    } else {
-        ContentTypeClass::Unknown
+    // Need at least "application/" + 1 discriminant byte.
+    if mime.len() < 13 || !starts_with_ignore_case(&mime[..12], b"application/") {
+        return ContentTypeClass::Unknown;
+    }
+
+    let rest = &mime[12..]; // slice after "application/"
+    match rest[0] | 0x20 {
+        // xhtml, xhtml+xml, xml
+        b'x' => {
+            if starts_with_ignore_case(rest, b"xhtml") {
+                ContentTypeClass::Html
+            } else if starts_with_ignore_case(rest, b"xml") {
+                ContentTypeClass::Xml
+            } else if rest.len() >= 2 && rest[1] | 0x20 == b'-' {
+                // x-rar, x-tar, x-7z, x-rpm, x-shockwave-flash
+                ContentTypeClass::Binary
+            } else {
+                ContentTypeClass::Unknown
+            }
+        }
+        // rss+xml
+        b'r' => {
+            if starts_with_ignore_case(rest, b"rss+xml") {
+                ContentTypeClass::Xml
+            } else {
+                ContentTypeClass::Unknown
+            }
+        }
+        // atom+xml
+        b'a' => {
+            if starts_with_ignore_case(rest, b"atom+xml") {
+                ContentTypeClass::Xml
+            } else {
+                ContentTypeClass::Unknown
+            }
+        }
+        // json
+        b'j' => {
+            if starts_with_ignore_case(rest, b"json")
+                || starts_with_ignore_case(rest, b"javascript")
+            {
+                // "json" is Json; "javascript" is WebAsset — disambiguate on length.
+                if rest.len() >= 10 && rest[1] | 0x20 == b'a' {
+                    ContentTypeClass::WebAsset
+                } else {
+                    ContentTypeClass::Json
+                }
+            } else {
+                ContentTypeClass::Unknown
+            }
+        }
+        // ld+json
+        b'l' => {
+            if starts_with_ignore_case(rest, b"ld+json") {
+                ContentTypeClass::Json
+            } else {
+                ContentTypeClass::Unknown
+            }
+        }
+        // wasm
+        b'w' => {
+            if starts_with_ignore_case(rest, b"wasm") {
+                ContentTypeClass::WebAsset
+            } else {
+                ContentTypeClass::Unknown
+            }
+        }
+        // pdf
+        b'p' => ContentTypeClass::Binary,
+        // zip
+        b'z' => ContentTypeClass::Binary,
+        // octet-stream
+        b'o' => {
+            if starts_with_ignore_case(rest, b"octet-stream") {
+                ContentTypeClass::Binary
+            } else {
+                ContentTypeClass::Unknown
+            }
+        }
+        // vnd.*
+        b'v' => {
+            if starts_with_ignore_case(rest, b"vnd.") {
+                ContentTypeClass::Binary
+            } else {
+                ContentTypeClass::Unknown
+            }
+        }
+        _ => ContentTypeClass::Unknown,
     }
 }
 

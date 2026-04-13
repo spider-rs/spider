@@ -149,6 +149,21 @@ const WAIT_TIMEOUTS: [u64; 6] = [0, 20, 50, 100, 100, 500];
 // #[cfg(feature = "chrome")]
 // const DOM_WAIT_TIMEOUTS: [u64; 6] = [100, 200, 300, 300, 400, 500];
 
+/// Hop-by-hop headers that must be stripped from synthetic CDP fulfill responses.
+/// Includes both lowercase (reqwest-normalized) and Title-Case forms to be
+/// safe against any header source.
+#[cfg(feature = "chrome")]
+pub(crate) static HOP_BY_HOP_HEADERS: phf::Set<&'static str> = phf_set! {
+    "content-length",    "Content-Length",
+    "transfer-encoding", "Transfer-Encoding",
+    "connection",        "Connection",
+    "keep-alive",        "Keep-Alive",
+    "proxy-connection",  "Proxy-Connection",
+    "te",                "Te",  "TE",
+    "trailers",          "Trailers",
+    "upgrade",           "Upgrade",
+};
+
 /// Ignore the content types.
 pub static IGNORE_CONTENT_TYPES: phf::Set<&'static str> = phf_set! {
     "application/pdf",
@@ -2716,16 +2731,9 @@ pub fn chrome_fulfill_headers_from_reqwest(
         for (name, value) in hm.iter() {
             let k = name.as_str();
 
-            // Hop-by-hop / unsafe in synthetic fulfill responses
-            if k.eq_ignore_ascii_case("content-length")
-                || k.eq_ignore_ascii_case("transfer-encoding")
-                || k.eq_ignore_ascii_case("connection")
-                || k.eq_ignore_ascii_case("keep-alive")
-                || k.eq_ignore_ascii_case("proxy-connection")
-                || k.eq_ignore_ascii_case("te")
-                || k.eq_ignore_ascii_case("trailers")
-                || k.eq_ignore_ascii_case("upgrade")
-            {
+            // Hop-by-hop / unsafe in synthetic fulfill responses.
+            // reqwest header names are already lowercase ASCII.
+            if HOP_BY_HOP_HEADERS.contains(k) {
                 continue;
             }
 
