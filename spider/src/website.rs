@@ -11796,65 +11796,129 @@ pub async fn channel_send_page(
     if let Some(c) = channel {
         if c.0.send(page).is_ok() {
             if let Some(guard) = channel_guard {
-                ChannelGuard::inc_guard(&guard.0 .1)
+                ChannelGuard::inc_guard(&guard.0)
             }
         }
     }
 }
 
 /// Guard a channel from closing until all concurrent operations are done.
-#[derive(Debug, Clone)]
-pub struct ChannelGuard(Arc<(AtomicBool, AtomicUsize, AtomicUsize)>);
+#[derive(Clone)]
+pub struct ChannelGuard(Arc<ChannelGuardInner>);
+
+/// Inner state for [`ChannelGuard`].
+pub(crate) struct ChannelGuardInner {
+    /// Whether the guard is active. When `false`, `lock()` returns immediately.
+    active: AtomicBool,
+    /// Monotonically increasing count of pages sent into the channel.
+    sent: AtomicUsize,
+    /// Monotonically increasing count of pages consumed by subscribers.
+    consumed: AtomicUsize,
+    /// Notifies waiters in `lock()` whenever `consumed` is incremented,
+    /// replacing the previous `yield_now()` spin-loop with event-driven wakeup.
+    notify: tokio::sync::Notify,
+}
+
+impl std::fmt::Debug for ChannelGuard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChannelGuard")
+            .field("active", &self.0.active.load(Ordering::Relaxed))
+            .field("sent", &self.0.sent.load(Ordering::Relaxed))
+            .field("consumed", &self.0.consumed.load(Ordering::Relaxed))
+            .finish()
+    }
+}
 
 impl ChannelGuard {
-    /// Create a new channel guard. The tuple has the guard control and the counter.
+    /// Create a new channel guard.
     #[cfg(feature = "sync")]
     pub(crate) fn new() -> ChannelGuard {
-        ChannelGuard(Arc::new((
-            AtomicBool::new(true),
-            AtomicUsize::new(0),
-            AtomicUsize::new(0),
-        )))
+        ChannelGuard(Arc::new(ChannelGuardInner {
+            active: AtomicBool::new(true),
+            sent: AtomicUsize::new(0),
+            consumed: AtomicUsize::new(0),
+            notify: tokio::sync::Notify::new(),
+        }))
     }
+
     /// Lock the channel until complete. This is only used for when storing the chrome page outside.
     ///
-    /// Waits until consumed count (`.2`) has caught up to sent count (`.1`).
+    /// Waits until consumed count has caught up to sent count.
     /// Both counters grow monotonically so this is safe to call repeatedly
     /// across multiple crawl iterations.
+    ///
+    /// Uses `Notify` for event-driven wakeup (zero CPU when idle) with a
+    /// short safety timeout to prevent stalls if all subscribers drop
+    /// without consuming (e.g. subscription_guard race).
+    ///
+    /// The timeout is deliberately short (250ms) because this sits in the
+    /// hot crawl loop — called after every page send.  In healthy flow the
+    /// Notify fires in microseconds.  If it hasn't fired after 250ms the
+    /// subscribers are gone and waiting longer just stalls the crawl.
     pub(crate) async fn lock(&self) {
-        if self.0 .0.load(Ordering::Relaxed) {
-            let sent = self.0 .1.load(Ordering::Acquire);
+        if !self.0.active.load(Ordering::Relaxed) {
+            return;
+        }
+        let sent = self.0.sent.load(Ordering::Acquire);
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(250);
 
-            // Spin until all sent pages have been consumed.
-            // Both counters are monotonically increasing — no reset needed.
-            while self.0 .2.load(Ordering::Acquire) < sent {
-                tokio::task::yield_now().await;
+        loop {
+            // Create the notified future *before* checking the condition so we
+            // never miss a notify_one() that fires between check and wait.
+            let notified = self.0.notify.notified();
+
+            if self.0.consumed.load(Ordering::Acquire) >= sent {
+                break;
             }
 
-            std::sync::atomic::fence(Ordering::Acquire);
+            // Guard deactivated (e.g. all subscribers dropped).
+            if !self.0.active.load(Ordering::Relaxed) {
+                break;
+            }
+
+            // Safety deadline — if subscribers vanished without consuming,
+            // bail quickly rather than stalling the crawl.  250ms total is
+            // generous for the normal notify path (µs-scale) while keeping
+            // the hot loop responsive.
+            tokio::select! {
+                biased;
+                _ = notified => {},
+                _ = tokio::time::sleep_until(deadline) => {
+                    break;
+                },
+            }
         }
+
+        std::sync::atomic::fence(Ordering::Acquire);
     }
 
     /// Set the guard control manually. If this is set to false the loop will not enter.
     pub fn guard(&mut self, guard: bool) {
-        self.0 .0.store(guard, Ordering::Release);
+        self.0.active.store(guard, Ordering::Release);
+        if !guard {
+            // Wake any waiter so it can observe the deactivation and exit.
+            self.0.notify.notify_waiters();
+        }
     }
 
     /// Increment the guard channel completions.
     // rename on next major since logic is now flow-controlled.
     pub fn inc(&mut self) {
-        self.0 .2.fetch_add(1, std::sync::atomic::Ordering::Release);
+        self.0.consumed.fetch_add(1, Ordering::Release);
+        self.0.notify.notify_one();
     }
 
-    /// Increment a guard channel completions.
-    pub(crate) fn inc_guard(guard: &AtomicUsize) {
-        guard.fetch_add(1, std::sync::atomic::Ordering::Release);
+    /// Increment the sent counter on a guard.
+    pub(crate) fn inc_guard(inner: &ChannelGuardInner) {
+        inner.sent.fetch_add(1, Ordering::Release);
     }
 }
 
 impl Drop for ChannelGuard {
     fn drop(&mut self) {
-        self.0 .0.store(false, Ordering::Release);
+        self.0.active.store(false, Ordering::Release);
+        // Wake any waiter blocked in lock() so it can exit immediately.
+        self.0.notify.notify_waiters();
     }
 }
 
@@ -14167,7 +14231,7 @@ async fn test_channel_guard_repeated_lock() {
 
     // Simulate first batch: send 3 pages.
     for _ in 0..3 {
-        ChannelGuard::inc_guard(&guard.0 .1);
+        ChannelGuard::inc_guard(&guard.0);
     }
     // Consume 3 pages.
     let mut g = guard.clone();
@@ -14181,16 +14245,20 @@ async fn test_channel_guard_repeated_lock() {
 
     // Simulate second batch: send 2 more pages (counters keep growing).
     for _ in 0..2 {
-        ChannelGuard::inc_guard(&guard.0 .1);
+        ChannelGuard::inc_guard(&guard.0);
     }
-    assert_eq!(guard.0 .1.load(Ordering::Relaxed), 5, "sent = 5 cumulative");
+    assert_eq!(
+        guard.0.sent.load(Ordering::Relaxed),
+        5,
+        "sent = 5 cumulative"
+    );
 
     // Consume 2 more pages.
     for _ in 0..2 {
         g.inc();
     }
     assert_eq!(
-        guard.0 .2.load(Ordering::Relaxed),
+        guard.0.consumed.load(Ordering::Relaxed),
         5,
         "consumed = 5 cumulative"
     );
@@ -14219,8 +14287,8 @@ async fn test_channel_guard_lock_waits_for_consumers() {
     let mut g = guard.clone();
 
     // Send 2 pages.
-    ChannelGuard::inc_guard(&guard.0 .1);
-    ChannelGuard::inc_guard(&guard.0 .1);
+    ChannelGuard::inc_guard(&guard.0);
+    ChannelGuard::inc_guard(&guard.0);
 
     // lock() should NOT resolve yet (0 consumed, 2 sent).
     let result = tokio::time::timeout(std::time::Duration::from_millis(50), guard.lock()).await;

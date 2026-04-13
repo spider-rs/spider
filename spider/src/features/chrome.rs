@@ -1419,7 +1419,10 @@ impl Drop for TabCloseGuard {
     fn drop(&mut self) {
         if let Some(page) = self.0.take() {
             tokio::task::spawn(async move {
-                let _ = page.close().await;
+                // Timeout prevents zombie tasks when Chrome is unresponsive.
+                // 5 seconds is generous — tab close is normally sub-100ms.
+                let _ =
+                    tokio::time::timeout(tokio::time::Duration::from_secs(5), page.close()).await;
             });
         }
     }

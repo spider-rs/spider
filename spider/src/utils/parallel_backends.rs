@@ -655,8 +655,11 @@ pub async fn race_backends(
         }
     }
 
-    // Drop the JoinSet immediately so any completed-but-unread backend
-    // responses (carrying full Page data) are freed before returning.
+    // Abort all remaining in-flight tasks immediately, then drop the JoinSet
+    // so completed-but-unread responses (carrying full Page data) are freed.
+    // abort_all() sends cancel signals eagerly — drop alone would do this too,
+    // but being explicit avoids relying on drop ordering.
+    futs.abort_all();
     drop(futs);
 
     if let Some(ref b) = best {
