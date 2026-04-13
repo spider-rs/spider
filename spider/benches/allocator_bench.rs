@@ -105,7 +105,7 @@ fn bench_link_extraction(c: &mut Criterion) {
                     let h = html.clone();
                     async move {
                         let links: HashSet<CaseInsensitiveString> =
-                            page.links_stream_base(&sel, &h, &b).await;
+                            page.links_stream_base(&sel, h.as_bytes(), &b).await;
                         black_box(links.len());
                     }
                 },
@@ -273,7 +273,7 @@ fn bench_mixed_workload(c: &mut Criterion) {
                                 _ => &*hl,
                             };
                             let links: HashSet<CaseInsensitiveString> =
-                                page.links_stream_base(&sel, html, &base).await;
+                                page.links_stream_base(&sel, html.as_bytes(), &base).await;
                             total += links.len();
                         }
                         black_box(total);

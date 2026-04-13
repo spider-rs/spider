@@ -67,16 +67,13 @@ pub use http_global_cache::CACACHE_MANAGER;
 /// The max backoff duration in seconds.
 const BACKOFF_MAX_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(60);
 
-/// Minimum retry count for Chrome requests. Chrome/CDP is inherently less
-/// reliable than plain HTTP (tab crashes, WebSocket flakes, navigation
-/// timeouts) so we always retry at least this many times even when the user
-/// left `config.retry` at 0.
-#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
-const CHROME_MIN_RETRY: u8 = 2;
-
 /// Chrome page fetch with retry. Creates a tab, navigates, retries on failure.
 /// Returns `Option<Page>` — `None` if tab creation fails.
 /// Used by the hedge feature to race a primary fetch against a hedge fetch on a second tab.
+///
+/// Every tab is wrapped in a [`TabCloseGuard`] so that if this future is
+/// cancelled by `tokio::select!` (the losing side of a hedge race), the
+/// orphaned Chrome tab is closed instead of leaking.
 #[cfg(all(feature = "hedge", feature = "chrome", not(feature = "decentralized")))]
 macro_rules! chrome_page_fetch {
     ($shared:expr, $target_url:expr) => {{
@@ -90,6 +87,9 @@ macro_rules! chrome_page_fetch {
         .await
         {
             Ok(hedge_tab) => {
+                // Guard closes the tab if this future is cancelled mid-flight.
+                let _tab_guard = crate::features::chrome::TabCloseGuard::new(hedge_tab.clone());
+
                 let (_, intercept_handle) = tokio::join!(
                     crate::features::chrome::setup_chrome_events(&hedge_tab, &$shared.6),
                     crate::features::chrome::setup_chrome_interception_base(
@@ -123,7 +123,7 @@ macro_rules! chrome_page_fetch {
                 )
                 .await;
 
-                let mut retry_count = $shared.6.retry.max(CHROME_MIN_RETRY);
+                let mut retry_count = $shared.6.retry;
                 let mut attempt: u32 = 0;
                 page.proxy_configured = $shared.6.proxies.is_some();
                 while page.needs_retry() && retry_count > 0 {
@@ -144,6 +144,10 @@ macro_rules! chrome_page_fetch {
                     )
                     .await
                     {
+                        // Guard for the retry tab — closed on cancellation or scope exit.
+                        let _retry_guard =
+                            crate::features::chrome::TabCloseGuard::new(retry_tab.clone());
+
                         let _ = tokio::join!(
                             crate::features::chrome::setup_chrome_events(&retry_tab, &$shared.6),
                             crate::features::chrome::setup_chrome_interception_base(
@@ -189,6 +193,10 @@ macro_rules! chrome_page_fetch {
                             page.should_retry = false;
                             break;
                         }
+
+                        // Retry tab no longer needed — close explicitly.
+                        _retry_guard.defuse();
+                        let _ = retry_tab.close().await;
                     } else {
                         log::warn!(
                             "{} chrome retry tab creation failed, attempt {}",
@@ -208,6 +216,10 @@ macro_rules! chrome_page_fetch {
                     }
                 }
 
+                // Initial tab no longer needed — close explicitly.
+                _tab_guard.defuse();
+                let _ = hedge_tab.close().await;
+
                 Some(page)
             }
             _ => None,
@@ -218,6 +230,8 @@ macro_rules! chrome_page_fetch {
 /// Chrome page fetch on an arbitrary browser connection. Used by the hedge
 /// feature to fire a duplicate request on a second WebSocket connection.
 /// Falls back to the primary browser if the hedge browser is `None`.
+///
+/// Tab is wrapped in a [`TabCloseGuard`] for cancellation safety.
 #[cfg(all(feature = "hedge", feature = "chrome", not(feature = "decentralized")))]
 macro_rules! chrome_page_fetch_on {
     ($shared:expr, $target_url:expr, $browser:expr, $context_id:expr) => {{
@@ -231,6 +245,8 @@ macro_rules! chrome_page_fetch_on {
         .await
         {
             Ok(hedge_tab) => {
+                let _tab_guard = crate::features::chrome::TabCloseGuard::new(hedge_tab.clone());
+
                 let (_, intercept_handle) = tokio::join!(
                     crate::features::chrome::setup_chrome_events(&hedge_tab, &$shared.6),
                     crate::features::chrome::setup_chrome_interception_base(
@@ -276,6 +292,10 @@ macro_rules! chrome_page_fetch_on {
                         abort_handle.abort();
                     }
                 }
+
+                // Tab no longer needed — close explicitly.
+                _tab_guard.defuse();
+                let _ = hedge_tab.close().await;
 
                 Some(page)
             }
@@ -7246,6 +7266,9 @@ impl Website {
                                                     } else {
                                                         match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
                                                         Ok(new_page) => {
+                                                            // Guard closes the tab if this task is aborted (e.g. budget exceeded).
+                                                            let _tab_guard = crate::features::chrome::TabCloseGuard::new(new_page.clone());
+
                                                             let (_, intercept_handle) = tokio::join!(
                                                                 crate::features::chrome::setup_chrome_events(&new_page, &shared.6),
                                                                 crate::features::chrome::setup_chrome_interception_base(
@@ -7283,7 +7306,7 @@ impl Website {
 
                                                             // Chrome requests are prone to transient tab/CDP failures.
                                                             // Ensure at least 2 retries even when the user left retry at 0.
-                                                            let mut retry_count = shared.6.retry.max(CHROME_MIN_RETRY);
+                                                            let mut retry_count = shared.6.retry;
                                                             let mut attempt: u32 = 0;
 
                                                             while page.needs_retry() && retry_count > 0 {
@@ -7301,6 +7324,8 @@ impl Website {
                                                                 // potentially corrupted tab (stale CDP session, bloated
                                                                 // memory, stuck navigation).
                                                                 if let Ok(retry_page) = attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
+                                                                    let _retry_guard = crate::features::chrome::TabCloseGuard::new(retry_page.clone());
+
                                                                     let _ = tokio::join!(
                                                                         crate::features::chrome::setup_chrome_events(&retry_page, &shared.6),
                                                                         crate::features::chrome::setup_chrome_interception_base(
@@ -7339,6 +7364,10 @@ impl Website {
                                                                         page.should_retry = false;
                                                                         break;
                                                                     }
+
+                                                                    // Retry tab no longer needed.
+                                                                    _retry_guard.defuse();
+                                                                    let _ = retry_page.close().await;
                                                                 } else {
                                                                     log::warn!("{target_url} chrome retry tab creation failed, attempt {attempt}");
                                                                 }
@@ -7351,6 +7380,10 @@ impl Website {
                                                                     abort_handle.abort();
                                                                 }
                                                             }
+
+                                                            // Tab no longer needed — close explicitly.
+                                                            _tab_guard.defuse();
+                                                            let _ = new_page.close().await;
 
                                                             // ── Parallel backends: binary content-type early-out (Chrome non-hedge) ──
                                                             #[cfg(feature = "parallel_backends")]
@@ -8276,6 +8309,8 @@ impl Website {
                                                         let target_url = target_url_string.as_str();
                                                         match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
                                                             Ok(new_page) => {
+                                                                let _tab_guard = crate::features::chrome::TabCloseGuard::new(new_page.clone());
+
                                                                 let (_, intercept_handle) = tokio::join!(
                                                                     crate::features::chrome::setup_chrome_events(&new_page, &shared.6),
                                                                     crate::features::chrome::setup_chrome_interception_base(
@@ -8309,7 +8344,7 @@ impl Website {
                                                                 )
                                                                 .await;
 
-                                                                let mut retry_count = shared.6.retry.max(CHROME_MIN_RETRY);
+                                                                let mut retry_count = shared.6.retry;
                                                                 let mut attempt: u32 = 0;
 
                                                                 while page.needs_retry() && retry_count > 0 {
@@ -8320,6 +8355,8 @@ impl Website {
                                                                     attempt += 1;
 
                                                                     if let Ok(retry_page) = attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
+                                                                        let _retry_guard = crate::features::chrome::TabCloseGuard::new(retry_page.clone());
+
                                                                         let _ = tokio::join!(
                                                                             crate::features::chrome::setup_chrome_events(&retry_page, &shared.6),
                                                                             crate::features::chrome::setup_chrome_interception_base(
@@ -8356,6 +8393,9 @@ impl Website {
                                                                         }).await {
                                                                             log::info!("{target_url} chrome retry backoff timeout exceeded {_elapsed}");
                                                                         }
+
+                                                                        _retry_guard.defuse();
+                                                                        let _ = retry_page.close().await;
                                                                     } else {
                                                                         log::warn!("{target_url} chrome retry tab creation failed, attempt {attempt}");
                                                                     }
@@ -8368,6 +8408,9 @@ impl Website {
                                                                         abort_handle.abort();
                                                                     }
                                                                 }
+
+                                                                _tab_guard.defuse();
+                                                                let _ = new_page.close().await;
 
                                                                 chrome_page_post_process!(page, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit)
                                                             }
@@ -9728,6 +9771,8 @@ impl Website {
                                                             )
                                                             .await
                                                             {
+                                                                let _tab_guard = crate::features::chrome::TabCloseGuard::new(new_page.clone());
+
                                                                 let (_, intercept_handle) = tokio::join!(
                                                                     crate::features::chrome::setup_chrome_events(
                                                                         &new_page, &shared.3,
@@ -9778,6 +9823,9 @@ impl Website {
                                                                         abort_handle.abort();
                                                                     }
                                                                 }
+
+                                                                _tab_guard.defuse();
+                                                                let _ = new_page.close().await;
 
                                                                 if page.page_links.is_none() {
                                                                     let links =
@@ -9855,6 +9903,8 @@ impl Website {
                                                 )
                                                 .await {
                                                     Ok(new_page) => {
+                                                        let _tab_guard = crate::features::chrome::TabCloseGuard::new(new_page.clone());
+
                                                         let (_, intercept_handle) = tokio::join!(
                                                             crate::features::chrome::setup_chrome_events(
                                                                 &new_page, &shared.3,
@@ -9903,6 +9953,9 @@ impl Website {
                                                                 abort_handle.abort();
                                                             }
                                                         }
+
+                                                        _tab_guard.defuse();
+                                                        let _ = new_page.close().await;
 
                                                         if page.page_links.is_none() {
                                                             let links = page.links(&shared.6, &shared.7).await;

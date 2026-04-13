@@ -1382,3 +1382,45 @@ impl Drop for HedgeBrowser {
         }
     }
 }
+
+/// Guard that closes a Chrome tab when dropped.
+///
+/// chromiumoxide's `Page` does **not** close the underlying Chrome tab on drop —
+/// it only decrements an internal counter.  When `tokio::select!` cancels the
+/// losing future during a hedge race, the tab stays open and keeps consuming
+/// browser resources.  Over time the leaked tabs exhaust Chrome, causing
+/// `browser.new_page()` to hang and deadlocking the crawl.
+///
+/// `TabCloseGuard` holds a clone of the `Page` handle.  On drop it spawns a
+/// fire-and-forget `page.close()` task so the tab is cleaned up even when the
+/// owning future is cancelled.  Call [`defuse`](Self::defuse) before an
+/// explicit `.close().await` to avoid a double-close.
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+pub(crate) struct TabCloseGuard(Option<chromiumoxide::Page>);
+
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+impl TabCloseGuard {
+    /// Create a guard that will close `page` on drop.
+    #[inline]
+    pub fn new(page: chromiumoxide::Page) -> Self {
+        Self(Some(page))
+    }
+
+    /// Disarm the guard — the caller will close the tab explicitly.
+    #[inline]
+    pub fn defuse(mut self) {
+        self.0 = None;
+        // self is dropped here; Drop sees None → no-op.
+    }
+}
+
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+impl Drop for TabCloseGuard {
+    fn drop(&mut self) {
+        if let Some(page) = self.0.take() {
+            tokio::task::spawn(async move {
+                let _ = page.close().await;
+            });
+        }
+    }
+}

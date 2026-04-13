@@ -7,6 +7,8 @@
 //!    blocking or deadlocking the primary Chrome path
 //! 3. The combined hedge + parallel_backends + Chrome path produces
 //!    valid pages
+//! 4. Tab cleanup (TabCloseGuard) prevents leaked tabs from accumulating
+//!    and deadlocking the browser
 //!
 //! Run:
 //!   CHROME_URL=ws://127.0.0.1:9222/devtools/browser/... \
@@ -201,4 +203,98 @@ async fn hedge_parallel_chrome_multi_page_no_deadlock() {
     assert!(!visited.is_empty(), "should have visited at least one URL");
 
     eprintln!("OK: visited {} URLs without deadlock", visited.len());
+}
+
+/// High-concurrency hedge crawl: exercise the tab-close guard under pressure.
+///
+/// Without TabCloseGuard, this test would accumulate orphaned Chrome tabs
+/// (one per cancelled hedge future) until the browser overloads and hangs.
+/// With the guard, tabs are closed on cancellation and the crawl completes.
+#[tokio::test]
+async fn hedge_chrome_high_concurrency_no_tab_leak() {
+    if chrome_url().is_none() {
+        eprintln!("SKIP: set CHROME_URL to run Chrome E2E tests");
+        return;
+    }
+
+    let mut w = Website::new("https://example.com");
+    w.with_limit(8)
+        .with_depth(1)
+        .with_request_timeout(Some(Duration::from_secs(15)))
+        .with_crawl_timeout(Some(Duration::from_secs(45)))
+        .with_respect_robots_txt(false);
+
+    if let Some(ref chrome) = chrome_url() {
+        w.configuration.chrome_connection_url = Some(chrome.clone());
+    }
+
+    // Very short hedge delay — forces nearly every request to race.
+    w.with_hedge(HedgeConfig {
+        delay: Duration::from_millis(100),
+        max_hedges: 1,
+        enabled: true,
+    });
+
+    let result = tokio::time::timeout(Duration::from_secs(60), async {
+        w.crawl().await;
+    })
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "high-concurrency hedge crawl must not deadlock (tab leak)"
+    );
+
+    let visited = w.get_all_links_visited().await;
+    assert!(!visited.is_empty(), "should have visited at least one URL");
+
+    eprintln!(
+        "OK: high-concurrency hedge crawl visited {} URLs without tab leak",
+        visited.len()
+    );
+}
+
+/// Rapid sequential crawls with hedging — exercises tab cleanup across
+/// multiple crawl lifecycles on the same browser.
+#[tokio::test]
+async fn hedge_chrome_sequential_crawls_no_accumulation() {
+    if chrome_url().is_none() {
+        eprintln!("SKIP: set CHROME_URL to run Chrome E2E tests");
+        return;
+    }
+
+    for i in 0..3 {
+        let mut w = Website::new("https://example.com");
+        w.with_limit(2)
+            .with_depth(0)
+            .with_request_timeout(Some(Duration::from_secs(15)))
+            .with_crawl_timeout(Some(Duration::from_secs(30)))
+            .with_respect_robots_txt(false);
+
+        if let Some(ref chrome) = chrome_url() {
+            w.configuration.chrome_connection_url = Some(chrome.clone());
+        }
+
+        w.with_hedge(HedgeConfig {
+            delay: Duration::from_millis(200),
+            max_hedges: 1,
+            enabled: true,
+        });
+
+        let result = tokio::time::timeout(Duration::from_secs(35), async {
+            w.crawl().await;
+        })
+        .await;
+
+        assert!(result.is_ok(), "sequential crawl {} must not deadlock", i);
+
+        let visited = w.get_all_links_visited().await;
+        assert!(
+            !visited.is_empty(),
+            "crawl {} should visit at least one URL",
+            i
+        );
+
+        eprintln!("OK: sequential crawl {} visited {} URLs", i, visited.len());
+    }
 }
