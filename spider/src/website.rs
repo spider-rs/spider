@@ -11782,17 +11782,29 @@ pub async fn channel_send_page(
     #[cfg(any(not(feature = "balance"), feature = "decentralized"))] page: Page,
     channel_guard: &Option<ChannelGuard>,
 ) {
-    // When `balance` is enabled, HTML always goes to disk before
-    // broadcasting.  Subscribers stream from disk — HTML never accumulates
     // When `balance` is enabled: large pages, high memory load, or system
     // pressure → spool to disk automatically.  Small pages stay in memory.
     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
     {
         let html_len = page.html.as_ref().map_or(0, |b| b.len());
         if html_len > 0 && crate::utils::html_spool::should_spool(html_len) {
+            // spool_html_to_disk_async calls track_bytes_sub internally.
             page.spool_html_to_disk_async().await;
         }
     }
+
+    // Subtract non-spooled HTML bytes from the budget.  After this point
+    // the page is either broadcast to subscribers (who own their clone) or
+    // dropped — either way the crawler no longer holds the bytes.
+    // Spooled pages already had their bytes subtracted above.
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+    {
+        let remaining = page.html.as_ref().map_or(0, |b| b.len());
+        if remaining > 0 {
+            crate::utils::html_spool::track_bytes_sub(remaining);
+        }
+    }
+
     if let Some(c) = channel {
         if c.0.send(page).is_ok() {
             if let Some(guard) = channel_guard {

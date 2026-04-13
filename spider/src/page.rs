@@ -1593,6 +1593,13 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
         .as_deref()
         .is_some_and(|b| b.starts_with(b"<?xml"));
 
+    // Track in-memory HTML bytes for the balance budget check.
+    // Subtracted when the page is spooled to disk or broadcast.
+    #[cfg(feature = "balance")]
+    if let Some(ref c) = res.content {
+        crate::utils::html_spool::track_bytes_add(c.len());
+    }
+
     Page {
         html: res.content.map(bytes::Bytes::from),
         binary_file,
