@@ -3292,6 +3292,18 @@ impl Page {
         false
     }
 
+    /// Check if this page contains binary content, even when the HTML is
+    /// spooled to disk.
+    ///
+    /// Zero disk I/O: `binary_file` is snapshotted at spool time (before
+    /// bytes leave memory).  For in-memory pages the magic-number check
+    /// runs on the existing buffer.  Spooled pages rely solely on the
+    /// pre-cached flag — no disk peek needed.
+    #[inline]
+    pub fn is_binary_spool_aware(&self) -> bool {
+        self.binary_file || auto_encoder::is_binary_file(self.get_html_bytes_u8())
+    }
+
     /// Return the path to the disk-spooled HTML file, if any.
     ///
     /// Useful for consumers that receive a `Page` via a broadcast channel
@@ -4271,6 +4283,248 @@ impl Page {
         map
     }
 
+    /// Disk-streaming variant of [`links_stream_base_ssg`] for spooled pages.
+    /// Streams from the spool file in chunks via `lol_html` with SSG manifest
+    /// detection — never loads the full page HTML into memory.
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+    pub async fn links_stream_base_from_disk_ssg<
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + ToString
+            + std::hash::Hash
+            + From<String>
+            + Into<CaseInsensitiveString>
+            + for<'a> From<&'a str>,
+    >(
+        &mut self,
+        selectors: &RelativeSelectors,
+        spool_path: std::path::PathBuf,
+        client: &Client,
+        base: &Option<Box<Url>>,
+    ) -> HashSet<A> {
+        let mut map: HashSet<A> = HashSet::with_capacity(link_set_capacity());
+        let mut map_ssg: HashSet<A> = HashSet::new();
+        let mut links_pages: Option<HashSet<A>> = if self.page_links.is_some() {
+            Some(HashSet::new())
+        } else {
+            None
+        };
+
+        let mut metadata: Option<Box<Metadata>> = None;
+        let mut meta_title: Option<_> = None;
+        let mut meta_description: Option<_> = None;
+        let mut meta_og_image: Option<_> = None;
+
+        // XML path: full read required because quick_xml NsReader needs a
+        // contiguous &[u8] slice.
+        if self.is_xml {
+            match crate::utils::uring_fs::read_file(spool_path.display().to_string()).await {
+                Ok(file_data) => {
+                    self.links_stream_xml_links_stream_base(selectors, &file_data, &mut map, base)
+                        .await;
+                }
+                Err(_) => {
+                    if let Some(lp) = links_pages {
+                        let page_links = self.page_links.get_or_insert_with(Default::default);
+                        page_links.extend(lp.into_iter().map(Into::into));
+                    }
+                    return map;
+                }
+            }
+        } else {
+            let cell = tokio::sync::OnceCell::new();
+            let base_input_url = tokio::sync::OnceCell::new();
+
+            let parent_host = &selectors.1[0];
+            let parent_host_scheme = &selectors.1[1];
+            let base_input_domain = &selectors.2;
+            let sub_matcher = &selectors.0;
+
+            let base = base.as_deref();
+
+            let original_page = {
+                self.set_url_parsed_direct_empty();
+                self.get_url_parsed_ref().as_ref()
+            };
+
+            let xml_file = self.get_url().ends_with(".xml");
+
+            let mut element_content_handlers =
+                metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
+
+            element_content_handlers.push(element_precompiled!(
+                compiled_base_element_selector(),
+                |el| {
+                    if let Some(href) = el.get_attribute("href") {
+                        if let Ok(parsed_base) = Url::parse(&href) {
+                            let _ = base_input_url.set(parsed_base);
+                        }
+                    }
+                    Ok(())
+                }
+            ));
+
+            element_content_handlers.push(element_precompiled!(
+                if xml_file {
+                    compiled_xml_selector()
+                } else {
+                    compiled_selector()
+                },
+                |el| {
+                    if let Some(href) = el.get_attribute("href") {
+                        let base = if relative_directory_url(&href) || base.is_none() {
+                            original_page
+                        } else {
+                            base
+                        };
+                        let base = if base_input_url.initialized() {
+                            base_input_url.get()
+                        } else {
+                            base
+                        };
+
+                        push_link(
+                            &base,
+                            &href,
+                            &mut map,
+                            &selectors.0,
+                            parent_host,
+                            parent_host_scheme,
+                            base_input_domain,
+                            sub_matcher,
+                            &self.external_domains_caseless,
+                            &mut links_pages,
+                        );
+                    }
+                    Ok(())
+                }
+            ));
+
+            // SSG manifest detection — same as links_stream_base_ssg.
+            element_content_handlers.push(lol_html::element!("script[src]", |el| {
+                if let Some(source) = el.get_attribute("src") {
+                    if source.starts_with("/_next/static/")
+                        && source.ends_with("/_ssgManifest.js")
+                    {
+                        if let Some(build_path) = base.map(|b| convert_abs_path(b, &source)) {
+                            let _ = cell.set(build_path.to_string());
+                        }
+                    }
+                }
+                Ok(())
+            }));
+
+            let rewriter_settings = lol_html::Settings {
+                element_content_handlers,
+                adjust_charset_on_meta_tag: true,
+                ..lol_html::send::Settings::new_for_handler_types()
+            };
+
+            let mut rewriter = lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
+
+            let chunk_size = *STREAMING_CHUNK_SIZE;
+            let mut wrote_error = false;
+
+            let _ = crate::utils::uring_fs::read_file_chunked(
+                spool_path.display().to_string(),
+                chunk_size,
+                |chunk| {
+                    if rewriter.write(chunk).is_err() {
+                        wrote_error = true;
+                        return false;
+                    }
+                    true
+                },
+            )
+            .await;
+
+            if !wrote_error {
+                let _ = rewriter.end();
+            }
+
+            // Process SSG manifest if detected during streaming.
+            if let Some(build_ssg_path) = cell.get() {
+                if !build_ssg_path.is_empty() {
+                    let build_page = Page::new_page(build_ssg_path, client).await;
+
+                    for cap in SSG_CAPTURE.captures_iter(build_page.get_html_bytes_u8()) {
+                        if let Some(matched) = cap.get(1) {
+                            let href =
+                                auto_encode_bytes(matched.as_bytes()).replace(r#"\u002F"#, "/");
+
+                            let last_segment = crate::utils::get_last_segment(&href);
+
+                            if !(last_segment.starts_with("[") && last_segment.ends_with("]")) {
+                                let base = if relative_directory_url(&href) || base.is_none() {
+                                    original_page
+                                } else {
+                                    base
+                                };
+                                let base = if base_input_url.initialized() {
+                                    base_input_url.get()
+                                } else {
+                                    base
+                                };
+
+                                push_link(
+                                    &base,
+                                    &href,
+                                    &mut map_ssg,
+                                    &selectors.0,
+                                    parent_host,
+                                    parent_host_scheme,
+                                    base_input_domain,
+                                    sub_matcher,
+                                    &self.external_domains_caseless,
+                                    &mut None,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(lp) = links_pages {
+            let page_links = self.page_links.get_or_insert_with(Default::default);
+            page_links.extend(lp.into_iter().map(Into::into));
+        }
+
+        let valid_meta = meta_title.is_some()
+            || meta_description.is_some()
+            || meta_og_image.is_some()
+            || self.get_metadata().is_some();
+
+        if valid_meta {
+            let mut metadata_inner = Metadata::default();
+            metadata_inner.title = meta_title;
+            metadata_inner.description = meta_description;
+            metadata_inner.image = meta_og_image;
+
+            if metadata_inner.exist() && self.get_metadata().is_some() {
+                set_metadata(self.get_metadata(), &mut metadata_inner);
+            }
+
+            if metadata_inner.exist() {
+                metadata.replace(Box::new(metadata_inner));
+            }
+
+            if metadata.is_some() {
+                self.metadata = metadata;
+            }
+        }
+
+        map.extend(map_ssg);
+
+        update_link_capacity_hint(map.len());
+
+        map
+    }
+
     /// Find the links as a stream using string resource validation
     #[inline(always)]
     #[cfg(not(feature = "decentralized"))]
@@ -4523,7 +4777,7 @@ impl Page {
         client: &Client,
         prior_domain: &Option<Box<Url>>,
     ) -> HashSet<A> {
-        if self.binary_file || auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
+        if self.is_binary_spool_aware() {
             Default::default()
         } else if let Some(html_bytes) = self.html.take() {
             let result = self
@@ -4569,6 +4823,24 @@ impl Page {
         match has_html {
             false => Default::default(),
             true => {
+                // When HTML is on disk, stream link extraction with SSG
+                // support directly without loading full content into memory.
+                #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+                if self.html.is_none() && self.html_spool_path.is_some() {
+                    if let Some(ref guard) = self.html_spool_path {
+                        if let Some(path) = guard.path() {
+                            return self
+                                .links_stream_base_from_disk_ssg(
+                                    selectors,
+                                    path.to_path_buf(),
+                                    client,
+                                    prior_domain,
+                                )
+                                .await;
+                        }
+                    }
+                    return Default::default();
+                }
                 self.links_stream_ssg::<CaseInsensitiveString>(selectors, client, prior_domain)
                     .await
             }
@@ -4595,7 +4867,7 @@ impl Page {
         selectors: &RelativeSelectors,
         base: &Option<Box<Url>>,
     ) -> HashSet<A> {
-        if self.binary_file || auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
+        if self.is_binary_spool_aware() {
             Default::default()
         } else if let Some(html_bytes) = self.html.take() {
             let result = self.links_stream_base(selectors, &html_bytes, base).await;
@@ -4692,7 +4964,23 @@ impl Page {
                     }
                 }
             }
-        } else if let Some(html_bytes_taken) = self.html.take() {
+        } else {
+            // When HTML is on disk (spooled), stream from spool file.
+            // Chrome upgrade heuristic is skipped — spooled pages already
+            // have rendered content.
+            #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+            if self.html.is_none() && self.html_spool_path.is_some() {
+                if let Some(ref guard) = self.html_spool_path {
+                    if let Some(path) = guard.path() {
+                        let disk_links: HashSet<A> = self
+                            .links_stream_base_from_disk(selectors, path.to_path_buf(), base)
+                            .await;
+                        map.extend(disk_links);
+                    }
+                }
+            }
+
+            if let Some(html_bytes_taken) = self.html.take() {
             {
                 let base_input_url = tokio::sync::OnceCell::new();
 
@@ -5061,6 +5349,7 @@ impl Page {
             map.extend(inner_map);
             self.html = Some(html_bytes_taken);
         }
+        }
 
         if let Some(lp) = links_pages {
             let page_links = self.page_links.get_or_insert_with(Default::default);
@@ -5165,7 +5454,21 @@ impl Page {
                     }
                 }
             }
-        } else if let Some(html_bytes_taken) = self.html.take() {
+        } else {
+            // When HTML is on disk (spooled), stream from spool file.
+            #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+            if self.html.is_none() && self.html_spool_path.is_some() {
+                if let Some(ref guard) = self.html_spool_path {
+                    if let Some(path) = guard.path() {
+                        let disk_links: HashSet<A> = self
+                            .links_stream_base_from_disk(selectors, path.to_path_buf(), base)
+                            .await;
+                        map.extend(disk_links);
+                    }
+                }
+            }
+
+            if let Some(html_bytes_taken) = self.html.take() {
             {
                 let base_input_url = tokio::sync::OnceCell::new();
 
@@ -5524,6 +5827,7 @@ impl Page {
             map.extend(inner_map);
             self.html = Some(html_bytes_taken);
         }
+        }
 
         if let Some(lp) = links_pages {
             let page_links = self.page_links.get_or_insert_with(Default::default);
@@ -5616,7 +5920,22 @@ impl Page {
                     }
                 }
             }
-        } else if let Some(html_bytes_taken) = self.html.take() {
+        } else {
+            // When HTML is on disk (spooled), stream from spool file using
+            // the base disk extractor instead of loading full content.
+            #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+            if self.html.is_none() && self.html_spool_path.is_some() {
+                if let Some(ref guard) = self.html_spool_path {
+                    if let Some(path) = guard.path() {
+                        let disk_links = self
+                            .links_stream_base_from_disk(selectors, path.to_path_buf(), base)
+                            .await;
+                        map.extend(disk_links);
+                    }
+                }
+            }
+
+            if let Some(html_bytes_taken) = self.html.take() {
             {
                 // let base_domain = &selectors.0;
                 let parent_host = &selectors.1[0];
@@ -5719,6 +6038,7 @@ impl Page {
 
             self.html = Some(html_bytes_taken);
         }
+        }
 
         let valid_meta =
             meta_title.is_some() || meta_description.is_some() || meta_og_image.is_some();
@@ -5763,7 +6083,7 @@ impl Page {
         selectors: &RelativeSelectors,
         base: &Option<Box<Url>>,
     ) -> HashSet<A> {
-        if self.binary_file || auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
+        if self.is_binary_spool_aware() {
             Default::default()
         } else {
             // When HTML is on disk, stream from disk without loading full
@@ -5856,7 +6176,7 @@ impl Page {
                     }
                     return Default::default();
                 }
-                if self.binary_file || auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
+                if self.is_binary_spool_aware() {
                     return Default::default();
                 }
                 self.links_stream_full_resource::<CaseInsensitiveString>(selectors, base)
@@ -5900,7 +6220,7 @@ impl Page {
                     }
                     return Default::default();
                 }
-                if self.binary_file || auto_encoder::is_binary_file(self.get_html_bytes_u8()) {
+                if self.is_binary_spool_aware() {
                     return Default::default();
                 }
                 self.links_stream_smart::<CaseInsensitiveString>(
