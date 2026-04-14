@@ -599,8 +599,7 @@ pub async fn setup_browser_configuration(
                             log::error!("Exceeded maximum retry attempts");
                             break;
                         }
-                        let backoff =
-                            crate::utils::backoff::backoff_delay(attempts, 100, 5_000);
+                        let backoff = crate::utils::backoff::backoff_delay(attempts, 100, 5_000);
                         tokio::time::sleep(backoff).await;
                     }
                 }

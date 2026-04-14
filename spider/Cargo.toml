@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.51.48"
+version = "2.51.49"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -127,11 +127,11 @@ features = ["serde", "headers", "dynamic-versions"]
 
 [dependencies.spider_agent_types]
 path = "../spider_agent_types"
-version = "2.51.48"
+version = "2.51.49"
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.51.48"
+version = "2.51.49"
 optional = true
 default-features = false
 
@@ -357,6 +357,11 @@ agent_search_brave = ["agent", "spider_agent/search_brave"]
 agent_search_bing = ["agent", "spider_agent/search_bing"]
 agent_search_tavily = ["agent", "spider_agent/search_tavily"]
 agent_full = ["agent", "agent_skills", "spider_agent/full"]
+
+# Adaptive wait-for timeout guard — tracks domains that repeatedly produce
+# empty / blocked results after wait-for and progressively reduces their
+# timeouts to free browser pages faster.
+wait_guard = ["dep:dashmap"]
 
 # Per-domain token bucket rate limiter.
 rate_limit = ["dep:dashmap"]

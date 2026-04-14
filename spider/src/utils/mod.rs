@@ -72,6 +72,9 @@ pub mod validation;
 #[cfg(feature = "balance")]
 /// Lock-free crawl vitals for intelligent scaling (requests, bytes, pages, tabs).
 pub mod vitals;
+#[cfg(feature = "wait_guard")]
+/// Adaptive wait-for timeout guard for chronic bad domains.
+pub mod wait_guard;
 #[cfg(feature = "warc")]
 /// WARC 1.1 file writer for web archive output.
 pub mod warc;
@@ -678,18 +681,14 @@ pub async fn page_wait(
         }
 
         if let Some(wait) = &wait_for.almost_idle_network0 {
-            let timeout = wait
-                .timeout
-                .unwrap_or(core::time::Duration::from_secs(30));
+            let timeout = wait.timeout.unwrap_or(core::time::Duration::from_secs(30));
             let _ = page
                 .wait_for_network_almost_idle_with_timeout(timeout)
                 .await;
         }
 
         if let Some(wait) = &wait_for.idle_network0 {
-            let timeout = wait
-                .timeout
-                .unwrap_or(core::time::Duration::from_secs(30));
+            let timeout = wait.timeout.unwrap_or(core::time::Duration::from_secs(30));
             let _ = page.wait_for_network_idle_with_timeout(timeout).await;
         }
 
@@ -3352,9 +3351,12 @@ pub async fn fetch_page_html_chrome_base(
             }
 
             if wait_for.is_some() {
-                base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
+                let wait_budget = sub_duration(base_timeout_measurement, start_time.elapsed());
+                #[cfg(feature = "wait_guard")]
+                let wait_budget = crate::utils::wait_guard::global_wait_guard()
+                    .adjusted_timeout(get_domain_from_url(source_str), wait_budget);
                 if let Err(elasped) =
-                    tokio::time::timeout(base_timeout, page_wait(page, wait_for)).await
+                    tokio::time::timeout(wait_budget, page_wait(page, wait_for)).await
                 {
                     log::warn!("max wait for timeout {elasped}");
                 }
@@ -3689,6 +3691,9 @@ pub async fn fetch_page_html_chrome_base(
             // smart mode behavior.
             if wait_for.is_some() && !block_bytes && !base_timeout.is_zero() {
                 let idle_timeout = base_timeout.min(Duration::from_secs(15));
+                #[cfg(feature = "wait_guard")]
+                let idle_timeout = crate::utils::wait_guard::global_wait_guard()
+                    .adjusted_timeout(get_domain_from_url(source_str), idle_timeout);
                 if let Err(elapsed) =
                     tokio::time::timeout(idle_timeout, page_wait(page, wait_for)).await
                 {
@@ -3864,6 +3869,33 @@ pub async fn fetch_page_html_chrome_base(
     // responses and trigger retries appropriately.
     else if page_response.status_code == StatusCode::OK && page_response.content.is_none() {
         page_response.status_code = StatusCode::GATEWAY_TIMEOUT;
+    }
+
+    // Track bad wait-for outcomes per domain so future requests get reduced
+    // timeouts, preventing one user's antibot-heavy crawl from hogging pages.
+    #[cfg(feature = "wait_guard")]
+    if wait_for.is_some() {
+        let domain = get_domain_from_url(source_str);
+        let guard = crate::utils::wait_guard::global_wait_guard();
+        let no_useful_content = page_response
+            .content
+            .as_ref()
+            .is_none_or(|b| b.is_empty() || is_cacheable_body_empty(b));
+        let bad = match page_response.status_code.as_u16() {
+            // Blocked / bot-detected / rate-limited: if antibot was
+            // detected (waf_check) the response is challenge HTML —
+            // not useful output regardless of size. Also flag when
+            // content is genuinely empty.
+            403 | 429 | 503 | 520..=530 => page_response.waf_check || no_useful_content,
+            // Timeout with nothing to show.
+            408 | 504 => page_response.content.is_none(),
+            _ => false,
+        };
+        if bad {
+            guard.record_bad(domain);
+        } else {
+            guard.record_good(domain);
+        }
     }
 
     // run initial handling hidden anchors
