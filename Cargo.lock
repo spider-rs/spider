@@ -1621,9 +1621,9 @@ dependencies = [
 
 [[package]]
 name = "chromey"
-version = "2.46.17"
+version = "2.46.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26eb9c2609c3b3ce857b25594da3917c3f98d5781be4318b3cadf4d76e1f26d6"
+checksum = "3863ece44d8b53f9c2785fa67de9e49cd703329231d378b075aab07c3ae34fb0"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -8008,47 +8008,6 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.51.43"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "343a7ebb43f1e9e08000de86c8ffab7a4912d0787334a29c1c9b372fe32d8990"
-dependencies = [
- "ahash",
- "aho-corasick",
- "auto_encoder 0.1.10",
- "bytes",
- "case_insensitive_string",
- "h2 0.4.13",
- "hashbrown 0.16.1",
- "lazy_static",
- "libc",
- "log",
- "lol_html",
- "memchr",
- "num_cpus",
- "percent-encoding",
- "phf 0.13.1",
- "pin-project-lite",
- "quick-xml",
- "regex",
- "reqwest 0.13.2",
- "serde",
- "serde_json",
- "serde_regex",
- "simdutf8",
- "smallvec",
- "spider_agent_types 2.51.43",
- "spider_fingerprint",
- "string-interner",
- "string_concat",
- "strum 0.28.0",
- "tokio",
- "tokio-stream",
- "tower 0.5.3",
- "url",
-]
-
-[[package]]
-name = "spider"
 version = "2.51.44"
 dependencies = [
  "ahash",
@@ -8134,6 +8093,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "spider"
+version = "2.51.44"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c7f8817a3090158f594aa3a2892a00acc57d8c65803f64a50b57318e915ad84"
+dependencies = [
+ "ahash",
+ "aho-corasick",
+ "auto_encoder 0.1.10",
+ "bytes",
+ "case_insensitive_string",
+ "h2 0.4.13",
+ "hashbrown 0.16.1",
+ "lazy_static",
+ "libc",
+ "log",
+ "lol_html",
+ "memchr",
+ "num_cpus",
+ "percent-encoding",
+ "phf 0.13.1",
+ "pin-project-lite",
+ "quick-xml",
+ "regex",
+ "reqwest 0.13.2",
+ "serde",
+ "serde_json",
+ "serde_regex",
+ "simdutf8",
+ "smallvec",
+ "spider_agent_types 2.51.44 (registry+https://github.com/rust-lang/crates.io-index)",
+ "spider_fingerprint",
+ "string-interner",
+ "string_concat",
+ "strum 0.28.0",
+ "tokio",
+ "tokio-stream",
+ "tower 0.5.3",
+ "url",
+]
+
+[[package]]
 name = "spider_agent"
 version = "2.51.44"
 dependencies = [
@@ -8180,9 +8180,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.51.43"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8bb0be8f8d51f098b9dd4fdf5ebadaf0cbf844158e81274cf682edd860e53599"
+version = "2.51.44"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8194,6 +8192,8 @@ dependencies = [
 [[package]]
 name = "spider_agent_types"
 version = "2.51.44"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8fa1c8d4cb38d068752c4637c79e6a95484e304e7e5af01e69628430e08d227"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8271,7 +8271,7 @@ dependencies = [
  "serde_json",
  "spider 2.51.44",
  "spider_transformations",
- "spider_utils 2.51.43",
+ "spider_utils 2.51.44 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -8388,26 +8388,12 @@ dependencies = [
  "phf_codegen 0.11.3",
  "regex",
  "serde",
- "spider 2.51.43",
+ "spider 2.51.44 (registry+https://github.com/rust-lang/crates.io-index)",
  "spider_scraper",
  "tendril",
  "thiserror 1.0.69",
  "unicode-width 0.2.2",
  "url",
-]
-
-[[package]]
-name = "spider_utils"
-version = "2.51.43"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f299729917a4c2bce5ba4b103d380d7e7c39000a6c9f95b04e07f5f45971f234"
-dependencies = [
- "hashbrown 0.16.1",
- "lazy_static",
- "log",
- "spider_scraper",
- "sxd-document",
- "sxd-xpath",
 ]
 
 [[package]]
@@ -8423,6 +8409,20 @@ dependencies = [
  "sxd-document",
  "sxd-xpath",
  "tokio",
+]
+
+[[package]]
+name = "spider_utils"
+version = "2.51.44"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "097c5ee64ee1b76a6e3568f6851bcffe9c25e8b3e014df82d11a4c86e3f3be0c"
+dependencies = [
+ "hashbrown 0.16.1",
+ "lazy_static",
+ "log",
+ "spider_scraper",
+ "sxd-document",
+ "sxd-xpath",
 ]
 
 [[package]]

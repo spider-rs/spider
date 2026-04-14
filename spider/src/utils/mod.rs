@@ -678,21 +678,19 @@ pub async fn page_wait(
         }
 
         if let Some(wait) = &wait_for.almost_idle_network0 {
-            if let Some(timeout) = wait.timeout {
-                let _ = page
-                    .wait_for_network_almost_idle_with_timeout(timeout)
-                    .await;
-            } else {
-                let _ = page.wait_for_network_almost_idle().await;
-            }
+            let timeout = wait
+                .timeout
+                .unwrap_or(core::time::Duration::from_secs(30));
+            let _ = page
+                .wait_for_network_almost_idle_with_timeout(timeout)
+                .await;
         }
 
         if let Some(wait) = &wait_for.idle_network0 {
-            if let Some(timeout) = wait.timeout {
-                let _ = page.wait_for_network_idle_with_timeout(timeout).await;
-            } else {
-                let _ = page.wait_for_network_idle().await;
-            }
+            let timeout = wait
+                .timeout
+                .unwrap_or(core::time::Duration::from_secs(30));
+            let _ = page.wait_for_network_idle_with_timeout(timeout).await;
         }
 
         if let Some(wait) = &wait_for.selector {
