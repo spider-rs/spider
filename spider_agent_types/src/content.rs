@@ -297,35 +297,67 @@ fn count_style_tags_fast(html: &[u8]) -> usize {
 }
 
 /// Estimate visible text length (fast heuristic).
+///
+/// Uses `memchr` SIMD-accelerated byte scanning for `<` / `>` instead of
+/// iterating char-by-char. Tag names are matched directly on the byte
+/// buffer with `eq_ignore_ascii_case`, avoiding per-tag `String` allocation
+/// and `to_lowercase()`.
 fn estimate_text_length(html: &str) -> usize {
-    let mut in_tag = false;
+    let bytes = html.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
     let mut in_script = false;
     let mut in_style = false;
     let mut text_len = 0;
-    let mut tag_name = String::new();
 
-    for c in html.chars() {
-        if c == '<' {
-            in_tag = true;
-            tag_name.clear();
-        } else if c == '>' {
-            in_tag = false;
-            let tag_lower = tag_name.to_lowercase();
-            if tag_lower == "script" {
-                in_script = true;
-            } else if tag_lower == "/script" {
-                in_script = false;
-            } else if tag_lower == "style" {
-                in_style = true;
-            } else if tag_lower == "/style" {
-                in_style = false;
+    while i < len {
+        // SIMD scan for the next '<'
+        let remaining = &bytes[i..];
+        let Some(lt) = memchr::memchr(b'<', remaining) else {
+            // No more tags — count visible bytes in the tail.
+            if !in_script && !in_style {
+                text_len += remaining
+                    .iter()
+                    .filter(|&&b| !b.is_ascii_whitespace())
+                    .count();
             }
-        } else if in_tag {
-            if tag_name.len() < 20 {
-                tag_name.push(c);
-            }
-        } else if !in_script && !in_style && !c.is_whitespace() {
-            text_len += 1;
+            break;
+        };
+
+        // Count visible text bytes before the '<'.
+        if !in_script && !in_style && lt > 0 {
+            text_len += remaining[..lt]
+                .iter()
+                .filter(|&&b| !b.is_ascii_whitespace())
+                .count();
+        }
+
+        let tag_start = i + lt;
+        i = tag_start + 1;
+
+        // Find the matching '>'
+        let Some(gt) = memchr::memchr(b'>', &bytes[i..]) else {
+            break;
+        };
+        let tag_inner = &bytes[i..i + gt]; // bytes between '<' and '>'
+        i += gt + 1;
+
+        // Extract the tag name (up to first space or end, max 20 bytes).
+        let name_end = tag_inner
+            .iter()
+            .position(|&b| b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' || b == b'/')
+            .unwrap_or(tag_inner.len())
+            .min(20);
+        let name = &tag_inner[..name_end];
+
+        if name.eq_ignore_ascii_case(b"script") {
+            in_script = true;
+        } else if name.eq_ignore_ascii_case(b"/script") {
+            in_script = false;
+        } else if name.eq_ignore_ascii_case(b"style") {
+            in_style = true;
+        } else if name.eq_ignore_ascii_case(b"/style") {
+            in_style = false;
         }
     }
 
@@ -333,38 +365,93 @@ fn estimate_text_length(html: &str) -> usize {
 }
 
 /// Estimate bytes within a tag type.
+///
+/// Uses `memchr::memmem` SIMD-accelerated search with manual case-insensitive
+/// byte matching, avoiding the previous `html.to_lowercase()` full-string clone.
+/// Only called for "svg", "script", "style" — all ASCII tags.
 fn estimate_tag_bytes(html: &str, tag: &str) -> usize {
-    let open = format!("<{}", tag);
-    let close = format!("</{}>", tag);
+    let bytes = html.as_bytes();
+    let len = bytes.len();
+    let open_tag = format!("<{}", tag); // e.g. "<script"
+    let close_tag = format!("</{}>", tag); // e.g. "</script>"
+    let open_len = open_tag.len();
+    let close_len = close_tag.len();
+    let open_lower = open_tag.as_bytes();
+    let close_lower = close_tag.as_bytes();
+
     let mut total = 0;
+    let mut i = 0;
 
-    let html_lower = html.to_lowercase();
-    let mut search_start = 0;
-
-    while let Some(start) = html_lower[search_start..].find(&open) {
-        let abs_start = search_start + start;
-        if let Some(end_offset) = html_lower[abs_start..].find(&close) {
-            let end = abs_start + end_offset + close.len();
-            total += end - abs_start;
-            search_start = end;
-        } else {
+    while i + open_len <= len {
+        // SIMD scan for '<' as a fast filter.
+        let Some(lt) = memchr::memchr(b'<', &bytes[i..]) else {
             break;
+        };
+        let pos = i + lt;
+
+        // Check if this '<' starts our open tag (case-insensitive).
+        if pos + open_len <= len && bytes[pos..pos + open_len].eq_ignore_ascii_case(open_lower) {
+            // Found open tag — now find the matching close tag.
+            if let Some(close_lt) = find_ascii_case_insensitive(&bytes[pos..], close_lower) {
+                let end = pos + close_lt + close_len;
+                total += end - pos;
+                i = end;
+                continue;
+            } else {
+                break; // unclosed tag
+            }
         }
+
+        i = pos + 1;
     }
 
     total
 }
 
-/// Estimate base64 encoded bytes.
-fn estimate_base64_bytes(html: &str) -> usize {
-    let mut total = 0;
+/// Case-insensitive search for an ASCII needle in a byte slice.
+/// Uses `memchr` to find candidates on the first byte, then verifies the rest.
+#[inline]
+fn find_ascii_case_insensitive(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    let first_lower = needle[0].to_ascii_lowercase();
+    let first_upper = needle[0].to_ascii_uppercase();
+    let nlen = needle.len();
+    let mut offset = 0;
 
-    // Look for data: URIs
+    while offset + nlen <= haystack.len() {
+        // SIMD 2-way scan for both cases of the first byte.
+        let pos = memchr::memchr2(first_lower, first_upper, &haystack[offset..])?;
+        let abs = offset + pos;
+        if abs + nlen > haystack.len() {
+            return None;
+        }
+        if haystack[abs..abs + nlen].eq_ignore_ascii_case(needle) {
+            return Some(abs);
+        }
+        offset = abs + 1;
+    }
+
+    None
+}
+
+/// Estimate base64 encoded bytes.
+///
+/// Uses `memchr::memmem::Finder` (SIMD-accelerated) to locate `data:` needles
+/// and `memchr3` to find the closing delimiter (`"`, `'`, or `)`).
+fn estimate_base64_bytes(html: &str) -> usize {
+    static DATA_FINDER: LazyLock<memchr::memmem::Finder<'static>> =
+        LazyLock::new(|| memchr::memmem::Finder::new(b"data:"));
+
+    let bytes = html.as_bytes();
+    let mut total = 0;
     let mut search_start = 0;
-    while let Some(pos) = html[search_start..].find("data:") {
+
+    while let Some(pos) = DATA_FINDER.find(&bytes[search_start..]) {
         let abs_pos = search_start + pos;
-        // Find the end of the data URI
-        if let Some(end) = html[abs_pos..].find(['"', '\'', ')']) {
+        // Find the closing delimiter with SIMD 3-way byte search.
+        if let Some(end) = memchr::memchr3(b'"', b'\'', b')', &bytes[abs_pos..]) {
             total += end;
         }
         search_start = abs_pos + 5;
