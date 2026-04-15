@@ -2118,9 +2118,10 @@ pub async fn cache_chrome_response(
             // Inject spider's client on first use so the worker shares the
             // connection pool. The chromey cache init also calls set_client,
             // so whichever runs first wins — both use the same TLS stack.
-            spider_remote_cache::set_client(
-                chromiumoxide::browser::request_client().clone(),
-            );
+            #[cfg(feature = "chrome")]
+            spider_remote_cache::set_client(chromiumoxide::browser::request_client().clone());
+            #[cfg(not(feature = "chrome"))]
+            spider_remote_cache::set_client(reqwest::Client::new());
             if let Err(_) = spider_remote_cache::enqueue(job).await {
                 #[cfg(feature = "tracing")]
                 tracing::debug!("remote dump skipped (queue full)");
