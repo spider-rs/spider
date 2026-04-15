@@ -2115,13 +2115,8 @@ pub async fn cache_chrome_response(
                 tracing::debug!("remote dump skipped (queue full)");
             }
         } else {
-            // Inject spider's client on first use so the worker shares the
-            // connection pool. The chromey cache init also calls set_client,
-            // so whichever runs first wins — both use the same TLS stack.
-            #[cfg(feature = "chrome")]
-            spider_remote_cache::set_client(chromiumoxide::browser::request_client().clone());
-            #[cfg(not(feature = "chrome"))]
-            spider_remote_cache::set_client(reqwest::Client::new());
+            // Worker should already be inited by spawn_cache_listener, but
+            // enqueue() auto-inits as a fallback (uses default client).
             if let Err(_) = spider_remote_cache::enqueue(job).await {
                 #[cfg(feature = "tracing")]
                 tracing::debug!("remote dump skipped (queue full)");
@@ -2468,6 +2463,17 @@ async fn set_document_content_if_requested_cached(
             .await;
         }
     };
+
+    // Eagerly init the remote cache worker before the listener starts so
+    // all uploads hit the fast try_enqueue path.
+    #[cfg(feature = "chrome_remote_cache")]
+    if remote.is_some() {
+        #[cfg(feature = "chrome")]
+        spider_remote_cache::set_client(chromiumoxide::browser::request_client().clone());
+        #[cfg(not(feature = "chrome"))]
+        spider_remote_cache::set_client(reqwest::Client::new());
+        spider_remote_cache::init_default_worker().await;
+    }
 
     let (_, __, _cache_future) = tokio::join!(
         page.spawn_cache_listener(
