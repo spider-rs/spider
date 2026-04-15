@@ -662,49 +662,60 @@ pub async fn create_output_path(
 }
 
 #[cfg(feature = "chrome")]
-/// Wait for page events.
-/// 1. First wait for idle networks.
-/// 2. Wait for selectors.
-/// 3. Wait for the dom element to finish updated.
-/// 4. Wait for hard delay.
+/// Wait for page events in two phases:
+/// 1. Network waits run concurrently (resources must arrive before DOM settles).
+/// 2. Selector + DOM + delay run concurrently (check rendering results).
 pub async fn page_wait(
     page: &chromiumoxide::Page,
     wait_for: &Option<crate::configuration::WaitFor>,
 ) {
     if let Some(wait_for) = wait_for {
-        if let Some(wait) = &wait_for.idle_network {
-            wait_for_event::<chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>(
-                page,
-                wait.timeout,
-            )
-            .await;
-        }
+        // Phase 1: wait for network to settle (all network conditions concurrent).
+        tokio::join!(
+            async {
+                if let Some(wait) = &wait_for.idle_network {
+                    wait_for_event::<
+                        chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished,
+                    >(page, wait.timeout)
+                    .await;
+                }
+            },
+            async {
+                if let Some(wait) = &wait_for.almost_idle_network0 {
+                    let timeout = wait.timeout.unwrap_or(core::time::Duration::from_secs(30));
+                    let _ = page
+                        .wait_for_network_almost_idle_with_timeout(timeout)
+                        .await;
+                }
+            },
+            async {
+                if let Some(wait) = &wait_for.idle_network0 {
+                    let timeout = wait.timeout.unwrap_or(core::time::Duration::from_secs(30));
+                    let _ = page.wait_for_network_idle_with_timeout(timeout).await;
+                }
+            },
+        );
 
-        if let Some(wait) = &wait_for.almost_idle_network0 {
-            let timeout = wait.timeout.unwrap_or(core::time::Duration::from_secs(30));
-            let _ = page
-                .wait_for_network_almost_idle_with_timeout(timeout)
-                .await;
-        }
-
-        if let Some(wait) = &wait_for.idle_network0 {
-            let timeout = wait.timeout.unwrap_or(core::time::Duration::from_secs(30));
-            let _ = page.wait_for_network_idle_with_timeout(timeout).await;
-        }
-
-        if let Some(wait) = &wait_for.selector {
-            wait_for_selector(page, wait.timeout, &wait.selector).await;
-        }
-
-        if let Some(wait) = &wait_for.dom {
-            wait_for_dom(page, wait.timeout, &wait.selector).await;
-        }
-
-        if let Some(wait) = &wait_for.delay {
-            if let Some(timeout) = wait.timeout {
-                tokio::time::sleep(timeout).await
-            }
-        }
+        // Phase 2: network is settled — check DOM/selector/delay concurrently.
+        tokio::join!(
+            async {
+                if let Some(wait) = &wait_for.selector {
+                    wait_for_selector(page, wait.timeout, &wait.selector).await;
+                }
+            },
+            async {
+                if let Some(wait) = &wait_for.dom {
+                    wait_for_dom(page, wait.timeout, &wait.selector).await;
+                }
+            },
+            async {
+                if let Some(wait) = &wait_for.delay {
+                    if let Some(timeout) = wait.timeout {
+                        tokio::time::sleep(timeout).await;
+                    }
+                }
+            },
+        );
     }
 }
 
