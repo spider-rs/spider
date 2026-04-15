@@ -2111,6 +2111,7 @@ pub async fn cache_chrome_response(
 
         if spider_remote_cache::worker_inited() {
             if !spider_remote_cache::try_enqueue(job) {
+                #[cfg(feature = "tracing")]
                 tracing::debug!("remote dump skipped (queue full)");
             }
         } else {
@@ -2121,6 +2122,7 @@ pub async fn cache_chrome_response(
                 chromiumoxide::browser::request_client().clone(),
             );
             if let Err(_) = spider_remote_cache::enqueue(job).await {
+                #[cfg(feature = "tracing")]
                 tracing::debug!("remote dump skipped (queue full)");
             }
         }
