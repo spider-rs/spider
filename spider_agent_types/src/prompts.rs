@@ -73,7 +73,10 @@ Set `"done": true` when the task is fully complete. Set `"done": false` to conti
 - `{ "Wait": 1000 }` – Wait milliseconds
 - `{ "WaitFor": "selector" }` – Wait for element
 - `{ "WaitForWithTimeout": { "selector": "sel", "timeout": 5000 } }`
-- `{ "WaitForNavigation": null }` – Wait for page load
+- `{ "WaitForNavigation": null }` – Wait for next navigation event
+- `{ "WaitForLoad": { "timeout": 15000 } }` – Wait for page load event (readyState complete)
+- `{ "WaitForNetworkIdle": { "timeout": 30000 } }` – Wait for zero in-flight network requests
+- `{ "WaitForNetworkAlmostIdle": { "timeout": 30000 } }` – Wait for near-zero network requests
 - `{ "WaitForDom": { "selector": "sel", "timeout": 5000 } }`
 
 ### Navigate

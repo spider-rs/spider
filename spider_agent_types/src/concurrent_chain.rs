@@ -71,8 +71,15 @@ impl DependentStep {
             for action_name in obj.keys() {
                 match action_name.as_str() {
                     // Read-only / timing actions
-                    "Wait" | "WaitFor" | "WaitForWithTimeout" | "WaitForNavigation"
-                    | "WaitForDom" | "Screenshot" => continue,
+                    "Wait"
+                    | "WaitFor"
+                    | "WaitForWithTimeout"
+                    | "WaitForNavigation"
+                    | "WaitForLoad"
+                    | "WaitForNetworkIdle"
+                    | "WaitForNetworkAlmostIdle"
+                    | "WaitForDom"
+                    | "Screenshot" => continue,
                     // Evaluate is parallel-safe if it doesn't mutate
                     "Evaluate" => {
                         // Conservative: assume evaluate might mutate

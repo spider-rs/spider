@@ -94,6 +94,12 @@ pub enum ActionType {
     },
     /// Wait for the next navigation event.
     WaitForNavigation,
+    /// Wait for the page load event (readyState complete).
+    WaitForLoad,
+    /// Wait for zero in-flight network connections (CDP networkIdle).
+    WaitForNetworkIdle,
+    /// Wait for ≤2 in-flight network connections (CDP networkAlmostIdle).
+    WaitForNetworkAlmostIdle,
     /// Wait for DOM updates to stop.
     WaitForDom {
         /// Optional selector to watch (defaults to body).
@@ -172,6 +178,9 @@ impl std::fmt::Display for ActionType {
                 write!(f, "wait_for_timeout:{}:{}ms", selector, timeout)
             }
             Self::WaitForNavigation => write!(f, "wait_for_navigation"),
+            Self::WaitForLoad => write!(f, "wait_for_load"),
+            Self::WaitForNetworkIdle => write!(f, "wait_for_network_idle"),
+            Self::WaitForNetworkAlmostIdle => write!(f, "wait_for_network_almost_idle"),
             Self::WaitForDom { selector, timeout } => {
                 write!(f, "wait_for_dom:{:?}:{}ms", selector, timeout)
             }

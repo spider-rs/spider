@@ -605,6 +605,48 @@ pub async fn run_automation(driver: &WebDriver, action: &WebAutomation) -> bool 
             "#;
             valid = driver.execute(js, vec![]).await.is_ok();
         }
+        WebAutomation::WaitForLoad { timeout } => {
+            let js = r#"
+                return new Promise(resolve => {
+                    if (document.readyState === 'complete') {
+                        resolve(true);
+                    } else {
+                        window.addEventListener('load', () => resolve(true));
+                    }
+                });
+            "#;
+            let dur = Duration::from_millis(*timeout);
+            valid = tokio::time::timeout(dur, driver.execute(js, vec![]))
+                .await
+                .map(|r| r.is_ok())
+                .unwrap_or(false);
+        }
+        WebAutomation::WaitForNetworkIdle { timeout } => {
+            // Webdriver doesn't have native network idle — approximate via JS
+            let js = format!(
+                r#"return new Promise(r => {{
+                    let t; const c = () => {{ clearTimeout(t); t = setTimeout(() => r(true), 500); }};
+                    const o = new PerformanceObserver(l => {{ l.getEntries().forEach(c); }});
+                    o.observe({{ type: 'resource', buffered: false }});
+                    c(); setTimeout(() => {{ o.disconnect(); r(true); }}, {});
+                }})"#,
+                timeout
+            );
+            valid = driver.execute(&js, vec![]).await.is_ok();
+        }
+        WebAutomation::WaitForNetworkAlmostIdle { timeout } => {
+            // Same approach as NetworkIdle for webdriver — no CDP lifecycle
+            let js = format!(
+                r#"return new Promise(r => {{
+                    let t; const c = () => {{ clearTimeout(t); t = setTimeout(() => r(true), 500); }};
+                    const o = new PerformanceObserver(l => {{ l.getEntries().forEach(c); }});
+                    o.observe({{ type: 'resource', buffered: false }});
+                    c(); setTimeout(() => {{ o.disconnect(); r(true); }}, {});
+                }})"#,
+                timeout
+            );
+            valid = driver.execute(&js, vec![]).await.is_ok();
+        }
         WebAutomation::WaitForDom { selector, timeout } => {
             let timeout_duration = Duration::from_millis(*timeout as u64);
             if let Some(sel) = selector {

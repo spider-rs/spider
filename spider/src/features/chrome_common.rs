@@ -525,6 +525,21 @@ pub enum WebAutomation {
     Wait(u64),
     /// Waits for the next navigation event.
     WaitForNavigation,
+    /// Waits for the page `load` event (document.readyState === "complete").
+    WaitForLoad {
+        /// Timeout in milliseconds. Defaults to 15000.
+        timeout: u64,
+    },
+    /// Waits for zero in-flight network connections (CDP lifecycle networkIdle). Non-polling.
+    WaitForNetworkIdle {
+        /// Timeout in milliseconds. Defaults to 30000.
+        timeout: u64,
+    },
+    /// Waits for ≤2 in-flight network connections (CDP lifecycle networkAlmostIdle). Non-polling.
+    WaitForNetworkAlmostIdle {
+        /// Timeout in milliseconds. Defaults to 30000.
+        timeout: u64,
+    },
     /// Wait for dom updates to stop.
     WaitForDom {
         /// The selector of the element to wait for updates.
@@ -592,6 +607,9 @@ impl WebAutomation {
             ClickPoint { .. } => "ClickPoint",
             Wait(_) => "Wait",
             WaitForNavigation => "WaitForNavigation",
+            WaitForLoad { .. } => "WaitForLoad",
+            WaitForNetworkIdle { .. } => "WaitForNetworkIdle",
+            WaitForNetworkAlmostIdle { .. } => "WaitForNetworkAlmostIdle",
             WaitForDom { .. } => "WaitForDom",
             WaitFor(_) => "WaitFor",
             WaitForWithTimeout { .. } => "WaitForWithTimeout",
@@ -635,6 +653,11 @@ impl WebAutomation {
             ClickAllClickable() => "ClickAllClickable".into(),
             Wait(ms) => format!("Wait {}ms", ms),
             WaitForNavigation => "WaitForNavigation".into(),
+            WaitForLoad { timeout } => format!("WaitForLoad ({}ms)", timeout),
+            WaitForNetworkIdle { timeout } => format!("WaitForNetworkIdle ({}ms)", timeout),
+            WaitForNetworkAlmostIdle { timeout } => {
+                format!("WaitForNetworkAlmostIdle ({}ms)", timeout)
+            }
             ClickPoint { x, y } => {
                 format!("ClickPoint x:{} y:{}", x, y)
             }
@@ -866,6 +889,25 @@ impl WebAutomation {
             }
             WebAutomation::WaitForNavigation => {
                 valid = page.wait_for_navigation().await.is_ok();
+            }
+            WebAutomation::WaitForLoad { timeout } => {
+                let js = "new Promise(r => { if (document.readyState === 'complete') r(); else window.addEventListener('load', r); })";
+                let dur = Duration::from_millis(*timeout);
+                valid = tokio::time::timeout(dur, page.evaluate(js))
+                    .await
+                    .map(|r| r.is_ok())
+                    .unwrap_or(false);
+            }
+            WebAutomation::WaitForNetworkIdle { timeout } => {
+                let dur = Duration::from_millis(*timeout);
+                valid = page.wait_for_network_idle_with_timeout(dur).await.is_ok();
+            }
+            WebAutomation::WaitForNetworkAlmostIdle { timeout } => {
+                let dur = Duration::from_millis(*timeout);
+                valid = page
+                    .wait_for_network_almost_idle_with_timeout(dur)
+                    .await
+                    .is_ok();
             }
             WebAutomation::WaitForAndClick(selector) => {
                 valid = wait_for_selector(page, Some(Duration::from_secs(60)), selector).await;

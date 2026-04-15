@@ -154,9 +154,24 @@ impl ToolCall {
             }
 
             // Object argument actions
-            "Fill" | "Select" | "ClickPoint" | "ClickHold" | "ClickHoldPoint" | "ClickDrag"
-            | "ClickDragPoint" | "ScrollTo" | "ScrollToPoint" | "WaitForWithTimeout"
-            | "WaitForDom" | "Type" | "Press" | "KeyDown" | "KeyUp" => {
+            "Fill"
+            | "Select"
+            | "ClickPoint"
+            | "ClickHold"
+            | "ClickHoldPoint"
+            | "ClickDrag"
+            | "ClickDragPoint"
+            | "ScrollTo"
+            | "ScrollToPoint"
+            | "WaitForWithTimeout"
+            | "WaitForLoad"
+            | "WaitForNetworkIdle"
+            | "WaitForNetworkAlmostIdle"
+            | "WaitForDom"
+            | "Type"
+            | "Press"
+            | "KeyDown"
+            | "KeyUp" => {
                 json!({ self.function.name.clone(): args })
             }
 
@@ -251,6 +266,9 @@ impl ActionToolSchemas {
             Self::wait_for(),
             Self::wait_for_with_timeout(),
             Self::wait_for_navigation(),
+            Self::wait_for_load(),
+            Self::wait_for_network_idle(),
+            Self::wait_for_network_almost_idle(),
             Self::wait_for_dom(),
             // Navigate
             Self::navigate(),
@@ -753,6 +771,48 @@ impl ActionToolSchemas {
             json!({
                 "type": "object",
                 "properties": {},
+                "required": []
+            }),
+        )
+    }
+
+    fn wait_for_load() -> ToolDefinition {
+        ToolDefinition::function(
+            "WaitForLoad",
+            "Wait for page load event (readyState complete). Non-polling.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "timeout": { "type": "integer", "description": "Timeout in ms (default 15000)" }
+                },
+                "required": []
+            }),
+        )
+    }
+
+    fn wait_for_network_idle() -> ToolDefinition {
+        ToolDefinition::function(
+            "WaitForNetworkIdle",
+            "Wait for zero in-flight network connections (CDP networkIdle). Non-polling.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "timeout": { "type": "integer", "description": "Timeout in ms (default 30000)" }
+                },
+                "required": []
+            }),
+        )
+    }
+
+    fn wait_for_network_almost_idle() -> ToolDefinition {
+        ToolDefinition::function(
+            "WaitForNetworkAlmostIdle",
+            "Wait for near-zero in-flight network connections (CDP networkAlmostIdle). Non-polling.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "timeout": { "type": "integer", "description": "Timeout in ms (default 30000)" }
+                },
                 "required": []
             }),
         )

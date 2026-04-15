@@ -4320,6 +4320,33 @@ return await s.prompt(msg);
                 PageWaitStrategy::Load.apply(page).await;
                 ActionOutcome::ok("WaitForNavigation")
             }
+            "WaitForLoad" => {
+                let timeout = value
+                    .get("timeout")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(15000);
+                PageWaitStrategy::Load.apply(page).await;
+                let _ = timeout; // timeout already capped inside PageWaitStrategy::Load (15s)
+                ActionOutcome::ok("WaitForLoad")
+            }
+            "WaitForNetworkIdle" => {
+                let timeout = value
+                    .get("timeout")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(30000);
+                let dur = std::time::Duration::from_millis(timeout.min(60_000));
+                let _ = page.wait_for_network_idle_with_timeout(dur).await;
+                ActionOutcome::ok("WaitForNetworkIdle")
+            }
+            "WaitForNetworkAlmostIdle" => {
+                let timeout = value
+                    .get("timeout")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(30000);
+                let dur = std::time::Duration::from_millis(timeout.min(60_000));
+                let _ = page.wait_for_network_almost_idle_with_timeout(dur).await;
+                ActionOutcome::ok("WaitForNetworkAlmostIdle")
+            }
             "WaitForDom" => {
                 let selector = value.get("selector").and_then(|v| v.as_str());
                 let timeout = value
