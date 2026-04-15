@@ -891,12 +891,11 @@ impl WebAutomation {
                 valid = page.wait_for_navigation().await.is_ok();
             }
             WebAutomation::WaitForLoad { timeout } => {
-                let js = "new Promise(r => { if (document.readyState === 'complete') r(); else window.addEventListener('load', r); })";
-                let dur = Duration::from_millis(*timeout);
-                valid = tokio::time::timeout(dur, page.evaluate(js))
-                    .await
-                    .map(|r| r.is_ok())
-                    .unwrap_or(false);
+                crate::utils::wait_for_event::<
+                    chromiumoxide::cdp::browser_protocol::page::EventLoadEventFired,
+                >(page, Some(Duration::from_millis(*timeout)))
+                .await;
+                valid = true;
             }
             WebAutomation::WaitForNetworkIdle { timeout } => {
                 let dur = Duration::from_millis(*timeout);

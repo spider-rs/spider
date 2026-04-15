@@ -10,6 +10,8 @@ use chromiumoxide::{
     cdp::browser_protocol::page::CaptureScreenshotFormat, layout::Point, page::ScreenshotParams,
     Page,
 };
+#[cfg(feature = "chrome")]
+use futures::StreamExt;
 
 use super::{
     clean_html_with_profile, parse_tool_calls, tool_calls_to_steps, truncate_utf8_tail, ActResult,
@@ -4325,8 +4327,15 @@ return await s.prompt(msg);
                     .get("timeout")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(15000);
-                PageWaitStrategy::Load.apply(page).await;
-                let _ = timeout; // timeout already capped inside PageWaitStrategy::Load (15s)
+                let dur = std::time::Duration::from_millis(timeout.min(60_000));
+                if let Ok(mut events) = page
+                    .event_listener::<
+                        chromiumoxide::cdp::browser_protocol::page::EventLoadEventFired,
+                    >()
+                    .await
+                {
+                    let _ = tokio::time::timeout(dur, events.next()).await;
+                }
                 ActionOutcome::ok("WaitForLoad")
             }
             "WaitForNetworkIdle" => {
