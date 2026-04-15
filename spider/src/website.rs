@@ -11346,6 +11346,10 @@ pub async fn channel_send_page(
         if remaining > 0 {
             crate::utils::html_spool::track_bytes_sub(remaining);
         }
+        // Clear the tracking flag so the Page::Drop impl does not
+        // double-subtract these bytes when the page (or its broadcast
+        // clones) is eventually dropped.
+        page.balance_bytes_tracked = false;
     }
 
     if let Some(c) = channel {
@@ -13558,6 +13562,79 @@ fn test_spool_clone_byte_counter_consistency() {
         !shared_path.exists(),
         "file should be deleted after last clone drops"
     );
+}
+
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
+#[test]
+fn test_page_drop_subtracts_leaked_bytes() {
+    // Simulate the Chrome retry pattern: multiple pages created via build(),
+    // only the last one goes through channel_send_page.  Old pages must
+    // subtract their bytes via the Drop impl.
+    use crate::utils::html_spool;
+
+    let before = html_spool::total_bytes_in_memory();
+
+    // Create a page (simulating build()) — bytes are tracked.
+    let html_data = vec![b'x'; 10_000];
+    let mut page1 = Page::default();
+    page1.html = Some(bytes::Bytes::from(html_data.clone()));
+    html_spool::track_bytes_add(page1.html.as_ref().unwrap().len());
+    page1.balance_bytes_tracked = true;
+
+    assert_eq!(html_spool::total_bytes_in_memory(), before + 10_000);
+
+    // Create a second page (retry) — also tracked.
+    let mut page2 = Page::default();
+    page2.html = Some(bytes::Bytes::from(html_data));
+    html_spool::track_bytes_add(page2.html.as_ref().unwrap().len());
+    page2.balance_bytes_tracked = true;
+
+    assert_eq!(html_spool::total_bytes_in_memory(), before + 20_000);
+
+    // Drop the first page (simulates `page = next_page` in retry).
+    // The Drop impl should subtract the 10_000 bytes.
+    drop(page1);
+    assert_eq!(html_spool::total_bytes_in_memory(), before + 10_000);
+
+    // Simulate channel_send_page: subtract bytes and clear the flag.
+    let remaining = page2.html.as_ref().map_or(0, |b| b.len());
+    html_spool::track_bytes_sub(remaining);
+    page2.balance_bytes_tracked = false;
+
+    assert_eq!(html_spool::total_bytes_in_memory(), before);
+
+    // Drop page2 — should NOT double-subtract (flag is false).
+    drop(page2);
+    assert_eq!(html_spool::total_bytes_in_memory(), before);
+}
+
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
+#[test]
+fn test_page_drop_no_double_subtract_on_clone() {
+    // When a page is broadcast via channel_send_page, it's cloned for
+    // subscribers.  The clone inherits balance_bytes_tracked=false, so
+    // dropping it must not subtract bytes.
+    use crate::utils::html_spool;
+
+    let before = html_spool::total_bytes_in_memory();
+
+    let mut page = Page::default();
+    page.html = Some(bytes::Bytes::from(vec![b'y'; 5_000]));
+    html_spool::track_bytes_add(5_000);
+    page.balance_bytes_tracked = true;
+
+    // Simulate channel_send_page clearing the flag before broadcast.
+    html_spool::track_bytes_sub(5_000);
+    page.balance_bytes_tracked = false;
+
+    // Clone (simulating broadcast::send cloning the page).
+    let clone = page.clone();
+    assert!(!clone.balance_bytes_tracked);
+
+    // Drop both — neither should subtract.
+    drop(page);
+    drop(clone);
+    assert_eq!(html_spool::total_bytes_in_memory(), before);
 }
 
 #[cfg(all(test, feature = "balance"))]

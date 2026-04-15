@@ -836,6 +836,36 @@ pub struct Page {
     /// byte counter stays consistent.  When set, `html` is `None` and
     /// content accessors transparently reload from this path.
     pub(crate) html_spool_path: Option<HtmlSpoolGuard>,
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+    /// Whether this page's HTML bytes are currently tracked in the global
+    /// `TOTAL_HTML_BYTES_IN_MEMORY` counter.  Set to `true` in `build()`
+    /// when `track_bytes_add` is called; cleared to `false` in
+    /// `channel_send_page` after bytes are subtracted.  The `Drop` impl
+    /// uses this flag to subtract leaked bytes from pages that are dropped
+    /// without going through `channel_send_page` (e.g. during retries).
+    pub(crate) balance_bytes_tracked: bool,
+}
+
+/// Subtract leaked bytes from the global counter when a `Page` is dropped
+/// without going through `channel_send_page`.  This prevents the
+/// `TOTAL_HTML_BYTES_IN_MEMORY` counter from growing monotonically during
+/// Chrome retries (where `page = next_page` drops the old page).
+///
+/// Pages that pass through `channel_send_page` have `balance_bytes_tracked`
+/// cleared to `false`, so their `Drop` is a no-op.
+#[cfg(all(feature = "balance", not(feature = "decentralized")))]
+impl Drop for Page {
+    #[inline]
+    fn drop(&mut self) {
+        if self.balance_bytes_tracked {
+            if let Some(ref html) = self.html {
+                let len = html.len();
+                if len > 0 {
+                    crate::utils::html_spool::track_bytes_sub(len);
+                }
+            }
+        }
+    }
 }
 
 /// Represent a page visited.
@@ -945,7 +975,7 @@ pub struct Page {
 
 /// Assign properties from a new page.
 #[cfg(feature = "smart")]
-pub fn page_assign(page: &mut Page, new_page: Page) {
+pub fn page_assign(page: &mut Page, mut new_page: Page) {
     if let Some(s) = new_page.final_redirect_destination.as_deref() {
         let bad = match s.as_bytes().first().copied() {
             None => true,
@@ -962,14 +992,27 @@ pub fn page_assign(page: &mut Page, new_page: Page) {
         new_page.status_code == 200 && new_page.bytes_transferred.is_none() && new_page.is_empty();
 
     page.anti_bot_tech = new_page.anti_bot_tech;
-    page.base = new_page.base;
+    page.base = std::mem::take(&mut new_page.base);
     page.blocked_crawl = new_page.blocked_crawl;
 
     if !chrome_default_empty_200 {
         page.status_code = new_page.status_code;
         page.bytes_transferred = new_page.bytes_transferred;
         if new_page.html.is_some() {
-            page.html = new_page.html;
+            // Transfer byte tracking ownership from new_page to page.
+            #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+            {
+                // Subtract old page bytes if tracked.
+                if page.balance_bytes_tracked {
+                    if let Some(ref old_html) = page.html {
+                        crate::utils::html_spool::track_bytes_sub(old_html.len());
+                    }
+                }
+                // Transfer the tracking flag from new_page.
+                page.balance_bytes_tracked = new_page.balance_bytes_tracked;
+                new_page.balance_bytes_tracked = false;
+            }
+            page.html = std::mem::take(&mut new_page.html);
             page.is_valid_utf8 = new_page.is_valid_utf8;
             page.is_xml = new_page.is_xml;
         }
@@ -989,26 +1032,29 @@ pub fn page_assign(page: &mut Page, new_page: Page) {
     }
     #[cfg(feature = "page_error_status_details")]
     {
-        page.error_status = new_page.error_status;
+        page.error_status = std::mem::take(&mut new_page.error_status);
     }
 
-    page.request_map = new_page.request_map;
-    page.response_map = new_page.response_map;
+    #[cfg(feature = "chrome")]
+    {
+        page.request_map = std::mem::take(&mut new_page.request_map);
+        page.response_map = std::mem::take(&mut new_page.response_map);
+    }
 
     #[cfg(feature = "cookies")]
     {
         if new_page.cookies.is_some() {
-            page.cookies = new_page.cookies;
+            page.cookies = std::mem::take(&mut new_page.cookies);
         }
     }
     if new_page.headers.is_some() {
-        page.headers = new_page.headers;
+        page.headers = std::mem::take(&mut new_page.headers);
     }
 
     page.waf_check = new_page.waf_check;
     page.should_retry = new_page.should_retry;
     page.signature = new_page.signature;
-    if let Some(mut new_spawn_pages) = new_page.spawn_pages {
+    if let Some(mut new_spawn_pages) = std::mem::take(&mut new_page.spawn_pages) {
         /// Max URLs a single page can accumulate via automation spawn_pages.
         const MAX_SPAWN_PAGES: usize = 1000;
         match page.spawn_pages.as_mut() {
@@ -1023,7 +1069,7 @@ pub fn page_assign(page: &mut Page, new_page: Page) {
             }
         }
     }
-    page.metadata = new_page.metadata;
+    page.metadata = std::mem::take(&mut new_page.metadata);
 }
 
 /// Validate link and push into the map
@@ -1594,10 +1640,13 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
         .is_some_and(|b| b.starts_with(b"<?xml"));
 
     // Track in-memory HTML bytes for the balance budget check.
-    // Subtracted when the page is spooled to disk or broadcast.
+    // Subtracted when the page is spooled to disk, broadcast via
+    // channel_send_page, or dropped (via the Page Drop impl).
     #[cfg(feature = "balance")]
-    if let Some(ref c) = res.content {
-        crate::utils::html_spool::track_bytes_add(c.len());
+    let balance_has_bytes = res.content.as_ref().is_some_and(|c| !c.is_empty());
+    #[cfg(feature = "balance")]
+    if balance_has_bytes {
+        crate::utils::html_spool::track_bytes_add(res.content.as_ref().unwrap().len());
     }
 
     Page {
@@ -1645,7 +1694,16 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
         anti_bot_tech: res.anti_bot_tech,
         metadata: res.metadata,
         content_truncated: res.content_truncated,
-        ..Default::default()
+        #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+        balance_bytes_tracked: balance_has_bytes,
+        base: None,
+        external_domains_caseless: Default::default(),
+        page_links: None,
+        proxy_configured: false,
+        #[cfg(feature = "balance")]
+        html_spool_path: None,
+        #[cfg(feature = "parallel_backends")]
+        backend_source: None,
     }
 }
 
@@ -3131,9 +3189,12 @@ impl Page {
     pub fn set_html_bytes(&mut self, html: Option<Vec<u8>>) {
         #[cfg(all(feature = "balance", not(feature = "decentralized")))]
         {
-            // Subtract old tracked bytes.
-            if let Some(old) = &self.html {
-                crate::utils::html_spool::track_bytes_sub(old.len());
+            // Subtract old tracked bytes if this page owns them.
+            if self.balance_bytes_tracked {
+                if let Some(old) = &self.html {
+                    crate::utils::html_spool::track_bytes_sub(old.len());
+                }
+                self.balance_bytes_tracked = false;
             }
             // Drop the spool guard (deletes the temp file automatically).
             self.html_spool_path = None;
@@ -3154,6 +3215,7 @@ impl Page {
         #[cfg(all(feature = "balance", not(feature = "decentralized")))]
         if let Some(ref h) = self.html {
             crate::utils::html_spool::track_bytes_add(h.len());
+            self.balance_bytes_tracked = true;
         }
     }
 
@@ -3181,6 +3243,9 @@ impl Page {
             crate::utils::html_spool::track_bytes_sub(len);
             crate::utils::html_spool::track_page_spooled();
             self.html_spool_path = Some(HtmlSpoolGuard::new(path));
+            // Bytes are now on disk, not in memory — clear the tracking
+            // flag so Drop does not double-subtract.
+            self.balance_bytes_tracked = false;
             true
         } else {
             false
@@ -3209,6 +3274,9 @@ impl Page {
             crate::utils::html_spool::track_bytes_sub(len);
             crate::utils::html_spool::track_page_spooled();
             self.html_spool_path = Some(HtmlSpoolGuard::new(path));
+            // Bytes are now on disk, not in memory — clear the tracking
+            // flag so Drop does not double-subtract.
+            self.balance_bytes_tracked = false;
             true
         } else {
             false
@@ -3233,6 +3301,7 @@ impl Page {
                         crate::utils::html_spool::track_bytes_add(bytes.len());
                         self.html = Some(bytes);
                         self.html_spool_path = None;
+                        self.balance_bytes_tracked = true;
                         true
                     }
                     Err(_) => {
@@ -3266,6 +3335,7 @@ impl Page {
                         crate::utils::html_spool::track_bytes_add(bytes.len());
                         self.html = Some(bytes);
                         self.html_spool_path = None;
+                        self.balance_bytes_tracked = true;
                         true
                     }
                     Err(_) => {
@@ -7566,7 +7636,10 @@ fn test_build_preserves_spawn_pages() {
         },
     );
 
-    let spawn_pages = page.spawn_pages.expect("spawn_pages should be preserved");
+    let spawn_pages = page
+        .spawn_pages
+        .as_ref()
+        .expect("spawn_pages should be preserved");
     assert_eq!(spawn_pages.len(), 2);
     assert_eq!(spawn_pages[0], "https://example.com/a");
     assert_eq!(spawn_pages[1], "https://example.com/b");
@@ -7600,7 +7673,10 @@ fn test_page_assign_merges_spawn_pages() {
 
     page_assign(&mut page, new_page);
 
-    let spawn_pages = page.spawn_pages.expect("spawn_pages should be merged");
+    let spawn_pages = page
+        .spawn_pages
+        .as_ref()
+        .expect("spawn_pages should be merged");
     assert_eq!(spawn_pages.len(), 3);
     assert!(spawn_pages.contains(&"https://example.com/root".to_string()));
     assert!(spawn_pages.contains(&"https://example.com/x".to_string()));
