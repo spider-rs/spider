@@ -2055,17 +2055,17 @@ pub async fn cache_chrome_response(
     } = chrome_http_req_res;
 
     // Prepare remote dump data BEFORE put_hybrid_cache consumes the HttpResponse.
-    // Use the same body/headers — remote dump spawns a task that takes ownership.
+    // Use the same body/headers — the worker batches, deduplicates, and uploads.
     #[cfg(feature = "chrome_remote_cache")]
     let remote_dump_data = {
         let cache_site =
             chromiumoxide::cache::manager::site_key_for_target_url(target_url, None, namespace);
         let remote_version = match chromey_version {
-            HttpVersion::Http09 => chromiumoxide::http::HttpVersion::Http09,
-            HttpVersion::Http10 => chromiumoxide::http::HttpVersion::Http10,
-            HttpVersion::H2 => chromiumoxide::http::HttpVersion::H2,
-            HttpVersion::H3 => chromiumoxide::http::HttpVersion::H3,
-            _ => chromiumoxide::http::HttpVersion::Http11,
+            HttpVersion::Http09 => spider_remote_cache::HttpVersion::Http09,
+            HttpVersion::Http10 => spider_remote_cache::HttpVersion::Http10,
+            HttpVersion::H2 => spider_remote_cache::HttpVersion::H2,
+            HttpVersion::H3 => spider_remote_cache::HttpVersion::H3,
+            _ => spider_remote_cache::HttpVersion::Http11,
         };
         // Clone only what the spawned task needs; body is cloned once (not twice).
         Some((
@@ -2091,30 +2091,39 @@ pub async fn cache_chrome_response(
 
     put_hybrid_cache(&cache_key, http_response, &method, request_headers).await;
 
-    // Best-effort async dump to the shared remote cache server so other
-    // ECS tasks / processes can serve cache hits without re-rendering.
+    // Best-effort enqueue into the shared worker — batched, deduped, concurrent.
     #[cfg(feature = "chrome_remote_cache")]
     if let Some((key, site, body, _status, req_hdrs, resp_hdrs, remote_version, method, target)) =
         remote_dump_data
     {
-        tokio::spawn(async move {
-            let _ = tokio::time::timeout(
-                Duration::from_secs(5),
-                chromiumoxide::cache::remote::dump_to_remote_cache_parts(
-                    &key,
-                    &site,
-                    &target,
-                    &body,
-                    &method,
-                    _status.into(),
-                    &req_hdrs,
-                    &resp_hdrs,
-                    &remote_version,
-                    Some("true"),
-                ),
-            )
-            .await;
-        });
+        let job = spider_remote_cache::DumpJob {
+            cache_key: key,
+            cache_site: site,
+            url: target,
+            method,
+            status: _status.into(),
+            request_headers: req_hdrs,
+            response_headers: resp_hdrs,
+            body,
+            http_version: remote_version,
+            dump_remote: None,
+        };
+
+        if spider_remote_cache::worker_inited() {
+            if !spider_remote_cache::try_enqueue(job) {
+                tracing::debug!("remote dump skipped (queue full)");
+            }
+        } else {
+            // Inject spider's client on first use so the worker shares the
+            // connection pool. The chromey cache init also calls set_client,
+            // so whichever runs first wins — both use the same TLS stack.
+            spider_remote_cache::set_client(
+                chromiumoxide::browser::request_client().clone(),
+            );
+            if let Err(_) = spider_remote_cache::enqueue(job).await {
+                tracing::debug!("remote dump skipped (queue full)");
+            }
+        }
     }
 }
 

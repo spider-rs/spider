@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.51.54"
+version = "2.51.55"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -116,6 +116,11 @@ optional = true
 default-features = false
 features = ["bytes", "stream"]
 
+[dependencies.spider_remote_cache]
+version = "0.2"
+optional = true
+default-features = false
+
 [dependencies.spider_firewall]
 version = "2"
 optional = true
@@ -127,11 +132,11 @@ features = ["serde", "headers", "dynamic-versions"]
 
 [dependencies.spider_agent_types]
 path = "../spider_agent_types"
-version = "2.51.54"
+version = "2.51.55"
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.51.54"
+version = "2.51.55"
 optional = true
 default-features = false
 
@@ -277,7 +282,7 @@ chrome_headless_new = ["chrome"]
 chrome_simd = ["chrome", "chromey/simd", "simd"]
 chrome_tls_connection = ["chrome", "chromey/chrome_tls_connection"]
 chrome_serde_stacker = ["chrome", "chromey/serde_stacker"]
-chrome_remote_cache = ["chrome", "cache_mem", "chromey/_cache", "chromey/cache_mem"]
+chrome_remote_cache = ["chrome", "cache_mem", "chromey/_cache", "chromey/cache_mem", "dep:spider_remote_cache"]
 chrome_remote_cache_disk = ["chrome_remote_cache", "chromey/cache"]
 chrome_remote_cache_mem = ["chrome_remote_cache"]
 cookies = ["reqwest/cookies", "dep:cookie"]
