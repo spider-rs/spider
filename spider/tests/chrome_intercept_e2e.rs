@@ -57,8 +57,16 @@ mod e2e {
         eprintln!("basic_chrome_crawl: {} pages in {:?}", pages.len(), elapsed);
 
         assert!(!pages.is_empty(), "Should have crawled at least 1 page");
-        assert!(pages[0].1 > 100, "Page should have content ({} bytes)", pages[0].1);
-        assert!(elapsed < Duration::from_secs(45), "Should not deadlock ({:?})", elapsed);
+        assert!(
+            pages[0].1 > 100,
+            "Page should have content ({} bytes)",
+            pages[0].1
+        );
+        assert!(
+            elapsed < Duration::from_secs(45),
+            "Should not deadlock ({:?})",
+            elapsed
+        );
     }
 
     /// Chrome crawl with chrome_intercept — resource blocking active.
@@ -92,11 +100,23 @@ mod e2e {
         let elapsed = start.elapsed();
 
         let pages = collector.await.unwrap();
-        eprintln!("chrome_intercept_crawl: {} pages in {:?}", pages.len(), elapsed);
+        eprintln!(
+            "chrome_intercept_crawl: {} pages in {:?}",
+            pages.len(),
+            elapsed
+        );
 
         assert!(!pages.is_empty(), "Should have crawled at least 1 page");
-        assert!(pages[0].1 > 100, "Page should have content ({} bytes)", pages[0].1);
-        assert!(elapsed < Duration::from_secs(45), "Should not deadlock ({:?})", elapsed);
+        assert!(
+            pages[0].1 > 100,
+            "Page should have content ({} bytes)",
+            pages[0].1
+        );
+        assert!(
+            elapsed < Duration::from_secs(45),
+            "Should not deadlock ({:?})",
+            elapsed
+        );
     }
 
     /// Multiple concurrent pages with chrome_intercept — most likely to trigger blocking.
@@ -131,10 +151,17 @@ mod e2e {
         let elapsed = start.elapsed();
 
         let count = collector.await.unwrap();
-        eprintln!("chrome_intercept_concurrent: {} pages in {:?}", count, elapsed);
+        eprintln!(
+            "chrome_intercept_concurrent: {} pages in {:?}",
+            count, elapsed
+        );
 
         assert!(count >= 1, "Should have visited at least 1 page");
-        assert!(elapsed < Duration::from_secs(60), "No deadlock ({:?})", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(60),
+            "No deadlock ({:?})",
+            elapsed
+        );
     }
 
     /// Smart mode — HTTP first, Chrome upgrade for JS content.
@@ -171,7 +198,11 @@ mod e2e {
         eprintln!("smart_mode: {} pages in {:?}", pages.len(), elapsed);
 
         assert!(!pages.is_empty(), "Should have crawled at least 1 page");
-        assert!(elapsed < Duration::from_secs(60), "No deadlock ({:?})", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(60),
+            "No deadlock ({:?})",
+            elapsed
+        );
     }
 
     /// Verify the seeded content path (goto_with_html_once) doesn't deadlock.
@@ -196,7 +227,9 @@ mod e2e {
         let mut rx1 = website1.subscribe(16);
         let c1 = tokio::spawn(async move {
             let mut n = 0usize;
-            while let Ok(_) = rx1.recv().await { n += 1; }
+            while let Ok(_) = rx1.recv().await {
+                n += 1;
+            }
             n
         });
 
@@ -217,7 +250,9 @@ mod e2e {
         let mut rx2 = website2.subscribe(16);
         let c2 = tokio::spawn(async move {
             let mut n = 0usize;
-            while let Ok(_) = rx2.recv().await { n += 1; }
+            while let Ok(_) = rx2.recv().await {
+                n += 1;
+            }
             n
         });
 
@@ -312,7 +347,12 @@ mod e2e {
             let elapsed = start.elapsed();
             let count = collector.await.unwrap();
 
-            eprintln!("sequential crawl {}: {} pages in {:?}", i + 1, count, elapsed);
+            eprintln!(
+                "sequential crawl {}: {} pages in {:?}",
+                i + 1,
+                count,
+                elapsed
+            );
             assert!(
                 elapsed < Duration::from_secs(30),
                 "Sequential crawl {} should not degrade ({:?})",

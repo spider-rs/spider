@@ -1145,8 +1145,8 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion 0.8.2",
- "spider 2.51.59",
- "spider_utils 2.51.59",
+ "spider 2.51.60",
+ "spider_utils 2.51.60",
 ]
 
 [[package]]
@@ -1620,9 +1620,9 @@ dependencies = [
 
 [[package]]
 name = "chromey"
-version = "2.46.32"
+version = "2.46.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f75f9fce432504e142a1ec0b0f082fa61da7468cd41f3fcdceac15fe474ece78"
+checksum = "e49af8f3f422c6238311da13a43675a3e896b8757bee0219a556d2547253e8db"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -4238,7 +4238,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.4",
  "tower-service",
- "webpki-roots 1.0.6",
+ "webpki-roots 1.0.7",
 ]
 
 [[package]]
@@ -4944,9 +4944,9 @@ dependencies = [
 
 [[package]]
 name = "llm_models_spider"
-version = "0.1.75"
+version = "0.1.76"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "520303eea42669b819052d42e4a7487a74184abe09c48192b9e4af6518202274"
+checksum = "988259dc499e498c72131f87cfeeae52f7989e55e926575d232e696f32afbc52"
 
 [[package]]
 name = "llm_readability"
@@ -7025,7 +7025,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams 0.4.2",
  "web-sys",
- "webpki-roots 1.0.6",
+ "webpki-roots 1.0.7",
 ]
 
 [[package]]
@@ -7385,7 +7385,7 @@ dependencies = [
  "rustls-webpki 0.103.12",
  "security-framework",
  "security-framework-sys",
- "webpki-root-certs 1.0.6",
+ "webpki-root-certs 1.0.7",
  "windows-sys 0.61.2",
 ]
 
@@ -8009,9 +8009,9 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.51.58"
+version = "2.51.59"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7ed12278a1ded3e177830b23af4a12d0ac87e117b3f9b67cc01e5f52d8ae6a7"
+checksum = "63282cd469c40776556ec3524546a909695a01ffc8c87ecd762f8c57404243ce"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -8037,7 +8037,7 @@ dependencies = [
  "serde_regex",
  "simdutf8",
  "smallvec",
- "spider_agent_types 2.51.58",
+ "spider_agent_types 2.51.59",
  "spider_fingerprint",
  "string-interner",
  "string_concat",
@@ -8050,7 +8050,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.51.59"
+version = "2.51.60"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -8109,7 +8109,7 @@ dependencies = [
  "smallvec",
  "sonic-rs",
  "spider_agent",
- "spider_agent_types 2.51.59",
+ "spider_agent_types 2.51.60",
  "spider_fingerprint",
  "spider_firewall",
  "spider_remote_cache",
@@ -8137,7 +8137,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent"
-version = "2.51.59"
+version = "2.51.60"
 dependencies = [
  "aho-corasick",
  "async-openai 0.33.1",
@@ -8160,7 +8160,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spider_agent_html",
- "spider_agent_types 2.51.59",
+ "spider_agent_types 2.51.60",
  "spider_skills",
  "tempfile",
  "thirtyfour",
@@ -8171,20 +8171,20 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_html"
-version = "2.51.59"
+version = "2.51.60"
 dependencies = [
  "aho-corasick",
  "lol_html",
  "serde",
  "serde_json",
- "spider_agent_types 2.51.59",
+ "spider_agent_types 2.51.60",
 ]
 
 [[package]]
 name = "spider_agent_types"
-version = "2.51.58"
+version = "2.51.59"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ae6bbd3fd45d7cd6fcc1a837736efb52f0e44a0a9e7a3f8a91bacdfd57baaf9"
+checksum = "ba4a2581a56debe27ccf51afe11ed10ee345d9735fdad180ffc61b6b3adb6fb4"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8195,7 +8195,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.51.59"
+version = "2.51.60"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8245,7 +8245,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.51.59"
+version = "2.51.60"
 dependencies = [
  "clap",
  "env_logger",
@@ -8254,7 +8254,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.51.59",
+ "spider 2.51.60",
  "spider_transformations",
  "tikv-jemallocator",
  "tokio",
@@ -8271,9 +8271,9 @@ dependencies = [
  "flexbuffers",
  "htr",
  "serde_json",
- "spider 2.51.59",
+ "spider 2.51.60",
  "spider_transformations",
- "spider_utils 2.51.58",
+ "spider_utils 2.51.59",
 ]
 
 [[package]]
@@ -8312,7 +8312,7 @@ dependencies = [
 
 [[package]]
 name = "spider_mcp"
-version = "2.51.59"
+version = "2.51.60"
 dependencies = [
  "clap",
  "dashmap",
@@ -8321,7 +8321,7 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
- "spider 2.51.59",
+ "spider 2.51.60",
  "spider_transformations",
  "tokio",
  "uuid",
@@ -8406,7 +8406,7 @@ dependencies = [
  "phf_codegen 0.11.3",
  "regex",
  "serde",
- "spider 2.51.58",
+ "spider 2.51.59",
  "spider_scraper",
  "tendril",
  "thiserror 1.0.69",
@@ -8416,9 +8416,9 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.51.58"
+version = "2.51.59"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa8180c3f5d731333c2b797b5824549b2caee83fbc0abce0a6c32461a5863fa2"
+checksum = "2bd171fc5d195de4a09ebfe7d5482aafb2bc5be7f38d7eb70817da702e73c9a1"
 dependencies = [
  "hashbrown 0.16.1",
  "lazy_static",
@@ -8430,7 +8430,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.51.59"
+version = "2.51.60"
 dependencies = [
  "hashbrown 0.16.1",
  "indexmap 2.14.0",
@@ -8445,14 +8445,14 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.51.59"
+version = "2.51.60"
 dependencies = [
  "env_logger",
  "hyper 1.9.0",
  "hyper-util",
  "lazy_static",
  "rustls-pemfile",
- "spider 2.51.59",
+ "spider 2.51.60",
  "tokio-rustls 0.26.4",
  "warp",
 ]
@@ -9876,9 +9876,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.23.0"
+version = "1.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ac8b6f42ead25368cf5b098aeb3dc8a1a2c05a3eee8a9a1a68c640edbfc79d9"
+checksum = "ddd74a9687298c6858e9b88ec8935ec45d22e8fd5e6394fa1bd4e99a87789c76"
 dependencies = [
  "getrandom 0.4.2",
  "js-sys",
@@ -10137,14 +10137,14 @@ version = "0.26.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75c7f0ef91146ebfb530314f5f1d24528d7f0767efbfd31dce919275413e393e"
 dependencies = [
- "webpki-root-certs 1.0.6",
+ "webpki-root-certs 1.0.7",
 ]
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.6"
+version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "804f18a4ac2676ffb4e8b5b5fa9ae38af06df08162314f96a68d2a363e21a8ca"
+checksum = "f31141ce3fc3e300ae89b78c0dd67f9708061d1d2eda54b8209346fd6be9a92c"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -10155,14 +10155,14 @@ version = "0.26.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
 dependencies = [
- "webpki-roots 1.0.6",
+ "webpki-roots 1.0.7",
 ]
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.6"
+version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22cfaf3c063993ff62e73cb4311efde4db1efb31ab78a3e5c457939ad5cc0bed"
+checksum = "52f5ee44c96cf55f1b349600768e3ece3a8f26010c05265ab73f945bb1a2eb9d"
 dependencies = [
  "rustls-pki-types",
 ]

@@ -3350,7 +3350,6 @@ pub async fn fetch_page_html_chrome_base(
         None
     };
 
-
     let run_events = !base_timeout.is_zero()
         && !block_bytes
         && !request_cancelled
@@ -3866,7 +3865,6 @@ pub async fn fetch_page_html_chrome_base(
         }
         _ => Ok(run_page_response.await),
     };
-
 
     let mut page_response = page_response.unwrap_or_default();
 
