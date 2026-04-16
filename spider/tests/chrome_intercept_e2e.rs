@@ -234,4 +234,200 @@ mod e2e {
             elapsed
         );
     }
+
+    /// High concurrency — 8 concurrent pages, depth 2.
+    /// Tests that semaphore permits are returned, tabs are cleaned up,
+    /// and the handler doesn't get overwhelmed.
+    #[cfg(feature = "chrome_intercept")]
+    #[tokio::test]
+    async fn high_concurrency_no_deadlock() {
+        let Some(ws) = chrome_url().await else {
+            eprintln!("SKIP: no Chrome at 9222");
+            return;
+        };
+
+        let mut website = Website::new("https://example.com")
+            .with_chrome_connection(Some(ws.into()))
+            .with_depth(2)
+            .with_limit(8)
+            .with_request_timeout(Some(Duration::from_secs(15)))
+            .build()
+            .unwrap();
+
+        let mut rx = website.subscribe(64);
+        let collector = tokio::spawn(async move {
+            let mut count = 0usize;
+            while let Ok(_) = rx.recv().await {
+                count += 1;
+            }
+            count
+        });
+
+        let start = std::time::Instant::now();
+        website.crawl().await;
+        website.unsubscribe();
+        let elapsed = start.elapsed();
+        let count = collector.await.unwrap();
+
+        eprintln!("high_concurrency: {} pages in {:?}", count, elapsed);
+        assert!(count >= 1, "Should crawl at least 1 page");
+        assert!(
+            elapsed < Duration::from_secs(60),
+            "High concurrency crawl should not deadlock ({:?})",
+            elapsed
+        );
+    }
+
+    /// Rapid sequential crawls — reuse the same Chrome instance across
+    /// multiple Website instances to test tab cleanup between crawls.
+    #[cfg(feature = "chrome_intercept")]
+    #[tokio::test]
+    async fn sequential_crawls_no_accumulation() {
+        let Some(ws) = chrome_url().await else {
+            eprintln!("SKIP: no Chrome at 9222");
+            return;
+        };
+
+        for i in 0..3 {
+            let mut website = Website::new("https://example.com")
+                .with_chrome_connection(Some(ws.clone().into()))
+                .with_limit(2)
+                .with_depth(1)
+                .with_request_timeout(Some(Duration::from_secs(15)))
+                .build()
+                .unwrap();
+
+            let mut rx = website.subscribe(16);
+            let collector = tokio::spawn(async move {
+                let mut count = 0usize;
+                while let Ok(_) = rx.recv().await {
+                    count += 1;
+                }
+                count
+            });
+
+            let start = std::time::Instant::now();
+            website.crawl().await;
+            website.unsubscribe();
+            let elapsed = start.elapsed();
+            let count = collector.await.unwrap();
+
+            eprintln!("sequential crawl {}: {} pages in {:?}", i + 1, count, elapsed);
+            assert!(
+                elapsed < Duration::from_secs(30),
+                "Sequential crawl {} should not degrade ({:?})",
+                i + 1,
+                elapsed
+            );
+        }
+    }
+
+    /// Budget exhaustion — set a small budget and verify the crawl
+    /// completes without hanging when the budget is exceeded.
+    #[cfg(feature = "chrome_intercept")]
+    #[tokio::test]
+    async fn budget_exhaustion_completes() {
+        let Some(ws) = chrome_url().await else {
+            eprintln!("SKIP: no Chrome at 9222");
+            return;
+        };
+
+        let mut budget = spider::hashbrown::HashMap::new();
+        budget.insert("*", 1u32); // max 1 page total
+
+        let mut website = Website::new("https://example.com")
+            .with_chrome_connection(Some(ws.into()))
+            .with_depth(2)
+            .with_limit(4)
+            .with_budget(Some(budget))
+            .with_request_timeout(Some(Duration::from_secs(15)))
+            .build()
+            .unwrap();
+
+        let mut rx = website.subscribe(16);
+        let collector = tokio::spawn(async move {
+            let mut count = 0usize;
+            while let Ok(_) = rx.recv().await {
+                count += 1;
+            }
+            count
+        });
+
+        let start = std::time::Instant::now();
+        website.crawl().await;
+        website.unsubscribe();
+        let elapsed = start.elapsed();
+        let count = collector.await.unwrap();
+
+        eprintln!("budget_exhaustion: {} pages in {:?}", count, elapsed);
+        assert!(count <= 2, "Budget should limit pages (got {})", count);
+        assert!(
+            elapsed < Duration::from_secs(30),
+            "Budget exhaustion should not hang ({:?})",
+            elapsed
+        );
+    }
+
+    /// Crawl with timeout — set a very short crawl timeout and verify
+    /// it terminates promptly without hanging on cleanup.
+    #[cfg(feature = "chrome_intercept")]
+    #[tokio::test]
+    async fn crawl_timeout_terminates() {
+        let Some(ws) = chrome_url().await else {
+            eprintln!("SKIP: no Chrome at 9222");
+            return;
+        };
+
+        let mut website = Website::new("https://example.com")
+            .with_chrome_connection(Some(ws.into()))
+            .with_depth(3)
+            .with_limit(10)
+            .with_request_timeout(Some(Duration::from_secs(5)))
+            .with_crawl_timeout(Some(Duration::from_secs(5)))
+            .build()
+            .unwrap();
+
+        let start = std::time::Instant::now();
+        website.crawl().await;
+        let elapsed = start.elapsed();
+
+        eprintln!("crawl_timeout: completed in {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(30),
+            "Crawl with 5s timeout should not hang on cleanup ({:?})",
+            elapsed
+        );
+    }
+
+    /// Drop subscriber mid-crawl — verify subscription_guard doesn't hang.
+    #[cfg(feature = "chrome_intercept")]
+    #[tokio::test]
+    async fn dropped_subscriber_no_hang() {
+        let Some(ws) = chrome_url().await else {
+            eprintln!("SKIP: no Chrome at 9222");
+            return;
+        };
+
+        let mut website = Website::new("https://example.com")
+            .with_chrome_connection(Some(ws.into()))
+            .with_limit(1)
+            .with_request_timeout(Some(Duration::from_secs(15)))
+            .build()
+            .unwrap();
+
+        // Subscribe then immediately drop the receiver
+        let _rx = website.subscribe(16);
+        drop(_rx);
+
+        let start = std::time::Instant::now();
+        website.crawl().await;
+        let elapsed = start.elapsed();
+
+        eprintln!("dropped_subscriber: completed in {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(20),
+            "Dropped subscriber should not cause hang ({:?})",
+            elapsed
+        );
+    }
 }
