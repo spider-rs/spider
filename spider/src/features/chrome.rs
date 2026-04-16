@@ -5,7 +5,9 @@ use chromiumoxide::cdp::browser_protocol::browser::{
     SetDownloadBehaviorBehavior, SetDownloadBehaviorParamsBuilder,
 };
 use chromiumoxide::cdp::browser_protocol::{
-    browser::BrowserContextId, emulation::SetGeolocationOverrideParams, network::CookieParam,
+    browser::BrowserContextId,
+    emulation::{SetGeolocationOverrideParams, SetScriptExecutionDisabledParams},
+    network::CookieParam,
     target::CreateTargetParams,
 };
 use chromiumoxide::error::CdpError;
@@ -1201,11 +1203,20 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
         }
     };
 
+    let disable_js = async {
+        if config.disable_javascript {
+            let _ = chrome_page
+                .execute(SetScriptExecutionDisabledParams::new(true))
+                .await;
+        }
+    };
+
     if tokio::time::timeout(tokio::time::Duration::from_secs(15), async {
         tokio::join!(
             apply_page_setup,
             disable_log,
             bypass_csp,
+            disable_js,
             configure_browser(chrome_page, config),
         )
     })

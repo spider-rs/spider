@@ -496,6 +496,9 @@ pub struct Configuration {
     #[cfg(feature = "chrome")]
     /// Enables bypassing CSP. This does nothing without the flag `chrome` enabled.
     pub bypass_csp: bool,
+    #[cfg(feature = "chrome")]
+    /// Disables JavaScript execution on the page. This does nothing without the flag `chrome` enabled.
+    pub disable_javascript: bool,
     /// Bind the connections only on the network interface.
     pub network_interface: Option<String>,
     /// Bind to a local IP Address.
@@ -949,6 +952,19 @@ impl Configuration {
     /// Bypass CSP protection detection. This does nothing without the feat flag `chrome` enabled.
     #[cfg(not(feature = "chrome"))]
     pub fn with_csp_bypass(&mut self, _enabled: bool) -> &mut Self {
+        self
+    }
+
+    /// Disable JavaScript execution on the page. This does nothing without the feat flag `chrome` enabled.
+    #[cfg(feature = "chrome")]
+    pub fn with_disable_javascript(&mut self, disabled: bool) -> &mut Self {
+        self.disable_javascript = disabled;
+        self
+    }
+
+    /// Disable JavaScript execution on the page. This does nothing without the feat flag `chrome` enabled.
+    #[cfg(not(feature = "chrome"))]
+    pub fn with_disable_javascript(&mut self, _disabled: bool) -> &mut Self {
         self
     }
 

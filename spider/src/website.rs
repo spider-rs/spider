@@ -9993,6 +9993,12 @@ impl Website {
         self
     }
 
+    /// Disable JavaScript execution on the page. This does nothing without the feat flag `chrome` enabled.
+    pub fn with_disable_javascript(&mut self, disabled: bool) -> &mut Self {
+        self.configuration.with_disable_javascript(disabled);
+        self
+    }
+
     /// Configure WebDriver for browser automation. This does nothing without the `webdriver` feature flag enabled.
     /// When configured, the `crawl()` function will automatically use WebDriver instead of raw HTTP.
     #[cfg(feature = "webdriver")]
