@@ -2287,7 +2287,7 @@ async fn goto_with_html_once(
     html: &[u8],
     block_bytes: &mut bool,
     resp_headers: &Option<reqwest::header::HeaderMap<reqwest::header::HeaderValue>>,
-    chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
+    _chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
 ) -> Result<(), chromiumoxide::error::CdpError> {
     use base64::Engine;
     use chromiumoxide::cdp::browser_protocol::fetch::{
@@ -2297,28 +2297,40 @@ async fn goto_with_html_once(
     use chromiumoxide::cdp::browser_protocol::network::ResourceType;
     use tokio_stream::StreamExt;
 
-    let mut paused = page.event_listener::<EventRequestPaused>().await?;
-
     let fulfill_headers =
         chrome_fulfill_headers_from_reqwest(resp_headers.as_ref(), "text/html; charset=utf-8");
 
-    // If interception is already active, temporarily move to manual paused-request handling
-    // for this one-shot document fulfill. Otherwise enable a narrow one-shot Fetch pattern.
-    let had_interception = chrome_intercept.map(|c| c.enabled).unwrap_or(false);
+    // Tell the handler we will handle paused requests ourselves. This sets
+    // `user_request_interception_enabled = !true = false` via the inverted
+    // EnableInterception semantics. Combined with the listener registration
+    // below (which sets `protocol_request_interception_enabled = true`),
+    // the handler guard `user && protocol` evaluates to `false && true`,
+    // so the handler still auto-processes events. We then flip it back with
+    // set_request_interception(false) which sets `user = true`. With both
+    // flags true the handler defers entirely to our listener — no race
+    // between the handler's continueRequest and our fulfillRequest.
+    let mut paused = page.event_listener::<EventRequestPaused>().await?;
 
-    if had_interception {
-        page.set_request_interception(false).await?;
-    } else {
-        page.execute(EnableParams {
-            patterns: Some(vec![RequestPattern {
-                url_pattern: Some("*".into()),
-                resource_type: Some(ResourceType::Document),
-                request_stage: Some(RequestStage::Request),
-            }]),
-            handle_auth_requests: Some(false),
-        })
-        .await?;
-    }
+    // Enable a narrow Document-only Fetch pattern. Only Document requests
+    // will be paused by Chrome; subresource requests proceed unintercepted.
+    // This prevents the old deadlock: with a wide "*" pattern, non-Document
+    // events that nobody answers would hang forever.
+    page.execute(EnableParams {
+        patterns: Some(vec![RequestPattern {
+            url_pattern: Some("*".into()),
+            resource_type: Some(ResourceType::Document),
+            request_stage: Some(RequestStage::Request),
+        }]),
+        handle_auth_requests: Some(false),
+    })
+    .await?;
+
+    // Now make the handler defer to our listener. set_request_interception(false)
+    // sends EnableInterception(false) → user_request_interception_enabled = !false = true.
+    // With both user=true and protocol=true (from listener registration above),
+    // the handler's guard returns early, letting ONLY our listener handle events.
+    // This is safe because only Document events arrive (narrow pattern above).
+    page.set_request_interception(false).await?;
 
     let mut did_goto = false;
 
@@ -2331,11 +2343,8 @@ async fn goto_with_html_once(
                     if matches!(e, chromiumoxide::error::CdpError::Timeout) {
                         *block_bytes = true;
                     }
-                    if had_interception {
-                        let _ = page.set_request_interception(true).await;
-                    } else {
-                        let _ = page.execute(DisableParams {}).await;
-                    }
+                    let _ = page.execute(DisableParams {}).await;
+                    let _ = page.set_request_interception(true).await;
                     return Err(e);
                 }
             }
@@ -2359,11 +2368,8 @@ async fn goto_with_html_once(
                     binary_response_headers: None,
                 }).await;
 
-                if had_interception {
-                    let _ = page.set_request_interception(true).await;
-                } else {
-                    let _ = page.execute(DisableParams {}).await;
-                }
+                let _ = page.execute(DisableParams {}).await;
+                let _ = page.set_request_interception(true).await;
 
                 match res {
                     Ok(_) => {
@@ -2393,11 +2399,8 @@ async fn goto_with_html_once(
         }
     }
 
-    if had_interception {
-        let _ = page.set_request_interception(true).await;
-    } else {
-        let _ = page.execute(DisableParams {}).await;
-    }
+    let _ = page.execute(DisableParams {}).await;
+    let _ = page.set_request_interception(true).await;
 
     Ok(())
 }
