@@ -67,7 +67,245 @@ pub use http_global_cache::CACACHE_MANAGER;
 /// The max backoff duration in seconds.
 const BACKOFF_MAX_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(60);
 
+/// Chrome page fetch with retry. Creates a tab, navigates, retries on failure.
+/// Returns `Option<Page>` — `None` if tab creation fails.
+/// Used by the hedge feature to race a primary fetch against a hedge fetch on a second tab.
+///
+/// Every tab is wrapped in a [`TabCloseGuard`] so that if this future is
+/// cancelled by `tokio::select!` (the losing side of a hedge race), the
+/// orphaned Chrome tab is closed instead of leaking.
+#[cfg(all(feature = "hedge", feature = "chrome", not(feature = "decentralized")))]
+macro_rules! chrome_page_fetch {
+    ($shared:expr, $target_url:expr) => {{
+        match crate::features::chrome::attempt_navigation(
+            "about:blank",
+            &$shared.5,
+            &$shared.6.request_timeout,
+            &$shared.8,
+            &$shared.6.viewport,
+        )
+        .await
+        {
+            Ok(hedge_tab) => {
+                // Guard closes the tab if this future is cancelled mid-flight.
+                let _tab_guard = crate::features::chrome::TabCloseGuard::new(hedge_tab.clone());
+
+                let (_, intercept_handle) = tokio::join!(
+                    crate::features::chrome::setup_chrome_events(&hedge_tab, &$shared.6),
+                    crate::features::chrome::setup_chrome_interception_base(
+                        &hedge_tab,
+                        $shared.6.chrome_intercept.enabled,
+                        &$shared.6.auth_challenge_response,
+                        $shared.6.chrome_intercept.block_visuals,
+                        &$shared.7,
+                    )
+                );
+
+                let mut page = Page::new(
+                    $target_url,
+                    &$shared.0,
+                    &hedge_tab,
+                    &$shared.6.wait_for,
+                    &$shared.6.screenshot,
+                    false,
+                    &$shared.6.openai_config,
+                    &$shared.6.execution_scripts,
+                    &$shared.6.automation_scripts,
+                    &$shared.6.viewport,
+                    &$shared.6.request_timeout,
+                    &$shared.6.track_events,
+                    $shared.6.referer.clone(),
+                    $shared.6.max_page_bytes,
+                    $shared.6.get_cache_options(),
+                    &$shared.6.cache_policy,
+                    &$shared.6.remote_multimodal,
+                    $shared.6.cache_namespace_str(),
+                )
+                .await;
+
+                let mut retry_count = $shared.6.retry;
+                let mut attempt: u32 = 0;
+                page.proxy_configured = $shared.6.proxies.is_some();
+                while page.needs_retry() && retry_count > 0 {
+                    retry_count -= 1;
+                    // Exponential backoff with jitter between retries.
+                    let status_delay = page.get_timeout().unwrap_or_default();
+                    let backoff = crate::utils::backoff::backoff_delay(attempt, 200, 15_000);
+                    tokio::time::sleep(status_delay.max(backoff)).await;
+                    attempt += 1;
+
+                    // Fresh tab for retry — avoids reusing a corrupted tab.
+                    if let Ok(retry_tab) = crate::features::chrome::attempt_navigation(
+                        "about:blank",
+                        &$shared.5,
+                        &$shared.6.request_timeout,
+                        &$shared.8,
+                        &$shared.6.viewport,
+                    )
+                    .await
+                    {
+                        // Guard for the retry tab — closed on cancellation or scope exit.
+                        let _retry_guard =
+                            crate::features::chrome::TabCloseGuard::new(retry_tab.clone());
+
+                        let _ = tokio::join!(
+                            crate::features::chrome::setup_chrome_events(&retry_tab, &$shared.6),
+                            crate::features::chrome::setup_chrome_interception_base(
+                                &retry_tab,
+                                $shared.6.chrome_intercept.enabled,
+                                &$shared.6.auth_challenge_response,
+                                $shared.6.chrome_intercept.block_visuals,
+                                &$shared.7,
+                            )
+                        );
+
+                        if let Err(_elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
+                            let p = Page::new(
+                                $target_url,
+                                &$shared.0,
+                                &retry_tab,
+                                &$shared.6.wait_for,
+                                &$shared.6.screenshot,
+                                false,
+                                &$shared.6.openai_config,
+                                &$shared.6.execution_scripts,
+                                &$shared.6.automation_scripts,
+                                &$shared.6.viewport,
+                                &$shared.6.request_timeout,
+                                &$shared.6.track_events,
+                                $shared.6.referer.clone(),
+                                $shared.6.max_page_bytes,
+                                $shared.6.get_cache_options(),
+                                &$shared.6.cache_policy,
+                                &$shared.6.remote_multimodal,
+                                $shared.6.cache_namespace_str(),
+                            )
+                            .await;
+                            page = p;
+                        })
+                        .await
+                        {
+                            log::info!(
+                                "{} chrome retry backoff timeout exceeded {}",
+                                $target_url,
+                                _elapsed
+                            );
+                            page.should_retry = false;
+                            break;
+                        }
+
+                        // Retry tab no longer needed — close explicitly.
+                        _retry_guard.defuse();
+                        let _ = retry_tab.close().await;
+                    } else {
+                        log::warn!(
+                            "{} chrome retry tab creation failed, attempt {}",
+                            $target_url,
+                            attempt
+                        );
+                    }
+                }
+
+                if let Some(h) = intercept_handle {
+                    let abort_handle = h.abort_handle();
+                    if let Err(elapsed) =
+                        tokio::time::timeout(tokio::time::Duration::from_secs(10), h).await
+                    {
+                        log::warn!("Handler timeout exceeded {}", elapsed);
+                        abort_handle.abort();
+                    }
+                }
+
+                // Initial tab no longer needed — close explicitly.
+                _tab_guard.defuse();
+                let _ = hedge_tab.close().await;
+
+                Some(page)
+            }
+            _ => None,
+        }
+    }};
+}
+
+/// Chrome page fetch on an arbitrary browser connection. Used by the hedge
+/// feature to fire a duplicate request on a second WebSocket connection.
+/// Falls back to the primary browser if the hedge browser is `None`.
+///
+/// Tab is wrapped in a [`TabCloseGuard`] for cancellation safety.
+#[cfg(all(feature = "hedge", feature = "chrome", not(feature = "decentralized")))]
+macro_rules! chrome_page_fetch_on {
+    ($shared:expr, $target_url:expr, $browser:expr, $context_id:expr) => {{
+        match crate::features::chrome::attempt_navigation(
+            "about:blank",
+            $browser,
+            &$shared.6.request_timeout,
+            $context_id,
+            &$shared.6.viewport,
+        )
+        .await
+        {
+            Ok(hedge_tab) => {
+                let _tab_guard = crate::features::chrome::TabCloseGuard::new(hedge_tab.clone());
+
+                let (_, intercept_handle) = tokio::join!(
+                    crate::features::chrome::setup_chrome_events(&hedge_tab, &$shared.6),
+                    crate::features::chrome::setup_chrome_interception_base(
+                        &hedge_tab,
+                        $shared.6.chrome_intercept.enabled,
+                        &$shared.6.auth_challenge_response,
+                        $shared.6.chrome_intercept.block_visuals,
+                        &$shared.7,
+                    )
+                );
+
+                let page = Page::new(
+                    $target_url,
+                    &$shared.0,
+                    &hedge_tab,
+                    &$shared.6.wait_for,
+                    &$shared.6.screenshot,
+                    false,
+                    &$shared.6.openai_config,
+                    &$shared.6.execution_scripts,
+                    &$shared.6.automation_scripts,
+                    &$shared.6.viewport,
+                    &$shared.6.request_timeout,
+                    &$shared.6.track_events,
+                    $shared.6.referer.clone(),
+                    $shared.6.max_page_bytes,
+                    $shared.6.get_cache_options(),
+                    &$shared.6.cache_policy,
+                    &$shared.6.remote_multimodal,
+                    $shared.6.cache_namespace_str(),
+                )
+                .await;
+
+                // Single attempt — no retries on the hedge path. The primary
+                // path retries independently; adding retries here would hold
+                // the hedge browser connection open longer than necessary.
+                if let Some(h) = intercept_handle {
+                    let abort_handle = h.abort_handle();
+                    if let Err(elapsed) =
+                        tokio::time::timeout(tokio::time::Duration::from_secs(10), h).await
+                    {
+                        log::warn!("[hedge-chrome] handler timeout exceeded {}", elapsed);
+                        abort_handle.abort();
+                    }
+                }
+
+                // Tab no longer needed — close explicitly.
+                _tab_guard.defuse();
+                let _ = hedge_tab.close().await;
+
+                Some(page)
+            }
+            _ => None,
+        }
+    }};
+}
+
 /// Inline post-processing for Chrome page fetch results (link extraction, normalization, channel send).
+/// Used by both hedge and non-hedge Chrome crawl paths.
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 macro_rules! chrome_page_post_process {
     ($page:expr, $shared:expr, $add_external:expr, $full_resources:expr,
@@ -6659,6 +6897,10 @@ impl Website {
                     Ok(new_page) => {
                         let mut selectors = self.setup_selectors();
                         self.status = CrawlStatus::Active;
+                        #[cfg(feature = "hedge")]
+                        let hedge_config = self.configuration.hedge.clone();
+                        #[cfg(feature = "hedge")]
+                        let hedge_tracker = Arc::new(crate::utils::hedge::HedgeTracker::default());
 
                         if self.single_page() {
                             self.crawl_establish(client, &mut selectors, false, &new_page)
@@ -6800,6 +7042,10 @@ impl Website {
                                                 let on_should_crawl_callback = on_should_crawl_callback.clone();
                                                 #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
                                                 let compiled_custom_antibot = compiled_custom_antibot.clone();
+                                                #[cfg(feature = "hedge")]
+                                                let hedge_cfg = hedge_config.clone();
+                                                #[cfg(feature = "hedge")]
+                                                let hedge_trk = hedge_tracker.clone();
                                                 #[cfg(feature = "parallel_backends")]
                                                 let pb_config_ref = pb_config_chrome.clone();
                                                 #[cfg(feature = "parallel_backends")]
@@ -6907,9 +7153,112 @@ impl Website {
                                                         }
                                                     };
 
-                                                    // Chrome path: single tab fetch with robust retry.
+                                                    // Hedge-enabled Chrome path: race primary tab vs hedge tab (new WS connection)
+                                                    #[cfg(feature = "hedge")]
+                                                    if shared.11.load(std::sync::atomic::Ordering::Acquire) {
+                                                        log::warn!("{target_url_string} skipping fetch: browser is dead");
+                                                        drop(permit);
+                                                        return Default::default();
+                                                    }
+                                                    #[cfg(feature = "hedge")]
+                                                    let results = {
+                                                        let should_hedge = hedge_cfg.as_ref().is_some_and(|h| h.enabled);
+                                                        let target_url = target_url_string.as_str();
+                                                        let fetch_start = Instant::now();
+
+                                                        let page_opt: Option<Page> = if should_hedge {
+                                                            let base_delay = hedge_cfg.as_ref().unwrap().delay;
+                                                            let delay = hedge_trk.adaptive_delay(base_delay);
+                                                            let primary_fut = async { chrome_page_fetch!(shared, target_url) };
+                                                            tokio::pin!(primary_fut);
+
+                                                            let result = tokio::select! {
+                                                                biased;
+                                                                result = &mut primary_fut => result,
+                                                                _ = tokio::time::sleep(delay) => {
+                                                                    hedge_trk.record_fired();
+                                                                    log::info!("[hedge-chrome] fired after {}ms (ema={}ms, stddev={}ms, win={}%, errs={}) url={}",
+                                                                        delay.as_millis(), hedge_trk.ema_ms(), hedge_trk.stddev_ms(),
+                                                                        hedge_trk.hedge_win_rate_pct(), hedge_trk.consecutive_errors(), target_url);
+
+                                                                    // Decide based on already-collected signals whether
+                                                                    // to escalate to a new WS connection (zero latency
+                                                                    // check — pure atomic reads, no CDP round-trip).
+                                                                    let hedge_browser = if crate::features::chrome::HedgeBrowser::should_new_connection(
+                                                                        &hedge_trk, &shared.11,
+                                                                    ) {
+                                                                        log::info!("[hedge-chrome] signals indicate connection-level issue, opening new WS");
+                                                                        crate::features::chrome::HedgeBrowser::connect(
+                                                                            &shared.5, &shared.6,
+                                                                        ).await
+                                                                    } else {
+                                                                        None
+                                                                    };
+
+                                                                    let hedge_fut = async {
+                                                                        match &hedge_browser {
+                                                                            Some(hb) => {
+                                                                                log::info!("[hedge-chrome] using new WS connection url={}", target_url);
+                                                                                chrome_page_fetch_on!(shared, target_url, &hb.browser, &hb.context_id)
+                                                                            }
+                                                                            None => {
+                                                                                chrome_page_fetch!(shared, target_url)
+                                                                            }
+                                                                        }
+                                                                    };
+                                                                    tokio::pin!(hedge_fut);
+
+                                                                    let race_result = tokio::select! {
+                                                                        biased;
+                                                                        result = &mut primary_fut => {
+                                                                            log::info!("[hedge-chrome] winner: primary url={}", target_url);
+                                                                            hedge_trk.record_outcome(false);
+                                                                            result
+                                                                        }
+                                                                        result = &mut hedge_fut => {
+                                                                            log::info!("[hedge-chrome] winner: hedge url={}", target_url);
+                                                                            hedge_trk.record_outcome(true);
+                                                                            result
+                                                                        }
+                                                                    };
+                                                                    // hedge_browser drops at scope exit — aborts handler, closes WS.
+                                                                    race_result
+                                                                }
+                                                            };
+                                                            hedge_trk.record(fetch_start.elapsed());
+                                                            if result.as_ref().is_some_and(|p| p.status_code.is_server_error()) {
+                                                                hedge_trk.record_error();
+                                                            } else if result.is_some() {
+                                                                hedge_trk.record_success();
+                                                            }
+                                                            result
+                                                        } else {
+                                                            let result = chrome_page_fetch!(shared, target_url);
+                                                            hedge_trk.record(fetch_start.elapsed());
+                                                            if result.as_ref().is_some_and(|p| p.status_code.is_server_error()) {
+                                                                hedge_trk.record_error();
+                                                            } else if result.is_some() {
+                                                                hedge_trk.record_success();
+                                                            }
+                                                            result
+                                                        };
+
+                                                        #[allow(unused_assignments)]
+                                                        match page_opt {
+                                                            Some(page) => chrome_page_post_process!(page, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit, pb_backend_set, pb_config_ref, pb_tracker_ref),
+                                                            None => {
+                                                                // Abort any spawned parallel backend tasks on primary failure.
+                                                                #[cfg(feature = "parallel_backends")]
+                                                                drop(pb_backend_set);
+                                                                Default::default()
+                                                            },
+                                                        }
+                                                    };
+
+                                                    // Non-hedge Chrome path: single tab fetch with robust retry
                                                     // Early-out if browser process died (WebSocket closed,
                                                     // crash, etc.) — avoids wasting time on doomed tabs.
+                                                    #[cfg(not(feature = "hedge"))]
                                                     let results = if shared.11.load(std::sync::atomic::Ordering::Acquire) {
                                                         log::warn!("{target_url_string} skipping fetch: browser is dead");
                                                         drop(permit);
@@ -7764,6 +8113,11 @@ impl Website {
                             let on_should_crawl_callback = self.on_should_crawl_callback.clone();
                             let full_resources = self.configuration.full_resources;
                             let return_page_links = self.configuration.return_page_links;
+                            #[cfg(feature = "hedge")]
+                            let hedge_config = self.configuration.hedge.clone();
+                            #[cfg(feature = "hedge")]
+                            let hedge_tracker =
+                                Arc::new(crate::utils::hedge::HedgeTracker::default());
                             let mut exceeded_budget = false;
                             let concurrency = throttle.is_zero();
 
@@ -7834,7 +8188,12 @@ impl Website {
                                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                                 let shared = shared.clone();
                                                 let on_should_crawl_callback = on_should_crawl_callback.clone();
+                                                #[cfg(feature = "hedge")]
+                                                let hedge_cfg = hedge_config.clone();
+                                                #[cfg(feature = "hedge")]
+                                                let hedge_trk = hedge_tracker.clone();
                                                 spawn_set("page_fetch", &mut set, async move {
+                                                    // Resolve target URL before fetch (needed for hedge path)
                                                     let link_result =
                                                         match &shared.10 {
                                                             Some(cb) => cb(link, None),
@@ -7842,12 +8201,110 @@ impl Website {
                                                         };
                                                     let target_url_string = link_result.0.as_ref().to_string();
 
-                                                    // Chrome path: single tab fetch with robust retry
+                                                    // Hedge-enabled Chrome path: race primary tab vs hedge tab (new WS connection)
+                                                    #[cfg(feature = "hedge")]
                                                     if shared.11.load(std::sync::atomic::Ordering::Acquire) {
                                                         log::warn!("{target_url_string} skipping fetch: browser is dead");
                                                         drop(permit);
                                                         return Default::default();
                                                     }
+                                                    #[cfg(feature = "hedge")]
+                                                    let results = {
+                                                        let should_hedge = hedge_cfg.as_ref().is_some_and(|h| h.enabled);
+                                                        let target_url = target_url_string.as_str();
+                                                        let fetch_start = Instant::now();
+
+                                                        let page_opt: Option<Page> = if should_hedge {
+                                                            let base_delay = hedge_cfg.as_ref().unwrap().delay;
+                                                            let delay = hedge_trk.adaptive_delay(base_delay);
+                                                            let primary_fut = async { chrome_page_fetch!(shared, target_url) };
+                                                            tokio::pin!(primary_fut);
+
+                                                            let result = tokio::select! {
+                                                                biased;
+                                                                result = &mut primary_fut => result,
+                                                                _ = tokio::time::sleep(delay) => {
+                                                                    hedge_trk.record_fired();
+                                                                    log::info!("[hedge-chrome] fired after {}ms (ema={}ms, stddev={}ms, win={}%, errs={}) url={}",
+                                                                        delay.as_millis(), hedge_trk.ema_ms(), hedge_trk.stddev_ms(),
+                                                                        hedge_trk.hedge_win_rate_pct(), hedge_trk.consecutive_errors(), target_url);
+
+                                                                    // Decide based on already-collected signals whether
+                                                                    // to escalate to a new WS connection (zero latency
+                                                                    // check — pure atomic reads, no CDP round-trip).
+                                                                    let hedge_browser = if crate::features::chrome::HedgeBrowser::should_new_connection(
+                                                                        &hedge_trk, &shared.11,
+                                                                    ) {
+                                                                        log::info!("[hedge-chrome] signals indicate connection-level issue, opening new WS");
+                                                                        crate::features::chrome::HedgeBrowser::connect(
+                                                                            &shared.5, &shared.6,
+                                                                        ).await
+                                                                    } else {
+                                                                        None
+                                                                    };
+
+                                                                    let hedge_fut = async {
+                                                                        match &hedge_browser {
+                                                                            Some(hb) => {
+                                                                                log::info!("[hedge-chrome] using new WS connection url={}", target_url);
+                                                                                chrome_page_fetch_on!(shared, target_url, &hb.browser, &hb.context_id)
+                                                                            }
+                                                                            None => {
+                                                                                chrome_page_fetch!(shared, target_url)
+                                                                            }
+                                                                        }
+                                                                    };
+                                                                    tokio::pin!(hedge_fut);
+
+                                                                    let race_result = tokio::select! {
+                                                                        biased;
+                                                                        result = &mut primary_fut => {
+                                                                            log::info!("[hedge-chrome] winner: primary url={}", target_url);
+                                                                            hedge_trk.record_outcome(false);
+                                                                            result
+                                                                        }
+                                                                        result = &mut hedge_fut => {
+                                                                            log::info!("[hedge-chrome] winner: hedge url={}", target_url);
+                                                                            hedge_trk.record_outcome(true);
+                                                                            result
+                                                                        }
+                                                                    };
+                                                                    // hedge_browser drops at scope exit — aborts handler, closes WS.
+                                                                    race_result
+                                                                }
+                                                            };
+                                                            hedge_trk.record(fetch_start.elapsed());
+                                                            if result.as_ref().is_some_and(|p| p.status_code.is_server_error()) {
+                                                                hedge_trk.record_error();
+                                                            } else if result.is_some() {
+                                                                hedge_trk.record_success();
+                                                            }
+                                                            result
+                                                        } else {
+                                                            let result = chrome_page_fetch!(shared, target_url);
+                                                            hedge_trk.record(fetch_start.elapsed());
+                                                            if result.as_ref().is_some_and(|p| p.status_code.is_server_error()) {
+                                                                hedge_trk.record_error();
+                                                            } else if result.is_some() {
+                                                                hedge_trk.record_success();
+                                                            }
+                                                            result
+                                                        };
+
+                                                        match page_opt {
+                                                            Some(page) => chrome_page_post_process!(page, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit),
+                                                            None => Default::default(),
+                                                        }
+                                                    };
+
+                                                    // Non-hedge Chrome path: single tab fetch with robust retry
+                                                    #[cfg(not(feature = "hedge"))]
+                                                    if shared.11.load(std::sync::atomic::Ordering::Acquire) {
+                                                        log::warn!("{target_url_string} skipping fetch: browser is dead");
+                                                        drop(permit);
+                                                        return Default::default();
+                                                    }
+                                                    #[cfg(not(feature = "hedge"))]
                                                     let results = {
                                                         let target_url = target_url_string.as_str();
                                                         match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
