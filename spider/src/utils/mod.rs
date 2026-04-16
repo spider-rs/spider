@@ -3350,6 +3350,7 @@ pub async fn fetch_page_html_chrome_base(
         None
     };
 
+
     let run_events = !base_timeout.is_zero()
         && !block_bytes
         && !request_cancelled
@@ -3866,6 +3867,7 @@ pub async fn fetch_page_html_chrome_base(
         _ => Ok(run_page_response.await),
     };
 
+
     let mut page_response = page_response.unwrap_or_default();
 
     set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
@@ -3989,15 +3991,14 @@ pub async fn fetch_page_html_chrome_base(
             .send_command(chromiumoxide::cdp::browser_protocol::page::CloseParams::default())
             .await;
 
-        // Let CDP streams close naturally after page close. If they don't
-        // drain within the remaining budget (capped at 30s), signal shutdown
-        // so listeners exit deterministically instead of hanging.
+        // Signal CDP event listeners to exit now that the page is closed,
+        // then give a brief grace period for final metric flush.
+        let _ = shutdown_tx.send(true);
+
         let collect_timeout = base_timeout.min(Duration::from_secs(30));
         let collected = tokio::select! {
             result = bytes_collected_handle => Ok(result),
             _ = tokio::time::sleep(collect_timeout) => {
-                log::warn!("CDP event listeners did not drain after page close, signaling shutdown");
-                let _ = shutdown_tx.send(true);
                 Err(())
             }
         };

@@ -10,20 +10,24 @@ mod e2e {
     use spider::website::Website;
     use std::time::Duration;
 
-    fn chrome_url() -> Option<String> {
-        std::env::var("CHROME_URL").ok().or_else(|| {
-            if std::net::TcpStream::connect("127.0.0.1:9222").is_ok() {
-                Some("ws://127.0.0.1:9222".to_string())
-            } else {
-                None
-            }
-        })
+    /// Get the full devtools WS URL from a local Chrome instance.
+    /// `Browser::connect_with_config` requires the full path (e.g.
+    /// ws://host:port/devtools/browser/UUID), not just ws://host:port.
+    async fn chrome_url() -> Option<String> {
+        if std::net::TcpStream::connect("127.0.0.1:9222").is_err() {
+            return None;
+        }
+        let resp = spider::reqwest::get("http://127.0.0.1:9222/json/version")
+            .await
+            .ok()?;
+        let json: serde_json::Value = resp.json().await.ok()?;
+        json["webSocketDebuggerUrl"].as_str().map(String::from)
     }
 
     /// Basic Chrome crawl without chrome_intercept features — the common path.
     #[tokio::test]
     async fn basic_chrome_crawl() {
-        let Some(ws) = chrome_url() else {
+        let Some(ws) = chrome_url().await else {
             eprintln!("SKIP: no Chrome at port 9222");
             return;
         };
@@ -61,7 +65,7 @@ mod e2e {
     #[cfg(feature = "chrome_intercept")]
     #[tokio::test]
     async fn chrome_intercept_crawl() {
-        let Some(ws) = chrome_url() else {
+        let Some(ws) = chrome_url().await else {
             eprintln!("SKIP: no Chrome at port 9222");
             return;
         };
@@ -99,7 +103,7 @@ mod e2e {
     #[cfg(feature = "chrome_intercept")]
     #[tokio::test]
     async fn chrome_intercept_concurrent() {
-        let Some(ws) = chrome_url() else {
+        let Some(ws) = chrome_url().await else {
             eprintln!("SKIP: no Chrome at port 9222");
             return;
         };
@@ -137,7 +141,7 @@ mod e2e {
     #[cfg(feature = "smart")]
     #[tokio::test]
     async fn smart_mode_crawl() {
-        let Some(ws) = chrome_url() else {
+        let Some(ws) = chrome_url().await else {
             eprintln!("SKIP: no Chrome at port 9222");
             return;
         };
@@ -175,7 +179,7 @@ mod e2e {
     #[cfg(feature = "chrome_intercept")]
     #[tokio::test]
     async fn seeded_content_no_deadlock() {
-        let Some(ws) = chrome_url() else {
+        let Some(ws) = chrome_url().await else {
             eprintln!("SKIP: no Chrome at port 9222");
             return;
         };
