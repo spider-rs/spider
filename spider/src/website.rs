@@ -13887,6 +13887,21 @@ fn test_spool_get_html_cow_from_disk() {
 
 #[cfg(all(test, feature = "balance"))]
 #[test]
+fn test_page_size_basic() {
+    let mut page = Page::default();
+    assert_eq!(page.size(), 0);
+
+    page.html = Some(bytes::Bytes::from("hello"));
+    assert_eq!(page.size(), 5);
+
+    page.html = Some(bytes::Bytes::from(""));
+    assert_eq!(page.size(), 0);
+
+    page.html = None;
+    assert_eq!(page.size(), 0);
+}
+
+#[test]
 fn test_stream_html_bytes_from_memory() {
     let mut page = Page::default();
     page.html = Some(bytes::Bytes::from("abcdefghij"));
@@ -13937,6 +13952,54 @@ fn test_stream_html_bytes_empty_page() {
     let page = Page::default();
     let total = page.stream_html_bytes(10, |_| true);
     assert_eq!(total, 0);
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_page_size_in_memory_and_on_disk() {
+    let mut page = Page::default();
+
+    // Empty page.
+    assert_eq!(page.size(), 0);
+
+    // In-memory content.
+    let html = b"<html><body>hello world</body></html>";
+    page.html = Some(bytes::Bytes::from(html.as_slice()));
+    assert_eq!(page.size(), html.len());
+
+    // Spool to disk: size() must still return the correct byte length.
+    assert!(page.spool_html_to_disk());
+    assert!(page.html.is_none());
+    assert!(page.is_html_on_disk());
+    assert_eq!(page.size(), html.len());
+
+    // Reload back into memory: size() stays consistent.
+    assert!(page.ensure_html_loaded());
+    assert!(page.html.is_some());
+    assert_eq!(page.size(), html.len());
+
+    // Replace with different content.
+    let html2 = b"<html><body>longer content here for testing</body></html>";
+    page.html = Some(bytes::Bytes::from(html2.as_slice()));
+    assert_eq!(page.size(), html2.len());
+
+    // Spool the new content and verify size tracks the new length.
+    page.html_spool_path = None;
+    assert!(page.spool_html_to_disk());
+    assert_eq!(page.size(), html2.len());
+}
+
+#[cfg(all(test, feature = "balance"))]
+#[tokio::test]
+async fn test_page_size_async_spool() {
+    let mut page = Page::default();
+    let html = b"<html><body>async spool size test</body></html>";
+    page.html = Some(bytes::Bytes::from(html.as_slice()));
+    assert_eq!(page.size(), html.len());
+
+    assert!(page.spool_html_to_disk_async().await);
+    assert!(page.is_html_on_disk());
+    assert_eq!(page.size(), html.len());
 }
 
 #[cfg(all(test, feature = "balance"))]

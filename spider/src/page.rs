@@ -844,6 +844,10 @@ pub struct Page {
     /// uses this flag to subtract leaked bytes from pages that are dropped
     /// without going through `channel_send_page` (e.g. during retries).
     pub(crate) balance_bytes_tracked: bool,
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+    /// Cached byte length of the HTML content, set at spool time so that
+    /// `size()` can return the length without any I/O when HTML is on disk.
+    pub(crate) content_byte_len: usize,
 }
 
 /// Subtract leaked bytes from the global counter when a `Page` is dropped
@@ -1702,6 +1706,8 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
         proxy_configured: false,
         #[cfg(feature = "balance")]
         html_spool_path: None,
+        #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+        content_byte_len: 0,
         #[cfg(feature = "parallel_backends")]
         backend_source: None,
     }
@@ -3118,6 +3124,27 @@ impl Page {
         }
     }
 
+    /// Get the byte length of the page's HTML content without any I/O.
+    ///
+    /// When HTML is in memory, returns `html.len()` directly.
+    /// When HTML is spooled to disk (`balance` feature), returns the cached
+    /// byte length captured at spool time.
+    /// Returns `0` when the page is truly empty.
+    #[inline]
+    pub fn size(&self) -> usize {
+        if let Some(ref html) = self.html {
+            return html.len();
+        }
+        #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+        {
+            self.content_byte_len
+        }
+        #[cfg(any(not(feature = "balance"), feature = "decentralized"))]
+        {
+            0
+        }
+    }
+
     /// Url getter for page.
     #[cfg(not(feature = "decentralized"))]
     pub fn get_url(&self) -> &str {
@@ -3249,6 +3276,7 @@ impl Page {
         let path = crate::utils::html_spool::next_spool_path();
         if crate::utils::html_spool::spool_write(&path, html).is_ok() {
             let len = html.len();
+            self.content_byte_len = len;
             self.html = None;
             crate::utils::html_spool::track_bytes_sub(len);
             crate::utils::html_spool::track_page_spooled();
@@ -3290,6 +3318,7 @@ impl Page {
             .is_ok()
         {
             let len = html.len();
+            self.content_byte_len = len;
             self.html = None;
             crate::utils::html_spool::track_bytes_sub(len);
             crate::utils::html_spool::track_page_spooled();
