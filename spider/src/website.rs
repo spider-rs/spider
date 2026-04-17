@@ -77,6 +77,13 @@ const BACKOFF_MAX_DURATION: tokio::time::Duration = tokio::time::Duration::from_
 #[cfg(all(feature = "hedge", feature = "chrome", not(feature = "decentralized")))]
 macro_rules! chrome_page_fetch {
     ($shared:expr, $target_url:expr) => {{
+        chrome_page_fetch!(
+            $shared,
+            $target_url,
+            None::<&std::sync::Arc<dyn crate::retry_strategy::RetryStrategy>>
+        )
+    }};
+    ($shared:expr, $target_url:expr, $strategy:expr) => {{
         match crate::features::chrome::attempt_navigation(
             "about:blank",
             &$shared.5,
@@ -123,16 +130,61 @@ macro_rules! chrome_page_fetch {
                 )
                 .await;
 
-                let mut retry_count = $shared.6.retry;
+                let _retry_strategy_ref: Option<
+                    &std::sync::Arc<dyn crate::retry_strategy::RetryStrategy>,
+                > = $strategy.as_ref().map(|s| {
+                    let s: &std::sync::Arc<dyn crate::retry_strategy::RetryStrategy> = s;
+                    s
+                });
+
+                let mut retry_count: u32 = match _retry_strategy_ref {
+                    Some(s) => s.max_retries(),
+                    None => $shared.6.retry as u32,
+                };
                 let mut attempt: u32 = 0;
                 page.proxy_configured = $shared.6.proxies.is_some();
                 while page.needs_retry() && retry_count > 0 {
                     retry_count -= 1;
+                    attempt += 1;
+
+                    // Consult the retry strategy if set.
+                    let (_directive_backoff, _directive_profile_key) = match _retry_strategy_ref {
+                        Some(s) => {
+                            let outcome = crate::retry_strategy::AttemptOutcome {
+                                attempt,
+                                status_code: page.status_code,
+                                should_retry: page.should_retry,
+                                content_truncated: page.content_truncated,
+                                waf_check: page.waf_check,
+                                anti_bot_tech: &page.anti_bot_tech,
+                                proxy_configured: page.proxy_configured,
+                                url: $target_url,
+                                profile_key: page.profile_key.as_deref(),
+                                html_length: page.size(),
+                                bytes_transferred: page.bytes_transferred,
+                                #[cfg(not(feature = "page_error_status_details"))]
+                                error_status: page.error_status.as_deref(),
+                                #[cfg(feature = "page_error_status_details")]
+                                error_status: None,
+                                final_redirect_destination: page
+                                    .final_redirect_destination
+                                    .as_deref(),
+                            };
+                            let directive = s.on_retry(&outcome);
+                            if !directive.should_retry {
+                                break;
+                            }
+                            (directive.backoff, directive.profile_key)
+                        }
+                        None => (None, None),
+                    };
+
                     // Exponential backoff with jitter between retries.
                     let status_delay = page.get_timeout().unwrap_or_default();
-                    let backoff = crate::utils::backoff::backoff_delay(attempt, 200, 15_000);
+                    let backoff = _directive_backoff.unwrap_or_else(|| {
+                        crate::utils::backoff::backoff_delay(attempt - 1, 200, 15_000)
+                    });
                     tokio::time::sleep(status_delay.max(backoff)).await;
-                    attempt += 1;
 
                     // Fresh tab for retry — avoids reusing a corrupted tab.
                     if let Ok(retry_tab) = crate::features::chrome::attempt_navigation(
@@ -192,6 +244,11 @@ macro_rules! chrome_page_fetch {
                             );
                             page.should_retry = false;
                             break;
+                        }
+
+                        // Stamp the profile key from the strategy directive.
+                        if let Some(ref pk) = _directive_profile_key {
+                            page.profile_key = Some(pk.clone());
                         }
 
                         // Retry tab no longer needed — close explicitly.
@@ -806,6 +863,9 @@ pub struct Website {
     pub on_link_find_callback: Option<OnLinkFindCallback>,
     /// The callback to use if a page should be ignored. Return false to ensure that the discovered links are not crawled.
     pub on_should_crawl_callback: Option<OnShouldCrawlCallback>,
+    /// Custom retry strategy that controls retry behavior per attempt.
+    /// When set, this takes precedence over the simple `Configuration::retry` counter.
+    pub retry_strategy: Option<crate::retry_strategy::SharedRetryStrategy>,
     /// Set the crawl ID to track. This allows explicit targeting for shutdown, pause, and etc.
     pub crawl_id: Box<String>,
     #[cfg(feature = "extra_information")]
@@ -3173,7 +3233,11 @@ impl Website {
 
         let mut domain_parsed = self.domain_parsed.take();
 
-        let mut retry_count = self.configuration.retry;
+        let retry_strategy = self.retry_strategy.clone();
+        let mut retry_count: u32 = match &retry_strategy {
+            Some(s) => s.max_retries(),
+            None => self.configuration.retry as u32,
+        };
         let mut attempt: u32 = 0;
         let mut last_err: Option<std::io::Error> = None;
 
@@ -3409,17 +3473,63 @@ impl Website {
                 }
             }
 
-            let mut retry_count = self.configuration.retry;
-            let domains_caseless = &self.configuration.external_domains_caseless;
+            let retry_strategy = self.retry_strategy.clone();
+            let mut retry_count: u32 = match &retry_strategy {
+                Some(s) => s.max_retries(),
+                None => self.configuration.retry as u32,
+            };
             page.proxy_configured = self.configuration.proxies.is_some();
             let mut attempt: u32 = 0;
 
             while page.needs_retry() && retry_count > 0 {
                 retry_count -= 1;
-                let status_delay = page.get_timeout().unwrap_or_default();
-                let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
-                tokio::time::sleep(status_delay.max(backoff)).await;
                 attempt += 1;
+
+                // Consult the retry strategy if set. Scope the outcome borrow
+                // so it doesn't conflict with apply_directive's &mut self.
+                let directive = match &retry_strategy {
+                    Some(s) => {
+                        let outcome = crate::retry_strategy::AttemptOutcome {
+                            attempt,
+                            status_code: page.status_code,
+                            should_retry: page.should_retry,
+                            content_truncated: page.content_truncated,
+                            waf_check: page.waf_check,
+                            anti_bot_tech: &page.anti_bot_tech,
+                            proxy_configured: page.proxy_configured,
+                            url: self.url.inner(),
+                            profile_key: page.profile_key.as_deref(),
+                            html_length: page.size(),
+                            bytes_transferred: page.bytes_transferred,
+                            #[cfg(not(feature = "page_error_status_details"))]
+                            error_status: page.error_status.as_deref(),
+                            #[cfg(feature = "page_error_status_details")]
+                            error_status: None,
+                            final_redirect_destination: page.final_redirect_destination.as_deref(),
+                        };
+                        Some(s.on_retry(&outcome))
+                    }
+                    None => None,
+                };
+                let (directive_backoff, directive_profile_key) = match directive {
+                    Some(d) => {
+                        if !d.should_retry {
+                            break;
+                        }
+                        crate::retry_strategy::apply_directive(self, &d);
+                        (d.backoff, d.profile_key)
+                    }
+                    None => (None, None),
+                };
+
+                // Re-borrow after apply_directive to avoid borrow conflicts.
+                let url = self.url.inner();
+                let domains_caseless = &self.configuration.external_domains_caseless;
+                let status_delay = page.get_timeout().unwrap_or_default();
+                let backoff = directive_backoff.unwrap_or_else(|| {
+                    crate::utils::backoff::backoff_delay(attempt - 1, 1_000, 60_000)
+                });
+                tokio::time::sleep(status_delay.max(backoff)).await;
 
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                     let mut domain_parsed_clone = self.domain_parsed.clone();
@@ -3466,9 +3576,14 @@ impl Website {
                     )
                     .await;
                 }
+
+                // Stamp the profile key from the strategy directive.
+                if let Some(ref pk) = directive_profile_key {
+                    page.profile_key = Some(pk.clone());
+                }
             }
 
-            emit_log(url);
+            emit_log(self.url.inner());
 
             if let Some(signature) = page.signature {
                 if !self.is_signature_allowed(signature).await {
@@ -3676,6 +3791,7 @@ impl Website {
         ));
 
         let mut set: JoinSet<(HashSet<CaseInsensitiveString>, Option<u64>)> = JoinSet::new();
+        let retry_strategy_ref = self.retry_strategy.clone();
 
         let mut exceeded_budget = false;
         let concurrency = throttle.is_zero();
@@ -3739,6 +3855,7 @@ impl Website {
                         if let Ok(permit) = semaphore.clone().acquire_owned().await {
                             let shared = shared.clone();
                             let on_should_crawl_callback = on_should_crawl_callback.clone();
+                            let retry_strategy_ref = retry_strategy_ref.clone();
                             spawn_set("page_fetch_cmd", &mut set, async move {
                                 let link_result = match &shared.10 {
                                     Some(cb) => cb(link, None),
@@ -3755,7 +3872,11 @@ impl Website {
                                 let target_url = link_result.0.as_ref();
 
                                 // Run cmd -> bytes with retry
-                                let mut retry_count = shared.6;
+                                let mut retry_count: u32 = match &retry_strategy_ref {
+                                    Some(s) => s.max_retries(),
+                                    None => shared.6 as u32,
+                                };
+                                let mut attempt: u32 = 0;
                                 let mut last_err: Option<std::io::Error> = None;
 
                                 let bytes = loop {
@@ -3774,6 +3895,34 @@ impl Website {
 
                                     if retry_count == 0 { break None; }
                                     retry_count -= 1;
+                                    attempt += 1;
+
+                                    // Consult the retry strategy if set.
+                                    if let Some(ref s) = retry_strategy_ref {
+                                        let outcome = crate::retry_strategy::AttemptOutcome {
+                                            attempt,
+                                            status_code: reqwest::StatusCode::BAD_GATEWAY,
+                                            should_retry: true,
+                                            content_truncated: false,
+                                            waf_check: false,
+                                            anti_bot_tech: &crate::page::AntiBotTech::None,
+                                            proxy_configured: false,
+                                            url: target_url,
+                                            profile_key: None,
+                                            html_length: 0,
+                                            bytes_transferred: None,
+                                            error_status: last_err.as_ref().map(|e| e.to_string()).as_deref(),
+                                            final_redirect_destination: None,
+                                        };
+                                        let directive = s.on_retry(&outcome);
+                                        if !directive.should_retry {
+                                            break None;
+                                        }
+                                        if let Some(d) = directive.backoff {
+                                            tokio::time::sleep(d).await;
+                                            continue;
+                                        }
+                                    }
 
                                     tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                                 };
@@ -3974,7 +4123,11 @@ impl Website {
                 .await
             };
 
-            let mut retry_count = self.configuration.retry;
+            let retry_strategy = self.retry_strategy.clone();
+            let mut retry_count: u32 = match &retry_strategy {
+                Some(s) => s.max_retries(),
+                None => self.configuration.retry as u32,
+            };
             page.proxy_configured = self.configuration.proxies.is_some();
 
             if let Some(final_redirect_destination) = &page.final_redirect_destination {
@@ -3992,10 +4145,45 @@ impl Website {
             let mut attempt: u32 = 0;
             while page.needs_retry() && retry_count > 0 {
                 retry_count -= 1;
-                let status_delay = page.get_timeout().unwrap_or_default();
-                let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
-                tokio::time::sleep(status_delay.max(backoff)).await;
                 attempt += 1;
+
+                // Consult the retry strategy if set.
+                let (directive_backoff, directive_profile_key) = match &retry_strategy {
+                    Some(s) => {
+                        let outcome = crate::retry_strategy::AttemptOutcome {
+                            attempt,
+                            status_code: page.status_code,
+                            should_retry: page.should_retry,
+                            content_truncated: page.content_truncated,
+                            waf_check: page.waf_check,
+                            anti_bot_tech: &page.anti_bot_tech,
+                            proxy_configured: page.proxy_configured,
+                            url: self.url.inner(),
+                            profile_key: page.profile_key.as_deref(),
+                            html_length: page.size(),
+                            bytes_transferred: page.bytes_transferred,
+                            #[cfg(not(feature = "page_error_status_details"))]
+                            error_status: page.error_status.as_deref(),
+                            #[cfg(feature = "page_error_status_details")]
+                            error_status: None,
+                            final_redirect_destination: page.final_redirect_destination.as_deref(),
+                        };
+                        let directive = s.on_retry(&outcome);
+                        if !directive.should_retry {
+                            break;
+                        }
+                        crate::retry_strategy::apply_directive(self, &directive);
+                        (directive.backoff, directive.profile_key)
+                    }
+                    None => (None, None),
+                };
+
+                let status_delay = page.get_timeout().unwrap_or_default();
+                let backoff = directive_backoff.unwrap_or_else(|| {
+                    crate::utils::backoff::backoff_delay(attempt - 1, 1_000, 60_000)
+                });
+                tokio::time::sleep(status_delay.max(backoff)).await;
+
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                     if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                         let next_page = Page::new(
@@ -4048,6 +4236,11 @@ impl Website {
                     )
                     .await;
                     page = next_page;
+                }
+
+                // Stamp the profile key from the strategy directive.
+                if let Some(ref pk) = directive_profile_key {
+                    page.profile_key = Some(pk.clone());
                 }
 
                 // check the page again for final.
@@ -4197,7 +4390,11 @@ impl Website {
             )
             .await;
 
-            let mut retry_count = self.configuration.retry;
+            let retry_strategy = self.retry_strategy.as_ref();
+            let mut retry_count: u32 = match retry_strategy {
+                Some(s) => s.max_retries(),
+                None => self.configuration.retry as u32,
+            };
             page.proxy_configured = self.configuration.proxies.is_some();
 
             if let Some(final_redirect_destination) = &page.final_redirect_destination {
@@ -4215,10 +4412,44 @@ impl Website {
             let mut attempt: u32 = 0;
             while page.needs_retry() && retry_count > 0 {
                 retry_count -= 1;
-                let status_delay = page.get_timeout().unwrap_or_default();
-                let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
-                tokio::time::sleep(status_delay.max(backoff)).await;
                 attempt += 1;
+
+                // Consult the retry strategy if set (read-only context, no config mutation).
+                let (directive_backoff, directive_profile_key) = match retry_strategy {
+                    Some(s) => {
+                        let outcome = crate::retry_strategy::AttemptOutcome {
+                            attempt,
+                            status_code: page.status_code,
+                            should_retry: page.should_retry,
+                            content_truncated: page.content_truncated,
+                            waf_check: page.waf_check,
+                            anti_bot_tech: &page.anti_bot_tech,
+                            proxy_configured: page.proxy_configured,
+                            url: self.url.inner(),
+                            profile_key: page.profile_key.as_deref(),
+                            html_length: page.size(),
+                            bytes_transferred: page.bytes_transferred,
+                            #[cfg(not(feature = "page_error_status_details"))]
+                            error_status: page.error_status.as_deref(),
+                            #[cfg(feature = "page_error_status_details")]
+                            error_status: None,
+                            final_redirect_destination: page.final_redirect_destination.as_deref(),
+                        };
+                        let directive = s.on_retry(&outcome);
+                        if !directive.should_retry {
+                            break;
+                        }
+                        (directive.backoff, directive.profile_key)
+                    }
+                    None => (None, None),
+                };
+
+                let status_delay = page.get_timeout().unwrap_or_default();
+                let backoff = directive_backoff.unwrap_or_else(|| {
+                    crate::utils::backoff::backoff_delay(attempt - 1, 1_000, 60_000)
+                });
+                tokio::time::sleep(status_delay.max(backoff)).await;
+
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                     if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                         let next_page = Page::new(
@@ -4271,6 +4502,11 @@ impl Website {
                     )
                     .await;
                     page = next_page;
+                }
+
+                // Stamp the profile key from the strategy directive.
+                if let Some(ref pk) = directive_profile_key {
+                    page.profile_key = Some(pk.clone());
                 }
 
                 // check the page again for final.
@@ -4382,16 +4618,54 @@ impl Website {
             let mut page =
                 Page::new_page_webdriver(url.unwrap_or(self.url.inner()), driver, timeout).await;
 
-            let mut retry_count = self.configuration.retry;
+            let retry_strategy = self.retry_strategy.as_ref();
+            let mut retry_count: u32 = match retry_strategy {
+                Some(s) => s.max_retries(),
+                None => self.configuration.retry as u32,
+            };
             page.proxy_configured = self.configuration.proxies.is_some();
             let mut attempt: u32 = 0;
 
             while page.needs_retry() && retry_count > 0 {
                 retry_count -= 1;
-                let status_delay = page.get_timeout().unwrap_or_default();
-                let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
-                tokio::time::sleep(status_delay.max(backoff)).await;
                 attempt += 1;
+
+                // Consult the retry strategy if set (read-only context, no config mutation).
+                let (directive_backoff, directive_profile_key) = match retry_strategy {
+                    Some(s) => {
+                        let outcome = crate::retry_strategy::AttemptOutcome {
+                            attempt,
+                            status_code: page.status_code,
+                            should_retry: page.should_retry,
+                            content_truncated: page.content_truncated,
+                            waf_check: page.waf_check,
+                            anti_bot_tech: &page.anti_bot_tech,
+                            proxy_configured: page.proxy_configured,
+                            url: self.url.inner(),
+                            profile_key: page.profile_key.as_deref(),
+                            html_length: page.size(),
+                            bytes_transferred: page.bytes_transferred,
+                            #[cfg(not(feature = "page_error_status_details"))]
+                            error_status: page.error_status.as_deref(),
+                            #[cfg(feature = "page_error_status_details")]
+                            error_status: None,
+                            final_redirect_destination: page.final_redirect_destination.as_deref(),
+                        };
+                        let directive = s.on_retry(&outcome);
+                        if !directive.should_retry {
+                            break;
+                        }
+                        (directive.backoff, directive.profile_key)
+                    }
+                    None => (None, None),
+                };
+
+                let status_delay = page.get_timeout().unwrap_or_default();
+                let backoff = directive_backoff.unwrap_or_else(|| {
+                    crate::utils::backoff::backoff_delay(attempt - 1, 1_000, 60_000)
+                });
+                tokio::time::sleep(status_delay.max(backoff)).await;
+
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                     if let Err(elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                         let next_page =
@@ -4406,6 +4680,11 @@ impl Website {
                     let next_page =
                         Page::new_page_webdriver(self.url.inner(), driver, timeout).await;
                     page = next_page;
+                }
+
+                // Stamp the profile key from the strategy directive.
+                if let Some(ref pk) = directive_profile_key {
+                    page.profile_key = Some(pk.clone());
                 }
             }
 
@@ -4740,17 +5019,64 @@ impl Website {
                     }
                 }
 
-                let mut retry_count = self.configuration.retry;
-                let domains_caseless = &self.configuration.external_domains_caseless;
+                let retry_strategy = self.retry_strategy.clone();
+                let mut retry_count: u32 = match &retry_strategy {
+                    Some(s) => s.max_retries(),
+                    None => self.configuration.retry as u32,
+                };
                 page.proxy_configured = self.configuration.proxies.is_some();
                 let mut attempt: u32 = 0;
 
                 while page.needs_retry() && retry_count > 0 {
                     retry_count -= 1;
-                    let status_delay = page.get_timeout().unwrap_or_default();
-                    let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
-                    tokio::time::sleep(status_delay.max(backoff)).await;
                     attempt += 1;
+
+                    // Consult the retry strategy if set. Scope the outcome
+                    // so it doesn't conflict with apply_directive's &mut self.
+                    let directive = match &retry_strategy {
+                        Some(s) => {
+                            let outcome = crate::retry_strategy::AttemptOutcome {
+                                attempt,
+                                status_code: page.status_code,
+                                should_retry: page.should_retry,
+                                content_truncated: page.content_truncated,
+                                waf_check: page.waf_check,
+                                anti_bot_tech: &page.anti_bot_tech,
+                                proxy_configured: page.proxy_configured,
+                                url: url.inner(),
+                                profile_key: page.profile_key.as_deref(),
+                                html_length: page.size(),
+                                bytes_transferred: page.bytes_transferred,
+                                #[cfg(not(feature = "page_error_status_details"))]
+                                error_status: page.error_status.as_deref(),
+                                #[cfg(feature = "page_error_status_details")]
+                                error_status: None,
+                                final_redirect_destination: page
+                                    .final_redirect_destination
+                                    .as_deref(),
+                            };
+                            Some(s.on_retry(&outcome))
+                        }
+                        None => None,
+                    };
+                    let (directive_backoff, directive_profile_key) = match directive {
+                        Some(d) => {
+                            if !d.should_retry {
+                                break;
+                            }
+                            crate::retry_strategy::apply_directive(self, &d);
+                            (d.backoff, d.profile_key)
+                        }
+                        None => (None, None),
+                    };
+
+                    // Re-borrow after apply_directive to avoid borrow conflicts.
+                    let domains_caseless = &self.configuration.external_domains_caseless;
+                    let status_delay = page.get_timeout().unwrap_or_default();
+                    let backoff = directive_backoff.unwrap_or_else(|| {
+                        crate::utils::backoff::backoff_delay(attempt - 1, 1_000, 60_000)
+                    });
+                    tokio::time::sleep(status_delay.max(backoff)).await;
 
                     if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                         let mut domain_parsed_clone = self.domain_parsed.clone();
@@ -4794,6 +5120,11 @@ impl Website {
                             &mut links_pages,
                         )
                         .await;
+                    }
+
+                    // Stamp the profile key from the strategy directive.
+                    if let Some(ref pk) = directive_profile_key {
+                        page.profile_key = Some(pk.clone());
                     }
                 }
 
@@ -4877,16 +5208,62 @@ impl Website {
                 .await
             };
 
-            let mut retry_count = self.configuration.retry;
+            let retry_strategy = self.retry_strategy.clone();
+            let mut retry_count: u32 = match &retry_strategy {
+                Some(s) => s.max_retries(),
+                None => self.configuration.retry as u32,
+            };
             page.proxy_configured = self.configuration.proxies.is_some();
             let mut attempt: u32 = 0;
 
             while page.needs_retry() && retry_count > 0 {
                 retry_count -= 1;
-                let status_delay = page.get_timeout().unwrap_or_default();
-                let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
-                tokio::time::sleep(status_delay.max(backoff)).await;
                 attempt += 1;
+
+                // Consult the retry strategy if set. Scope the outcome
+                // so it doesn't conflict with apply_directive's &mut self.
+                let directive = match &retry_strategy {
+                    Some(s) => {
+                        let outcome = crate::retry_strategy::AttemptOutcome {
+                            attempt,
+                            status_code: page.status_code,
+                            should_retry: page.should_retry,
+                            content_truncated: page.content_truncated,
+                            waf_check: page.waf_check,
+                            anti_bot_tech: &page.anti_bot_tech,
+                            proxy_configured: page.proxy_configured,
+                            url: self.url.inner(),
+                            profile_key: page.profile_key.as_deref(),
+                            html_length: page.size(),
+                            bytes_transferred: page.bytes_transferred,
+                            #[cfg(not(feature = "page_error_status_details"))]
+                            error_status: page.error_status.as_deref(),
+                            #[cfg(feature = "page_error_status_details")]
+                            error_status: None,
+                            final_redirect_destination: page.final_redirect_destination.as_deref(),
+                        };
+                        Some(s.on_retry(&outcome))
+                    }
+                    None => None,
+                };
+                let (directive_backoff, directive_profile_key) = match directive {
+                    Some(d) => {
+                        if !d.should_retry {
+                            break;
+                        }
+                        crate::retry_strategy::apply_directive(self, &d);
+                        (d.backoff, d.profile_key)
+                    }
+                    None => (None, None),
+                };
+
+                // Re-borrow url after apply_directive to avoid borrow conflicts.
+                let url = self.url.inner();
+                let status_delay = page.get_timeout().unwrap_or_default();
+                let backoff = directive_backoff.unwrap_or_else(|| {
+                    crate::utils::backoff::backoff_delay(attempt - 1, 1_000, 60_000)
+                });
+                tokio::time::sleep(status_delay.max(backoff)).await;
                 let client_error = page.status_code.is_client_error();
 
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
@@ -4936,6 +5313,11 @@ impl Website {
                         self.configuration.cache_namespace_str(),
                     )
                     .await;
+                }
+
+                // Stamp the profile key from the strategy directive.
+                if let Some(ref pk) = directive_profile_key {
+                    page.profile_key = Some(pk.clone());
                 }
             }
 
@@ -6047,6 +6429,7 @@ impl Website {
             ));
 
             let mut set: JoinSet<(HashSet<CaseInsensitiveString>, Option<u64>)> = JoinSet::new();
+            let retry_strategy_ref = self.retry_strategy.clone();
 
             #[cfg(feature = "auto_throttle")]
             let auto_throttle_arc = self.auto_throttle.clone();
@@ -6174,6 +6557,8 @@ impl Website {
                                 let pb_validator_ref = pb_validator_raw.clone();
                                 #[cfg(feature = "parallel_backends")]
                                 let pb_semaphore_ref = pb_semaphore_raw.clone();
+                                #[allow(unused_variables)]
+                                let retry_strategy_ref = retry_strategy_ref.clone();
                                 spawn_set("page_fetch", &mut set, async move {
                                     let link_result = match &shared.9 {
                                         Some(cb) => cb(link, None),
@@ -6547,15 +6932,50 @@ impl Website {
                                         }
                                     };
 
-                                    let mut retry_count = shared.5;
+                                    let mut retry_count: u32 = match &retry_strategy_ref {
+                                        Some(s) => s.max_retries(),
+                                        None => shared.5 as u32,
+                                    };
                                     let mut attempt: u32 = 0;
 
                                     while page.needs_retry() && retry_count > 0 {
                                         retry_count -= 1;
-                                        let status_delay = page.get_timeout().unwrap_or_default();
-                                        let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
-                                        tokio::time::sleep(status_delay.max(backoff)).await;
                                         attempt += 1;
+
+                                        // Consult the retry strategy if set.
+                                        let (_directive_backoff, _directive_profile_key) = match &retry_strategy_ref {
+                                            Some(s) => {
+                                                let outcome = crate::retry_strategy::AttemptOutcome {
+                                                    attempt,
+                                                    status_code: page.status_code,
+                                                    should_retry: page.should_retry,
+                                                    content_truncated: page.content_truncated,
+                                                    waf_check: page.waf_check,
+                                                    anti_bot_tech: &page.anti_bot_tech,
+                                                    proxy_configured: page.proxy_configured,
+                                                    url: target_url,
+                                                    profile_key: page.profile_key.as_deref(),
+                                                    html_length: page.size(),
+                                                    bytes_transferred: page.bytes_transferred,
+                                                    #[cfg(not(feature = "page_error_status_details"))]
+                                                    error_status: page.error_status.as_deref(),
+                                                    #[cfg(feature = "page_error_status_details")]
+                                                    error_status: None,
+                                                    final_redirect_destination: page.final_redirect_destination.as_deref(),
+                                                };
+                                                let directive = s.on_retry(&outcome);
+                                                if !directive.should_retry {
+                                                    break;
+                                                }
+                                                (directive.backoff, directive.profile_key)
+                                            }
+                                            None => (None, None),
+                                        };
+
+                                        let status_delay = page.get_timeout().unwrap_or_default();
+                                        let backoff = _directive_backoff
+                                            .unwrap_or_else(|| crate::utils::backoff::backoff_delay(attempt - 1, 1_000, 60_000));
+                                        tokio::time::sleep(status_delay.max(backoff)).await;
 
                                         let retry_client = match &rotator {
                                             Some(r) => r.next(),
@@ -6602,6 +7022,11 @@ impl Website {
                                                 &shared.8,
                                                 &mut domain_parsed,
                                                 &mut links_pages).await;
+                                        }
+
+                                        // Stamp profile key from strategy.
+                                        if let Some(ref pk) = _directive_profile_key {
+                                            page.profile_key = Some(pk.clone());
                                         }
                                     }
 
@@ -6947,6 +7372,7 @@ impl Website {
 
                             let add_external = !shared.3.is_empty();
                             let on_should_crawl_callback = self.on_should_crawl_callback.clone();
+                            let retry_strategy_ref = self.retry_strategy.clone();
                             let full_resources = self.configuration.full_resources;
                             let return_page_links = self.configuration.return_page_links;
                             #[cfg(any(
@@ -7059,6 +7485,8 @@ impl Website {
                                                 let pb_validator_ref = pb_validator_chrome.clone();
                                                 #[cfg(feature = "parallel_backends")]
                                                 let pb_semaphore_ref = pb_semaphore_chrome.clone();
+                                                #[allow(unused_variables)]
+                                                let retry_strategy_ref = retry_strategy_ref.clone();
                                                 spawn_set("page_fetch", &mut set, async move {
                                                     let link_result =
                                                         match &shared.10 {
@@ -7169,7 +7597,7 @@ impl Website {
                                                         let page_opt: Option<Page> = if should_hedge {
                                                             let base_delay = hedge_cfg.as_ref().unwrap().delay;
                                                             let delay = hedge_trk.adaptive_delay(base_delay);
-                                                            let primary_fut = async { chrome_page_fetch!(shared, target_url) };
+                                                            let primary_fut = async { chrome_page_fetch!(shared, target_url, retry_strategy_ref) };
                                                             tokio::pin!(primary_fut);
 
                                                             let result = tokio::select! {
@@ -7202,7 +7630,7 @@ impl Website {
                                                                                 chrome_page_fetch_on!(shared, target_url, &hb.browser, &hb.context_id)
                                                                             }
                                                                             None => {
-                                                                                chrome_page_fetch!(shared, target_url)
+                                                                                chrome_page_fetch!(shared, target_url, retry_strategy_ref)
                                                                             }
                                                                         }
                                                                     };
@@ -7233,7 +7661,7 @@ impl Website {
                                                             }
                                                             result
                                                         } else {
-                                                            let result = chrome_page_fetch!(shared, target_url);
+                                                            let result = chrome_page_fetch!(shared, target_url, retry_strategy_ref);
                                                             hedge_trk.record(fetch_start.elapsed());
                                                             if result.as_ref().is_some_and(|p| p.status_code.is_server_error()) {
                                                                 hedge_trk.record_error();
@@ -7305,20 +7733,51 @@ impl Website {
                                                             .await;
 
                                                             // Chrome requests are prone to transient tab/CDP failures.
-                                                            // Ensure at least 2 retries even when the user left retry at 0.
-                                                            let mut retry_count = shared.6.retry;
+                                                            let mut retry_count: u32 = match &retry_strategy_ref {
+                                                                Some(s) => s.max_retries(),
+                                                                None => shared.6.retry as u32,
+                                                            };
                                                             let mut attempt: u32 = 0;
 
                                                             while page.needs_retry() && retry_count > 0 {
                                                                 retry_count -= 1;
+                                                                attempt += 1;
+
+                                                                // Consult the retry strategy if set.
+                                                                let (_directive_backoff, _directive_profile_key) = match &retry_strategy_ref {
+                                                                    Some(s) => {
+                                                                        let outcome = crate::retry_strategy::AttemptOutcome {
+                                                                            attempt,
+                                                                            status_code: page.status_code,
+                                                                            should_retry: page.should_retry,
+                                                                            content_truncated: page.content_truncated,
+                                                                            waf_check: page.waf_check,
+                                                                            anti_bot_tech: &page.anti_bot_tech,
+                                                                            proxy_configured: page.proxy_configured,
+                                                                            url: target_url,
+                                                                            profile_key: page.profile_key.as_deref(),
+                                                                            html_length: page.size(),
+                                                                            bytes_transferred: page.bytes_transferred,
+                                                                            #[cfg(not(feature = "page_error_status_details"))]
+                                                                            error_status: page.error_status.as_deref(),
+                                                                            #[cfg(feature = "page_error_status_details")]
+                                                                            error_status: None,
+                                                                            final_redirect_destination: page.final_redirect_destination.as_deref(),
+                                                                        };
+                                                                        let directive = s.on_retry(&outcome);
+                                                                        if !directive.should_retry {
+                                                                            break;
+                                                                        }
+                                                                        (directive.backoff, directive.profile_key)
+                                                                    }
+                                                                    None => (None, None),
+                                                                };
 
                                                                 // Exponential backoff with jitter between retries.
-                                                                // get_timeout() covers 429/504/598-599 specific delays;
-                                                                // backoff_delay covers everything else with increasing waits.
                                                                 let status_delay = page.get_timeout().unwrap_or_default();
-                                                                let backoff = crate::utils::backoff::backoff_delay(attempt, 200, 15_000);
+                                                                let backoff = _directive_backoff
+                                                                    .unwrap_or_else(|| crate::utils::backoff::backoff_delay(attempt - 1, 200, 15_000));
                                                                 tokio::time::sleep(status_delay.max(backoff)).await;
-                                                                attempt += 1;
 
                                                                 // Create a fresh tab for the retry to avoid reusing a
                                                                 // potentially corrupted tab (stale CDP session, bloated
@@ -7363,6 +7822,11 @@ impl Website {
                                                                         log::info!("{target_url} chrome retry backoff timeout exceeded {_elapsed}");
                                                                         page.should_retry = false;
                                                                         break;
+                                                                    }
+
+                                                                    // Stamp profile key from strategy.
+                                                                    if let Some(ref pk) = _directive_profile_key {
+                                                                        page.profile_key = Some(pk.clone());
                                                                     }
 
                                                                     // Retry tab no longer needed.
@@ -7629,6 +8093,7 @@ impl Website {
             ));
 
             let mut set: JoinSet<(HashSet<CaseInsensitiveString>, Option<u64>)> = JoinSet::new();
+            let retry_strategy_ref = self.retry_strategy.clone();
 
             // track budgeting one time.
             let mut exceeded_budget = false;
@@ -7692,6 +8157,8 @@ impl Website {
                                 let shared = shared.clone();
                                 let on_should_crawl_callback = on_should_crawl_callback.clone();
                                 let rotator = client_rotator.clone();
+                                #[allow(unused_variables)]
+                                let retry_strategy_ref = retry_strategy_ref.clone();
                                 #[cfg(feature = "hedge")]
                                 let hedge_cfg = hedge_config.clone();
                                 #[cfg(feature = "hedge")]
@@ -7866,15 +8333,50 @@ impl Website {
                                         (page, links, links_pages)
                                     };
 
-                                    let mut retry_count = shared.5;
+                                    let mut retry_count: u32 = match &retry_strategy_ref {
+                                        Some(s) => s.max_retries(),
+                                        None => shared.5 as u32,
+                                    };
                                     let mut attempt: u32 = 0;
 
                                     while page.needs_retry() && retry_count > 0 {
                                         retry_count -= 1;
-                                        let status_delay = page.get_timeout().unwrap_or_default();
-                                        let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
-                                        tokio::time::sleep(status_delay.max(backoff)).await;
                                         attempt += 1;
+
+                                        // Consult the retry strategy if set.
+                                        let (_directive_backoff, _directive_profile_key) = match &retry_strategy_ref {
+                                            Some(s) => {
+                                                let outcome = crate::retry_strategy::AttemptOutcome {
+                                                    attempt,
+                                                    status_code: page.status_code,
+                                                    should_retry: page.should_retry,
+                                                    content_truncated: page.content_truncated,
+                                                    waf_check: page.waf_check,
+                                                    anti_bot_tech: &page.anti_bot_tech,
+                                                    proxy_configured: page.proxy_configured,
+                                                    url: target_url,
+                                                    profile_key: page.profile_key.as_deref(),
+                                                    html_length: page.size(),
+                                                    bytes_transferred: page.bytes_transferred,
+                                                    #[cfg(not(feature = "page_error_status_details"))]
+                                                    error_status: page.error_status.as_deref(),
+                                                    #[cfg(feature = "page_error_status_details")]
+                                                    error_status: None,
+                                                    final_redirect_destination: page.final_redirect_destination.as_deref(),
+                                                };
+                                                let directive = s.on_retry(&outcome);
+                                                if !directive.should_retry {
+                                                    break;
+                                                }
+                                                (directive.backoff, directive.profile_key)
+                                            }
+                                            None => (None, None),
+                                        };
+
+                                        let status_delay = page.get_timeout().unwrap_or_default();
+                                        let backoff = _directive_backoff
+                                            .unwrap_or_else(|| crate::utils::backoff::backoff_delay(attempt - 1, 1_000, 60_000));
+                                        tokio::time::sleep(status_delay.max(backoff)).await;
 
                                         let retry_client = match &rotator {
                                             Some(r) => r.next(),
@@ -7921,6 +8423,11 @@ impl Website {
                                                 &shared.8,
                                                 &mut domain_parsed,
                                                 &mut links_pages).await;
+                                        }
+
+                                        // Stamp profile key from strategy.
+                                        if let Some(ref pk) = _directive_profile_key {
+                                            page.profile_key = Some(pk.clone());
                                         }
                                     }
 
@@ -8111,6 +8618,7 @@ impl Website {
 
                             let add_external = !shared.3.is_empty();
                             let on_should_crawl_callback = self.on_should_crawl_callback.clone();
+                            let retry_strategy_ref = self.retry_strategy.clone();
                             let full_resources = self.configuration.full_resources;
                             let return_page_links = self.configuration.return_page_links;
                             #[cfg(feature = "hedge")]
@@ -8188,6 +8696,8 @@ impl Website {
                                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                                 let shared = shared.clone();
                                                 let on_should_crawl_callback = on_should_crawl_callback.clone();
+                                                #[allow(unused_variables)]
+                                                let retry_strategy_ref = retry_strategy_ref.clone();
                                                 #[cfg(feature = "hedge")]
                                                 let hedge_cfg = hedge_config.clone();
                                                 #[cfg(feature = "hedge")]
@@ -8217,7 +8727,7 @@ impl Website {
                                                         let page_opt: Option<Page> = if should_hedge {
                                                             let base_delay = hedge_cfg.as_ref().unwrap().delay;
                                                             let delay = hedge_trk.adaptive_delay(base_delay);
-                                                            let primary_fut = async { chrome_page_fetch!(shared, target_url) };
+                                                            let primary_fut = async { chrome_page_fetch!(shared, target_url, retry_strategy_ref) };
                                                             tokio::pin!(primary_fut);
 
                                                             let result = tokio::select! {
@@ -8250,7 +8760,7 @@ impl Website {
                                                                                 chrome_page_fetch_on!(shared, target_url, &hb.browser, &hb.context_id)
                                                                             }
                                                                             None => {
-                                                                                chrome_page_fetch!(shared, target_url)
+                                                                                chrome_page_fetch!(shared, target_url, retry_strategy_ref)
                                                                             }
                                                                         }
                                                                     };
@@ -8281,7 +8791,7 @@ impl Website {
                                                             }
                                                             result
                                                         } else {
-                                                            let result = chrome_page_fetch!(shared, target_url);
+                                                            let result = chrome_page_fetch!(shared, target_url, retry_strategy_ref);
                                                             hedge_trk.record(fetch_start.elapsed());
                                                             if result.as_ref().is_some_and(|p| p.status_code.is_server_error()) {
                                                                 hedge_trk.record_error();
@@ -8344,15 +8854,50 @@ impl Website {
                                                                 )
                                                                 .await;
 
-                                                                let mut retry_count = shared.6.retry;
+                                                                let mut retry_count: u32 = match &retry_strategy_ref {
+                                                                    Some(s) => s.max_retries(),
+                                                                    None => shared.6.retry as u32,
+                                                                };
                                                                 let mut attempt: u32 = 0;
 
                                                                 while page.needs_retry() && retry_count > 0 {
                                                                     retry_count -= 1;
-                                                                    let status_delay = page.get_timeout().unwrap_or_default();
-                                                                    let backoff = crate::utils::backoff::backoff_delay(attempt, 200, 15_000);
-                                                                    tokio::time::sleep(status_delay.max(backoff)).await;
                                                                     attempt += 1;
+
+                                                                    // Consult the retry strategy if set.
+                                                                    let (_directive_backoff, _directive_profile_key) = match &retry_strategy_ref {
+                                                                        Some(s) => {
+                                                                            let outcome = crate::retry_strategy::AttemptOutcome {
+                                                                                attempt,
+                                                                                status_code: page.status_code,
+                                                                                should_retry: page.should_retry,
+                                                                                content_truncated: page.content_truncated,
+                                                                                waf_check: page.waf_check,
+                                                                                anti_bot_tech: &page.anti_bot_tech,
+                                                                                proxy_configured: page.proxy_configured,
+                                                                                url: target_url,
+                                                                                profile_key: page.profile_key.as_deref(),
+                                                                                html_length: page.size(),
+                                                                                bytes_transferred: page.bytes_transferred,
+                                                                                #[cfg(not(feature = "page_error_status_details"))]
+                                                                                error_status: page.error_status.as_deref(),
+                                                                                #[cfg(feature = "page_error_status_details")]
+                                                                                error_status: None,
+                                                                                final_redirect_destination: page.final_redirect_destination.as_deref(),
+                                                                            };
+                                                                            let directive = s.on_retry(&outcome);
+                                                                            if !directive.should_retry {
+                                                                                break;
+                                                                            }
+                                                                            (directive.backoff, directive.profile_key)
+                                                                        }
+                                                                        None => (None, None),
+                                                                    };
+
+                                                                    let status_delay = page.get_timeout().unwrap_or_default();
+                                                                    let backoff = _directive_backoff
+                                                                        .unwrap_or_else(|| crate::utils::backoff::backoff_delay(attempt - 1, 200, 15_000));
+                                                                    tokio::time::sleep(status_delay.max(backoff)).await;
 
                                                                     if let Ok(retry_page) = attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
                                                                         let _retry_guard = crate::features::chrome::TabCloseGuard::new(retry_page.clone());
@@ -8392,6 +8937,13 @@ impl Website {
                                                                             page = p;
                                                                         }).await {
                                                                             log::info!("{target_url} chrome retry backoff timeout exceeded {_elapsed}");
+                                                                            page.should_retry = false;
+                                                                            break;
+                                                                        }
+
+                                                                        // Stamp profile key from strategy.
+                                                                        if let Some(ref pk) = _directive_profile_key {
+                                                                            page.profile_key = Some(pk.clone());
                                                                         }
 
                                                                         _retry_guard.defuse();
@@ -8617,6 +9169,7 @@ impl Website {
 
                     let add_external = !shared.3.is_empty();
                     let on_should_crawl_callback = self.on_should_crawl_callback.clone();
+                    let retry_strategy_ref = self.retry_strategy.clone();
                     let full_resources = self.configuration.full_resources;
                     let return_page_links = self.configuration.return_page_links;
                     let mut exceeded_budget = false;
@@ -8684,6 +9237,7 @@ impl Website {
                                     if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                         let shared = shared.clone();
                                         let on_should_crawl_callback = on_should_crawl_callback.clone();
+                                        let retry_strategy_ref = retry_strategy_ref.clone();
 
                                         spawn_set("page_fetch_webdriver", &mut set, async move {
                                             let link_result = match &shared.9 {
@@ -8703,15 +9257,50 @@ impl Website {
                                             )
                                             .await;
 
-                                            let mut retry_count = shared.6.retry;
+                                            let mut retry_count: u32 = match &retry_strategy_ref {
+                                                Some(s) => s.max_retries(),
+                                                None => shared.6.retry as u32,
+                                            };
                                             let mut attempt: u32 = 0;
 
                                             while page.needs_retry() && retry_count > 0 {
                                                 retry_count -= 1;
-                                                let status_delay = page.get_timeout().unwrap_or_default();
-                                                let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
-                                                tokio::time::sleep(status_delay.max(backoff)).await;
                                                 attempt += 1;
+
+                                                // Consult the retry strategy if set.
+                                                let (_directive_backoff, _directive_profile_key) = match &retry_strategy_ref {
+                                                    Some(s) => {
+                                                        let outcome = crate::retry_strategy::AttemptOutcome {
+                                                            attempt,
+                                                            status_code: page.status_code,
+                                                            should_retry: page.should_retry,
+                                                            content_truncated: page.content_truncated,
+                                                            waf_check: page.waf_check,
+                                                            anti_bot_tech: &page.anti_bot_tech,
+                                                            proxy_configured: page.proxy_configured,
+                                                            url: target_url,
+                                                            profile_key: page.profile_key.as_deref(),
+                                                            html_length: page.size(),
+                                                            bytes_transferred: page.bytes_transferred,
+                                                            #[cfg(not(feature = "page_error_status_details"))]
+                                                            error_status: page.error_status.as_deref(),
+                                                            #[cfg(feature = "page_error_status_details")]
+                                                            error_status: None,
+                                                            final_redirect_destination: page.final_redirect_destination.as_deref(),
+                                                        };
+                                                        let directive = s.on_retry(&outcome);
+                                                        if !directive.should_retry {
+                                                            break;
+                                                        }
+                                                        (directive.backoff, directive.profile_key)
+                                                    }
+                                                    None => (None, None),
+                                                };
+
+                                                let status_delay = page.get_timeout().unwrap_or_default();
+                                                let backoff = _directive_backoff
+                                                    .unwrap_or_else(|| crate::utils::backoff::backoff_delay(attempt - 1, 1_000, 60_000));
+                                                tokio::time::sleep(status_delay.max(backoff)).await;
                                                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                                                     if let Err(elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
                                                         let p = Page::new_page_webdriver(
@@ -8732,6 +9321,11 @@ impl Website {
                                                             shared.10,
                                                         )
                                                         .await;
+                                                }
+
+                                                // Stamp profile key from strategy.
+                                                if let Some(ref pk) = _directive_profile_key {
+                                                    page.profile_key = Some(pk.clone());
                                                 }
                                             }
 
@@ -9053,6 +9647,7 @@ impl Website {
             ));
 
             let add_external = !self.configuration.external_domains_caseless.is_empty();
+            let retry_strategy_ref = self.retry_strategy.clone();
             let mut exceeded_budget = false;
             let concurrency = throttle.is_zero();
 
@@ -9118,6 +9713,7 @@ impl Website {
                             if let Ok(permit) = semaphore.clone().acquire_owned().await {
                                 let shared = shared.clone();
                                 let on_should_crawl_callback = on_should_crawl_callback.clone();
+                                let retry_strategy_ref = retry_strategy_ref.clone();
                                 spawn_set("page_fetch", &mut set, async move {
                                     let link_result = match &shared.7 {
                                         Some(cb) => cb(link, None),
@@ -9134,15 +9730,50 @@ impl Website {
                                     )
                                     .await;
 
-                                    let mut retry_count = shared.4.retry;
+                                    let mut retry_count: u32 = match &retry_strategy_ref {
+                                        Some(s) => s.max_retries(),
+                                        None => shared.4.retry as u32,
+                                    };
                                     let mut attempt: u32 = 0;
 
                                     while page.needs_retry() && retry_count > 0 {
                                         retry_count -= 1;
-                                        let status_delay = page.get_timeout().unwrap_or_default();
-                                        let backoff = crate::utils::backoff::backoff_delay(attempt, 1_000, 60_000);
-                                        tokio::time::sleep(status_delay.max(backoff)).await;
                                         attempt += 1;
+
+                                        // Consult the retry strategy if set.
+                                        let (_directive_backoff, _directive_profile_key) = match &retry_strategy_ref {
+                                            Some(s) => {
+                                                let outcome = crate::retry_strategy::AttemptOutcome {
+                                                    attempt,
+                                                    status_code: page.status_code,
+                                                    should_retry: page.should_retry,
+                                                    content_truncated: page.content_truncated,
+                                                    waf_check: page.waf_check,
+                                                    anti_bot_tech: &page.anti_bot_tech,
+                                                    proxy_configured: page.proxy_configured,
+                                                    url,
+                                                    profile_key: page.profile_key.as_deref(),
+                                                    html_length: page.size(),
+                                                    bytes_transferred: page.bytes_transferred,
+                                                    #[cfg(not(feature = "page_error_status_details"))]
+                                                    error_status: page.error_status.as_deref(),
+                                                    #[cfg(feature = "page_error_status_details")]
+                                                    error_status: None,
+                                                    final_redirect_destination: page.final_redirect_destination.as_deref(),
+                                                };
+                                                let directive = s.on_retry(&outcome);
+                                                if !directive.should_retry {
+                                                    break;
+                                                }
+                                                (directive.backoff, directive.profile_key)
+                                            }
+                                            None => (None, None),
+                                        };
+
+                                        let status_delay = page.get_timeout().unwrap_or_default();
+                                        let backoff = _directive_backoff
+                                            .unwrap_or_else(|| crate::utils::backoff::backoff_delay(attempt - 1, 1_000, 60_000));
+                                        tokio::time::sleep(status_delay.max(backoff)).await;
 
                                         if page.status_code == StatusCode::GATEWAY_TIMEOUT {
 
@@ -9192,6 +9823,11 @@ impl Website {
                                             shared.4.cache_namespace_str(),
                                                 )
                                                     .await;
+                                        }
+
+                                        // Stamp profile key from strategy.
+                                        if let Some(ref pk) = _directive_profile_key {
+                                            page.profile_key = Some(pk.clone());
                                         }
                                     }
 
@@ -10240,6 +10876,7 @@ impl Website {
             let reader = SiteMapReader::new(&*b);
 
             let retry = self.configuration.retry;
+            let retry_strategy_ref = self.retry_strategy.clone();
 
             for entity in reader {
                 if !self.handle_process(handle, interval, async {}).await {
@@ -10274,6 +10911,7 @@ impl Website {
                                     .as_ref()
                                     .map(|s| s.as_str().to_string());
 
+                                let retry_strategy_ref = retry_strategy_ref.clone();
                                 crate::utils::spawn_task("page_fetch", async move {
                                     let mut page = Page::new_page_with_cache(
                                         link.inner(),
@@ -10284,16 +10922,69 @@ impl Website {
                                     )
                                     .await;
 
-                                    let mut retry_count = retry;
+                                    let mut retry_count: u32 = match &retry_strategy_ref {
+                                        Some(s) => s.max_retries(),
+                                        None => retry as u32,
+                                    };
                                     let mut attempt: u32 = 0;
 
                                     while page.needs_retry() && retry_count > 0 {
-                                        let status_delay = page.get_timeout().unwrap_or_default();
-                                        let backoff = crate::utils::backoff::backoff_delay(
-                                            attempt, 1_000, 60_000,
-                                        );
-                                        tokio::time::sleep(status_delay.max(backoff)).await;
+                                        retry_count -= 1;
                                         attempt += 1;
+
+                                        // Consult the retry strategy if set.
+                                        let (_directive_backoff, _directive_profile_key) =
+                                            match &retry_strategy_ref {
+                                                Some(s) => {
+                                                    let outcome =
+                                                        crate::retry_strategy::AttemptOutcome {
+                                                            attempt,
+                                                            status_code: page.status_code,
+                                                            should_retry: page.should_retry,
+                                                            content_truncated: page
+                                                                .content_truncated,
+                                                            waf_check: page.waf_check,
+                                                            anti_bot_tech: &page.anti_bot_tech,
+                                                            proxy_configured: page.proxy_configured,
+                                                            url: link.inner(),
+                                                            profile_key: page
+                                                                .profile_key
+                                                                .as_deref(),
+                                                            html_length: page.size(),
+                                                            bytes_transferred: page
+                                                                .bytes_transferred,
+                                                            #[cfg(not(
+                                                                feature = "page_error_status_details"
+                                                            ))]
+                                                            error_status: page
+                                                                .error_status
+                                                                .as_deref(),
+                                                            #[cfg(
+                                                                feature = "page_error_status_details"
+                                                            )]
+                                                            error_status: None,
+                                                            final_redirect_destination: page
+                                                                .final_redirect_destination
+                                                                .as_deref(),
+                                                        };
+                                                    let directive = s.on_retry(&outcome);
+                                                    if !directive.should_retry {
+                                                        break;
+                                                    }
+                                                    (directive.backoff, directive.profile_key)
+                                                }
+                                                None => (None, None),
+                                            };
+
+                                        let status_delay = page.get_timeout().unwrap_or_default();
+                                        let backoff = _directive_backoff.unwrap_or_else(|| {
+                                            crate::utils::backoff::backoff_delay(
+                                                attempt - 1,
+                                                1_000,
+                                                60_000,
+                                            )
+                                        });
+                                        tokio::time::sleep(status_delay.max(backoff)).await;
                                         page = Page::new_page_with_cache(
                                             link.inner(),
                                             &client,
@@ -10302,7 +10993,11 @@ impl Website {
                                             cache_ns.as_deref(),
                                         )
                                         .await;
-                                        retry_count -= 1;
+
+                                        // Stamp profile key from strategy.
+                                        if let Some(ref pk) = _directive_profile_key {
+                                            page.profile_key = Some(pk.clone());
+                                        }
                                     }
 
                                     if let Ok(permit) = tx.reserve().await {
@@ -10728,6 +11423,16 @@ impl Website {
             }
             _ => self.on_should_crawl_callback = None,
         };
+        self
+    }
+
+    /// Set a custom retry strategy that controls retry behavior per attempt.
+    /// When set, this replaces the simple `Configuration::retry` counter.
+    pub fn with_retry_strategy(
+        &mut self,
+        strategy: crate::retry_strategy::SharedRetryStrategy,
+    ) -> &mut Self {
+        self.retry_strategy = Some(strategy);
         self
     }
 

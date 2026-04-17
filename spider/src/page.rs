@@ -814,6 +814,10 @@ pub struct Page {
     /// Whether a proxy was configured for this request.
     /// When true, 401 responses are retried (proxy rotation may fix auth).
     pub proxy_configured: bool,
+    /// The profile key identifying which retry profile was used to fetch this page.
+    /// Set by a [`RetryStrategy`](crate::retry_strategy::RetryStrategy); `None` when
+    /// using the default simple retry counter.
+    pub profile_key: Option<CompactString>,
     /// Whether the content is a binary file (image, PDF, etc.).
     /// Set once when HTML bytes are first available so the flag remains
     /// accurate after content is spooled to disk.
@@ -959,6 +963,10 @@ pub struct Page {
     /// Whether a proxy was configured for this request.
     /// When true, 401 responses are retried (proxy rotation may fix auth).
     pub proxy_configured: bool,
+    /// The profile key identifying which retry profile was used to fetch this page.
+    /// Set by a [`RetryStrategy`](crate::retry_strategy::RetryStrategy); `None` when
+    /// using the default simple retry counter.
+    pub profile_key: Option<CompactString>,
     /// Whether the content is a binary file (image, PDF, etc.).
     /// Set once when HTML bytes are first available so the flag remains
     /// accurate after content is spooled to disk.
@@ -1704,6 +1712,7 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
         external_domains_caseless: Default::default(),
         page_links: None,
         proxy_configured: false,
+        profile_key: None,
         #[cfg(feature = "balance")]
         html_spool_path: None,
         #[cfg(all(feature = "balance", not(feature = "decentralized")))]

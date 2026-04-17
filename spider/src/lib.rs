@@ -396,6 +396,8 @@ pub mod features;
 pub mod packages;
 /// A page scraped.
 pub mod page;
+/// Configurable retry strategy for advanced retry logic.
+pub mod retry_strategy;
 /// Trait abstractions for core types.
 pub mod traits;
 /// Application utils.
