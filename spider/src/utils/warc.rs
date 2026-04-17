@@ -178,6 +178,43 @@ mod inner {
         buf
     }
 
+    /// Guess a reasonable Content-Type from the first few bytes of a response body.
+    /// Used when the captured headers don't contain one so WARC replay tools
+    /// still know how to render the resource.
+    fn guess_content_type(body: &[u8]) -> &'static str {
+        let trimmed = {
+            let mut i = 0;
+            while i < body.len()
+                && (body[i] == b' ' || body[i] == b'\t' || body[i] == b'\r' || body[i] == b'\n')
+            {
+                i += 1;
+            }
+            &body[i..]
+        };
+        if trimmed.is_empty() {
+            return "application/octet-stream";
+        }
+        match trimmed[0] {
+            b'<' => "text/html; charset=utf-8",
+            b'{' | b'[' => "application/json; charset=utf-8",
+            _ => {
+                if trimmed.len() >= 4 && &trimmed[..4] == b"\x89PNG" {
+                    "image/png"
+                } else if trimmed.len() >= 3 && &trimmed[..3] == b"\xff\xd8\xff" {
+                    "image/jpeg"
+                } else if trimmed.len() >= 4 && &trimmed[..4] == b"GIF8" {
+                    "image/gif"
+                } else if trimmed.len() >= 4 && &trimmed[..4] == b"%PDF" {
+                    "application/pdf"
+                } else if trimmed.is_ascii() {
+                    "text/plain; charset=utf-8"
+                } else {
+                    "application/octet-stream"
+                }
+            }
+        }
+    }
+
     /// Serialize a WARC `response` record from a `Page` into a self-contained byte buffer.
     /// Returns `None` if the page has an empty URL.
     pub fn serialize_page(page: &Page) -> Option<Vec<u8>> {
@@ -200,13 +237,40 @@ mod inner {
             );
         }
 
+        // Track whether Content-Type / Content-Length are present in the captured
+        // response headers. WARC replay tools (replayweb.page, pywb) require
+        // Content-Type in the HTTP payload to know how to serve the resource.
+        let mut has_content_type = false;
+        let mut has_content_length = false;
+
         if let Some(ref headers) = page.headers {
             for (name, value) in headers.iter() {
-                payload.extend_from_slice(name.as_str().as_bytes());
+                let n = name.as_str();
+                if n.eq_ignore_ascii_case("content-type") {
+                    has_content_type = true;
+                } else if n.eq_ignore_ascii_case("content-length") {
+                    has_content_length = true;
+                }
+                payload.extend_from_slice(n.as_bytes());
                 payload.extend_from_slice(b": ");
                 payload.extend_from_slice(value.as_bytes());
                 payload.extend_from_slice(CRLF);
             }
+        }
+
+        // Synthesize a Content-Type when the captured headers don't have one so
+        // replay tools can serve the resource. Guess from the body's first byte.
+        if !has_content_type {
+            let ct = guess_content_type(body);
+            payload.extend_from_slice(b"Content-Type: ");
+            payload.extend_from_slice(ct.as_bytes());
+            payload.extend_from_slice(CRLF);
+        }
+
+        // Ensure Content-Length reflects the actual body length for the replay
+        // engine even when upstream headers omitted it (e.g. chunked encoding).
+        if !has_content_length {
+            let _ = write!(payload, "Content-Length: {}\r\n", body.len());
         }
 
         payload.extend_from_slice(CRLF);
@@ -716,6 +780,61 @@ mod inner {
             assert!(content.contains("WARC-Type: warcinfo"));
 
             let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn response_payload_has_content_type_when_headers_missing() {
+            let page = make_test_page("https://example.com", 200, "<html>Hi</html>");
+            let buf = serialize_page(&page).unwrap();
+            let content = String::from_utf8_lossy(&buf);
+            assert!(
+                content.contains("Content-Type: text/html; charset=utf-8\r\n"),
+                "synthesized Content-Type missing: {content}"
+            );
+            assert!(content.contains("Content-Length: 15\r\n"));
+        }
+
+        #[test]
+        fn response_payload_skips_synthesis_when_content_type_present() {
+            let mut page = make_test_page("https://example.com", 200, "<html>Hi</html>");
+            let mut hdr_map = reqwest::header::HeaderMap::new();
+            hdr_map.insert("content-type", "text/plain; charset=utf-8".parse().unwrap());
+            page.headers = Some(hdr_map);
+
+            let buf = serialize_page(&page).unwrap();
+            let content = String::from_utf8_lossy(&buf);
+            // Only the real one should appear (case preserved as sent).
+            let ct_count = content
+                .matches("content-type: text/plain; charset=utf-8")
+                .count();
+            assert_eq!(ct_count, 1);
+            assert!(!content.contains("Content-Type: text/html"));
+        }
+
+        #[test]
+        fn guess_content_type_variants() {
+            assert_eq!(guess_content_type(b"<html>"), "text/html; charset=utf-8");
+            assert_eq!(
+                guess_content_type(b"  <!doctype html>"),
+                "text/html; charset=utf-8"
+            );
+            assert_eq!(
+                guess_content_type(b"{\"a\":1}"),
+                "application/json; charset=utf-8"
+            );
+            assert_eq!(
+                guess_content_type(b"[1,2]"),
+                "application/json; charset=utf-8"
+            );
+            assert_eq!(
+                guess_content_type(b"plain text"),
+                "text/plain; charset=utf-8"
+            );
+            assert_eq!(guess_content_type(b""), "application/octet-stream");
+            assert_eq!(guess_content_type(b"\x89PNG\r\n\x1a\n"), "image/png");
+            assert_eq!(guess_content_type(b"\xff\xd8\xff\xe0"), "image/jpeg");
+            assert_eq!(guess_content_type(b"GIF89a"), "image/gif");
+            assert_eq!(guess_content_type(b"%PDF-1.4"), "application/pdf");
         }
 
         #[tokio::test]

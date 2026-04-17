@@ -6476,7 +6476,7 @@ async fn test_headers() {
         },
     );
 
-    let headers = page.headers.expect("There should be some headers");
+    let headers = page.headers.clone().expect("There should be some headers");
 
     assert_eq!(
         headers
