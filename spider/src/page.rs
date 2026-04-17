@@ -3233,6 +3233,16 @@ impl Page {
             Some(h) if !h.is_empty() => h,
             _ => return false,
         };
+        // Chrome returns a bare `<html><head></head><body></body></html>` shell
+        // for pages that never produced content.  Spooling that to disk and
+        // then claiming the page has content (via `html_spool_path.is_some()`)
+        // is wrong — treat it as empty and skip the spool entirely.
+        {
+            let trimmed = html.trim_ascii();
+            if trimmed.is_empty() || trimmed == *EMPTY_HTML || trimmed == *EMPTY_HTML_BASIC {
+                return false;
+            }
+        }
         if self.html_spool_path.is_some() {
             return false;
         }
@@ -3261,6 +3271,16 @@ impl Page {
             Some(h) if !h.is_empty() => h,
             _ => return false,
         };
+        // Chrome returns a bare `<html><head></head><body></body></html>` shell
+        // for pages that never produced content.  Spooling that to disk and
+        // then claiming the page has content (via `html_spool_path.is_some()`)
+        // is wrong — treat it as empty and skip the spool entirely.
+        {
+            let trimmed = html.trim_ascii();
+            if trimmed.is_empty() || trimmed == *EMPTY_HTML || trimmed == *EMPTY_HTML_BASIC {
+                return false;
+            }
+        }
         if self.html_spool_path.is_some() {
             return false;
         }
