@@ -294,7 +294,7 @@ impl DnsCacheResolver {
 
         // Collect unique hostnames.
         let mut unique = Vec::with_capacity(hosts.len());
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = std::collections::HashSet::with_capacity(proxy_urls.len());
         for url_str in proxy_urls {
             if let Some(host) = Self::parse_proxy_host(url_str) {
                 if seen.insert(host.clone()) {
@@ -327,8 +327,8 @@ impl DnsCacheResolver {
     /// Returns a `JoinHandle` — drop or abort when the crawl ends.
     /// No-op (immediately-ready handle) if `proxy_urls` is empty.
     pub fn spawn_proxy_dns_refresh(&self, proxy_urls: &[String]) -> tokio::task::JoinHandle<()> {
-        let mut unique_hosts = Vec::new();
-        let mut seen = std::collections::HashSet::new();
+        let mut unique_hosts = Vec::with_capacity(proxy_urls.len());
+        let mut seen = std::collections::HashSet::with_capacity(proxy_urls.len());
         for url_str in proxy_urls {
             if let Some(host) = Self::parse_proxy_host(url_str) {
                 if seen.insert(host.clone()) {

@@ -1103,7 +1103,7 @@ async fn solve_with_external_gemini(
 
             let target = challenge.target.unwrap_or("target object").to_string();
 
-            let mut yes_ids = Vec::new();
+            let mut yes_ids = Vec::with_capacity(challenge.tiles.len().min(64));
 
             for tile in &challenge.tiles {
                 // -------------------------------------------------------------

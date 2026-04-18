@@ -250,7 +250,7 @@ fn build_responses_body(
 ) -> serde_json::Value {
     // Separate system messages into `instructions` and the rest into `input`.
     let mut instructions = String::new();
-    let mut input_items = Vec::new();
+    let mut input_items = Vec::with_capacity(messages.len());
 
     for msg in messages {
         if msg.role == "system" {

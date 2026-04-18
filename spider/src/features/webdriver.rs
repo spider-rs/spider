@@ -168,10 +168,13 @@ async fn build_chrome_capabilities(
     }
 
     // Collect all arguments
-    let mut args: Vec<String> = Vec::new();
-
-    // Add default browser args
     let default_args = get_browser_args(&WebDriverBrowser::Chrome);
+    let custom_len = webdriver_config
+        .browser_args
+        .as_ref()
+        .map_or(0, |v| v.len());
+    let mut args: Vec<String> = Vec::with_capacity(default_args.len() + custom_len + 4);
+
     for arg in default_args {
         args.push(arg.to_string());
     }
@@ -243,10 +246,13 @@ async fn build_firefox_capabilities(
     }
 
     // Collect all arguments
-    let mut args: Vec<String> = Vec::new();
-
-    // Add default browser args
     let default_args = get_browser_args(&WebDriverBrowser::Firefox);
+    let custom_len = webdriver_config
+        .browser_args
+        .as_ref()
+        .map_or(0, |v| v.len());
+    let mut args: Vec<String> = Vec::with_capacity(default_args.len() + custom_len + 1);
+
     for arg in default_args {
         args.push(arg.to_string());
     }
@@ -298,10 +304,13 @@ async fn build_edge_capabilities(
     }
 
     // Collect all arguments
-    let mut args: Vec<String> = Vec::new();
-
-    // Add default browser args
     let default_args = get_browser_args(&WebDriverBrowser::Edge);
+    let custom_len = webdriver_config
+        .browser_args
+        .as_ref()
+        .map_or(0, |v| v.len());
+    let mut args: Vec<String> = Vec::with_capacity(default_args.len() + custom_len + 4);
+
     for arg in default_args {
         args.push(arg.to_string());
     }

@@ -4005,7 +4005,9 @@ pub async fn fetch_page_html_chrome_base(
             let response_map = rs.response_map;
 
             if response_map.is_some() {
-                let mut _response_map = HashMap::new();
+                // Cap to bound pre-allocation against pages with excessive subresources.
+                let mut _response_map =
+                    HashMap::with_capacity(response_map.as_ref().map_or(0, |r| r.len().min(1024)));
 
                 if let Some(response_map) = response_map {
                     if let Some(bytes_map) = bytes_map {
@@ -4223,8 +4225,9 @@ async fn set_page_response_cookies(
     scope_url: Option<&url::Url>,
 ) {
     if let Ok(mut cookies) = page.get_cookies().await {
+        // Cap to bound pre-allocation against malicious pages setting many cookies.
         let mut cookies_map: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
+            std::collections::HashMap::with_capacity(cookies.len().min(256));
 
         for cookie in cookies.drain(..) {
             if let Some(scope_url) = scope_url {
@@ -4969,7 +4972,8 @@ pub async fn fetch_page_html_spider_cloud(
     let multi = config.has_multiple_formats();
 
     let mut body = if multi {
-        let mut formats: Vec<&str> = Vec::new();
+        let mut formats: Vec<&str> =
+            Vec::with_capacity(config.return_formats.as_ref().map_or(0, |v| v.len()));
         if let Some(fmts) = config.return_formats.as_ref() {
             for f in fmts {
                 let s = f.as_str();
@@ -5056,7 +5060,7 @@ pub async fn fetch_page_html_spider_cloud(
                                         .unwrap_or_default()
                                         .to_string();
 
-                                    let mut map = hashbrown::HashMap::new();
+                                    let mut map = hashbrown::HashMap::with_capacity(obj.len());
                                     for (k, v) in obj {
                                         if let Some(s) = v.as_str() {
                                             map.insert(

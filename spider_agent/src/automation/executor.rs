@@ -263,7 +263,7 @@ impl ChainExecutor {
         steps: &[ChainStep],
         _context: &ChainContext,
     ) -> Vec<Vec<ChainStep>> {
-        let mut groups: Vec<Vec<ChainStep>> = Vec::new();
+        let mut groups: Vec<Vec<ChainStep>> = Vec::with_capacity(steps.len());
         let mut current_group: Vec<ChainStep> = Vec::new();
 
         for step in steps {

@@ -88,7 +88,7 @@ mod inner {
         /// Returns a vec of `(header_name, header_value)` pairs to add to the
         /// request. Empty if no validators are cached for this URL.
         pub fn conditional_headers(&self, url: &str) -> Vec<(&'static str, CompactString)> {
-            let mut headers = Vec::new();
+            let mut headers = Vec::with_capacity(2);
 
             if let Some((etag, last_modified)) = self.get(url) {
                 if let Some(etag) = etag {

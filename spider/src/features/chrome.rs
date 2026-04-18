@@ -41,7 +41,8 @@ pub fn parse_cookies_with_jar(
         let cookie_header_str = header_value.to_str().map_err(|e| e.to_string())?;
         let cookie_pairs: Vec<&str> = cookie_header_str.split(';').collect();
 
-        let mut cookies = Vec::new();
+        // Cap to bound pre-allocation against malicious Set-Cookie headers.
+        let mut cookies = Vec::with_capacity(cookie_pairs.len().min(256));
 
         for pair in cookie_pairs {
             let parts: Vec<&str> = pair.trim().splitn(2, '=').collect();
@@ -146,7 +147,9 @@ pub fn cookie_params_from_jar(
     };
 
     let s = header_value.to_str().map_err(|e| e.to_string())?;
-    let mut out = Vec::new();
+    // Cap to bound pre-allocation against malicious cookie headers.
+    let mut out =
+        Vec::with_capacity((memchr::memchr_iter(b';', s.as_bytes()).count() + 1).min(256));
 
     for pair in s.split(';') {
         let pair = pair.trim();
@@ -1317,11 +1320,19 @@ impl HedgeBrowser {
         fires >= 8 && tracker.hedge_win_rate_pct() > 60
     }
 
-    /// Open a fresh WS connection to the same Chrome process.
-    /// Returns `None` if the connection fails (non-fatal — caller falls
-    /// back to same-browser tab hedge).
+    /// Open a fresh WS connection for the hedge request.
+    ///
+    /// When `chrome_connection_urls` has a second entry, connects to that
+    /// URL so the load balancer can route to a **different** backend
+    /// instance.  Falls back to `chrome_connection_url` (re-enters the LB),
+    /// then to the primary browser's direct websocket address.
     pub async fn connect(primary: &Browser, config: &Configuration) -> Option<Self> {
-        let ws_url = primary.websocket_address().clone();
+        let ws_url = config
+            .chrome_connection_urls
+            .as_ref()
+            .and_then(|urls| urls.get(1).cloned())
+            .or_else(|| config.chrome_connection_url.clone())
+            .unwrap_or_else(|| primary.websocket_address().clone());
 
         let handler_config = create_handler_config(config);
 

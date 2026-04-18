@@ -689,7 +689,8 @@ pub struct ProxyRotator {
 impl ProxyRotator {
     /// Build from the crawler's proxy list.
     pub fn new(proxies: &Option<Vec<RequestProxy>>) -> Self {
-        let (mut cdp, mut wd) = (Vec::new(), Vec::new());
+        let cap = proxies.as_ref().map_or(0, |v| v.len());
+        let (mut cdp, mut wd) = (Vec::with_capacity(cap), Vec::with_capacity(cap));
 
         if let Some(proxies) = proxies {
             for p in proxies {
@@ -1101,7 +1102,8 @@ pub fn build_backend_futures(
     let backend_timeout_ms_log = config.backend_timeout_ms;
 
     #[allow(unused_mut)]
-    let mut futs: Vec<Pin<Box<dyn Future<Output = BackendResult> + Send>>> = Vec::new();
+    let mut futs: Vec<Pin<Box<dyn Future<Output = BackendResult> + Send>>> =
+        Vec::with_capacity(config.backends.len());
 
     for (i, backend) in config.backends.iter().enumerate() {
         let backend_index = i + 1; // 0 is primary

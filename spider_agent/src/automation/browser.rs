@@ -536,8 +536,8 @@ impl RemoteMultimodalEngine {
     fn summarize_step_blocklist(steps: &[serde_json::Value], max_items: usize) -> Vec<String> {
         use std::collections::HashSet;
 
-        let mut seen = HashSet::new();
-        let mut out = Vec::new();
+        let mut seen = HashSet::with_capacity(max_items);
+        let mut out = Vec::with_capacity(max_items);
 
         for step in steps {
             let Some(obj) = step.as_object() else {
@@ -1525,8 +1525,11 @@ impl RemoteMultimodalEngine {
                                         let words = data.get("words").and_then(|v| v.as_array());
                                         let drags = data.get("drags").and_then(|v| v.as_array());
                                         if let (Some(words), Some(drags)) = (words, drags) {
-                                            let mut dragged = Vec::new();
-                                            let mut all_coords: Vec<(f64, f64)> = Vec::new();
+                                            // Cap to bound pre-allocation against malicious page payloads.
+                                            let drag_cap = drags.len().min(128);
+                                            let mut dragged = Vec::with_capacity(drag_cap);
+                                            let mut all_coords: Vec<(f64, f64)> =
+                                                Vec::with_capacity(drag_cap * 4);
                                             for (wi, drag_pts) in drags.iter().enumerate() {
                                                 if let Some(pts) = drag_pts.as_array() {
                                                     let coords: Vec<(f64, f64)> = pts
@@ -2191,7 +2194,7 @@ impl RemoteMultimodalEngine {
         let max_attempts = effective_cfg.retry.max_attempts.max(1);
         let mut last_err: Option<EngineError> = None;
         // Track which models have been tried so we can rotate on retryable errors
-        let mut tried_models: Vec<String> = Vec::new();
+        let mut tried_models: Vec<String> = Vec::with_capacity(max_attempts);
 
         for attempt in 0..max_attempts {
             // On retryable errors (502, 503, 429, timeout), try a different model from the pool
@@ -3781,7 +3784,8 @@ return await s.prompt(msg);
     ) -> EngineResult<(usize, Vec<String>, Vec<ActionOutcome>)> {
         let mut executed = 0;
         let mut spawn_pages = Vec::new();
-        let mut outcomes = Vec::new();
+        // Cap to bound pre-allocation against oversized LLM outputs.
+        let mut outcomes = Vec::with_capacity(steps.len().min(256));
 
         for step in steps {
             log::debug!("Executing step: {:?}", step);

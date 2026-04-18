@@ -40,7 +40,7 @@ pub async fn css_query_select_map_streamed<K>(
 where
     K: AsRef<str> + Eq + Hash + Sized,
 {
-    let mut map: CSSQueryMap = HashMap::new();
+    let mut map: CSSQueryMap = HashMap::with_capacity(selectors.css.len() + selectors.xpath.len());
 
     if !selectors.css.is_empty() {
         let fragment = Box::new(Html::parse_document(html));
@@ -89,7 +89,7 @@ pub fn css_query_select_map<K>(html: &str, selectors: &DocumentSelectors<K>) -> 
 where
     K: AsRef<str> + Eq + Hash + Sized,
 {
-    let mut map: CSSQueryMap = HashMap::new();
+    let mut map: CSSQueryMap = HashMap::with_capacity(selectors.css.len() + selectors.xpath.len());
 
     if !selectors.css.is_empty() {
         let fragment = Box::new(Html::parse_document(html));
@@ -199,14 +199,17 @@ where
     V: AsRef<str> + Debug + AsRef<str>,
     S: IntoIterator<Item = V>,
 {
-    let mut valid_selectors: HashMap<K, Vec<Selector>> = HashMap::new();
-    let mut valid_selectors_xpath: HashMap<K, Vec<String>> = HashMap::new();
+    let cap = selectors.len();
+    let mut valid_selectors: HashMap<K, Vec<Selector>> = HashMap::with_capacity(cap);
+    let mut valid_selectors_xpath: HashMap<K, Vec<String>> = HashMap::with_capacity(cap);
 
     for (key, selector_set) in selectors {
-        let mut selectors_vec = Vec::new();
+        let iter = selector_set.into_iter();
+        let (size_hint, _) = iter.size_hint();
+        let mut selectors_vec = Vec::with_capacity(size_hint);
         let mut selectors_vec_xpath = Vec::new();
 
-        for selector_str in selector_set {
+        for selector_str in iter {
             match Selector::parse(selector_str.as_ref()) {
                 Ok(selector) => selectors_vec.push(selector),
                 Err(err) => {

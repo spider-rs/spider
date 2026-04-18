@@ -327,7 +327,7 @@ impl ExperienceMemory {
         // Load all records for matching
         let all_records = self.load_all_records().await?;
 
-        let mut experiences = Vec::new();
+        let mut experiences = Vec::with_capacity(search_results.len());
         for (score, text) in &search_results {
             // Match search result text back to an experience record
             let relevance = *score;
