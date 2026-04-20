@@ -15088,6 +15088,124 @@ async fn test_spool_subscription_stream_from_disk() {
     website.unsubscribe();
 }
 
+/// Vitals computed at construction time must survive a disk spool so
+/// readers like `size()`, `is_empty()`, and `is_binary_spool_aware()`
+/// never need to touch the disk again.
+#[cfg(all(test, feature = "balance"))]
+#[test]
+fn test_spool_vitals_zero_disk_io() {
+    use crate::page::build;
+    use crate::utils::PageResponse;
+
+    let html = b"<html><body>balance vitals check</body></html>".to_vec();
+    let html_len = html.len();
+
+    let mut res = PageResponse::default();
+    res.content = Some(html);
+    res.status_code = reqwest::StatusCode::OK;
+    let mut page = build("https://example.com", res);
+
+    // Vitals are captured in build() before any spool happens.
+    assert_eq!(page.size(), html_len, "byte length cached at build time");
+    assert!(page.is_valid_utf8, "utf-8 flag captured");
+    assert!(!page.binary_file, "not binary");
+    assert!(!page.is_xml, "not xml");
+    assert!(!page.is_empty(), "has content");
+    assert!(!page.is_binary_spool_aware(), "not binary (in memory)");
+
+    // Spool and re-check — vitals and accessors remain correct without any
+    // disk I/O.
+    assert!(page.spool_html_to_disk());
+    assert!(page.is_html_on_disk(), "on disk after spool");
+    assert!(page.html.is_none(), "html buffer cleared");
+
+    // Delete the spool file out from under us to prove these paths do NOT
+    // touch the disk.  The file has already been opened by the guard so
+    // removal on macOS/Linux tolerates a subsequent read by the FD, but
+    // our fast vitals paths should not open it at all.
+    if let Some(spool_path) = page.get_html_spool_path().map(|p| p.to_path_buf()) {
+        let _ = std::fs::remove_file(&spool_path);
+        assert_eq!(page.size(), html_len, "size from cached byte len");
+        assert!(page.is_valid_utf8, "utf-8 flag survives spool");
+        assert!(!page.is_empty(), "spooled page not empty");
+        assert!(!page.is_binary_spool_aware(), "binary flag survives spool");
+    }
+}
+
+/// Link extraction from a spooled page must stay streaming — the spool
+/// must remain on disk and `self.html` must not be repopulated.
+#[cfg(all(test, feature = "balance"))]
+#[tokio::test]
+async fn test_spool_links_extraction_does_not_reload() {
+    let mut html = String::from("<html><body>");
+    for i in 0..200 {
+        html.push_str(&format!(r#"<a href="/page/{i}">l{i}</a>"#));
+    }
+    html.push_str("</body></html>");
+
+    let mut page = Page::default();
+    page.url = "https://example.com".to_string();
+    page.html = Some(bytes::Bytes::from(html));
+    assert!(page.spool_html_to_disk_async().await);
+    assert!(page.is_html_on_disk());
+
+    let selectors = crate::page::get_page_selectors("https://example.com", false, false);
+
+    let links = page.links(&selectors, &None).await;
+    assert!(!links.is_empty(), "should extract links from disk");
+
+    assert!(
+        page.html.is_none(),
+        "self.html must stay empty after disk-streaming link extraction"
+    );
+    assert!(
+        page.is_html_on_disk(),
+        "spool file must remain on disk after link extraction"
+    );
+}
+
+/// XML link extraction from a spooled feed must stay streaming — no
+/// full-file read, and the spool must still be on disk afterwards.
+/// Uses the Atom-style `<link>` tag format matched by
+/// `links_stream_xml_from_reader`.
+#[cfg(all(test, feature = "balance"))]
+#[tokio::test]
+async fn test_spool_xml_links_extraction_streams_from_disk() {
+    let mut xml = String::from(r#"<?xml version="1.0" encoding="UTF-8"?>"#);
+    xml.push_str(r#"<feed xmlns="http://www.w3.org/2005/Atom">"#);
+    for i in 0..50 {
+        xml.push_str(&format!(
+            r#"<entry><link>https://example.com/entry/{i}</link></entry>"#
+        ));
+    }
+    xml.push_str("</feed>");
+
+    let mut page = Page::default();
+    page.url = "https://example.com/feed.xml".to_string();
+    page.html = Some(bytes::Bytes::from(xml));
+    page.is_xml = true;
+    assert!(page.spool_html_to_disk_async().await);
+    assert!(page.is_html_on_disk());
+
+    let selectors = crate::page::get_page_selectors("https://example.com", false, false);
+
+    let mut map: hashbrown::HashSet<case_insensitive_string::CaseInsensitiveString> =
+        hashbrown::HashSet::new();
+    if let Some(p) = page.get_html_spool_path().map(|p| p.to_path_buf()) {
+        page.links_stream_xml_from_disk(&selectors, p, &mut map, &None)
+            .await;
+    }
+    assert!(!map.is_empty(), "xml streaming should yield <link> entries");
+    assert!(
+        page.html.is_none(),
+        "html buffer must stay empty after xml disk stream"
+    );
+    assert!(
+        page.is_html_on_disk(),
+        "spool file must remain after xml stream"
+    );
+}
+
 /// Verify that ChannelGuard::lock() completes correctly when called
 /// multiple times — counters are monotonic and never reset.
 #[cfg(all(test, feature = "sync"))]

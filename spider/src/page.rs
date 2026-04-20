@@ -1651,16 +1651,20 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
         .as_deref()
         .is_some_and(|b| b.starts_with(b"<?xml"));
 
+    // Cache the byte length at build time so `size()`, budget checks, and
+    // accounting stay correct for both in-memory and later-spooled pages
+    // without ever needing to peek at the content again.
+    let content_byte_len = res.content.as_ref().map_or(0, |c| c.len());
+
     // Track in-memory HTML bytes for the balance budget check.
     // Subtracted when the page is spooled to disk, broadcast via
     // channel_send_page, or dropped (via the Page Drop impl).
     #[cfg(feature = "balance")]
-    let balance_has_bytes = match res.content.as_ref() {
-        Some(c) if !c.is_empty() => {
-            crate::utils::html_spool::track_bytes_add(c.len());
-            true
-        }
-        _ => false,
+    let balance_has_bytes = if content_byte_len > 0 {
+        crate::utils::html_spool::track_bytes_add(content_byte_len);
+        true
+    } else {
+        false
     };
 
     Page {
@@ -1718,7 +1722,7 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
         #[cfg(feature = "balance")]
         html_spool_path: None,
         #[cfg(all(feature = "balance", not(feature = "decentralized")))]
-        content_byte_len: 0,
+        content_byte_len,
         #[cfg(feature = "parallel_backends")]
         backend_source: None,
     }
@@ -3251,9 +3255,14 @@ impl Page {
             .as_deref()
             .is_some_and(|b| b.starts_with(b"<?xml"));
         #[cfg(all(feature = "balance", not(feature = "decentralized")))]
-        if let Some(ref h) = self.html {
-            crate::utils::html_spool::track_bytes_add(h.len());
-            self.balance_bytes_tracked = true;
+        {
+            // Refresh the cached length so `size()` stays accurate across
+            // later spools without needing to peek the bytes again.
+            self.content_byte_len = self.html.as_ref().map_or(0, |h| h.len());
+            if let Some(ref h) = self.html {
+                crate::utils::html_spool::track_bytes_add(h.len());
+                self.balance_bytes_tracked = true;
+            }
         }
     }
 
@@ -3304,6 +3313,14 @@ impl Page {
     /// Offload HTML to disk using `tokio::fs` — fully async, never blocks
     /// a tokio worker thread.  Used by `channel_send_page` and all internal
     /// crawl paths.
+    ///
+    /// The write path uses
+    /// [`spool_write_streaming_vitals`](crate::utils::html_spool::spool_write_streaming_vitals)
+    /// which computes `byte_len`, `is_valid_utf8`, `binary_file`, and
+    /// `is_xml` **inline with the disk write** — one single-pass scan
+    /// interleaved with I/O instead of a separate linear UTF-8 validation
+    /// over the whole buffer.  The vitals are mirrored onto the `Page`
+    /// struct so subsequent disk-aware accessors never re-validate.
     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
     pub async fn spool_html_to_disk_async(&mut self) -> bool {
         let html = match self.html.as_ref() {
@@ -3324,22 +3341,26 @@ impl Page {
             return false;
         }
         let path = crate::utils::html_spool::next_spool_path();
-        if crate::utils::html_spool::spool_write_async(&path, html.as_ref())
-            .await
-            .is_ok()
-        {
-            let len = html.len();
-            self.content_byte_len = len;
-            self.html = None;
-            crate::utils::html_spool::track_bytes_sub(len);
-            crate::utils::html_spool::track_page_spooled();
-            self.html_spool_path = Some(HtmlSpoolGuard::new(path));
-            // Bytes are now on disk, not in memory — clear the tracking
-            // flag so Drop does not double-subtract.
-            self.balance_bytes_tracked = false;
-            true
-        } else {
-            false
+        match crate::utils::html_spool::spool_write_streaming_vitals(&path, html.as_ref()).await {
+            Ok(vitals) => {
+                // Mirror the streaming-computed vitals onto the page.  They
+                // match the values captured at build time for the same
+                // bytes, so this is strictly a no-behavior-change refresh
+                // that keeps future accessors from touching the disk.
+                self.content_byte_len = vitals.byte_len;
+                self.is_valid_utf8 = vitals.is_valid_utf8;
+                self.binary_file = vitals.binary_file;
+                self.is_xml = vitals.is_xml;
+                self.html = None;
+                crate::utils::html_spool::track_bytes_sub(vitals.byte_len);
+                crate::utils::html_spool::track_page_spooled();
+                self.html_spool_path = Some(HtmlSpoolGuard::new(path));
+                // Bytes are now on disk, not in memory — clear the tracking
+                // flag so Drop does not double-subtract.
+                self.balance_bytes_tracked = false;
+                true
+            }
+            Err(_) => false,
         }
     }
 
@@ -3432,13 +3453,21 @@ impl Page {
     /// Check if this page contains binary content, even when the HTML is
     /// spooled to disk.
     ///
-    /// Zero disk I/O: `binary_file` is snapshotted at spool time (before
-    /// bytes leave memory).  For in-memory pages the magic-number check
-    /// runs on the existing buffer.  Spooled pages rely solely on the
-    /// pre-cached flag — no disk peek needed.
+    /// Zero disk I/O: `binary_file` is snapshotted at build/spool time
+    /// (before bytes leave memory) so spooled pages just read the cached
+    /// flag.  In-memory pages also trust the flag by default; they only
+    /// fall back to a magic-number re-scan when the flag is unset AND
+    /// bytes are available (covers pages whose `html` was assigned after
+    /// construction without going through `set_html_bytes`).
     #[inline]
     pub fn is_binary_spool_aware(&self) -> bool {
-        self.binary_file || auto_encoder::is_binary_file(self.get_html_bytes_u8())
+        if self.binary_file {
+            return true;
+        }
+        match self.html.as_deref() {
+            Some(bytes) => auto_encoder::is_binary_file(bytes),
+            None => false,
+        }
     }
 
     /// Return the path to the disk-spooled HTML file, if any.
@@ -3798,6 +3827,17 @@ impl Page {
     }
 
     /// Html getter for page to u8.
+    ///
+    /// **Disk-spool caveat (`balance` feature):** this accessor only returns
+    /// the in-memory buffer.  Once HTML has been spooled to a temporary file
+    /// via the balance feature, `self.html` is `None` and this method returns
+    /// an empty slice — loading the file back would defeat the point of
+    /// spooling.  Disk-aware callers should use
+    /// [`stream_html_bytes_async`](Self::stream_html_bytes_async),
+    /// [`get_html_async`](Self::get_html_async), or
+    /// [`get_content`](Self::get_content) instead.  Pre-computed vitals
+    /// (`binary_file`, `is_valid_utf8`, `is_xml`, `size()`) survive the
+    /// spool and do not require disk I/O.
     pub fn get_html_bytes_u8(&self) -> &[u8] {
         match self.html.as_deref() {
             Some(html) => html,
@@ -3965,6 +4005,13 @@ impl Page {
     }
 
     /// Find the links as a stream using string resource validation for XML files.
+    ///
+    /// Thin `&[u8]` wrapper around the generic
+    /// [`links_stream_xml_from_reader`](Self::links_stream_xml_from_reader)
+    /// so existing in-memory callers keep their shape.  Disk-spooled pages
+    /// should call
+    /// [`links_stream_xml_from_disk`](Self::links_stream_xml_from_disk)
+    /// instead to avoid loading the full file into memory.
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn links_stream_xml_links_stream_base<
         A: PartialEq
@@ -3985,10 +4032,76 @@ impl Page {
         map: &mut HashSet<A>,
         base: &Option<Box<Url>>,
     ) {
+        self.links_stream_xml_from_reader(selectors, xml, map, base)
+            .await;
+    }
+
+    /// Disk-streaming XML link extractor.  Opens the spool file as a buffered
+    /// async reader and feeds chunks into `quick_xml` via `read_event_into_async`
+    /// — never materialises the full XML in memory.  Used by disk-spooled
+    /// sitemaps / feeds when the `balance` feature offloads large responses.
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+    pub async fn links_stream_xml_from_disk<
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + ToString
+            + std::hash::Hash
+            + From<String>
+            + Into<CaseInsensitiveString>
+            + for<'a> From<&'a str>,
+    >(
+        &mut self,
+        selectors: &RelativeSelectors,
+        spool_path: std::path::PathBuf,
+        map: &mut HashSet<A>,
+        base: &Option<Box<Url>>,
+    ) {
+        match tokio::fs::File::open(&spool_path).await {
+            Ok(file) => {
+                let reader = tokio::io::BufReader::with_capacity(*STREAMING_CHUNK_SIZE, file);
+                self.links_stream_xml_from_reader(selectors, reader, map, base)
+                    .await;
+            }
+            Err(_) => {
+                // Missing or unreadable spool file — caller treats an empty
+                // map as "no links", matching the behaviour of the previous
+                // full-read code path when `uring_fs::read_file` errored.
+            }
+        }
+    }
+
+    /// Internal generic XML extractor.  Accepts any `AsyncBufRead` source,
+    /// so in-memory `&[u8]` callers and disk-streaming `BufReader<File>`
+    /// callers share one implementation.
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    pub async fn links_stream_xml_from_reader<
+        R: tokio::io::AsyncBufRead + Unpin + Send,
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + ToString
+            + std::hash::Hash
+            + From<String>
+            + Into<CaseInsensitiveString>
+            + for<'a> From<&'a str>,
+    >(
+        &mut self,
+        selectors: &RelativeSelectors,
+        source: R,
+        map: &mut HashSet<A>,
+        base: &Option<Box<Url>>,
+    ) {
         use quick_xml::events::Event;
         use quick_xml::reader::NsReader;
 
-        let mut reader = NsReader::from_reader(xml);
+        let mut reader = NsReader::from_reader(source);
 
         reader.config_mut().trim_text(true);
 
@@ -4275,22 +4388,11 @@ impl Page {
         let mut meta_description: Option<_> = None;
         let mut meta_og_image: Option<_> = None;
 
-        // XML path: full read required because quick_xml NsReader needs a
-        // contiguous &[u8] slice.  HTML path below uses true streaming.
+        // XML path: stream from disk via BufReader<File> → quick_xml async
+        // reader.  Never materialises the full document in memory.
         if self.is_xml {
-            match crate::utils::uring_fs::read_file(spool_path.display().to_string()).await {
-                Ok(file_data) => {
-                    self.links_stream_xml_links_stream_base(selectors, &file_data, &mut map, base)
-                        .await;
-                }
-                Err(_) => {
-                    if let Some(lp) = links_pages {
-                        let page_links = self.page_links.get_or_insert_with(Default::default);
-                        page_links.extend(lp.into_iter().map(Into::into));
-                    }
-                    return map;
-                }
-            }
+            self.links_stream_xml_from_disk(selectors, spool_path.clone(), &mut map, base)
+                .await;
         } else {
             let base_input_url = tokio::sync::OnceCell::new();
 
@@ -4456,22 +4558,11 @@ impl Page {
         let mut meta_description: Option<_> = None;
         let mut meta_og_image: Option<_> = None;
 
-        // XML path: full read required because quick_xml NsReader needs a
-        // contiguous &[u8] slice.
+        // XML path: stream from disk via BufReader<File> → quick_xml async
+        // reader — no full in-memory buffer.
         if self.is_xml {
-            match crate::utils::uring_fs::read_file(spool_path.display().to_string()).await {
-                Ok(file_data) => {
-                    self.links_stream_xml_links_stream_base(selectors, &file_data, &mut map, base)
-                        .await;
-                }
-                Err(_) => {
-                    if let Some(lp) = links_pages {
-                        let page_links = self.page_links.get_or_insert_with(Default::default);
-                        page_links.extend(lp.into_iter().map(Into::into));
-                    }
-                    return map;
-                }
-            }
+            self.links_stream_xml_from_disk(selectors, spool_path.clone(), &mut map, base)
+                .await;
         } else {
             let cell = tokio::sync::OnceCell::new();
             let base_input_url = tokio::sync::OnceCell::new();
@@ -4922,20 +5013,21 @@ impl Page {
             self.html = Some(html_bytes);
             result
         } else {
-            // When HTML is on disk, read via async I/O to avoid blocking
-            // the tokio runtime.  The bytes are used transiently for SSG
-            // parsing and NOT stored back into self.html so the spool
-            // continues to own the data on disk.
+            // When HTML is on disk, stream the spool file in chunks through
+            // lol_html.  The dedicated `_from_disk_ssg` variant avoids
+            // allocating a full in-memory buffer — keeps the balance feature
+            // honest: bytes stay on disk during link extraction.
             #[cfg(all(feature = "balance", not(feature = "decentralized")))]
             if let Some(ref guard) = self.html_spool_path {
                 if let Some(path) = guard.path() {
-                    if let Ok(disk_bytes) =
-                        crate::utils::html_spool::spool_read_bytes_async(path.to_path_buf()).await
-                    {
-                        return self
-                            .links_stream_base_ssg(selectors, &disk_bytes, client, prior_domain)
-                            .await;
-                    }
+                    return self
+                        .links_stream_base_from_disk_ssg(
+                            selectors,
+                            path.to_path_buf(),
+                            client,
+                            prior_domain,
+                        )
+                        .await;
                 }
             }
             Default::default()
@@ -5085,18 +5177,13 @@ impl Page {
                 #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                 if let Some(ref guard) = self.html_spool_path {
                     if let Some(path) = guard.path() {
-                        if let Ok(disk_bytes) =
-                            crate::utils::html_spool::spool_read_bytes_async(path.to_path_buf())
-                                .await
-                        {
-                            self.links_stream_xml_links_stream_base(
-                                selectors,
-                                &disk_bytes,
-                                &mut map,
-                                &base,
-                            )
-                            .await;
-                        }
+                        self.links_stream_xml_from_disk(
+                            selectors,
+                            path.to_path_buf(),
+                            &mut map,
+                            &base,
+                        )
+                        .await;
                     }
                 }
             }
@@ -5593,18 +5680,13 @@ impl Page {
                 #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                 if let Some(ref guard) = self.html_spool_path {
                     if let Some(path) = guard.path() {
-                        if let Ok(disk_bytes) =
-                            crate::utils::html_spool::spool_read_bytes_async(path.to_path_buf())
-                                .await
-                        {
-                            self.links_stream_xml_links_stream_base(
-                                selectors,
-                                &disk_bytes,
-                                &mut map,
-                                base,
-                            )
-                            .await;
-                        }
+                        self.links_stream_xml_from_disk(
+                            selectors,
+                            path.to_path_buf(),
+                            &mut map,
+                            base,
+                        )
+                        .await;
                     }
                 }
             }
@@ -6074,18 +6156,13 @@ impl Page {
                 #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                 if let Some(ref guard) = self.html_spool_path {
                     if let Some(path) = guard.path() {
-                        if let Ok(disk_bytes) =
-                            crate::utils::html_spool::spool_read_bytes_async(path.to_path_buf())
-                                .await
-                        {
-                            self.links_stream_xml_links_stream_base(
-                                selectors,
-                                &disk_bytes,
-                                &mut map,
-                                base,
-                            )
-                            .await;
-                        }
+                        self.links_stream_xml_from_disk(
+                            selectors,
+                            path.to_path_buf(),
+                            &mut map,
+                            base,
+                        )
+                        .await;
                     }
                 }
             }

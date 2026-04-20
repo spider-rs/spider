@@ -404,6 +404,152 @@ pub async fn spool_write_async(path: &Path, data: &[u8]) -> std::io::Result<()> 
     crate::utils::uring_fs::write_file(path.display().to_string(), data.to_vec()).await
 }
 
+/// Per-page vitals produced by the streaming spool writer.
+///
+/// All fields are computed *while* bytes flush to disk so the caller never
+/// has to scan the full buffer a second time or re-read the spool file.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SpoolVitals {
+    /// Total bytes written to the spool file.
+    pub byte_len: usize,
+    /// Whether the full payload is valid UTF-8.  Computed incrementally
+    /// across chunk boundaries so `simdutf8` never sees the whole buffer
+    /// at once (keeps branch-prediction cache warm + overlaps with I/O).
+    pub is_valid_utf8: bool,
+    /// Binary-file detection via magic numbers on the leading bytes.
+    /// `auto_encoder::is_binary_file` only inspects the header, so the
+    /// check is O(1) and happens before any chunked write.
+    pub binary_file: bool,
+    /// Whether the payload begins with `<?xml`.  Five-byte prefix test.
+    pub is_xml: bool,
+}
+
+/// Streaming-write variant of [`spool_write_async`] that also returns the
+/// page vitals computed **inline with the write**.
+///
+/// Design constraints:
+/// - No blocking syscalls on the caller's thread (all I/O goes through
+///   `tokio::fs` via `tokio::io::BufWriter`).
+/// - No locks, no mutexes, no atomics — purely local state.
+/// - No heap allocation on the hot path.  The tiny 4-byte `carry` buffer
+///   lives on the stack; `BufWriter` is constructed once.
+/// - Walks the bytes exactly **once** — same work as `simdutf8::basic::
+///   from_utf8` on the full buffer, but interleaved with disk flushes so
+///   large spools don't turn into a long CPU-only stall before I/O starts.
+/// - Never panics: every I/O call returns through the `?` operator, and
+///   all slice indexing is bounds-checked or uses `chunks`.
+///
+/// Returns the vitals on success.  The caller is expected to mirror them
+/// onto the `Page` struct so downstream accessors keep skipping redundant
+/// re-validation work.
+pub async fn spool_write_streaming_vitals(
+    path: &Path,
+    data: &[u8],
+) -> std::io::Result<SpoolVitals> {
+    use tokio::io::AsyncWriteExt;
+
+    /// Chunk size for the streaming loop.  64 KiB is large enough to keep
+    /// per-write syscall overhead down yet small enough that validation +
+    /// I/O can plausibly interleave on a busy async runtime.
+    const CHUNK: usize = 64 * 1024;
+
+    let byte_len = data.len();
+
+    // ── O(1) header vitals ────────────────────────────────────────────
+    // Both checks look at only the first few bytes, independent of the
+    // page size.  `auto_encoder::is_binary_file` is a magic-number lookup
+    // table; `is_xml` is a 5-byte `starts_with`.
+    let head = &data[..data.len().min(16)];
+    let binary_file = auto_encoder::is_binary_file(head);
+    let is_xml = head.starts_with(b"<?xml");
+
+    // ── Streaming write + incremental UTF-8 validation ────────────────
+    let file = tokio::fs::File::create(path).await?;
+    let mut writer = tokio::io::BufWriter::with_capacity(CHUNK, file);
+
+    // Rolling state for UTF-8 validation across chunk boundaries.  A
+    // single multi-byte codepoint is at most 4 bytes, so carrying up to
+    // 3 trailing bytes of an incomplete sequence into the next chunk is
+    // always sufficient.  Once `is_valid_utf8` flips to `false` we stop
+    // validating (writes continue to completion).
+    let mut is_valid_utf8 = true;
+    let mut carry: [u8; 4] = [0; 4];
+    let mut carry_len: usize = 0;
+    // Lazily-allocated scratch for stitching `carry + chunk` when the
+    // previous chunk ended mid-codepoint.  Allocated at most once per
+    // spool (the first time carry is non-zero); ASCII-only payloads
+    // never pay this cost.
+    let mut scratch: Vec<u8> = Vec::new();
+
+    for chunk in data.chunks(CHUNK) {
+        writer.write_all(chunk).await?;
+
+        if !is_valid_utf8 {
+            continue;
+        }
+
+        // Build the validation view.  Carry-less fast path is zero-copy:
+        // we validate the chunk slice directly.  Carry path copies the
+        // chunk into a persistent `scratch` buffer; after the first copy
+        // the buffer's capacity is reused, so the allocator is hit at
+        // most once per spool regardless of payload size.
+        let to_validate: &[u8] = if carry_len == 0 {
+            chunk
+        } else {
+            scratch.clear();
+            scratch.reserve(carry_len + chunk.len());
+            scratch.extend_from_slice(&carry[..carry_len]);
+            scratch.extend_from_slice(chunk);
+            &scratch[..]
+        };
+
+        match simdutf8::compat::from_utf8(to_validate) {
+            Ok(_) => {
+                carry_len = 0;
+            }
+            Err(e) => {
+                if e.error_len().is_some() {
+                    // Hard error mid-stream — payload is not UTF-8.
+                    is_valid_utf8 = false;
+                    continue;
+                }
+                // Incomplete sequence at end: save the trailing bytes
+                // for the next iteration.  By definition this can be
+                // at most 3 bytes (any longer would be a hard error).
+                let trailing = &to_validate[e.valid_up_to()..];
+                let keep = trailing.len().min(carry.len());
+                // Copy the last `keep` bytes of the trailing slice.
+                // Using a tiny stack temp avoids overlap pitfalls if
+                // `trailing` is borrowed from `scratch` and we later
+                // clear that buffer in the next iteration.
+                let mut tmp: [u8; 4] = [0; 4];
+                tmp[..keep].copy_from_slice(&trailing[trailing.len() - keep..]);
+                carry[..keep].copy_from_slice(&tmp[..keep]);
+                carry_len = keep;
+            }
+        }
+    }
+
+    writer.flush().await?;
+    // Ensure the underlying file is synced into its Drop path without
+    // awaiting a separate close — BufWriter::into_inner avoids a double
+    // flush while still dropping the fd cleanly.
+    let _file = writer.into_inner();
+
+    // Any leftover partial codepoint at EOF means the payload is not
+    // complete UTF-8.
+    if carry_len > 0 {
+        is_valid_utf8 = false;
+    }
+
+    Ok(SpoolVitals {
+        byte_len,
+        is_valid_utf8,
+        binary_file,
+        is_xml,
+    })
+}
+
 /// Async streaming read of a spool file in chunks.
 /// Delegates to [`uring_fs::read_file_chunked`] which picks the
 /// optimal strategy per platform (io_uring or tokio::fs streaming).
@@ -642,6 +788,93 @@ pub(crate) mod tests {
         assert_eq!(total, size);
         assert_eq!(collected, data);
 
+        spool_delete(&path);
+    }
+
+    /// The streaming vitals writer must match the one-shot reference values
+    /// (`simdutf8::basic::from_utf8` + `is_binary_file` on the full buffer)
+    /// so swapping it in never changes observable behavior.
+    #[tokio::test]
+    async fn test_spool_streaming_vitals_matches_reference_ascii() {
+        let data = b"<html><body>simple ascii page</body></html>";
+        let path = next_spool_path();
+        let vitals = spool_write_streaming_vitals(&path, data).await.unwrap();
+        assert_eq!(vitals.byte_len, data.len());
+        assert!(vitals.is_valid_utf8);
+        assert!(!vitals.binary_file);
+        assert!(!vitals.is_xml);
+        // File really exists with exactly the bytes we gave.
+        let on_disk = std::fs::read(&path).unwrap();
+        assert_eq!(on_disk, data);
+        spool_delete(&path);
+    }
+
+    /// Multi-byte UTF-8 codepoints that cross an internal chunk boundary
+    /// must still validate as valid UTF-8.  This exercises the `carry`
+    /// rollover path without needing a pathologically large payload.
+    #[tokio::test]
+    async fn test_spool_streaming_vitals_utf8_multibyte() {
+        // Repeat a 3-byte codepoint ("€") enough to span well past the
+        // 64 KiB chunk cutoff so at least one boundary falls mid-codepoint.
+        let mut data: Vec<u8> = Vec::with_capacity(256 * 1024);
+        for _ in 0..(90 * 1024) {
+            data.extend_from_slice("€".as_bytes());
+        }
+        assert!(simdutf8::basic::from_utf8(&data).is_ok());
+
+        let path = next_spool_path();
+        let vitals = spool_write_streaming_vitals(&path, &data).await.unwrap();
+        assert_eq!(vitals.byte_len, data.len());
+        assert!(
+            vitals.is_valid_utf8,
+            "multi-byte codepoint spanning chunk boundaries must stay valid"
+        );
+        spool_delete(&path);
+    }
+
+    /// Hard UTF-8 errors mid-stream flip the flag to false, never panic,
+    /// and the bytes still land on disk intact for later inspection.
+    #[tokio::test]
+    async fn test_spool_streaming_vitals_utf8_invalid() {
+        let mut data: Vec<u8> = b"<html>valid prefix".to_vec();
+        // Insert a lone continuation byte (illegal UTF-8 start).
+        data.push(0x80);
+        data.extend_from_slice(b"</html>");
+
+        let path = next_spool_path();
+        let vitals = spool_write_streaming_vitals(&path, &data).await.unwrap();
+        assert_eq!(vitals.byte_len, data.len());
+        assert!(!vitals.is_valid_utf8);
+        let on_disk = std::fs::read(&path).unwrap();
+        assert_eq!(on_disk, data);
+        spool_delete(&path);
+    }
+
+    /// XML header detection is O(1): only the first five bytes decide the
+    /// flag, regardless of payload size.
+    #[tokio::test]
+    async fn test_spool_streaming_vitals_xml_header() {
+        let data = br#"<?xml version="1.0"?><feed/>"#;
+        let path = next_spool_path();
+        let vitals = spool_write_streaming_vitals(&path, data).await.unwrap();
+        assert!(vitals.is_xml);
+        assert!(vitals.is_valid_utf8);
+        spool_delete(&path);
+    }
+
+    /// Empty payload still writes a file (size 0) and returns sensible
+    /// vitals — never panics.
+    #[tokio::test]
+    async fn test_spool_streaming_vitals_empty() {
+        let path = next_spool_path();
+        let vitals = spool_write_streaming_vitals(&path, &[]).await.unwrap();
+        assert_eq!(vitals.byte_len, 0);
+        assert!(
+            vitals.is_valid_utf8,
+            "empty bytes are trivially valid utf-8"
+        );
+        assert!(!vitals.binary_file);
+        assert!(!vitals.is_xml);
         spool_delete(&path);
     }
 }
