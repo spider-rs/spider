@@ -3687,7 +3687,7 @@ pub async fn fetch_page_html_chrome_base(
                 feature = "chrome",
                 not(feature = "decentralized")
             ))]
-            let spooled_response: Option<PageResponse> = {
+            let (spooled_response, spool_attempted): (Option<PageResponse>, bool) = {
                 let prefer_direct_spool = !xml_target
                     && !waf_check
                     && anti_bot_tech == AntiBotTech::None
@@ -3697,11 +3697,14 @@ pub async fn fetch_page_html_chrome_base(
                     && chrome_doc_length_above_solver_threshold(page).await;
 
                 if prefer_direct_spool {
-                    match tokio::time::timeout(
-                        base_timeout.max(HALF_MAX_PAGE_TIMEOUT),
-                        fetch_chrome_html_to_spool(page),
-                    )
-                    .await
+                    // Use at most half the remaining budget so the legacy
+                    // fallback below still has runway if the spool attempt
+                    // fails partway through.  Without this split, spool +
+                    // fallback could each consume up to
+                    // `HALF_MAX_PAGE_TIMEOUT` (2.5 min) and blow past the
+                    // caller's `request_timeout` on the failure path.
+                    let spool_budget = (base_timeout / 2).max(Duration::from_secs(10));
+                    match tokio::time::timeout(spool_budget, fetch_chrome_html_to_spool(page)).await
                     {
                         Ok(Some(spool)) => {
                             // Gate already rules out waf_check = true,
@@ -3726,12 +3729,12 @@ pub async fn fetch_page_html_chrome_base(
                             if ok {
                                 pr.content_spool = Some(spool);
                             }
-                            Some(pr)
+                            (Some(pr), true)
                         }
-                        _ => None,
+                        _ => (None, true),
                     }
                 } else {
-                    None
+                    (None, false)
                 }
             };
 
@@ -3740,14 +3743,12 @@ pub async fn fetch_page_html_chrome_base(
                 feature = "chrome",
                 not(feature = "decentralized")
             )))]
-            let spooled_response: Option<PageResponse> = None;
+            let (spooled_response, spool_attempted): (Option<PageResponse>, bool) = (None, false);
 
-            // If the spool attempt consumed non-trivial time before
-            // failing, don't let the legacy fallback start with a fresh
-            // clock — keep total wall time within the caller's
-            // `request_timeout`.  When the gate was closed or the spool
-            // branch is cfg-out, this is effectively a no-op since the
-            // block above returned immediately.
+            // Recompute `base_timeout` so the fallback clock reflects the
+            // time already burned by the spool attempt (when it ran).  The
+            // no-spool path never mutated the clock, so this is a no-op
+            // there.
             base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
 
             let mut page_response = if let Some(pr) = spooled_response {
@@ -3763,8 +3764,18 @@ pub async fn fetch_page_html_chrome_base(
                     }
                 };
 
-                let results =
-                    tokio::time::timeout(base_timeout.max(HALF_MAX_PAGE_TIMEOUT), page_fn);
+                // When we fell through from a failed spool attempt, use
+                // only the remaining budget (no `HALF_MAX_PAGE_TIMEOUT`
+                // floor) so the total wall time never exceeds the
+                // caller's `request_timeout`.  When the gate was closed
+                // (no spool attempt), preserve the original floor so
+                // behaviour matches pre-spool releases exactly.
+                let fallback_budget = if spool_attempted {
+                    base_timeout
+                } else {
+                    base_timeout.max(HALF_MAX_PAGE_TIMEOUT)
+                };
+                let results = tokio::time::timeout(fallback_budget, page_fn);
 
                 let mut res: Vec<u8> = match results.await {
                     Ok(v) => v.unwrap_or_default(),
