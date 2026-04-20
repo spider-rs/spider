@@ -140,6 +140,112 @@ struct SpoolDirHandle {
     path: PathBuf,
 }
 
+/// Per-[`crate::website::Website`] spool directory.
+///
+/// Created lazily on first spool and torn down when the last holder drops
+/// the `Arc`.  Two paths keep it alive:
+///
+/// 1. The owning `Website` holds an [`Arc`] so the dir persists across all
+///    crawl tasks it spawns.
+/// 2. Each spool file's [`crate::page::HtmlSpoolGuard`] holds a clone so
+///    in-flight pages (e.g. ones broadcast through `subscribe`) keep the
+///    dir alive past the `Website` drop — reads on the spool file stay
+///    valid until the consumer finishes with the page.
+///
+/// When both drop, the inner [`tempfile::TempDir`] runs its sync
+/// `remove_dir_all` which bulk-removes every file inside — making
+/// `Website::drop` the single deterministic cleanup point for *all* spool
+/// files it produced, no matter whether individual pages were consumed
+/// or dropped.
+///
+/// `Arc` bumps are wait-free reference counts; no mutex, no lock, no
+/// broadcast.  Construction is one syscall (`mkdtemp`).  Drop is one
+/// syscall per entry plus one `rmdir`.
+pub struct WebsiteSpoolDir {
+    /// `None` when the filesystem refused to create a new temp dir and
+    /// we fell back to the process-shared global dir — in that mode the
+    /// wrapper becomes a zero-cost passthrough and drop is a no-op.
+    owned: Option<tempfile::TempDir>,
+    path: PathBuf,
+}
+
+impl std::fmt::Debug for WebsiteSpoolDir {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebsiteSpoolDir")
+            .field("path", &self.path)
+            .field("owned", &self.owned.is_some())
+            .finish()
+    }
+}
+
+impl WebsiteSpoolDir {
+    /// Create a fresh per-website spool directory under the global
+    /// spool root.  If creation fails (disk full, permissions), falls
+    /// back to the shared global dir so the caller always gets a valid
+    /// handle — never panics, never blocks.
+    #[inline]
+    pub fn new_or_shared() -> Self {
+        match tempfile::Builder::new()
+            .prefix("spider_website_")
+            .tempdir_in(spool_dir())
+        {
+            Ok(td) => {
+                let path = td.path().to_path_buf();
+                Self {
+                    owned: Some(td),
+                    path,
+                }
+            }
+            Err(_) => Self {
+                owned: None,
+                path: spool_dir().to_path_buf(),
+            },
+        }
+    }
+
+    /// Root path of this website's spool directory.  Every file produced
+    /// by `next_path` sits directly inside this path; no subdirs.
+    #[inline]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Allocate a unique spool file path inside this directory.  The
+    /// counter is global and atomic, so two `WebsiteSpoolDir`s never
+    /// produce the same name even at high concurrency.
+    #[inline]
+    pub fn next_path(&self) -> PathBuf {
+        let id = SPOOL_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        self.path.join(format!("{id}.sphtml"))
+    }
+}
+
+tokio::task_local! {
+    /// Ambient per-task handle to the current [`WebsiteSpoolDir`].
+    ///
+    /// Set by each `Website` crawl entry point and re-propagated by
+    /// `utils::spawn_set` so every fetch task spawned by the crawl
+    /// inherits it without needing to thread an `Arc` parameter through
+    /// the ~20-argument fetch API.
+    ///
+    /// Outside a scoped task (ad-hoc callers, tests, external users of
+    /// `Page::spool_html_to_disk`), the task-local is absent and
+    /// [`next_spool_path`] falls back to the process-shared
+    /// [`spool_dir`].
+    pub static WEBSITE_SPOOL_DIR: std::sync::Arc<WebsiteSpoolDir>;
+}
+
+/// Read the current task-local `WebsiteSpoolDir` handle, if any.
+///
+/// Lock-free and allocation-free beyond the `Arc` bump — a single
+/// atomic read via `task_local!::try_with`.  Returns `None` when no
+/// scope is active (ad-hoc `page.spool_html_to_disk()` outside a
+/// website crawl, tests, etc.).
+#[inline]
+pub fn current_website_spool_dir() -> Option<std::sync::Arc<WebsiteSpoolDir>> {
+    WEBSITE_SPOOL_DIR.try_with(|d| d.clone()).ok()
+}
+
 // ── Configurable thresholds (env-overridable) ──────────────────────────────
 
 /// Hard cap on total in-memory HTML before pages are spooled.
@@ -347,7 +453,16 @@ pub fn spool_dir() -> &'static Path {
 }
 
 /// Generate a unique spool file path for a page.
+///
+/// When called inside a [`WEBSITE_SPOOL_DIR`] scope, the file lands in
+/// that website's private subdir so it's torn down with the website.
+/// Outside a scope — ad-hoc callers, tests, external users of
+/// `Page::spool_html_to_disk` — the path resolves to the global
+/// process-shared [`spool_dir`], preserving the legacy behaviour.
 pub fn next_spool_path() -> PathBuf {
+    if let Some(dir) = current_website_spool_dir() {
+        return dir.next_path();
+    }
     let id = SPOOL_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
     spool_dir().join(format!("{id}.sphtml"))
 }

@@ -7985,6 +7985,19 @@ where
     F: Send + 'static,
     T: Send + 'static,
 {
+    // Auto-propagate the current website's spool dir into every task
+    // we spawn.  `tokio::task_local!` does not cross `spawn` boundaries
+    // on its own — we read the caller's value and re-enter the scope
+    // inside the spawned future so descendants (nested spawn_set, fetch
+    // paths, `Page::build`) all see the same handle.  A single atomic
+    // `Arc` clone — no mutex, no alloc.  When the caller is not inside
+    // a website scope (tests, ad-hoc uses) this is a no-op.
+    #[cfg(feature = "balance")]
+    {
+        if let Some(dir) = crate::utils::html_spool::current_website_spool_dir() {
+            return set.spawn(crate::utils::html_spool::WEBSITE_SPOOL_DIR.scope(dir, future));
+        }
+    }
     set.spawn(future)
 }
 

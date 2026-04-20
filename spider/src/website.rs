@@ -954,6 +954,16 @@ pub struct Website {
     #[cfg(feature = "parallel_backends")]
     /// Semaphore limiting concurrent backend sessions to prevent memory spikes.
     pb_semaphore: Option<Arc<tokio::sync::Semaphore>>,
+    /// Lazily-created per-website spool directory.
+    ///
+    /// Only allocated on the first spool (file write / stream-to-disk).
+    /// Holding the `Arc` guarantees the underlying `tempfile::TempDir`
+    /// stays alive for the lifetime of this `Website` and any `Page`s
+    /// the crawl produced — when both drop, the entire directory plus
+    /// every file it contains is removed in a single
+    /// `std::fs::remove_dir_all` call.
+    #[cfg(feature = "balance")]
+    spool_dir: std::sync::OnceLock<Arc<crate::utils::html_spool::WebsiteSpoolDir>>,
 }
 
 impl fmt::Debug for Website {
@@ -1011,6 +1021,19 @@ impl fmt::Debug for Website {
 }
 
 impl Website {
+    /// Lazily create (or return the already-initialized) per-website spool
+    /// directory.  First call allocates the [`tempfile::TempDir`];
+    /// subsequent calls are a single atomic load + `Arc` clone, no locks.
+    /// Creation failures fall back to the shared global dir via
+    /// [`WebsiteSpoolDir::new_or_shared`] so the call is infallible.
+    #[cfg(feature = "balance")]
+    #[inline]
+    pub(crate) fn ensure_spool_dir(&self) -> Arc<crate::utils::html_spool::WebsiteSpoolDir> {
+        self.spool_dir
+            .get_or_init(|| Arc::new(crate::utils::html_spool::WebsiteSpoolDir::new_or_shared()))
+            .clone()
+    }
+
     /// Initialize the Website with a starting link to crawl and check the firewall base.
     fn _new(url: &str, check_firewall: bool) -> Self {
         let url = url.trim();
@@ -5792,57 +5815,77 @@ impl Website {
 
     /// Start to crawl website with async concurrency.
     pub async fn crawl(&mut self) {
-        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
-            self.start();
-            if self.try_cache_shortcircuit().await {
+        #[cfg(feature = "balance")]
+        let __spool_arc = self.ensure_spool_dir();
+        let __body = async {
+            if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+                self.start();
+                if self.try_cache_shortcircuit().await {
+                    self.set_crawl_status();
+                    return;
+                }
+                let (client, handle) = self.setup().await;
+                let (handle, join_handle) = match handle {
+                    Some(h) => (Some(h.0), Some(h.1)),
+                    _ => (None, None),
+                };
+                let crawl_timeout = self.configuration.crawl_timeout;
+                let url = self.url.inner().to_string();
+                run_with_crawl_timeout(crawl_timeout, &url, async {
+                    self.crawl_concurrent(&client, &handle).await;
+                    self.sitemap_crawl_chain(&client, &handle, false).await;
+                })
+                .await;
                 self.set_crawl_status();
-                return;
+                if let Some(h) = join_handle {
+                    h.abort()
+                }
+                self.client.replace(client);
             }
-            let (client, handle) = self.setup().await;
-            let (handle, join_handle) = match handle {
-                Some(h) => (Some(h.0), Some(h.1)),
-                _ => (None, None),
-            };
-            let crawl_timeout = self.configuration.crawl_timeout;
-            let url = self.url.inner().to_string();
-            run_with_crawl_timeout(crawl_timeout, &url, async {
-                self.crawl_concurrent(&client, &handle).await;
-                self.sitemap_crawl_chain(&client, &handle, false).await;
-            })
+        };
+        #[cfg(feature = "balance")]
+        crate::utils::html_spool::WEBSITE_SPOOL_DIR
+            .scope(__spool_arc, __body)
             .await;
-            self.set_crawl_status();
-            if let Some(h) = join_handle {
-                h.abort()
-            }
-            self.client.replace(client);
-        }
+        #[cfg(not(feature = "balance"))]
+        __body.await;
     }
 
     /// Start to crawl website with async concurrency using the sitemap. This does not page forward into the request. This does nothing without the `sitemap` flag enabled.
     pub async fn crawl_sitemap(&mut self) {
-        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
-            self.start();
-            if self.try_cache_shortcircuit().await {
+        #[cfg(feature = "balance")]
+        let __spool_arc = self.ensure_spool_dir();
+        let __body = async {
+            if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+                self.start();
+                if self.try_cache_shortcircuit().await {
+                    self.set_crawl_status();
+                    return;
+                }
+                let (client, handle) = self.setup().await;
+                let (handle, join_handle) = match handle {
+                    Some(h) => (Some(h.0), Some(h.1)),
+                    _ => (None, None),
+                };
+                let crawl_timeout = self.configuration.crawl_timeout;
+                let url = self.url.inner().to_string();
+                run_with_crawl_timeout(crawl_timeout, &url, async {
+                    self.sitemap_crawl(&client, &handle, false).await;
+                })
+                .await;
                 self.set_crawl_status();
-                return;
+                if let Some(h) = join_handle {
+                    h.abort()
+                }
+                self.client.replace(client);
             }
-            let (client, handle) = self.setup().await;
-            let (handle, join_handle) = match handle {
-                Some(h) => (Some(h.0), Some(h.1)),
-                _ => (None, None),
-            };
-            let crawl_timeout = self.configuration.crawl_timeout;
-            let url = self.url.inner().to_string();
-            run_with_crawl_timeout(crawl_timeout, &url, async {
-                self.sitemap_crawl(&client, &handle, false).await;
-            })
+        };
+        #[cfg(feature = "balance")]
+        crate::utils::html_spool::WEBSITE_SPOOL_DIR
+            .scope(__spool_arc, __body)
             .await;
-            self.set_crawl_status();
-            if let Some(h) = join_handle {
-                h.abort()
-            }
-            self.client.replace(client);
-        }
+        #[cfg(not(feature = "balance"))]
+        __body.await;
     }
 
     /// Start to crawl website with async concurrency using the sitemap. This does not page forward into the request. This does nothing without the `sitemap` and the `chrome` flag enabled.
@@ -5852,25 +5895,35 @@ impl Website {
         not(feature = "decentralized")
     ))]
     pub async fn crawl_sitemap_chrome(&mut self) {
-        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
-            self.start();
-            let (client, handle) = self.setup().await;
-            let (handle, join_handle) = match handle {
-                Some(h) => (Some(h.0), Some(h.1)),
-                _ => (None, None),
-            };
-            let crawl_timeout = self.configuration.crawl_timeout;
-            let url = self.url.inner().to_string();
-            run_with_crawl_timeout(crawl_timeout, &url, async {
-                self.sitemap_crawl_chrome(&client, &handle, false).await;
-            })
-            .await;
-            self.set_crawl_status();
-            if let Some(h) = join_handle {
-                h.abort()
+        #[cfg(feature = "balance")]
+        let __spool_arc = self.ensure_spool_dir();
+        let __body = async {
+            if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+                self.start();
+                let (client, handle) = self.setup().await;
+                let (handle, join_handle) = match handle {
+                    Some(h) => (Some(h.0), Some(h.1)),
+                    _ => (None, None),
+                };
+                let crawl_timeout = self.configuration.crawl_timeout;
+                let url = self.url.inner().to_string();
+                run_with_crawl_timeout(crawl_timeout, &url, async {
+                    self.sitemap_crawl_chrome(&client, &handle, false).await;
+                })
+                .await;
+                self.set_crawl_status();
+                if let Some(h) = join_handle {
+                    h.abort()
+                }
+                self.client.replace(client);
             }
-            self.client.replace(client);
-        }
+        };
+        #[cfg(feature = "balance")]
+        crate::utils::html_spool::WEBSITE_SPOOL_DIR
+            .scope(__spool_arc, __body)
+            .await;
+        #[cfg(not(feature = "balance"))]
+        __body.await;
     }
 
     /// Configures the website crawling process for concurrent execution with the ability to send it across threads for subscriptions.
@@ -5898,28 +5951,38 @@ impl Website {
     /// It checks the status to ensure it is not firewall-blocked before proceeding with concurrent crawling.
     /// You can pass in a manual url in order to setup a new crawl directly with pre-configurations ready.
     pub async fn crawl_raw_send(&self, url: Option<&str>) {
-        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
-            let (client, handle) = (
-                match &self.client {
-                    Some(c) => c.to_owned(),
-                    _ => self.configure_http_client(),
-                },
-                self.configure_handler(),
-            );
-            let (handle, join_handle) = match handle {
-                Some(h) => (Some(h.0), Some(h.1)),
-                _ => (None, None),
-            };
-            let crawl_timeout = self.configuration.crawl_timeout;
-            let u = self.url.inner().to_string();
-            run_with_crawl_timeout(crawl_timeout, &u, async {
-                self.crawl_concurrent_raw_send(&client, &handle, &url).await;
-            })
-            .await;
-            if let Some(h) = join_handle {
-                h.abort()
+        #[cfg(feature = "balance")]
+        let __spool_arc = self.ensure_spool_dir();
+        let __body = async {
+            if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+                let (client, handle) = (
+                    match &self.client {
+                        Some(c) => c.to_owned(),
+                        _ => self.configure_http_client(),
+                    },
+                    self.configure_handler(),
+                );
+                let (handle, join_handle) = match handle {
+                    Some(h) => (Some(h.0), Some(h.1)),
+                    _ => (None, None),
+                };
+                let crawl_timeout = self.configuration.crawl_timeout;
+                let u = self.url.inner().to_string();
+                run_with_crawl_timeout(crawl_timeout, &u, async {
+                    self.crawl_concurrent_raw_send(&client, &handle, &url).await;
+                })
+                .await;
+                if let Some(h) = join_handle {
+                    h.abort()
+                }
             }
-        }
+        };
+        #[cfg(feature = "balance")]
+        crate::utils::html_spool::WEBSITE_SPOOL_DIR
+            .scope(__spool_arc, __body)
+            .await;
+        #[cfg(not(feature = "balance"))]
+        __body.await;
     }
 
     #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
@@ -5927,28 +5990,38 @@ impl Website {
     /// Use `website.configure_setup().await` before executing this function to re-use the initial setup.
     /// You can pass in a manual url in order to setup a new crawl directly with pre-configurations ready.
     pub async fn crawl_chrome_send(&self, url: Option<&str>) {
-        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
-            let (client, handle) = (
-                match &self.client {
-                    Some(c) => c.to_owned(),
-                    _ => self.configure_http_client(),
-                },
-                self.configure_handler(),
-            );
-            let (handle, join_handle) = match handle {
-                Some(h) => (Some(h.0), Some(h.1)),
-                _ => (None, None),
-            };
-            let crawl_timeout = self.configuration.crawl_timeout;
-            let u = self.url.inner().to_string();
-            run_with_crawl_timeout(crawl_timeout, &u, async {
-                self.crawl_concurrent_send(&client, &handle, &url).await;
-            })
-            .await;
-            if let Some(h) = join_handle {
-                h.abort()
+        #[cfg(feature = "balance")]
+        let __spool_arc = self.ensure_spool_dir();
+        let __body = async {
+            if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+                let (client, handle) = (
+                    match &self.client {
+                        Some(c) => c.to_owned(),
+                        _ => self.configure_http_client(),
+                    },
+                    self.configure_handler(),
+                );
+                let (handle, join_handle) = match handle {
+                    Some(h) => (Some(h.0), Some(h.1)),
+                    _ => (None, None),
+                };
+                let crawl_timeout = self.configuration.crawl_timeout;
+                let u = self.url.inner().to_string();
+                run_with_crawl_timeout(crawl_timeout, &u, async {
+                    self.crawl_concurrent_send(&client, &handle, &url).await;
+                })
+                .await;
+                if let Some(h) = join_handle {
+                    h.abort()
+                }
             }
-        }
+        };
+        #[cfg(feature = "balance")]
+        crate::utils::html_spool::WEBSITE_SPOOL_DIR
+            .scope(__spool_arc, __body)
+            .await;
+        #[cfg(not(feature = "balance"))]
+        __body.await;
     }
 
     #[cfg(all(feature = "chrome", feature = "decentralized"))]
@@ -6018,29 +6091,39 @@ impl Website {
     #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
     /// Start to crawl website with async concurrency smart. Use HTTP first and JavaScript Rendering as needed. This has no effect without the `smart` flag enabled.
     pub async fn crawl_smart(&mut self) {
-        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
-            self.start();
-            if self.try_cache_shortcircuit().await {
+        #[cfg(feature = "balance")]
+        let __spool_arc = self.ensure_spool_dir();
+        let __body = async {
+            if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+                self.start();
+                if self.try_cache_shortcircuit().await {
+                    self.set_crawl_status();
+                    return;
+                }
+                let (client, handle) = self.setup().await;
+                let (handle, join_handle) = match handle {
+                    Some(h) => (Some(h.0), Some(h.1)),
+                    _ => (None, None),
+                };
+                let crawl_timeout = self.configuration.crawl_timeout;
+                let url = self.url.inner().to_string();
+                run_with_crawl_timeout(crawl_timeout, &url, async {
+                    self.crawl_concurrent_smart(&client, &handle).await;
+                })
+                .await;
                 self.set_crawl_status();
-                return;
+                if let Some(h) = join_handle {
+                    h.abort()
+                }
+                self.client.replace(client);
             }
-            let (client, handle) = self.setup().await;
-            let (handle, join_handle) = match handle {
-                Some(h) => (Some(h.0), Some(h.1)),
-                _ => (None, None),
-            };
-            let crawl_timeout = self.configuration.crawl_timeout;
-            let url = self.url.inner().to_string();
-            run_with_crawl_timeout(crawl_timeout, &url, async {
-                self.crawl_concurrent_smart(&client, &handle).await;
-            })
+        };
+        #[cfg(feature = "balance")]
+        crate::utils::html_spool::WEBSITE_SPOOL_DIR
+            .scope(__spool_arc, __body)
             .await;
-            self.set_crawl_status();
-            if let Some(h) = join_handle {
-                h.abort()
-            }
-            self.client.replace(client);
-        }
+        #[cfg(not(feature = "balance"))]
+        __body.await;
     }
 
     #[cfg(all(not(feature = "decentralized"), not(feature = "smart")))]
@@ -6051,30 +6134,40 @@ impl Website {
 
     /// Start to crawl website with async concurrency using the base raw functionality. Useful when using the `chrome` feature and defaulting to the basic implementation.
     pub async fn crawl_raw(&mut self) {
-        if !self.status.eq(&CrawlStatus::FirewallBlocked) {
-            self.start();
-            if self.try_cache_shortcircuit().await {
+        #[cfg(feature = "balance")]
+        let __spool_arc = self.ensure_spool_dir();
+        let __body = async {
+            if !self.status.eq(&CrawlStatus::FirewallBlocked) {
+                self.start();
+                if self.try_cache_shortcircuit().await {
+                    self.set_crawl_status();
+                    return;
+                }
+                let (client, handle) = self.setup().await;
+                let (handle, join_handle) = match handle {
+                    Some(h) => (Some(h.0), Some(h.1)),
+                    _ => (None, None),
+                };
+                let crawl_timeout = self.configuration.crawl_timeout;
+                let url = self.url.inner().to_string();
+                run_with_crawl_timeout(crawl_timeout, &url, async {
+                    self.crawl_concurrent_raw(&client, &handle).await;
+                    self.sitemap_crawl_chain(&client, &handle, false).await;
+                })
+                .await;
                 self.set_crawl_status();
-                return;
+                if let Some(h) = join_handle {
+                    h.abort()
+                }
+                self.client.replace(client);
             }
-            let (client, handle) = self.setup().await;
-            let (handle, join_handle) = match handle {
-                Some(h) => (Some(h.0), Some(h.1)),
-                _ => (None, None),
-            };
-            let crawl_timeout = self.configuration.crawl_timeout;
-            let url = self.url.inner().to_string();
-            run_with_crawl_timeout(crawl_timeout, &url, async {
-                self.crawl_concurrent_raw(&client, &handle).await;
-                self.sitemap_crawl_chain(&client, &handle, false).await;
-            })
+        };
+        #[cfg(feature = "balance")]
+        crate::utils::html_spool::WEBSITE_SPOOL_DIR
+            .scope(__spool_arc, __body)
             .await;
-            self.set_crawl_status();
-            if let Some(h) = join_handle {
-                h.abort()
-            }
-            self.client.replace(client);
-        }
+        #[cfg(not(feature = "balance"))]
+        __body.await;
     }
 
     /// Safety net: spool any accumulated pages that still have in-memory

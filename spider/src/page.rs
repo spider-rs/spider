@@ -676,10 +676,25 @@ pub enum AntiBotTech {
 /// Inner state for a spool file, protected by `Arc` so that clones (e.g.
 /// from broadcast channels) share the same file without copying it.
 /// The file is deleted only when the *last* reference drops.
+///
+/// When the spool was written inside a [`crate::utils::html_spool::WEBSITE_SPOOL_DIR`]
+/// scope, `dir_handle` holds an `Arc` to that per-website directory so
+/// it stays alive as long as any page referencing a file inside it is
+/// live — guaranteeing that readers keep working even if the owning
+/// `Website` was dropped mid-broadcast.  The handle is `None` for files
+/// written outside a scope (ad-hoc `page.spool_html_to_disk()` calls
+/// against the global dir) so there is zero per-page cost in the
+/// non-website path.
 #[cfg(feature = "balance")]
 #[derive(Debug)]
 struct SpoolInner {
     path: std::path::PathBuf,
+    /// Extends the lifetime of the per-website spool directory for as
+    /// long as this guard is alive.  Unread by design — the `Drop` of
+    /// the surrounding `Arc<SpoolInner>` decrements the dir's `Arc`
+    /// count, which is the entire contract.
+    #[allow(dead_code)]
+    dir_handle: Option<Arc<crate::utils::html_spool::WebsiteSpoolDir>>,
 }
 
 #[cfg(feature = "balance")]
@@ -710,9 +725,18 @@ pub(crate) struct HtmlSpoolGuard {
 
 #[cfg(feature = "balance")]
 impl HtmlSpoolGuard {
-    pub fn new(path: std::path::PathBuf) -> Self {
+    /// Build a guard for a spool file.  When `dir_handle` is `Some`, the
+    /// guard also keeps the per-website spool directory alive so readers
+    /// that outlive the owning `Website` (e.g. broadcast subscribers) can
+    /// still open the file.  When `None`, the file lives in the process-
+    /// shared global dir and is cleaned individually on last drop —
+    /// identical to the pre-website-scope behaviour, zero extra cost.
+    pub fn new(
+        path: std::path::PathBuf,
+        dir_handle: Option<Arc<crate::utils::html_spool::WebsiteSpoolDir>>,
+    ) -> Self {
         Self {
-            inner: Some(Arc::new(SpoolInner { path })),
+            inner: Some(Arc::new(SpoolInner { path, dir_handle })),
         }
     }
 
@@ -1705,7 +1729,15 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
             page_links: None,
             proxy_configured: false,
             profile_key: None,
-            html_spool_path: Some(HtmlSpoolGuard::new(spool.path)),
+            // Hook the guard to the current per-website spool dir (if
+            // we're inside a website crawl scope) so the dir survives as
+            // long as any page produced by the crawl is still live.
+            // Outside a scope this resolves to `None` — identical to the
+            // legacy global-dir behaviour, zero per-page cost.
+            html_spool_path: Some(HtmlSpoolGuard::new(
+                spool.path,
+                crate::utils::html_spool::current_website_spool_dir(),
+            )),
             content_byte_len: spool.vitals.byte_len,
             #[cfg(feature = "parallel_backends")]
             backend_source: None,
@@ -3376,7 +3408,10 @@ impl Page {
             self.html = None;
             crate::utils::html_spool::track_bytes_sub(len);
             crate::utils::html_spool::track_page_spooled();
-            self.html_spool_path = Some(HtmlSpoolGuard::new(path));
+            self.html_spool_path = Some(HtmlSpoolGuard::new(
+                path,
+                crate::utils::html_spool::current_website_spool_dir(),
+            ));
             // Bytes are now on disk, not in memory — clear the tracking
             // flag so Drop does not double-subtract.
             self.balance_bytes_tracked = false;
@@ -3430,7 +3465,10 @@ impl Page {
                 self.html = None;
                 crate::utils::html_spool::track_bytes_sub(vitals.byte_len);
                 crate::utils::html_spool::track_page_spooled();
-                self.html_spool_path = Some(HtmlSpoolGuard::new(path));
+                self.html_spool_path = Some(HtmlSpoolGuard::new(
+                    path,
+                    crate::utils::html_spool::current_website_spool_dir(),
+                ));
                 // Bytes are now on disk, not in memory — clear the tracking
                 // flag so Drop does not double-subtract.
                 self.balance_bytes_tracked = false;
