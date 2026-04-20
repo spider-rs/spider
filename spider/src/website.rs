@@ -6617,7 +6617,13 @@ impl Website {
                                                     page.links(&shared.1, &page_base).await
                                                 };
                                                 page.base = None;
-                                                if normalize {
+                                                // Skip when signature is already set — e.g. a
+                                                // pre-spooled page carries a `hash_html`-equivalent
+                                                // signature computed against its normalised bytes
+                                                // inside the spool writer.  Calling `hash_html`
+                                                // here would return `hash_html(&[])` = 0 because
+                                                // spooled pages expose empty in-memory bytes.
+                                                if normalize && page.signature.is_none() {
                                                     page.signature.replace(crate::utils::hash_html(page.get_html_bytes_u8()).await);
                                                 }
                                                 if let Some(ref cb) = on_should_crawl_callback {
@@ -7531,7 +7537,10 @@ impl Website {
                                                                     page.links(&shared.1, &page_base).await
                                                                 };
                                                                 page.base = None;
-                                                                if shared.6.normalize {
+                                                                // See comment on the sibling site: pre-spooled pages
+                                                                // already carry their signature; re-hashing the empty
+                                                                // in-memory buffer would clobber it with 0.
+                                                                if shared.6.normalize && page.signature.is_none() {
                                                                     page.signature.replace(crate::utils::hash_html(page.get_html_bytes_u8()).await);
                                                                 }
                                                                 if let Some(ref cb) = on_should_crawl_callback {
@@ -9355,7 +9364,10 @@ impl Website {
 
                                             page.base = prev_domain;
 
-                                            if shared.6.normalize {
+                                            // See comment on the sibling site: pre-spooled pages
+                                            // already carry their signature; re-hashing the empty
+                                            // in-memory buffer would clobber it with 0.
+                                            if shared.6.normalize && page.signature.is_none() {
                                                 page.signature.replace(crate::utils::hash_html(page.get_html_bytes_u8()).await);
                                             }
 
@@ -9863,7 +9875,10 @@ impl Website {
                                     page.base = prev_domain;
                                     page.bytes_transferred = bytes_transferred;
 
-                                    if shared.4.normalize {
+                                    // See comment on the sibling site: pre-spooled pages
+                                    // already carry their signature; re-hashing the empty
+                                    // in-memory buffer would clobber it with 0.
+                                    if shared.4.normalize && page.signature.is_none() {
                                         page.signature.replace(crate::utils::hash_html(page.get_html_bytes_u8()).await);
                                     }
 

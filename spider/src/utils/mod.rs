@@ -2893,11 +2893,59 @@ pub(crate) async fn fetch_chrome_html_to_spool(
 ) -> Option<crate::utils::html_spool::SpooledContent> {
     use tokio_stream::StreamExt;
 
-    let path = crate::utils::html_spool::next_spool_path();
-    let mut writer = match crate::utils::html_spool::StreamingVitalsSpoolWriter::new(&path).await {
-        Ok(w) => w,
-        Err(_) => return None,
-    };
+    // ── Cancellation-safe cleanup guard ────────────────────────────
+    //
+    // The outer caller wraps this future in `tokio::time::timeout` —
+    // if the timeout fires mid-write the future is *dropped*, not
+    // returned.  Without this guard, the spool file created by
+    // `StreamingVitalsSpoolWriter::new` would orphan on disk.
+    //
+    // The guard owns the `PathBuf`; every early-return path below
+    // simply lets it `Drop`, which queues the file for async deletion
+    // via `queue_spool_delete`.  On success we call `disarm()` to
+    // transfer ownership of the path to the returned `SpooledContent`
+    // (where the lifetime continues via `HtmlSpoolGuard` in `Page`).
+    //
+    // No allocation beyond the `PathBuf` that already existed.  No
+    // locks.  No panic sites: `disarm` consumes `self`, so the
+    // call-once invariant is checked by the borrow checker rather
+    // than at runtime.
+    struct SpoolCleanupGuard {
+        path: std::path::PathBuf,
+        armed: bool,
+    }
+    impl SpoolCleanupGuard {
+        #[inline]
+        fn new(path: std::path::PathBuf) -> Self {
+            Self { path, armed: true }
+        }
+        #[inline]
+        fn path(&self) -> &std::path::Path {
+            &self.path
+        }
+        #[inline]
+        fn disarm(mut self) -> std::path::PathBuf {
+            self.armed = false;
+            std::mem::take(&mut self.path)
+        }
+    }
+    impl Drop for SpoolCleanupGuard {
+        fn drop(&mut self) {
+            if self.armed {
+                let p = std::mem::take(&mut self.path);
+                if !p.as_os_str().is_empty() {
+                    crate::utils::html_spool::queue_spool_delete(p);
+                }
+            }
+        }
+    }
+
+    let guard = SpoolCleanupGuard::new(crate::utils::html_spool::next_spool_path());
+    let mut writer =
+        match crate::utils::html_spool::StreamingVitalsSpoolWriter::new(guard.path()).await {
+            Ok(w) => w,
+            Err(_) => return None,
+        };
 
     let mut stream = Box::pin(page.content_bytes_stream(None));
 
@@ -2905,14 +2953,13 @@ pub(crate) async fn fetch_chrome_html_to_spool(
         match item {
             Ok(chunk) => {
                 if writer.write_chunk(&chunk).await.is_err() {
-                    // Partial-write failure — clean up and let caller
-                    // fall back to the in-memory path.
-                    crate::utils::html_spool::queue_spool_delete(path);
+                    // Partial-write failure — `guard` drops and
+                    // queues the file for cleanup.  Caller falls back
+                    // to the in-memory path.
                     return None;
                 }
             }
             Err(_) => {
-                crate::utils::html_spool::queue_spool_delete(path);
                 return None;
             }
         }
@@ -2920,16 +2967,12 @@ pub(crate) async fn fetch_chrome_html_to_spool(
 
     let (vitals, head, tail) = match writer.finish().await {
         Ok(t) => t,
-        Err(_) => {
-            crate::utils::html_spool::queue_spool_delete(path);
-            return None;
-        }
+        Err(_) => return None,
     };
 
     if vitals.byte_len == 0 {
         // Empty doc — caller will treat as empty response exactly as
-        // the legacy path does.  Drop the empty file.
-        crate::utils::html_spool::queue_spool_delete(path);
+        // the legacy path does.  `guard` drops and cleans up.
         return None;
     }
 
@@ -2947,24 +2990,20 @@ pub(crate) async fn fetch_chrome_html_to_spool(
     // size.  Any page above `cap / 0.75` is guaranteed to abort.
     if vitals.byte_len.saturating_mul(3) / 4 > crate::utils::html_spool::SPOOL_SIGNATURE_BUFFER_CAP
     {
-        crate::utils::html_spool::queue_spool_delete(path);
         return None;
     }
 
     let signature = compute_spool_signature(
-        &path,
+        guard.path(),
         crate::utils::html_spool::SPOOL_SIGNATURE_BUFFER_CAP,
         Some(vitals.byte_len),
     )
     .await;
 
-    if signature.is_none() {
-        // Normalised output exceeded the cap (or I/O error).  Abort so
-        // the caller re-fetches via the legacy in-memory path and
-        // produces the exact same signature as before.
-        crate::utils::html_spool::queue_spool_delete(path);
-        return None;
-    }
+    signature?;
+
+    // Success — transfer ownership of the spool file to the caller.
+    let path = guard.disarm();
 
     Some(crate::utils::html_spool::SpooledContent {
         path,
@@ -2973,6 +3012,25 @@ pub(crate) async fn fetch_chrome_html_to_spool(
         tail,
         signature,
     })
+}
+
+/// Cheap V8-side probe: is the rendered document large enough that the
+/// `real_browser` solver loop would already have been skipped on the
+/// in-memory path?  Uses chromey's `Page::content_byte_length()` — one
+/// `Runtime.evaluate` returning a primitive `Number`, zero HTML bytes
+/// shipped back to Rust.  Fails closed on any CDP error so the spool
+/// gate defaults to the legacy in-memory path.
+#[cfg(all(
+    feature = "chrome",
+    feature = "balance",
+    not(feature = "decentralized")
+))]
+#[inline]
+async fn chrome_doc_length_above_solver_threshold(page: &chromiumoxide::Page) -> bool {
+    match page.content_byte_length().await {
+        Ok(n) => n > crate::page::TURNSTILE_WALL_PAGE_SIZE as u64,
+        Err(_) => false,
+    }
 }
 
 #[cfg(feature = "chrome")]
@@ -3615,38 +3673,155 @@ pub async fn fetch_page_html_chrome_base(
                 _ => target_url.ends_with(".xml"),
             };
 
-            let page_fn = async {
-                if !xml_target {
-                    return fetch_chrome_html_adaptive(page).await;
-                }
-                match page.content_bytes_xml().await {
-                    Ok(b) if !b.is_empty() => Ok(b),
-                    _ => fetch_chrome_html_adaptive(page).await,
+            // ── Direct-to-disk spool gate ──────────────────────────────
+            // Under memory pressure, bypass the `Vec<u8>` materialisation
+            // entirely and stream chromey's `content_bytes_stream`
+            // straight to a spool file.  Every clause below protects a
+            // specific behavioural invariant (solvers mutate &mut res,
+            // WAF / openai / multimodal inspect full content, XML uses a
+            // different API) — loosening any one of them requires
+            // replacing the guarantee it provides.  See
+            // SPOOL_STREAMING.md §2.
+            #[cfg(all(
+                feature = "balance",
+                feature = "chrome",
+                not(feature = "decentralized")
+            ))]
+            let spooled_response: Option<PageResponse> = {
+                let prefer_direct_spool = !xml_target
+                    && !waf_check
+                    && anti_bot_tech == AntiBotTech::None
+                    && remote_multimodal.is_none()
+                    && openai_config.is_none()
+                    && crate::utils::detect_system::get_process_memory_state_sync() >= 1
+                    && chrome_doc_length_above_solver_threshold(page).await;
+
+                if prefer_direct_spool {
+                    match tokio::time::timeout(
+                        base_timeout.max(HALF_MAX_PAGE_TIMEOUT),
+                        fetch_chrome_html_to_spool(page),
+                    )
+                    .await
+                    {
+                        Ok(Some(spool)) => {
+                            // Gate already rules out waf_check = true,
+                            // anti-bot, openai, and multimodal — so the
+                            // solver branch is behaviourally unreachable
+                            // here.  The forbidden check is kept as a
+                            // defensive mirror of the legacy path: if
+                            // the gate is ever weakened, this keeps the
+                            // Cloudflare-challenge detection alive via
+                            // the captured head/tail rings.
+                            let forbidden = waf_check
+                                && spool.head.starts_with(b"<html><head>\n    <style global=")
+                                && spool.tail.ends_with(b";</script><iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>");
+                            let ok = spool.vitals.byte_len > 0;
+                            let mut pr = PageResponse::default();
+                            pr.status_code = if forbidden {
+                                StatusCode::FORBIDDEN
+                            } else {
+                                status_code
+                            };
+                            pr.final_url = final_url.clone();
+                            if ok {
+                                pr.content_spool = Some(spool);
+                            }
+                            Some(pr)
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
                 }
             };
 
-            let results = tokio::time::timeout(base_timeout.max(HALF_MAX_PAGE_TIMEOUT), page_fn);
+            #[cfg(not(all(
+                feature = "balance",
+                feature = "chrome",
+                not(feature = "decentralized")
+            )))]
+            let spooled_response: Option<PageResponse> = None;
 
-            let mut res: Vec<u8> = match results.await {
-                Ok(v) => v.unwrap_or_default(),
-                _ => Default::default(),
-            };
+            // If the spool attempt consumed non-trivial time before
+            // failing, don't let the legacy fallback start with a fresh
+            // clock — keep total wall time within the caller's
+            // `request_timeout`.  When the gate was closed or the spool
+            // branch is cfg-out, this is effectively a no-op since the
+            // block above returned immediately.
+            base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
 
-            let forbidden = waf_check && res.starts_with(b"<html><head>\n    <style global=") && res.ends_with(b";</script><iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>");
+            let mut page_response = if let Some(pr) = spooled_response {
+                pr
+            } else {
+                let page_fn = async {
+                    if !xml_target {
+                        return fetch_chrome_html_adaptive(page).await;
+                    }
+                    match page.content_bytes_xml().await {
+                        Ok(b) if !b.is_empty() => Ok(b),
+                        _ => fetch_chrome_html_adaptive(page).await,
+                    }
+                };
 
-            #[cfg(feature = "real_browser")]
-            {
-                // guard entry to real pages.
-                if res.len() <= crate::page::TURNSTILE_WALL_PAGE_SIZE {
-                    if anti_bot_tech == AntiBotTech::Cloudflare || waf_check {
-                        if crate::features::solvers::detect_cf_turnstyle(&res) {
+                let results =
+                    tokio::time::timeout(base_timeout.max(HALF_MAX_PAGE_TIMEOUT), page_fn);
+
+                let mut res: Vec<u8> = match results.await {
+                    Ok(v) => v.unwrap_or_default(),
+                    _ => Default::default(),
+                };
+
+                let forbidden = waf_check && res.starts_with(b"<html><head>\n    <style global=") && res.ends_with(b";</script><iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>");
+
+                #[cfg(feature = "real_browser")]
+                {
+                    // guard entry to real pages.
+                    if res.len() <= crate::page::TURNSTILE_WALL_PAGE_SIZE {
+                        if anti_bot_tech == AntiBotTech::Cloudflare || waf_check {
+                            if crate::features::solvers::detect_cf_turnstyle(&res) {
+                                if let Err(_e) = tokio::time::timeout(base_timeout, async {
+                                    if let Ok(success) = crate::features::solvers::cf_handle(
+                                        &mut res, page, target_url, viewport,
+                                    )
+                                    .await
+                                    {
+                                        if success {
+                                            status_code = StatusCode::OK;
+                                        }
+                                    }
+                                })
+                                .await
+                                {
+                                    validate_cf = true;
+                                }
+                            }
+                        } else if anti_bot_tech == AntiBotTech::Imperva {
+                            if crate::features::solvers::looks_like_imperva_verify(res.len(), &res)
+                            {
+                                if let Err(_e) = tokio::time::timeout(base_timeout, async {
+                                    if let Ok(success) = crate::features::solvers::imperva_handle(
+                                        &mut res, page, target_url, viewport,
+                                    )
+                                    .await
+                                    {
+                                        if success {
+                                            status_code = StatusCode::OK;
+                                        }
+                                    }
+                                })
+                                .await
+                                {
+                                    validate_cf = true;
+                                }
+                            }
+                        } else if crate::features::solvers::detect_recaptcha(&res) {
                             if let Err(_e) = tokio::time::timeout(base_timeout, async {
-                                if let Ok(success) = crate::features::solvers::cf_handle(
-                                    &mut res, page, target_url, viewport,
+                                if let Ok(solved) = crate::features::solvers::recaptcha_handle(
+                                    &mut res, page, viewport,
                                 )
                                 .await
                                 {
-                                    if success {
+                                    if solved {
                                         status_code = StatusCode::OK;
                                     }
                                 }
@@ -3655,16 +3830,14 @@ pub async fn fetch_page_html_chrome_base(
                             {
                                 validate_cf = true;
                             }
-                        }
-                    } else if anti_bot_tech == AntiBotTech::Imperva {
-                        if crate::features::solvers::looks_like_imperva_verify(res.len(), &res) {
+                        } else if crate::features::solvers::detect_geetest(&res) {
                             if let Err(_e) = tokio::time::timeout(base_timeout, async {
-                                if let Ok(success) = crate::features::solvers::imperva_handle(
-                                    &mut res, page, target_url, viewport,
+                                if let Ok(solved) = crate::features::solvers::geetest_handle(
+                                    &mut res, page, viewport,
                                 )
                                 .await
                                 {
-                                    if success {
+                                    if solved {
                                         status_code = StatusCode::OK;
                                     }
                                 }
@@ -3673,77 +3846,57 @@ pub async fn fetch_page_html_chrome_base(
                             {
                                 validate_cf = true;
                             }
-                        }
-                    } else if crate::features::solvers::detect_recaptcha(&res) {
-                        if let Err(_e) = tokio::time::timeout(base_timeout, async {
-                            if let Ok(solved) =
-                                crate::features::solvers::recaptcha_handle(&mut res, page, viewport)
-                                    .await
-                            {
-                                if solved {
-                                    status_code = StatusCode::OK;
+                        } else if crate::features::solvers::detect_lemin(&res) {
+                            if let Err(_e) = tokio::time::timeout(base_timeout, async {
+                                if let Ok(solved) =
+                                    crate::features::solvers::lemin_handle(&mut res, page, viewport)
+                                        .await
+                                {
+                                    if solved {
+                                        status_code = StatusCode::OK;
+                                    }
                                 }
-                            }
-                        })
-                        .await
-                        {
-                            validate_cf = true;
-                        }
-                    } else if crate::features::solvers::detect_geetest(&res) {
-                        if let Err(_e) = tokio::time::timeout(base_timeout, async {
-                            if let Ok(solved) =
-                                crate::features::solvers::geetest_handle(&mut res, page, viewport)
-                                    .await
+                            })
+                            .await
                             {
-                                if solved {
-                                    status_code = StatusCode::OK;
-                                }
+                                validate_cf = true;
                             }
-                        })
-                        .await
-                        {
-                            validate_cf = true;
-                        }
-                    } else if crate::features::solvers::detect_lemin(&res) {
-                        if let Err(_e) = tokio::time::timeout(base_timeout, async {
-                            if let Ok(solved) =
-                                crate::features::solvers::lemin_handle(&mut res, page, viewport)
-                                    .await
-                            {
-                                if solved {
-                                    status_code = StatusCode::OK;
-                                }
-                            }
-                        })
-                        .await
-                        {
-                            validate_cf = true;
                         }
                     }
                 }
-            }
 
-            let ok = !res.is_empty();
+                let ok = !res.is_empty();
 
-            #[cfg(feature = "real_browser")]
-            if validate_cf
-                && ok
-                && !crate::features::solvers::detect_cf_turnstyle(&res)
-                && status_code == StatusCode::FORBIDDEN
-            {
-                status_code = StatusCode::OK;
-            }
+                #[cfg(feature = "real_browser")]
+                if validate_cf
+                    && ok
+                    && !crate::features::solvers::detect_cf_turnstyle(&res)
+                    && status_code == StatusCode::FORBIDDEN
+                {
+                    status_code = StatusCode::OK;
+                }
 
-            let mut page_response = set_page_response(
-                ok,
-                res,
-                if forbidden {
-                    StatusCode::FORBIDDEN
-                } else {
-                    status_code
-                },
-                final_url,
-            );
+                set_page_response(
+                    ok,
+                    res,
+                    if forbidden {
+                        StatusCode::FORBIDDEN
+                    } else {
+                        status_code
+                    },
+                    final_url,
+                )
+            };
+
+            // Mirror the legacy `ok = !res.is_empty()` flag across both
+            // arms so downstream consumers (openai, multimodal) keep
+            // seeing "is there content at all".  The spool arm sets
+            // `content_spool = Some` iff `vitals.byte_len > 0`, so this
+            // is bit-equivalent to the legacy meaning.
+            #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+            let ok = page_response.content.is_some() || page_response.content_spool.is_some();
+            #[cfg(not(all(feature = "balance", not(feature = "decentralized"))))]
+            let ok = page_response.content.is_some();
 
             base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
 
@@ -4040,35 +4193,58 @@ pub async fn fetch_page_html_chrome_base(
     set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
     page_response.status_code = chrome_http_req_res.status_code;
     page_response.waf_check = chrome_http_req_res.waf_check;
+
+    // Under `balance + !decentralized`, a pre-spooled page carries its
+    // HTML on disk via `content_spool` — `content` is `None` by design
+    // and must not be treated as "missing" by the fill / downgrade /
+    // wait_guard paths below.
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+    let has_spool = page_response.content_spool.is_some();
+    #[cfg(not(all(feature = "balance", not(feature = "decentralized"))))]
+    let has_spool = false;
+
     page_response.content = match content {
         Some(c) if !c.is_empty() => Some(c),
         _ => {
-            let needs_fill = page_response.content.as_ref().is_none_or(|b| b.is_empty());
-
-            if needs_fill {
-                tokio::time::timeout(base_timeout, fetch_chrome_html_adaptive(page))
-                    .await
-                    .ok()
-                    .and_then(Result::ok)
-                    .filter(|b| !b.is_empty())
-            } else {
+            if has_spool {
+                // Pre-spooled: the bytes are already on disk and
+                // `channel_send_page` will not re-spool.  Re-fetching
+                // here would materialise the full HTML and defeat the
+                // feature.
                 page_response.content
+            } else {
+                let needs_fill = page_response.content.as_ref().is_none_or(|b| b.is_empty());
+
+                if needs_fill {
+                    tokio::time::timeout(base_timeout, fetch_chrome_html_adaptive(page))
+                        .await
+                        .ok()
+                        .and_then(Result::ok)
+                        .filter(|b| !b.is_empty())
+                } else {
+                    page_response.content
+                }
             }
         }
     };
-    if page_response.status_code == *UNKNOWN_STATUS_ERROR && page_response.content.is_some() {
+
+    // Treat either in-memory content or a spool handle as "has content"
+    // for the downgrade / wait_guard heuristics below.
+    let content_absent = page_response.content.is_none() && !has_spool;
+
+    if page_response.status_code == *UNKNOWN_STATUS_ERROR && !content_absent {
         page_response.status_code = StatusCode::OK;
     }
     // If the request was cancelled (timeout or net::ERR_ABORTED) and we ended
     // up with no usable content, upgrade to a retryable 504 so the outer crawl
     // loop will retry instead of silently accepting an empty page.
-    if request_cancelled && page_response.content.is_none() {
+    if request_cancelled && content_absent {
         page_response.status_code = StatusCode::GATEWAY_TIMEOUT;
     }
     // If Chrome reported success (200) but produced no content, downgrade to
     // a retryable 504 so callers can distinguish real success from empty
     // responses and trigger retries appropriately.
-    else if page_response.status_code == StatusCode::OK && page_response.content.is_none() {
+    else if page_response.status_code == StatusCode::OK && content_absent {
         page_response.status_code = StatusCode::GATEWAY_TIMEOUT;
     }
 
@@ -4078,10 +4254,13 @@ pub async fn fetch_page_html_chrome_base(
     if wait_for.is_some() {
         let domain = get_domain_from_url(source_str);
         let guard = crate::utils::wait_guard::global_wait_guard();
-        let no_useful_content = page_response
-            .content
-            .as_ref()
-            .is_none_or(|b| b.is_empty() || is_cacheable_body_empty(b));
+        // Spool present => useful content on disk.  Only scan in-memory
+        // bytes when no spool handle is attached.
+        let no_useful_content = !has_spool
+            && page_response
+                .content
+                .as_ref()
+                .is_none_or(|b| b.is_empty() || is_cacheable_body_empty(b));
         let bad = match page_response.status_code.as_u16() {
             // Blocked / bot-detected / rate-limited: if antibot was
             // detected (waf_check) the response is challenge HTML —
@@ -4089,7 +4268,7 @@ pub async fn fetch_page_html_chrome_base(
             // content is genuinely empty.
             403 | 429 | 503 | 520..=530 => page_response.waf_check || no_useful_content,
             // Timeout with nothing to show.
-            408 | 504 => page_response.content.is_none(),
+            408 | 504 => content_absent,
             _ => false,
         };
         if bad {
@@ -7642,37 +7821,58 @@ pub(crate) async fn compute_spool_signature(
     use std::hash::{Hash, Hasher};
     use tokio::io::AsyncReadExt;
 
+    // ── Send-safe wrapper for the rewriter's output state ────────────
+    //
+    // The rewriter is held across async reads (line 7868's
+    // `reader.read(&mut buf).await`), so every piece of state its
+    // closure captures must satisfy `Send` when crossed by a borrow.
+    // `&RefCell<T>` and `&Cell<T>` are `!Send` because `RefCell` and
+    // `Cell` are `!Sync`.  We wrap both in a `SyncWrapper` that is
+    // manually marked `Sync` — that flips the borrow to `Send` and
+    // makes the enclosing future `Send` without loading the spool
+    // file into memory or touching a `Mutex` / `spawn_blocking` /
+    // channel.
+    //
+    // Soundness.  Each `SyncWrapper` is a stack-local inside this
+    // single async task.  `tokio`'s multi-threaded runtime migrates a
+    // task between worker threads *between* `.await` points, never
+    // during them; the rewriter's closure runs synchronously within
+    // `rewriter.write()`, so at any instant only one thread holds a
+    // borrow.  No `&SyncWrapper` is ever shared with another task or
+    // stored in a `'static` — which is exactly the condition under
+    // which `unsafe impl Sync` for a non-shared `RefCell`/`Cell` is
+    // sound.  Panic on double-borrow is precluded by `lol_html`'s
+    // single-caller guarantee on the output sink.
+    struct SyncWrapper<T: ?Sized>(T);
+    // SAFETY: see the module-level comment above.  The inner value is
+    // never accessed from two threads concurrently.
+    unsafe impl<T: ?Sized> Sync for SyncWrapper<T> {}
+
     let file = tokio::fs::File::open(path).await.ok()?;
-    // Size the read buffer to match the underlying file up to 64 KiB so
-    // small spools avoid the full 64 KiB alloc when the caller has a
-    // smaller `raw_byte_len_hint` — same behaviour, less peak memory
-    // for tiny pages.
     let read_cap = match raw_byte_len_hint {
         Some(len) => len.min(65_536).max(4_096),
         None => 65_536,
     };
     let mut reader = tokio::io::BufReader::with_capacity(read_cap, file);
 
-    // `Cell` gives the rewriter's output closure and the outer read
-    // loop safe shared access to the flag without mutex overhead.  The
-    // normalised buffer is borrowed only by the closure; we don't need
-    // to read it in the loop so `RefCell`-style wrappers aren't needed
-    // there — we keep it behind a `Cell<Vec<u8>>` and move it out after
-    // the rewriter is dropped.
-    let aborted: std::cell::Cell<bool> = std::cell::Cell::new(false);
-    // Pre-size the normalised accumulator to the same 3/4-of-raw
-    // estimate that `normalize_html` uses when the caller already
-    // knows the byte length.  Clamped to the cap so we never over-
-    // commit memory for pathological inputs.  Without this the Vec
-    // grows by doubling from 0 — up to log2(cap/32)~19 reallocations
-    // for a 16 MiB cap.
+    let aborted: SyncWrapper<std::cell::Cell<bool>> = SyncWrapper(std::cell::Cell::new(false));
     let initial_cap = match raw_byte_len_hint {
         Some(len) => len.saturating_mul(3) / 4,
         None => 0,
     }
     .min(cap);
-    let normalized: std::cell::RefCell<Vec<u8>> =
-        std::cell::RefCell::new(Vec::with_capacity(initial_cap));
+    let normalized: SyncWrapper<std::cell::RefCell<Vec<u8>>> =
+        SyncWrapper(std::cell::RefCell::new(Vec::with_capacity(initial_cap)));
+
+    // Force the closure's minimum capture to be the *whole* wrapper,
+    // not the inner `.0` field.  Rust 2021 disjoint-closure-captures
+    // would otherwise borrow `&aborted.0` (a `&Cell<bool>`, `!Send`)
+    // and `&normalized.0` (`&RefCell<Vec<u8>>`, `!Send`) — the
+    // `Sync` impl on `SyncWrapper<T>` only propagates to references
+    // to the wrapper itself.  Binding these references in a
+    // `move` closure preserves the wrapper-granularity capture.
+    let aborted_ref: &SyncWrapper<std::cell::Cell<bool>> = &aborted;
+    let normalized_ref: &SyncWrapper<std::cell::RefCell<Vec<u8>>> = &normalized;
 
     // Scoped so the rewriter (and the closure's borrows of `normalized`
     // and `aborted`) are released before we hash.
@@ -7715,17 +7915,13 @@ pub(crate) async fn compute_spool_signature(
                 ],
                 ..Settings::new_send()
             },
-            |c: &[u8]| {
-                if aborted.get() {
+            move |c: &[u8]| {
+                if aborted_ref.0.get() {
                     return;
                 }
-                // Borrow only inside this closure — never across await
-                // points, so there is no deadlock risk.  Panic on
-                // double-borrow is precluded by the loop structure:
-                // only one closure invocation runs at a time.
-                let mut buf_ref = normalized.borrow_mut();
+                let mut buf_ref = normalized_ref.0.borrow_mut();
                 if buf_ref.len().saturating_add(c.len()) > cap {
-                    aborted.set(true);
+                    aborted_ref.0.set(true);
                     return;
                 }
                 buf_ref.extend_from_slice(c);
@@ -7734,7 +7930,7 @@ pub(crate) async fn compute_spool_signature(
 
         let mut buf = vec![0u8; 65536];
         loop {
-            if aborted.get() {
+            if aborted_ref.0.get() {
                 break;
             }
             let n = match reader.read(&mut buf).await {
@@ -7749,16 +7945,16 @@ pub(crate) async fn compute_spool_signature(
             }
         }
 
-        if !aborted.get() {
+        if !aborted_ref.0.get() {
             let _ = rewriter.end();
         }
     }
 
-    if aborted.get() {
+    if aborted.0.get() {
         return None;
     }
 
-    let buf = normalized.into_inner();
+    let buf = normalized.0.into_inner();
     if buf.is_empty() {
         return None;
     }
