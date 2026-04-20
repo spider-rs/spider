@@ -3033,6 +3033,37 @@ async fn chrome_doc_length_above_solver_threshold(page: &chromiumoxide::Page) ->
     }
 }
 
+/// Borrowed parameter bundle for chrome fetch/page methods.
+///
+/// Collapses ten `&Option<T>` references that otherwise spill across
+/// the ABI into one pointer, letting `rustc` inline the hot fetch
+/// pipeline. All fields borrow from a longer-lived `Configuration`
+/// (or locals at the call site) — zero copies, zero allocations.
+#[cfg(feature = "chrome")]
+#[derive(Copy, Clone)]
+pub struct ChromeFetchParams<'a> {
+    /// Wait-for conditions applied after navigation.
+    pub wait_for: &'a Option<crate::configuration::WaitFor>,
+    /// Screenshot configuration, if any.
+    pub screenshot: &'a Option<crate::configuration::ScreenShotConfig>,
+    /// OpenAI configuration for content extraction.
+    pub openai_config: &'a Option<Box<crate::configuration::GPTConfigs>>,
+    /// Per-URL execution scripts trie.
+    pub execution_scripts: &'a Option<ExecutionScripts>,
+    /// Per-URL automation scripts trie.
+    pub automation_scripts: &'a Option<AutomationScripts>,
+    /// Viewport used for mouse/smart movement and CDP emulation.
+    pub viewport: &'a Option<crate::configuration::Viewport>,
+    /// Per-request timeout; caps chrome wall time.
+    pub request_timeout: &'a Option<std::time::Duration>,
+    /// CDP event tracking toggles.
+    pub track_events: &'a Option<crate::configuration::ChromeEventTracker>,
+    /// Disk/remote cache policy.
+    pub cache_policy: &'a Option<BasicCachePolicy>,
+    /// Remote multimodal automation configuration.
+    pub remote_multimodal: &'a Option<Box<RemoteMultimodalConfigs>>,
+}
+
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
@@ -3040,26 +3071,27 @@ pub async fn fetch_page_html_chrome_base(
     page: &chromiumoxide::Page,
     content: bool,
     wait_for_navigation: bool,
-    wait_for: &Option<crate::configuration::WaitFor>,
-    screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
-    openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
     url_target: Option<&str>,
-    execution_scripts: &Option<ExecutionScripts>,
-    automation_scripts: &Option<AutomationScripts>,
-    viewport: &Option<crate::configuration::Viewport>,
-    request_timeout: &Option<Duration>,
-    track_events: &Option<crate::configuration::ChromeEventTracker>,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
-    cache_policy: &Option<BasicCachePolicy>,
     resp_headers: &Option<HeaderMap<HeaderValue>>,
     chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
-    remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
     cache_namespace: Option<&str>,
+    params: &ChromeFetchParams<'_>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
+    let wait_for = params.wait_for;
+    let screenshot = params.screenshot;
+    let openai_config = params.openai_config;
+    let execution_scripts = params.execution_scripts;
+    let automation_scripts = params.automation_scripts;
+    let viewport = params.viewport;
+    let request_timeout = params.request_timeout;
+    let track_events = params.track_events;
+    let cache_policy = params.cache_policy;
+    let remote_multimodal = params.remote_multimodal;
     use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES, UNKNOWN_STATUS_ERROR};
     use chromiumoxide::{
         cdp::browser_protocol::network::{
@@ -5714,21 +5746,13 @@ pub async fn fetch_page_html(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
-    wait_for: &Option<crate::configuration::WaitFor>,
-    screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
-    openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
-    execution_scripts: &Option<ExecutionScripts>,
-    automation_scripts: &Option<AutomationScripts>,
-    viewport: &Option<crate::configuration::Viewport>,
-    request_timeout: &Option<std::time::Duration>,
-    track_events: &Option<crate::configuration::ChromeEventTracker>,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
-    cache_policy: &Option<BasicCachePolicy>,
     #[cfg(feature = "cookies")] jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     cache_namespace: Option<&str>,
+    params: &ChromeFetchParams<'_>,
 ) -> PageResponse {
     use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
@@ -5739,7 +5763,7 @@ pub async fn fetch_page_html(
     let cached_html = get_cached_url(
         target_url,
         cache_options.as_ref(),
-        cache_policy,
+        params.cache_policy,
         cache_namespace,
     )
     .await;
@@ -5770,25 +5794,16 @@ pub async fn fetch_page_html(
                 page,
                 cached,
                 true,
-                wait_for,
-                screenshot,
                 page_set,
-                openai_config,
                 if cached { Some(target_url) } else { None },
-                execution_scripts,
-                automation_scripts,
-                viewport,
-                request_timeout,
-                track_events,
                 referrer,
                 max_page_bytes,
                 cache_options,
-                cache_policy,
                 &None,
                 &None,
                 jar,
-                &None,
                 cache_namespace,
+                params,
             )
             .await
             {
@@ -5916,6 +5931,45 @@ pub async fn fetch_page_html(
     set_page_response_duration(&mut page_response, duration);
 
     page_response
+}
+
+/// Seeded variant of `fetch_page_html` for the `fs + chrome` build.
+///
+/// The non-fs variant has its own `fetch_page_html_base` + seeded wrapper
+/// chain; the fs variant historically had only a single fetch entry point
+/// because the fs path needs specialized HTTP streaming on chrome failure.
+/// For seeded resources we already have rendered HTML, so the HTTP
+/// streaming fallback is irrelevant — delegate straight to
+/// `fetch_page_html_chrome_seeded`, which accepts the seeded resource via
+/// `_fetch_page_html_chrome`.
+#[cfg(all(feature = "fs", feature = "chrome"))]
+pub async fn fetch_page_html_seeded(
+    target_url: &str,
+    client: &Client,
+    page: &chromiumoxide::Page,
+    page_set: bool,
+    referrer: Option<String>,
+    max_page_bytes: Option<f64>,
+    cache_options: Option<CacheOptions>,
+    seeded_resource: Option<String>,
+    jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
+    cache_namespace: Option<&str>,
+    params: &ChromeFetchParams<'_>,
+) -> PageResponse {
+    fetch_page_html_chrome_seeded(
+        target_url,
+        client,
+        page,
+        page_set,
+        referrer,
+        max_page_bytes,
+        cache_options,
+        seeded_resource,
+        jar,
+        cache_namespace,
+        params,
+    )
+    .await
 }
 
 #[cfg(any(feature = "cache", feature = "cache_mem"))]
@@ -6321,23 +6375,14 @@ pub async fn fetch_page_html_base(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
-    wait_for: &Option<crate::configuration::WaitFor>,
-    screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
-    openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
-    execution_scripts: &Option<ExecutionScripts>,
-    automation_scripts: &Option<AutomationScripts>,
-    viewport: &Option<crate::configuration::Viewport>,
-    request_timeout: &Option<std::time::Duration>,
-    track_events: &Option<crate::configuration::ChromeEventTracker>,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
-    cache_policy: &Option<BasicCachePolicy>,
     seeded_resource: Option<String>,
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
-    remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
     cache_namespace: Option<&str>,
+    params: &ChromeFetchParams<'_>,
 ) -> PageResponse {
     let skip_browser = cache_skip_browser(&cache_options);
     let cached_html = if let Some(seeded) = seeded_resource {
@@ -6351,7 +6396,7 @@ pub async fn fetch_page_html_base(
         get_cached_url(
             target_url,
             cache_options.as_ref(),
-            cache_policy,
+            params.cache_policy,
             cache_namespace,
         )
         .await
@@ -6379,25 +6424,16 @@ pub async fn fetch_page_html_base(
         page,
         cached,
         true,
-        wait_for,
-        screenshot,
         page_set,
-        openai_config,
         if cached { Some(target_url) } else { None },
-        execution_scripts,
-        automation_scripts,
-        viewport,
-        request_timeout,
-        track_events,
         referrer,
         max_page_bytes,
         cache_options,
-        cache_policy,
         &None,
         &None,
         jar,
-        remote_multimodal,
         cache_namespace,
+        params,
     )
     .await
     {
@@ -6415,43 +6451,25 @@ pub async fn fetch_page_html(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
-    wait_for: &Option<crate::configuration::WaitFor>,
-    screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
-    openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
-    execution_scripts: &Option<ExecutionScripts>,
-    automation_scripts: &Option<AutomationScripts>,
-    viewport: &Option<crate::configuration::Viewport>,
-    request_timeout: &Option<std::time::Duration>,
-    track_events: &Option<crate::configuration::ChromeEventTracker>,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
-    cache_policy: &Option<BasicCachePolicy>,
-    remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
     cache_namespace: Option<&str>,
+    params: &ChromeFetchParams<'_>,
 ) -> PageResponse {
     fetch_page_html_base(
         target_url,
         client,
         page,
-        wait_for,
-        screenshot,
         page_set,
-        openai_config,
-        execution_scripts,
-        automation_scripts,
-        viewport,
-        request_timeout,
-        track_events,
         referrer,
         max_page_bytes,
         cache_options,
-        cache_policy,
         None,
         None,
-        remote_multimodal,
         cache_namespace,
+        params,
     )
     .await
 }
@@ -6462,45 +6480,27 @@ pub async fn fetch_page_html_seeded(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
-    wait_for: &Option<crate::configuration::WaitFor>,
-    screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
-    openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
-    execution_scripts: &Option<ExecutionScripts>,
-    automation_scripts: &Option<AutomationScripts>,
-    viewport: &Option<crate::configuration::Viewport>,
-    request_timeout: &Option<std::time::Duration>,
-    track_events: &Option<crate::configuration::ChromeEventTracker>,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
-    cache_policy: &Option<BasicCachePolicy>,
     seeded_resource: Option<String>,
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
-    remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
     cache_namespace: Option<&str>,
+    params: &ChromeFetchParams<'_>,
 ) -> PageResponse {
     fetch_page_html_base(
         target_url,
         client,
         page,
-        wait_for,
-        screenshot,
         page_set,
-        openai_config,
-        execution_scripts,
-        automation_scripts,
-        viewport,
-        request_timeout,
-        track_events,
         referrer,
         max_page_bytes,
         cache_options,
-        cache_policy,
         seeded_resource,
         jar,
-        remote_multimodal,
         cache_namespace,
+        params,
     )
     .await
 }
@@ -6511,23 +6511,14 @@ async fn _fetch_page_html_chrome(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
-    wait_for: &Option<crate::configuration::WaitFor>,
-    screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
-    openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
-    execution_scripts: &Option<ExecutionScripts>,
-    automation_scripts: &Option<AutomationScripts>,
-    viewport: &Option<crate::configuration::Viewport>,
-    request_timeout: &Option<std::time::Duration>,
-    track_events: &Option<crate::configuration::ChromeEventTracker>,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
-    cache_policy: &Option<BasicCachePolicy>,
     resource: Option<String>,
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
-    remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
     cache_namespace: Option<&str>,
+    params: &ChromeFetchParams<'_>,
 ) -> PageResponse {
     let duration = if cfg!(feature = "time") {
         Some(tokio::time::Instant::now())
@@ -6542,7 +6533,7 @@ async fn _fetch_page_html_chrome(
         get_cached_url(
             target_url,
             cache_options.as_ref(),
-            cache_policy,
+            params.cache_policy,
             cache_namespace,
         )
         .await
@@ -6569,25 +6560,16 @@ async fn _fetch_page_html_chrome(
                 page,
                 cached,
                 true,
-                wait_for,
-                screenshot,
                 page_set,
-                openai_config,
                 if cached { Some(target_url) } else { None },
-                execution_scripts,
-                automation_scripts,
-                viewport,
-                request_timeout,
-                track_events,
                 referrer,
                 max_page_bytes,
                 cache_options,
-                cache_policy,
                 &None,
                 &None,
                 jar,
-                remote_multimodal,
                 cache_namespace,
+                params,
             )
             .await
             {
@@ -6681,44 +6663,26 @@ pub async fn fetch_page_html_chrome(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
-    wait_for: &Option<crate::configuration::WaitFor>,
-    screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
-    openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
-    execution_scripts: &Option<ExecutionScripts>,
-    automation_scripts: &Option<AutomationScripts>,
-    viewport: &Option<crate::configuration::Viewport>,
-    request_timeout: &Option<std::time::Duration>,
-    track_events: &Option<crate::configuration::ChromeEventTracker>,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
-    cache_policy: &Option<BasicCachePolicy>,
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
-    remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
     cache_namespace: Option<&str>,
+    params: &ChromeFetchParams<'_>,
 ) -> PageResponse {
     _fetch_page_html_chrome(
         target_url,
         client,
         page,
-        wait_for,
-        screenshot,
         page_set,
-        openai_config,
-        execution_scripts,
-        automation_scripts,
-        viewport,
-        request_timeout,
-        track_events,
         referrer,
         max_page_bytes,
         cache_options,
-        cache_policy,
         None,
         jar,
-        remote_multimodal,
         cache_namespace,
+        params,
     )
     .await
 }
@@ -6729,45 +6693,27 @@ pub async fn fetch_page_html_chrome_seeded(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
-    wait_for: &Option<crate::configuration::WaitFor>,
-    screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_set: bool,
-    openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
-    execution_scripts: &Option<ExecutionScripts>,
-    automation_scripts: &Option<AutomationScripts>,
-    viewport: &Option<crate::configuration::Viewport>,
-    request_timeout: &Option<std::time::Duration>,
-    track_events: &Option<crate::configuration::ChromeEventTracker>,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
-    cache_policy: &Option<BasicCachePolicy>,
     resource: Option<String>,
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
-    remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
     cache_namespace: Option<&str>,
+    params: &ChromeFetchParams<'_>,
 ) -> PageResponse {
     _fetch_page_html_chrome(
         target_url,
         client,
         page,
-        wait_for,
-        screenshot,
         page_set,
-        openai_config,
-        execution_scripts,
-        automation_scripts,
-        viewport,
-        request_timeout,
-        track_events,
         referrer,
         max_page_bytes,
         cache_options,
-        cache_policy,
         resource,
         jar,
-        remote_multimodal,
         cache_namespace,
+        params,
     )
     .await
 }

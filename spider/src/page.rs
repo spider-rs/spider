@@ -1,7 +1,3 @@
-#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
-use crate::configuration::{AutomationScripts, ExecutionScripts};
-#[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
-use crate::features::automation::RemoteMultimodalConfigs;
 use crate::utils::abs::convert_abs_path;
 use crate::utils::templates::EMPTY_HTML_BASIC;
 #[cfg(not(feature = "decentralized"))]
@@ -2843,70 +2839,64 @@ impl Page {
         url: &str,
         client: &Client,
         page: &chromiumoxide::Page,
-        wait_for: &Option<crate::configuration::WaitFor>,
-        screenshot: &Option<crate::configuration::ScreenShotConfig>,
         page_set: bool,
-        openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
-        execution_scripts: &Option<ExecutionScripts>,
-        automation_scripts: &Option<AutomationScripts>,
-        viewport: &Option<crate::configuration::Viewport>,
-        request_timeout: &Option<Duration>,
-        track_events: &Option<crate::configuration::ChromeEventTracker>,
         referrer: Option<String>,
         max_page_bytes: Option<f64>,
         cache_options: Option<CacheOptions>,
-        cache_policy: &Option<BasicCachePolicy>,
         seeded_resource: Option<String>,
         jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
-        remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
         cache_namespace: Option<&str>,
+        params: &crate::utils::ChromeFetchParams<'_>,
     ) -> Self {
         let page_resource = if seeded_resource.is_some() {
             crate::utils::fetch_page_html_seeded(
                 url,
                 client,
                 page,
-                wait_for,
-                screenshot,
                 page_set,
-                openai_config,
-                execution_scripts,
-                automation_scripts,
-                viewport,
-                request_timeout,
-                track_events,
                 referrer,
                 max_page_bytes,
                 cache_options,
-                cache_policy,
                 seeded_resource,
                 jar,
-                remote_multimodal,
                 cache_namespace,
+                params,
             )
             .await
         } else {
-            crate::utils::fetch_page_html(
-                url,
-                client,
-                page,
-                wait_for,
-                screenshot,
-                page_set,
-                openai_config,
-                execution_scripts,
-                automation_scripts,
-                viewport,
-                request_timeout,
-                track_events,
-                referrer,
-                max_page_bytes,
-                cache_options,
-                cache_policy,
-                remote_multimodal,
-                cache_namespace,
-            )
-            .await
+            #[cfg(feature = "fs")]
+            {
+                crate::utils::fetch_page_html(
+                    url,
+                    client,
+                    page,
+                    page_set,
+                    referrer,
+                    max_page_bytes,
+                    cache_options,
+                    #[cfg(feature = "cookies")]
+                    jar,
+                    cache_namespace,
+                    params,
+                )
+                .await
+            }
+            #[cfg(not(feature = "fs"))]
+            {
+                let _ = jar;
+                crate::utils::fetch_page_html(
+                    url,
+                    client,
+                    page,
+                    page_set,
+                    referrer,
+                    max_page_bytes,
+                    cache_options,
+                    cache_namespace,
+                    params,
+                )
+                .await
+            }
         };
         let mut p = build(url, page_resource);
 
@@ -2925,43 +2915,25 @@ impl Page {
         url: &str,
         client: &Client,
         page: &chromiumoxide::Page,
-        wait_for: &Option<crate::configuration::WaitFor>,
-        screenshot: &Option<crate::configuration::ScreenShotConfig>,
         page_set: bool,
-        openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
-        execution_scripts: &Option<ExecutionScripts>,
-        automation_scripts: &Option<AutomationScripts>,
-        viewport: &Option<crate::configuration::Viewport>,
-        request_timeout: &Option<Duration>,
-        track_events: &Option<crate::configuration::ChromeEventTracker>,
         referrer: Option<String>,
         max_page_bytes: Option<f64>,
         cache_options: Option<CacheOptions>,
-        cache_policy: &Option<BasicCachePolicy>,
-        remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
         cache_namespace: Option<&str>,
+        params: &crate::utils::ChromeFetchParams<'_>,
     ) -> Self {
         Self::new_base(
             url,
             client,
             page,
-            wait_for,
-            screenshot,
             page_set,
-            openai_config,
-            execution_scripts,
-            automation_scripts,
-            viewport,
-            request_timeout,
-            track_events,
             referrer,
             max_page_bytes,
             cache_options,
-            cache_policy,
             None,
             None,
-            remote_multimodal,
             cache_namespace,
+            params,
         )
         .await
     }
@@ -2973,45 +2945,27 @@ impl Page {
         url: &str,
         client: &Client,
         page: &chromiumoxide::Page,
-        wait_for: &Option<crate::configuration::WaitFor>,
-        screenshot: &Option<crate::configuration::ScreenShotConfig>,
         page_set: bool,
-        openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
-        execution_scripts: &Option<ExecutionScripts>,
-        automation_scripts: &Option<AutomationScripts>,
-        viewport: &Option<crate::configuration::Viewport>,
-        request_timeout: &Option<Duration>,
-        track_events: &Option<crate::configuration::ChromeEventTracker>,
         referrer: Option<String>,
         max_page_bytes: Option<f64>,
         cache_options: Option<CacheOptions>,
-        cache_policy: &Option<BasicCachePolicy>,
         seeded_resource: Option<String>,
         jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
-        remote_multimodal: &Option<Box<RemoteMultimodalConfigs>>,
         cache_namespace: Option<&str>,
+        params: &crate::utils::ChromeFetchParams<'_>,
     ) -> Self {
         Self::new_base(
             url,
             client,
             page,
-            wait_for,
-            screenshot,
             page_set,
-            openai_config,
-            execution_scripts,
-            automation_scripts,
-            viewport,
-            request_timeout,
-            track_events,
             referrer,
             max_page_bytes,
             cache_options,
-            cache_policy,
             seeded_resource,
             jar,
-            remote_multimodal,
             cache_namespace,
+            params,
         )
         .await
     }
@@ -5619,25 +5573,17 @@ impl Page {
                                     }
                                 }
 
+                                let fetch_params = configuration.chrome_fetch_params();
                                 let page_resource = crate::utils::fetch_page_html_chrome_base(
                                     &html_bytes_taken,
                                     &new_page,
                                     true,
                                     true,
-                                    &configuration.wait_for,
-                                    &configuration.screenshot,
                                     false,
-                                    &configuration.openai_config,
                                     Some(&self.url),
-                                    &configuration.execution_scripts,
-                                    &configuration.automation_scripts,
-                                    &configuration.viewport,
-                                    &configuration.request_timeout,
-                                    &configuration.track_events,
                                     configuration.referer.clone(),
                                     configuration.max_page_bytes,
                                     configuration.get_cache_options(),
-                                    &configuration.cache_policy,
                                     {
                                         #[cfg(feature = "headers")]
                                         {
@@ -5650,8 +5596,8 @@ impl Page {
                                     },
                                     &Some(&configuration.chrome_intercept),
                                     jar,
-                                    &configuration.remote_multimodal,
                                     configuration.cache_namespace_str(),
+                                    &fetch_params,
                                 )
                                 .await;
 
@@ -6113,25 +6059,17 @@ impl Page {
                                     }
                                 }
 
+                                let fetch_params = configuration.chrome_fetch_params();
                                 let page_resource = crate::utils::fetch_page_html_chrome_base(
                                     &html_bytes_taken,
                                     &new_page,
                                     true,
                                     true,
-                                    &configuration.wait_for,
-                                    &configuration.screenshot,
                                     false,
-                                    &configuration.openai_config,
                                     Some(&self.url),
-                                    &configuration.execution_scripts,
-                                    &configuration.automation_scripts,
-                                    &configuration.viewport,
-                                    &configuration.request_timeout,
-                                    &configuration.track_events,
                                     configuration.referer.clone(),
                                     configuration.max_page_bytes,
                                     configuration.get_cache_options(),
-                                    &configuration.cache_policy,
                                     {
                                         #[cfg(feature = "headers")]
                                         {
@@ -6144,8 +6082,8 @@ impl Page {
                                     },
                                     &Some(&configuration.chrome_intercept),
                                     jar,
-                                    &configuration.remote_multimodal,
                                     configuration.cache_namespace_str(),
+                                    &fetch_params,
                                 )
                                 .await;
 

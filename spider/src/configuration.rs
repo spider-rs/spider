@@ -1893,6 +1893,28 @@ impl Configuration {
         self
     }
 
+    /// Build the borrowed chrome fetch parameter bundle.
+    ///
+    /// Zero-copy: all fields borrow directly from `self`. Build once at
+    /// the top of a call chain and pass `&` through the layers to keep
+    /// the hot path inlineable.
+    #[cfg(feature = "chrome")]
+    #[inline]
+    pub fn chrome_fetch_params(&self) -> crate::utils::ChromeFetchParams<'_> {
+        crate::utils::ChromeFetchParams {
+            wait_for: &self.wait_for,
+            screenshot: &self.screenshot,
+            openai_config: &self.openai_config,
+            execution_scripts: &self.execution_scripts,
+            automation_scripts: &self.automation_scripts,
+            viewport: &self.viewport,
+            request_timeout: &self.request_timeout,
+            track_events: &self.track_events,
+            cache_policy: &self.cache_policy,
+            remote_multimodal: &self.remote_multimodal,
+        }
+    }
+
     /// Get the cache option to use for the run. This does nothing without the 'cache_request' feature.
     #[cfg(any(feature = "cache_request", feature = "chrome_remote_cache"))]
     pub(crate) fn get_cache_options(&self) -> Option<crate::utils::CacheOptions> {

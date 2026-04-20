@@ -4106,23 +4106,14 @@ impl Website {
                     self.url.inner(),
                     client,
                     chrome_page,
-                    &self.configuration.wait_for,
-                    &self.configuration.screenshot,
                     false, // we use the initial about:blank page.
-                    &self.configuration.openai_config,
-                    &self.configuration.execution_scripts,
-                    &self.configuration.automation_scripts,
-                    &self.configuration.viewport,
-                    &self.configuration.request_timeout,
-                    &self.configuration.track_events,
                     self.configuration.referer.clone(),
                     self.configuration.max_page_bytes,
                     self.configuration.get_cache_options(),
-                    &self.configuration.cache_policy,
                     Some(seeded_html.clone()),
                     Some(&self.cookie_jar),
-                    &self.configuration.remote_multimodal,
                     self.configuration.cache_namespace_str(),
+                    &self.configuration.chrome_fetch_params(),
                 )
                 .await
             } else {
@@ -4130,21 +4121,12 @@ impl Website {
                     self.url.inner(),
                     client,
                     chrome_page,
-                    &self.configuration.wait_for,
-                    &self.configuration.screenshot,
                     false, // we use the initial about:blank page.
-                    &self.configuration.openai_config,
-                    &self.configuration.execution_scripts,
-                    &self.configuration.automation_scripts,
-                    &self.configuration.viewport,
-                    &self.configuration.request_timeout,
-                    &self.configuration.track_events,
                     self.configuration.referer.clone(),
                     self.configuration.max_page_bytes,
                     self.configuration.get_cache_options(),
-                    &self.configuration.cache_policy,
-                    &self.configuration.remote_multimodal,
                     self.configuration.cache_namespace_str(),
+                    &self.configuration.chrome_fetch_params(),
                 )
                 .await
             };
@@ -4216,21 +4198,12 @@ impl Website {
                             self.url.inner(),
                             client,
                             chrome_page,
-                            &self.configuration.wait_for,
-                            &self.configuration.screenshot,
                             false, // we use the initial about:blank page.
-                            &self.configuration.openai_config,
-                            &self.configuration.execution_scripts,
-                            &self.configuration.automation_scripts,
-                            &self.configuration.viewport,
-                            &self.configuration.request_timeout,
-                            &self.configuration.track_events,
                             self.configuration.referer.clone(),
                             self.configuration.max_page_bytes,
                             self.configuration.get_cache_options(),
-                            &self.configuration.cache_policy,
-                            &self.configuration.remote_multimodal,
                             self.configuration.cache_namespace_str(),
+                            &self.configuration.chrome_fetch_params(),
                         )
                         .await;
                         page = next_page;
@@ -4244,21 +4217,12 @@ impl Website {
                         self.url.inner(),
                         client,
                         chrome_page,
-                        &self.configuration.wait_for,
-                        &self.configuration.screenshot,
                         false, // we use the initial about:blank page.
-                        &self.configuration.openai_config,
-                        &self.configuration.execution_scripts,
-                        &self.configuration.automation_scripts,
-                        &self.configuration.viewport,
-                        &self.configuration.request_timeout,
-                        &self.configuration.track_events,
                         self.configuration.referer.clone(),
                         self.configuration.max_page_bytes,
                         self.configuration.get_cache_options(),
-                        &self.configuration.cache_policy,
-                        &self.configuration.remote_multimodal,
                         self.configuration.cache_namespace_str(),
+                        &self.configuration.chrome_fetch_params(),
                     )
                     .await;
                     page = next_page;
@@ -4398,21 +4362,12 @@ impl Website {
                 url.unwrap_or(self.url.inner()),
                 client,
                 chrome_page,
-                &self.configuration.wait_for,
-                &self.configuration.screenshot,
                 false, // we use the initial about:blank page.
-                &self.configuration.openai_config,
-                &self.configuration.execution_scripts,
-                &self.configuration.automation_scripts,
-                &self.configuration.viewport,
-                &self.configuration.request_timeout,
-                &self.configuration.track_events,
                 self.configuration.referer.clone(),
                 self.configuration.max_page_bytes,
                 self.configuration.get_cache_options(),
-                &self.configuration.cache_policy,
-                &self.configuration.remote_multimodal,
                 self.configuration.cache_namespace_str(),
+                &self.configuration.chrome_fetch_params(),
             )
             .await;
 
@@ -4482,21 +4437,12 @@ impl Website {
                             self.url.inner(),
                             client,
                             chrome_page,
-                            &self.configuration.wait_for,
-                            &self.configuration.screenshot,
                             false, // we use the initial about:blank page.
-                            &self.configuration.openai_config,
-                            &self.configuration.execution_scripts,
-                            &self.configuration.automation_scripts,
-                            &self.configuration.viewport,
-                            &self.configuration.request_timeout,
-                            &self.configuration.track_events,
                             self.configuration.referer.clone(),
                             self.configuration.max_page_bytes,
                             self.configuration.get_cache_options(),
-                            &self.configuration.cache_policy,
-                            &self.configuration.remote_multimodal,
                             self.configuration.cache_namespace_str(),
+                            &self.configuration.chrome_fetch_params(),
                         )
                         .await;
                         page = next_page;
@@ -4510,21 +4456,12 @@ impl Website {
                         self.url.inner(),
                         client,
                         chrome_page,
-                        &self.configuration.wait_for,
-                        &self.configuration.screenshot,
                         false, // we use the initial about:blank page.
-                        &self.configuration.openai_config,
-                        &self.configuration.execution_scripts,
-                        &self.configuration.automation_scripts,
-                        &self.configuration.viewport,
-                        &self.configuration.request_timeout,
-                        &self.configuration.track_events,
                         self.configuration.referer.clone(),
                         self.configuration.max_page_bytes,
                         self.configuration.get_cache_options(),
-                        &self.configuration.cache_policy,
-                        &self.configuration.remote_multimodal,
                         self.configuration.cache_namespace_str(),
+                        &self.configuration.chrome_fetch_params(),
                     )
                     .await;
                     page = next_page;
@@ -5471,21 +5408,12 @@ impl Website {
                     url,
                     client,
                     &chrome_page,
-                    &config.wait_for,
-                    &config.screenshot,
                     false, // we use the initial about:blank page.
-                    &config.openai_config,
-                    &config.execution_scripts,
-                    &config.automation_scripts,
-                    &config.viewport,
-                    &config.request_timeout,
-                    &config.track_events,
                     config.referer.clone(),
                     config.max_page_bytes,
                     config.get_cache_options(),
-                    &config.cache_policy,
-                    &config.remote_multimodal,
                     config.cache_namespace_str(),
+                    &config.chrome_fetch_params(),
                 )
                 .await;
 
@@ -7819,21 +7747,12 @@ impl Website {
                                                                 target_url,
                                                                 &shared.0,
                                                                 &new_page,
-                                                                &shared.6.wait_for,
-                                                                &shared.6.screenshot,
                                                                 false,
-                                                                &shared.6.openai_config,
-                                                                &shared.6.execution_scripts,
-                                                                &shared.6.automation_scripts,
-                                                                &shared.6.viewport,
-                                                                &shared.6.request_timeout,
-                                                                &shared.6.track_events,
                                                                 shared.6.referer.clone(),
                                                                 shared.6.max_page_bytes,
                                                                 shared.6.get_cache_options(),
-                                                                &shared.6.cache_policy,
-                                                                &shared.6.remote_multimodal,
                                                                 shared.6.cache_namespace_str(),
+                                                                &shared.6.chrome_fetch_params(),
                                                             )
                                                             .await;
 
@@ -7906,21 +7825,12 @@ impl Website {
                                                                             target_url,
                                                                             &shared.0,
                                                                             &retry_page,
-                                                                            &shared.6.wait_for,
-                                                                            &shared.6.screenshot,
                                                                             false,
-                                                                            &shared.6.openai_config,
-                                                                            &shared.6.execution_scripts,
-                                                                            &shared.6.automation_scripts,
-                                                                            &shared.6.viewport,
-                                                                            &shared.6.request_timeout,
-                                                                            &shared.6.track_events,
                                                                             shared.6.referer.clone(),
                                                                             shared.6.max_page_bytes,
                                                                             shared.6.get_cache_options(),
-                                                                            &shared.6.cache_policy,
-                                                                            &shared.6.remote_multimodal,
-                                                                shared.6.cache_namespace_str(),
+                                                                            shared.6.cache_namespace_str(),
+                                                                            &shared.6.chrome_fetch_params(),
                                                                         ).await;
                                                                         page = p;
                                                                     }).await {
@@ -8941,21 +8851,12 @@ impl Website {
                                                                     target_url,
                                                                     &shared.0,
                                                                     &new_page,
-                                                                    &shared.6.wait_for,
-                                                                    &shared.6.screenshot,
                                                                     false,
-                                                                    &shared.6.openai_config,
-                                                                    &shared.6.execution_scripts,
-                                                                    &shared.6.automation_scripts,
-                                                                    &shared.6.viewport,
-                                                                    &shared.6.request_timeout,
-                                                                    &shared.6.track_events,
                                                                     shared.6.referer.clone(),
                                                                     shared.6.max_page_bytes,
                                                                     shared.6.get_cache_options(),
-                                                                    &shared.6.cache_policy,
-                                                                    &shared.6.remote_multimodal,
-                                                                shared.6.cache_namespace_str(),
+                                                                    shared.6.cache_namespace_str(),
+                                                                    &shared.6.chrome_fetch_params(),
                                                                 )
                                                                 .await;
 
@@ -9023,21 +8924,12 @@ impl Website {
                                                                                 target_url,
                                                                                 &shared.0,
                                                                                 &retry_page,
-                                                                                &shared.6.wait_for,
-                                                                                &shared.6.screenshot,
                                                                                 false,
-                                                                                &shared.6.openai_config,
-                                                                                &shared.6.execution_scripts,
-                                                                                &shared.6.automation_scripts,
-                                                                                &shared.6.viewport,
-                                                                                &shared.6.request_timeout,
-                                                                                &shared.6.track_events,
                                                                                 shared.6.referer.clone(),
                                                                                 shared.6.max_page_bytes,
                                                                                 shared.6.get_cache_options(),
-                                                                                &shared.6.cache_policy,
-                                                                                &shared.6.remote_multimodal,
-                                                                shared.6.cache_namespace_str(),
+                                                                                shared.6.cache_namespace_str(),
+                                                                                &shared.6.chrome_fetch_params(),
                                                                             ).await;
                                                                             page = p;
                                                                         }).await {
