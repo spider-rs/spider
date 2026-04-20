@@ -15206,6 +15206,57 @@ async fn test_spool_xml_links_extraction_streams_from_disk() {
     );
 }
 
+/// `Page::build` must consume a pre-spooled `SpooledContent` handle
+/// cleanly: the resulting page has `html=None`, `html_spool_path=Some`,
+/// all cached vitals mirrored, and `balance_bytes_tracked=false` so the
+/// Drop impl does not double-subtract bytes that never entered the
+/// in-memory counter.
+#[cfg(all(test, feature = "balance"))]
+#[tokio::test]
+async fn test_page_build_consumes_content_spool() {
+    use crate::page::build;
+    use crate::utils::html_spool::{spool_write_streaming_vitals, SpooledContent};
+    use crate::utils::PageResponse;
+
+    // Stage a real spool file via the streaming writer so SpooledContent
+    // mirrors the same vitals the writer would hand us in production.
+    let payload = b"<!DOCTYPE html><html><body>build from spool</body></html>";
+    let path = crate::utils::html_spool::next_spool_path();
+    let vitals = spool_write_streaming_vitals(&path, payload).await.unwrap();
+
+    let spool = SpooledContent {
+        path: path.clone(),
+        vitals,
+        head: bytes::Bytes::copy_from_slice(&payload[..payload.len().min(32)]),
+        tail: bytes::Bytes::copy_from_slice(&payload[payload.len().saturating_sub(32)..]),
+    };
+
+    let mut res = PageResponse::default();
+    res.status_code = reqwest::StatusCode::OK;
+    res.content_spool = Some(spool);
+
+    let page = build("https://example.com", res);
+
+    assert!(page.html.is_none(), "build must not materialise html");
+    assert!(page.is_html_on_disk(), "page must report on-disk");
+    assert_eq!(page.size(), payload.len(), "vitals byte_len mirrors");
+    assert!(page.is_valid_utf8, "vitals utf-8 mirrors");
+    assert!(!page.binary_file, "vitals binary mirrors");
+    assert!(!page.is_xml, "vitals xml mirrors");
+    assert!(!page.is_empty(), "spooled content is not empty");
+    assert!(
+        !page.balance_bytes_tracked,
+        "pre-spooled page never entered the in-memory byte counter"
+    );
+
+    // Spool path is reachable and points at the file the writer created.
+    let reported = page
+        .get_html_spool_path()
+        .expect("spool path must be populated")
+        .to_path_buf();
+    assert_eq!(reported, path);
+}
+
 /// Verify that ChannelGuard::lock() completes correctly when called
 /// multiple times — counters are monotonic and never reset.
 #[cfg(all(test, feature = "sync"))]

@@ -550,6 +550,263 @@ pub async fn spool_write_streaming_vitals(
     })
 }
 
+/// Maximum bytes of the page head captured by the streaming writer.
+/// 256 comfortably covers every WAF-prefix check currently performed
+/// after a chrome HTML fetch while staying well below a single cache
+/// line budget concern.
+pub const SPOOL_HEAD_TAIL_CAP: usize = 256;
+
+/// Fully-described disk-spooled content handle carried end-to-end on
+/// `PageResponse` so the crawler never has to materialise the full HTML
+/// in a `Vec<u8>` when a page is written straight to disk during the
+/// chrome fetch under memory pressure.
+///
+/// Every field is a small fixed-size value — a path, four cached vitals,
+/// and two bounded head/tail byte slices — so shipping one of these
+/// through the channel path carries the same cost as an owned
+/// `Box<SpooledContent>` regardless of the actual HTML size.
+#[derive(Debug, Clone, Default)]
+pub struct SpooledContent {
+    /// Filesystem path to the spooled HTML.  Ownership of the file is
+    /// transferred to the `HtmlSpoolGuard` held by `Page` once build
+    /// consumes this struct; the caller must not delete the file.
+    pub path: std::path::PathBuf,
+    /// Vitals computed incrementally during the write (byte length,
+    /// UTF-8 validity, binary detection, XML marker).  Zero disk I/O
+    /// required to populate these on the constructed `Page`.
+    pub vitals: SpoolVitals,
+    /// First ≤ [`SPOOL_HEAD_TAIL_CAP`] bytes of the document.  Downstream
+    /// checks that only need a prefix (e.g. Cloudflare WAF magic-bytes)
+    /// can operate on this slice without re-reading disk.
+    pub head: bytes::Bytes,
+    /// Last ≤ [`SPOOL_HEAD_TAIL_CAP`] bytes of the document, captured
+    /// via a rolling window during streaming.  Same use case as `head`.
+    pub tail: bytes::Bytes,
+}
+
+/// Stateful, push-driven streaming spool writer.
+///
+/// Powers both the in-memory driver
+/// ([`spool_write_streaming_vitals`]) and push-style flows where bytes
+/// arrive from an async source (e.g. chromey's `content_bytes_stream`).
+///
+/// Guarantees:
+/// - Lockfree: every field is local state, no atomics, no `Mutex`, no
+///   `RwLock`.
+/// - Non-blocking: all I/O goes through `tokio::io::BufWriter<
+///   tokio::fs::File>`.  `write_chunk` awaits on the inner future
+///   directly — no `spawn_blocking` or runtime-handle acquisition.
+/// - Allocation-light: the scratch buffer is allocated at most once per
+///   writer lifetime (only when a chunk actually ends mid-codepoint).
+///   The head/tail rings are `Vec<u8>` pre-sized to the cap so they
+///   never reallocate.
+/// - Panic-free: every fallible op returns through `?`.  No `unwrap`,
+///   no `expect`, no slice indexing that can go out of bounds.
+pub struct StreamingVitalsSpoolWriter {
+    writer: tokio::io::BufWriter<tokio::fs::File>,
+    byte_len: usize,
+    is_valid_utf8: bool,
+    binary_file: bool,
+    is_xml: bool,
+    header_seen: bool,
+    carry: [u8; 4],
+    carry_len: usize,
+    scratch: Vec<u8>,
+    head: Vec<u8>,
+    tail_ring: Vec<u8>,
+    /// Next write index in `tail_ring` (wraps around `tail_ring.capacity()`).
+    tail_head: usize,
+    /// Total bytes ever fed into the tail ring — used on `finish` to
+    /// decide whether the ring already wrapped.
+    tail_fed: usize,
+}
+
+impl StreamingVitalsSpoolWriter {
+    /// Internal chunk size for `BufWriter` flushes.  Matches
+    /// [`spool_write_streaming_vitals`] for consistency.
+    const CHUNK: usize = 64 * 1024;
+
+    /// Open `path` for a fresh streaming write.  Fails only if the
+    /// filesystem rejects the create — no lazy work is deferred.
+    pub async fn new(path: &Path) -> std::io::Result<Self> {
+        let file = tokio::fs::File::create(path).await?;
+        let writer = tokio::io::BufWriter::with_capacity(Self::CHUNK, file);
+        Ok(Self {
+            writer,
+            byte_len: 0,
+            is_valid_utf8: true,
+            binary_file: false,
+            is_xml: false,
+            header_seen: false,
+            carry: [0; 4],
+            carry_len: 0,
+            scratch: Vec::new(),
+            head: Vec::with_capacity(SPOOL_HEAD_TAIL_CAP),
+            tail_ring: Vec::with_capacity(SPOOL_HEAD_TAIL_CAP),
+            tail_head: 0,
+            tail_fed: 0,
+        })
+    }
+
+    /// Push a chunk of bytes through the writer.  Empty chunks are a
+    /// no-op.  The chunk is flushed to disk and its contribution to the
+    /// running vitals + head/tail windows is folded in before returning.
+    pub async fn write_chunk(&mut self, chunk: &[u8]) -> std::io::Result<()> {
+        use tokio::io::AsyncWriteExt;
+
+        if chunk.is_empty() {
+            return Ok(());
+        }
+
+        self.writer.write_all(chunk).await?;
+        self.byte_len = self.byte_len.saturating_add(chunk.len());
+
+        // ── Header-only vitals (fire exactly once) ────────────────────
+        if !self.header_seen {
+            let head_sample_len = chunk.len().min(16);
+            let head_sample = &chunk[..head_sample_len];
+            self.binary_file = auto_encoder::is_binary_file(head_sample);
+            self.is_xml = head_sample.starts_with(b"<?xml");
+            self.header_seen = true;
+        }
+
+        // ── Head window: fill until capped ────────────────────────────
+        if self.head.len() < SPOOL_HEAD_TAIL_CAP {
+            let remaining = SPOOL_HEAD_TAIL_CAP - self.head.len();
+            let take = chunk.len().min(remaining);
+            self.head.extend_from_slice(&chunk[..take]);
+        }
+
+        // ── Tail window: rolling last N bytes ─────────────────────────
+        // Fast path for small early chunks: just append.  Once we exceed
+        // the cap we switch to a ring layout.  On finish we reconstruct
+        // the last N bytes in original order.
+        let cap = SPOOL_HEAD_TAIL_CAP;
+        if self.tail_fed == 0 && chunk.len() <= cap {
+            self.tail_ring.clear();
+            self.tail_ring.extend_from_slice(chunk);
+            self.tail_head = self.tail_ring.len() % cap;
+            self.tail_fed = chunk.len();
+        } else if chunk.len() >= cap {
+            // Chunk alone covers the whole tail window — only its own
+            // last `cap` bytes survive.
+            self.tail_ring.clear();
+            self.tail_ring
+                .extend_from_slice(&chunk[chunk.len() - cap..]);
+            self.tail_head = 0;
+            self.tail_fed = self.tail_fed.saturating_add(chunk.len());
+        } else {
+            // Ensure the ring is sized to `cap` once so subsequent writes
+            // can use direct indexing without reallocation.
+            if self.tail_ring.len() < cap {
+                let needed = cap - self.tail_ring.len();
+                let pad = chunk.len().min(needed);
+                self.tail_ring.extend_from_slice(&chunk[..pad]);
+                // If we still have more bytes in this chunk, the rest
+                // wraps into the ring at index 0.
+                let rest = &chunk[pad..];
+                if !rest.is_empty() {
+                    let ring_cap = self.tail_ring.len();
+                    for (i, b) in rest.iter().enumerate() {
+                        self.tail_ring[i % ring_cap] = *b;
+                    }
+                    self.tail_head = rest.len() % ring_cap;
+                } else {
+                    self.tail_head = self.tail_ring.len() % cap;
+                }
+            } else {
+                // Full ring: write chunk bytes starting at tail_head,
+                // wrapping around.  Bounded loop, no allocation.
+                for b in chunk {
+                    self.tail_ring[self.tail_head] = *b;
+                    self.tail_head += 1;
+                    if self.tail_head == cap {
+                        self.tail_head = 0;
+                    }
+                }
+            }
+            self.tail_fed = self.tail_fed.saturating_add(chunk.len());
+        }
+
+        // ── Incremental UTF-8 validation ──────────────────────────────
+        if !self.is_valid_utf8 {
+            return Ok(());
+        }
+
+        let to_validate: &[u8] = if self.carry_len == 0 {
+            chunk
+        } else {
+            self.scratch.clear();
+            self.scratch.reserve(self.carry_len + chunk.len());
+            self.scratch
+                .extend_from_slice(&self.carry[..self.carry_len]);
+            self.scratch.extend_from_slice(chunk);
+            &self.scratch[..]
+        };
+
+        match simdutf8::compat::from_utf8(to_validate) {
+            Ok(_) => {
+                self.carry_len = 0;
+            }
+            Err(e) => {
+                if e.error_len().is_some() {
+                    self.is_valid_utf8 = false;
+                } else {
+                    let trailing = &to_validate[e.valid_up_to()..];
+                    let keep = trailing.len().min(self.carry.len());
+                    let mut tmp: [u8; 4] = [0; 4];
+                    tmp[..keep].copy_from_slice(&trailing[trailing.len() - keep..]);
+                    self.carry[..keep].copy_from_slice(&tmp[..keep]);
+                    self.carry_len = keep;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Flush remaining buffer, finalize vitals, and return the
+    /// aggregated outcome.  After this call the underlying file is
+    /// closed.
+    pub async fn finish(mut self) -> std::io::Result<(SpoolVitals, bytes::Bytes, bytes::Bytes)> {
+        use tokio::io::AsyncWriteExt;
+
+        self.writer.flush().await?;
+        let _file = self.writer.into_inner();
+
+        // An incomplete multi-byte sequence still pending at EOF means
+        // the payload is not valid UTF-8.
+        if self.carry_len > 0 {
+            self.is_valid_utf8 = false;
+        }
+
+        let head = bytes::Bytes::from(self.head);
+        let tail = if self.tail_fed <= SPOOL_HEAD_TAIL_CAP {
+            bytes::Bytes::from(self.tail_ring)
+        } else {
+            // Reassemble in original byte order: starting from tail_head,
+            // read `cap` bytes wrapping around.
+            let cap = self.tail_ring.len();
+            let mut out = Vec::with_capacity(cap);
+            let head_idx = self.tail_head;
+            out.extend_from_slice(&self.tail_ring[head_idx..]);
+            out.extend_from_slice(&self.tail_ring[..head_idx]);
+            bytes::Bytes::from(out)
+        };
+
+        Ok((
+            SpoolVitals {
+                byte_len: self.byte_len,
+                is_valid_utf8: self.is_valid_utf8,
+                binary_file: self.binary_file,
+                is_xml: self.is_xml,
+            },
+            head,
+            tail,
+        ))
+    }
+}
+
 /// Async streaming read of a spool file in chunks.
 /// Delegates to [`uring_fs::read_file_chunked`] which picks the
 /// optimal strategy per platform (io_uring or tokio::fs streaming).
@@ -875,6 +1132,76 @@ pub(crate) mod tests {
         );
         assert!(!vitals.binary_file);
         assert!(!vitals.is_xml);
+        spool_delete(&path);
+    }
+
+    /// Chunk-by-chunk writer must yield vitals identical to the single-
+    /// shot writer for the same input, and must capture head/tail
+    /// windows matching the actual bytes at those offsets.
+    #[tokio::test]
+    async fn test_streaming_writer_matches_single_shot() {
+        let mut data: Vec<u8> = Vec::with_capacity(200 * 1024);
+        for i in 0..(200 * 1024) {
+            data.push((b'a' + (i % 26) as u8) as u8);
+        }
+        // Reference: single-shot writer.
+        let ref_path = next_spool_path();
+        let ref_vitals = spool_write_streaming_vitals(&ref_path, &data)
+            .await
+            .unwrap();
+        spool_delete(&ref_path);
+
+        // Push-driven: small varying chunk sizes across boundaries.
+        let path = next_spool_path();
+        let mut w = StreamingVitalsSpoolWriter::new(&path).await.unwrap();
+        for chunk in data.chunks(7919) {
+            w.write_chunk(chunk).await.unwrap();
+        }
+        let (vitals, head, tail) = w.finish().await.unwrap();
+
+        assert_eq!(vitals.byte_len, ref_vitals.byte_len);
+        assert_eq!(vitals.is_valid_utf8, ref_vitals.is_valid_utf8);
+        assert_eq!(vitals.binary_file, ref_vitals.binary_file);
+        assert_eq!(vitals.is_xml, ref_vitals.is_xml);
+        assert_eq!(head.as_ref(), &data[..SPOOL_HEAD_TAIL_CAP]);
+        assert_eq!(tail.as_ref(), &data[data.len() - SPOOL_HEAD_TAIL_CAP..]);
+
+        let on_disk = std::fs::read(&path).unwrap();
+        assert_eq!(on_disk, data);
+        spool_delete(&path);
+    }
+
+    /// Head/tail windows for payloads smaller than the cap must contain
+    /// the full payload (not padded, not truncated).
+    #[tokio::test]
+    async fn test_streaming_writer_small_head_tail() {
+        let data = b"<html><body>tiny</body></html>";
+        let path = next_spool_path();
+        let mut w = StreamingVitalsSpoolWriter::new(&path).await.unwrap();
+        w.write_chunk(data).await.unwrap();
+        let (_, head, tail) = w.finish().await.unwrap();
+        assert_eq!(head.as_ref(), data.as_slice());
+        assert_eq!(tail.as_ref(), data.as_slice());
+        spool_delete(&path);
+    }
+
+    /// Multi-byte UTF-8 spanning chunk boundaries is still validated
+    /// correctly by the push-driven writer.
+    #[tokio::test]
+    async fn test_streaming_writer_multibyte_across_boundaries() {
+        let mut data: Vec<u8> = Vec::with_capacity(90 * 1024 * 3);
+        for _ in 0..(90 * 1024) {
+            data.extend_from_slice("€".as_bytes());
+        }
+        let path = next_spool_path();
+        let mut w = StreamingVitalsSpoolWriter::new(&path).await.unwrap();
+        // Push in ~3.3 KiB chunks — many boundaries split codepoints.
+        for chunk in data.chunks(3331) {
+            w.write_chunk(chunk).await.unwrap();
+        }
+        let (vitals, _, _) = w.finish().await.unwrap();
+        assert!(vitals.is_valid_utf8);
+        assert_eq!(vitals.byte_len, data.len());
         spool_delete(&path);
     }
 }

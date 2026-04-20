@@ -465,6 +465,14 @@ pub fn chunk_idle_timeout() -> Option<Duration> {
 pub struct PageResponse {
     /// The page response resource.
     pub content: Option<Vec<u8>>,
+    /// Pre-spooled HTML handle carrying the disk path and the vitals
+    /// that were computed inline with the write.  Set only when the
+    /// `balance` feature is active, the chrome fetch path detected
+    /// memory pressure, and chromey's `content_bytes_stream` succeeded
+    /// end-to-end.  When present, `content` is `None` and the bytes
+    /// never materialised as an owned `Vec<u8>` on the Rust side.
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+    pub content_spool: Option<crate::utils::html_spool::SpooledContent>,
     /// Additional content keyed by return format (populated when multiple
     /// formats are requested via [`SpiderCloudConfig::with_return_formats`]).
     #[cfg(feature = "spider_cloud")]
@@ -2854,6 +2862,82 @@ async fn fetch_chrome_html_adaptive(
         }
     }
     page.outer_html_bytes().await
+}
+
+/// Drive chromey's `Page::content_bytes_stream` chunk-by-chunk directly
+/// into a [`StreamingVitalsSpoolWriter`], landing the HTML on disk
+/// without ever materialising it as a single `Vec<u8>` on the Rust side.
+///
+/// Returns a ready-to-ship [`SpooledContent`] on success; on any
+/// streaming error the partially written spool file is removed and the
+/// caller is expected to fall back to the in-memory extraction path so
+/// observable behaviour matches prior releases exactly.
+///
+/// Constraints:
+/// - Async-native: every I/O op and every chromey `.next().await` goes
+///   through tokio.  No `spawn_blocking`, no runtime-handle grabs, no
+///   mutex, no RwLock — the only state is the owned writer.
+/// - Bounded memory: peak Rust-side footprint is the chromey chunk
+///   (≤ ~192 KiB worst case per chromey's documented slice size) plus
+///   the 64 KiB `BufWriter` plus the two 256-byte head/tail rings.
+///   Independent of document size.
+/// - Panic-free: every fallible step returns through `?` or `match`.
+#[cfg(all(
+    feature = "chrome",
+    feature = "balance",
+    not(feature = "decentralized")
+))]
+#[allow(dead_code)]
+pub(crate) async fn fetch_chrome_html_to_spool(
+    page: &chromiumoxide::Page,
+) -> Option<crate::utils::html_spool::SpooledContent> {
+    use tokio_stream::StreamExt;
+
+    let path = crate::utils::html_spool::next_spool_path();
+    let mut writer = match crate::utils::html_spool::StreamingVitalsSpoolWriter::new(&path).await {
+        Ok(w) => w,
+        Err(_) => return None,
+    };
+
+    let mut stream = Box::pin(page.content_bytes_stream(None));
+
+    while let Some(item) = stream.next().await {
+        match item {
+            Ok(chunk) => {
+                if writer.write_chunk(&chunk).await.is_err() {
+                    // Partial-write failure — clean up and let caller
+                    // fall back to the in-memory path.
+                    crate::utils::html_spool::queue_spool_delete(path);
+                    return None;
+                }
+            }
+            Err(_) => {
+                crate::utils::html_spool::queue_spool_delete(path);
+                return None;
+            }
+        }
+    }
+
+    match writer.finish().await {
+        Ok((vitals, head, tail)) => {
+            if vitals.byte_len == 0 {
+                // Empty doc — caller will treat as empty response
+                // exactly as the legacy path does.  Drop the empty file.
+                crate::utils::html_spool::queue_spool_delete(path);
+                return None;
+            }
+            Some(crate::utils::html_spool::SpooledContent {
+                path,
+                vitals,
+                head,
+                tail,
+            })
+        }
+        Err(_) => {
+            crate::utils::html_spool::queue_spool_delete(path);
+            None
+        }
+    }
 }
 
 #[cfg(feature = "chrome")]

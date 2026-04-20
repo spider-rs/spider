@@ -1636,6 +1636,74 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
         should_retry = false;
     }
 
+    // ── Pre-spooled content path (balance + chrome + pressure) ────────
+    //
+    // When the fetch layer handed us a `SpooledContent` handle the HTML
+    // is already on disk and every vital was computed inline with the
+    // write.  Materialising the bytes again — even transiently — would
+    // defeat the feature.  Fold the cached values straight onto the
+    // page, skip the `html` buffer, and install the spool guard so
+    // `HtmlSpoolGuard::Drop` still cleans up on the final drop.
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+    if let Some(spool) = res.content_spool.take() {
+        return Page {
+            html: None,
+            binary_file: spool.vitals.binary_file,
+            is_valid_utf8: spool.vitals.is_valid_utf8,
+            is_xml: spool.vitals.is_xml,
+            headers: res.headers,
+            #[cfg(feature = "remote_addr")]
+            remote_addr: res.remote_addr,
+            #[cfg(feature = "cookies")]
+            cookies: res.cookies,
+            url: url.into(),
+            #[cfg(feature = "time")]
+            duration: res.duration,
+            status_code: res.status_code,
+            error_status: get_error_status(&mut should_retry, res.error_for_status),
+            final_redirect_destination: if empty_page { None } else { res.final_url },
+            #[cfg(feature = "chrome")]
+            chrome_page: None,
+            #[cfg(feature = "chrome")]
+            screenshot_bytes: res.screenshot_bytes,
+            #[cfg(feature = "openai")]
+            openai_credits_used: res.openai_credits_used,
+            #[cfg(feature = "openai")]
+            extra_ai_data: res.extra_ai_data,
+            #[cfg(feature = "gemini")]
+            gemini_credits_used: res.gemini_credits_used,
+            #[cfg(feature = "gemini")]
+            extra_gemini_data: res.extra_gemini_data,
+            remote_multimodal_usage: res.remote_multimodal_usage,
+            extra_remote_multimodal_data: res.extra_remote_multimodal_data,
+            spawn_pages: res.spawn_pages,
+            #[cfg(feature = "spider_cloud")]
+            content_map: res.content_map,
+            should_retry,
+            waf_check: res.waf_check,
+            bytes_transferred: res.bytes_transferred,
+            blocked_crawl: false,
+            signature: res.signature,
+            #[cfg(feature = "chrome")]
+            response_map: res.response_map,
+            #[cfg(feature = "chrome")]
+            request_map: res.request_map,
+            anti_bot_tech: res.anti_bot_tech,
+            metadata: res.metadata,
+            content_truncated: res.content_truncated,
+            balance_bytes_tracked: false,
+            base: None,
+            external_domains_caseless: Default::default(),
+            page_links: None,
+            proxy_configured: false,
+            profile_key: None,
+            html_spool_path: Some(HtmlSpoolGuard::new(spool.path)),
+            content_byte_len: spool.vitals.byte_len,
+            #[cfg(feature = "parallel_backends")]
+            backend_source: None,
+        };
+    }
+
     let binary_file = res
         .content
         .as_deref()
