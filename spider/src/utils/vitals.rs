@@ -236,16 +236,13 @@ mod tests {
 
     #[test]
     fn test_snapshot() {
-        let snap = snapshot();
-        // Just verify it doesn't panic and returns reasonable values.
-        assert!(snap.requests_completed >= 0);
-        assert!(snap.network_bytes_received >= 0);
+        let _snap = snapshot();
     }
 
     #[test]
     fn test_error_rate() {
-        let base_completed = REQUESTS_COMPLETED.load(Ordering::Relaxed);
-        let base_errors = REQUEST_ERRORS.load(Ordering::Relaxed);
+        let _base_completed = REQUESTS_COMPLETED.load(Ordering::Relaxed);
+        let _base_errors = REQUEST_ERRORS.load(Ordering::Relaxed);
 
         // Add 10 completions and 2 errors.
         for _ in 0..10 {

@@ -1655,11 +1655,13 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
     // Subtracted when the page is spooled to disk, broadcast via
     // channel_send_page, or dropped (via the Page Drop impl).
     #[cfg(feature = "balance")]
-    let balance_has_bytes = res.content.as_ref().is_some_and(|c| !c.is_empty());
-    #[cfg(feature = "balance")]
-    if balance_has_bytes {
-        crate::utils::html_spool::track_bytes_add(res.content.as_ref().unwrap().len());
-    }
+    let balance_has_bytes = match res.content.as_ref() {
+        Some(c) if !c.is_empty() => {
+            crate::utils::html_spool::track_bytes_add(c.len());
+            true
+        }
+        _ => false,
+    };
 
     Page {
         html: res.content.map(bytes::Bytes::from),
