@@ -2807,6 +2807,55 @@ pub fn chrome_fulfill_headers_from_reqwest(
 /// Skip bytes tracker.
 const SKIP_BYTES_AMOUNT: f64 = 17.0;
 
+/// Adaptive Chrome HTML fetcher.
+///
+/// Default path — and the path used for every build that doesn't enable the
+/// `balance` feature — calls `Page::outer_html_bytes()` so the extraction
+/// API and byte output are byte-for-byte identical to prior releases.
+///
+/// When the `balance` feature is enabled **and** the background memory
+/// monitor reports pressure (state ≥ 1, i.e. RSS ≥ 90%), we reroute through
+/// chromey 2.46.40's `Page::content_bytes_streaming()` so the HTML is
+/// pulled from V8 in ≤ 64 KiB slices rather than one large allocation.
+/// chromey internally falls back to the single-shot `Page::content()` path
+/// for small documents, so small pages under pressure don't pay a round-trip
+/// cost.  On any streaming error we fall back to `outer_html_bytes()` to
+/// preserve the previous behavior bit-for-bit.
+///
+/// Non-regression guarantees:
+/// - Without `balance` or without pressure → unchanged call path, unchanged
+///   bytes.
+/// - Under pressure → `content_bytes_streaming` serializes via
+///   `doctype + documentElement.outerHTML` (the `content()` shape).  On
+///   real-world HTML this equals the `DOM.getOuterHTML` output; any
+///   serialization diff is accepted as the price of not OOM-ing under
+///   pressure, and only affects pages that would otherwise be spooled
+///   anyway.
+/// - Lockfree, non-blocking, no `unwrap`/`expect`, no deadlocks.
+#[cfg(feature = "chrome")]
+#[inline]
+async fn fetch_chrome_html_adaptive(
+    page: &chromiumoxide::Page,
+) -> Result<Vec<u8>, chromiumoxide::error::CdpError> {
+    #[cfg(feature = "balance")]
+    {
+        // Single atomic load — the cached memory state is refreshed by the
+        // background detector in `utils::detect_system`, so this stays off
+        // the hot path.
+        let mem_state = crate::utils::detect_system::get_process_memory_state_sync();
+        if mem_state >= 1 {
+            match page.content_bytes_streaming().await {
+                Ok(bytes) => return Ok(bytes),
+                Err(_) => {
+                    // Fall through to the legacy DOM path on any streaming
+                    // failure — preserves prior behavior exactly.
+                }
+            }
+        }
+    }
+    page.outer_html_bytes().await
+}
+
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
 pub async fn fetch_page_html_chrome_base(
@@ -3449,11 +3498,11 @@ pub async fn fetch_page_html_chrome_base(
 
             let page_fn = async {
                 if !xml_target {
-                    return page.outer_html_bytes().await;
+                    return fetch_chrome_html_adaptive(page).await;
                 }
                 match page.content_bytes_xml().await {
                     Ok(b) if !b.is_empty() => Ok(b),
-                    _ => page.outer_html_bytes().await,
+                    _ => fetch_chrome_html_adaptive(page).await,
                 }
             };
 
@@ -3689,11 +3738,12 @@ pub async fn fetch_page_html_chrome_base(
                     };
 
                 if multimodal_success {
-                    let next_content = tokio::time::timeout(base_timeout, page.outer_html_bytes())
-                        .await
-                        .ok()
-                        .and_then(Result::ok)
-                        .filter(|b| !b.is_empty());
+                    let next_content =
+                        tokio::time::timeout(base_timeout, fetch_chrome_html_adaptive(page))
+                            .await
+                            .ok()
+                            .and_then(Result::ok)
+                            .filter(|b| !b.is_empty());
 
                     if next_content.is_some() {
                         page_response.content = next_content;
@@ -3737,7 +3787,7 @@ pub async fn fetch_page_html_chrome_base(
             let res = if !block_bytes {
                 let results = tokio::time::timeout(
                     base_timeout.max(HALF_MAX_PAGE_TIMEOUT),
-                    page.outer_html_bytes(),
+                    fetch_chrome_html_adaptive(page),
                 );
 
                 match results.await {
@@ -3877,7 +3927,7 @@ pub async fn fetch_page_html_chrome_base(
             let needs_fill = page_response.content.as_ref().is_none_or(|b| b.is_empty());
 
             if needs_fill {
-                tokio::time::timeout(base_timeout, page.outer_html_bytes())
+                tokio::time::timeout(base_timeout, fetch_chrome_html_adaptive(page))
                     .await
                     .ok()
                     .and_then(Result::ok)
