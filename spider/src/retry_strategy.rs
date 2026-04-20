@@ -102,6 +102,13 @@ pub struct RetryDirective {
     pub profile_key: Option<CompactString>,
     /// Custom backoff override. `None` = use default exponential backoff.
     pub backoff: Option<Duration>,
+    /// Per-attempt hedge (work-stealing) configuration override. `None` =
+    /// leave the current [`Configuration::hedge`](crate::configuration::Configuration::hedge)
+    /// untouched. `Some(cfg)` replaces it for the next attempt, enabling
+    /// dynamic per-attempt hedge delays and concurrency. Set
+    /// `HedgeConfig { enabled: false, .. }` to disable hedging for this attempt.
+    #[cfg(feature = "hedge")]
+    pub hedge: Option<crate::utils::hedge::HedgeConfig>,
     /// Whether to reset HTTP-related state before applying this directive.
     /// When `true`, calls `reset_status()` and `clear_headers()` before
     /// applying configuration changes. Does NOT clear crawl progress
@@ -145,6 +152,8 @@ impl Default for RetryDirective {
             extra_info: None,
             profile_key: None,
             backoff: None,
+            #[cfg(feature = "hedge")]
+            hedge: None,
             reset_http_state: false,
             rebuild_client: false,
         }
@@ -202,7 +211,7 @@ pub type SharedRetryStrategy = Arc<dyn RetryStrategy>;
 /// When `directive.reset_http_state` is true, resets HTTP status and
 /// clears headers before applying changes. When `directive.rebuild_client`
 /// is true, rebuilds the HTTP client and headers after applying changes.
-pub(crate) fn apply_directive(website: &mut crate::website::Website, directive: &RetryDirective) {
+pub fn apply_directive(website: &mut crate::website::Website, directive: &RetryDirective) {
     // Reset HTTP-related state only (NOT crawl progress like links_visited/pages/signatures).
     if directive.reset_http_state {
         website.reset_status();
@@ -258,6 +267,13 @@ pub(crate) fn apply_directive(website: &mut crate::website::Website, directive: 
         }
         if let Some(ref idle_dom) = directive.wait_for_idle_dom {
             website.with_wait_for_idle_dom(idle_dom.clone());
+        }
+    }
+
+    #[cfg(feature = "hedge")]
+    {
+        if let Some(ref hedge_cfg) = directive.hedge {
+            website.configuration.hedge = Some(hedge_cfg.clone());
         }
     }
 
@@ -332,6 +348,8 @@ mod tests {
         assert!(d.user_agent.is_none());
         assert!(d.backoff.is_none());
         assert!(d.profile_key.is_none());
+        #[cfg(feature = "hedge")]
+        assert!(d.hedge.is_none());
     }
 
     #[test]

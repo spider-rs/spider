@@ -3899,6 +3899,9 @@ impl Website {
 
                                     // Consult the retry strategy if set.
                                     if let Some(ref s) = retry_strategy_ref {
+                                        // Bind the stringified error to a `let` so the temporary
+                                        // `String` outlives the `.as_deref()` borrow below.
+                                        let last_err_str = last_err.as_ref().map(|e| e.to_string());
                                         let outcome = crate::retry_strategy::AttemptOutcome {
                                             attempt,
                                             status_code: reqwest::StatusCode::BAD_GATEWAY,
@@ -3911,7 +3914,7 @@ impl Website {
                                             profile_key: None,
                                             html_length: 0,
                                             bytes_transferred: None,
-                                            error_status: last_err.as_ref().map(|e| e.to_string()).as_deref(),
+                                            error_status: last_err_str.as_deref(),
                                             final_redirect_destination: None,
                                         };
                                         let directive = s.on_retry(&outcome);
