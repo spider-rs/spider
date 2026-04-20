@@ -1646,6 +1646,14 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
     // `HtmlSpoolGuard::Drop` still cleans up on the final drop.
     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
     if let Some(spool) = res.content_spool.take() {
+        // Pre-spooled pages already have a `hash_html`-equivalent
+        // signature computed against their own normalised bytes — carry
+        // it straight onto the page so the downstream signature sites
+        // (see `website.rs`) see the same value they would have
+        // computed from the in-memory bytes.  When the fetch layer
+        // didn't pre-compute (legacy PageResponse.signature from earlier
+        // code paths), fall back to that value.
+        let precomputed_signature = spool.signature.or(res.signature);
         return Page {
             html: None,
             binary_file: spool.vitals.binary_file,
@@ -1683,7 +1691,7 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
             waf_check: res.waf_check,
             bytes_transferred: res.bytes_transferred,
             blocked_crawl: false,
-            signature: res.signature,
+            signature: precomputed_signature,
             #[cfg(feature = "chrome")]
             response_map: res.response_map,
             #[cfg(feature = "chrome")]

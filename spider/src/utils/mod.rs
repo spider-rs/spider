@@ -2918,26 +2918,61 @@ pub(crate) async fn fetch_chrome_html_to_spool(
         }
     }
 
-    match writer.finish().await {
-        Ok((vitals, head, tail)) => {
-            if vitals.byte_len == 0 {
-                // Empty doc — caller will treat as empty response
-                // exactly as the legacy path does.  Drop the empty file.
-                crate::utils::html_spool::queue_spool_delete(path);
-                return None;
-            }
-            Some(crate::utils::html_spool::SpooledContent {
-                path,
-                vitals,
-                head,
-                tail,
-            })
-        }
+    let (vitals, head, tail) = match writer.finish().await {
+        Ok(t) => t,
         Err(_) => {
             crate::utils::html_spool::queue_spool_delete(path);
-            None
+            return None;
         }
+    };
+
+    if vitals.byte_len == 0 {
+        // Empty doc — caller will treat as empty response exactly as
+        // the legacy path does.  Drop the empty file.
+        crate::utils::html_spool::queue_spool_delete(path);
+        return None;
     }
+
+    // Compute the `hash_html`-equivalent signature from the spool file
+    // so dedup stays bit-for-bit identical to the in-memory path.  If
+    // the normalised output would exceed the signature buffer cap, we
+    // abort the direct-spool path here and let the caller fall back to
+    // the legacy in-memory fetch — that path computes the same hash
+    // on the same raw bytes.
+    //
+    // Pre-check: if the raw payload is so large that its normalised
+    // output almost certainly exceeds the cap, skip the disk re-read
+    // entirely.  `normalize_html` typically shrinks HTML by ~25%, so we
+    // conservatively estimate 75% of raw as the minimum normalised
+    // size.  Any page above `cap / 0.75` is guaranteed to abort.
+    if vitals.byte_len.saturating_mul(3) / 4 > crate::utils::html_spool::SPOOL_SIGNATURE_BUFFER_CAP
+    {
+        crate::utils::html_spool::queue_spool_delete(path);
+        return None;
+    }
+
+    let signature = compute_spool_signature(
+        &path,
+        crate::utils::html_spool::SPOOL_SIGNATURE_BUFFER_CAP,
+        Some(vitals.byte_len),
+    )
+    .await;
+
+    if signature.is_none() {
+        // Normalised output exceeded the cap (or I/O error).  Abort so
+        // the caller re-fetches via the legacy in-memory path and
+        // produces the exact same signature as before.
+        crate::utils::html_spool::queue_spool_delete(path);
+        return None;
+    }
+
+    Some(crate::utils::html_spool::SpooledContent {
+        path,
+        vitals,
+        head,
+        tail,
+        signature,
+    })
 }
 
 #[cfg(feature = "chrome")]
@@ -7565,6 +7600,172 @@ pub(crate) async fn hash_html(html: &[u8]) -> u64 {
     } else {
         Default::default()
     }
+}
+
+/// `hash_html`-equivalent signature computation that reads the
+/// disk-spooled HTML in chunks, runs the same lol_html normalisation
+/// handlers as [`normalize_html`], and hashes the resulting buffer via
+/// the same `Vec<u8>::hash` + [`ahash::AHasher`] path as [`hash_html`].
+///
+/// Returns `Some(signature)` when the normalised output fits within
+/// `cap` bytes.  Returns `None` if normalisation would exceed `cap` or
+/// on any I/O error — the caller must then abort its direct-to-disk
+/// path and fall back to the legacy in-memory fetch so signatures stay
+/// bit-for-bit identical with `hash_html` in both paths.
+///
+/// The signature produced here is guaranteed to equal
+/// `hash_html(raw_bytes)` for any `raw_bytes` whose normalised output
+/// is ≤ `cap`, because:
+/// 1. The lol_html handlers are copied verbatim from `normalize_html`.
+/// 2. The final hash is a single `Vec<u8>::hash(&mut AHasher::default())`
+///    call, which `ahash` handles identically to a single
+///    `write_usize + write` (verified empirically — multiple `write`
+///    calls would diverge).
+///
+/// Design properties:
+/// - Bounded memory: the normalised accumulator never grows past `cap`.
+///   A 64 KiB read buffer + lol_html internal state is the only other
+///   allocation.  Disk I/O is sequential, single pass.
+/// - Lockfree, no mutexes, no `spawn_blocking` — only `tokio::fs` +
+///   `tokio::io::BufReader` async I/O.
+/// - Panic-free: every fallible op returns via `?` or matches.
+#[cfg(all(feature = "balance", not(feature = "decentralized")))]
+pub(crate) async fn compute_spool_signature(
+    path: &std::path::Path,
+    cap: usize,
+    // Known raw byte length of the spool file.  Used to pre-allocate
+    // the normalised accumulator to a realistic capacity so we avoid
+    // repeated `Vec` doublings during the hot write path.  Pass `None`
+    // when the length is unknown at the call site.
+    raw_byte_len_hint: Option<usize>,
+) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    use tokio::io::AsyncReadExt;
+
+    let file = tokio::fs::File::open(path).await.ok()?;
+    // Size the read buffer to match the underlying file up to 64 KiB so
+    // small spools avoid the full 64 KiB alloc when the caller has a
+    // smaller `raw_byte_len_hint` — same behaviour, less peak memory
+    // for tiny pages.
+    let read_cap = match raw_byte_len_hint {
+        Some(len) => len.min(65_536).max(4_096),
+        None => 65_536,
+    };
+    let mut reader = tokio::io::BufReader::with_capacity(read_cap, file);
+
+    // `Cell` gives the rewriter's output closure and the outer read
+    // loop safe shared access to the flag without mutex overhead.  The
+    // normalised buffer is borrowed only by the closure; we don't need
+    // to read it in the loop so `RefCell`-style wrappers aren't needed
+    // there — we keep it behind a `Cell<Vec<u8>>` and move it out after
+    // the rewriter is dropped.
+    let aborted: std::cell::Cell<bool> = std::cell::Cell::new(false);
+    // Pre-size the normalised accumulator to the same 3/4-of-raw
+    // estimate that `normalize_html` uses when the caller already
+    // knows the byte length.  Clamped to the cap so we never over-
+    // commit memory for pathological inputs.  Without this the Vec
+    // grows by doubling from 0 — up to log2(cap/32)~19 reallocations
+    // for a 16 MiB cap.
+    let initial_cap = match raw_byte_len_hint {
+        Some(len) => len.saturating_mul(3) / 4,
+        None => 0,
+    }
+    .min(cap);
+    let normalized: std::cell::RefCell<Vec<u8>> =
+        std::cell::RefCell::new(Vec::with_capacity(initial_cap));
+
+    // Scoped so the rewriter (and the closure's borrows of `normalized`
+    // and `aborted`) are released before we hash.
+    {
+        use lol_html::{
+            element,
+            send::{HtmlRewriter, Settings},
+        };
+
+        let mut rewriter = HtmlRewriter::new(
+            Settings {
+                element_content_handlers: vec![
+                    // ── Handlers copied verbatim from `normalize_html` ──
+                    //   Any drift here produces different signatures.
+                    element!("a[href]", |el| {
+                        el.remove_attribute("href");
+                        Ok(())
+                    }),
+                    element!("script, style, iframe, base, noscript", |el| {
+                        el.remove();
+                        Ok(())
+                    }),
+                    element!("*", |el| {
+                        let attrs = el.attributes();
+                        let mut remove_attr: smallvec::SmallVec<[String; 16]> =
+                            smallvec::SmallVec::new();
+                        for attr in attrs {
+                            let name = attr.name();
+                            let remove =
+                                !(name.starts_with("data-") || name == "id" || name == "class");
+                            if remove {
+                                remove_attr.push(name);
+                            }
+                        }
+                        for name in remove_attr {
+                            el.remove_attribute(&name);
+                        }
+                        Ok(())
+                    }),
+                ],
+                ..Settings::new_send()
+            },
+            |c: &[u8]| {
+                if aborted.get() {
+                    return;
+                }
+                // Borrow only inside this closure — never across await
+                // points, so there is no deadlock risk.  Panic on
+                // double-borrow is precluded by the loop structure:
+                // only one closure invocation runs at a time.
+                let mut buf_ref = normalized.borrow_mut();
+                if buf_ref.len().saturating_add(c.len()) > cap {
+                    aborted.set(true);
+                    return;
+                }
+                buf_ref.extend_from_slice(c);
+            },
+        );
+
+        let mut buf = vec![0u8; 65536];
+        loop {
+            if aborted.get() {
+                break;
+            }
+            let n = match reader.read(&mut buf).await {
+                Ok(n) => n,
+                Err(_) => return None,
+            };
+            if n == 0 {
+                break;
+            }
+            if rewriter.write(&buf[..n]).is_err() {
+                return None;
+            }
+        }
+
+        if !aborted.get() {
+            let _ = rewriter.end();
+        }
+    }
+
+    if aborted.get() {
+        return None;
+    }
+
+    let buf = normalized.into_inner();
+    if buf.is_empty() {
+        return None;
+    }
+
+    let mut s = ahash::AHasher::default();
+    buf.hash(&mut s);
+    Some(s.finish())
 }
 
 #[allow(unused)]

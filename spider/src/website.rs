@@ -15164,6 +15164,92 @@ async fn test_spool_links_extraction_does_not_reload() {
     );
 }
 
+/// `compute_spool_signature` reads a disk-spooled HTML file, normalises
+/// it with the same lol_html handlers as `normalize_html`, and returns
+/// a `u64` that **must equal** `hash_html(raw_bytes)` for the same raw
+/// payload — otherwise signature-based dedup silently diverges between
+/// the in-memory and the disk-spooled path.  This test pins that
+/// invariant.
+#[cfg(all(test, feature = "balance"))]
+#[tokio::test]
+async fn test_compute_spool_signature_matches_hash_html() {
+    use crate::utils::{
+        compute_spool_signature, hash_html,
+        html_spool::{
+            next_spool_path, spool_delete, spool_write_async, SPOOL_SIGNATURE_BUFFER_CAP,
+        },
+    };
+
+    // A realistic mix: doctype, script (stripped), href (cleared),
+    // class/id/data-* (preserved), plain text.  Any divergence between
+    // the two normalisation paths on this sample would fail the
+    // equivalence test.
+    let raw: &[u8] = br#"<!DOCTYPE html>
+<html>
+<head>
+    <title>sig test</title>
+    <script>window.leaks = 1;</script>
+    <style>body { color: red; }</style>
+</head>
+<body>
+    <a href="https://elsewhere.example/?q=1" class="kept" id="link" data-x="y">link</a>
+    <div class="wrapper">
+        <p>stable text</p>
+        <iframe src="https://ads.example"></iframe>
+    </div>
+    <noscript>no js</noscript>
+</body>
+</html>"#;
+
+    let expected = hash_html(raw).await;
+    assert_ne!(expected, 0, "sample must produce a non-zero reference hash");
+
+    let path = next_spool_path();
+    spool_write_async(&path, raw).await.unwrap();
+
+    let actual = compute_spool_signature(&path, SPOOL_SIGNATURE_BUFFER_CAP, Some(raw.len())).await;
+    assert_eq!(
+        actual,
+        Some(expected),
+        "disk-spool signature must equal hash_html byte-for-byte"
+    );
+
+    spool_delete(&path);
+}
+
+/// When the normalised output exceeds the cap, the helper returns
+/// `None` so the caller can fall back to the in-memory path and
+/// recompute the exact same signature there.  Verifies the abort path
+/// without needing a huge payload.
+#[cfg(all(test, feature = "balance"))]
+#[tokio::test]
+async fn test_compute_spool_signature_aborts_on_cap() {
+    use crate::utils::{
+        compute_spool_signature,
+        html_spool::{next_spool_path, spool_delete, spool_write_async},
+    };
+
+    let mut raw = String::from("<html><body>");
+    // 8 KiB of preserved text content — easily over any small cap.
+    for _ in 0..1024 {
+        raw.push_str("<p class=\"x\">aaaaaaaa</p>");
+    }
+    raw.push_str("</body></html>");
+
+    let path = next_spool_path();
+    spool_write_async(&path, raw.as_bytes()).await.unwrap();
+
+    // Tiny cap: 1 KiB.  Normalised output is much larger, so the helper
+    // must return None rather than produce a partial-hash value.
+    let actual = compute_spool_signature(&path, 1024, Some(raw.len())).await;
+    assert!(
+        actual.is_none(),
+        "helper must abort when normalised output exceeds cap"
+    );
+
+    spool_delete(&path);
+}
+
 /// XML link extraction from a spooled feed must stay streaming — no
 /// full-file read, and the spool must still be on disk afterwards.
 /// Uses the Atom-style `<link>` tag format matched by
@@ -15229,6 +15315,7 @@ async fn test_page_build_consumes_content_spool() {
         vitals,
         head: bytes::Bytes::copy_from_slice(&payload[..payload.len().min(32)]),
         tail: bytes::Bytes::copy_from_slice(&payload[payload.len().saturating_sub(32)..]),
+        signature: None,
     };
 
     let mut res = PageResponse::default();

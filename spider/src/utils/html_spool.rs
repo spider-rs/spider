@@ -556,15 +556,24 @@ pub async fn spool_write_streaming_vitals(
 /// line budget concern.
 pub const SPOOL_HEAD_TAIL_CAP: usize = 256;
 
+/// Maximum bytes of normalised HTML the signature helper is willing to
+/// buffer when computing `hash_html`-equivalent signatures for a
+/// disk-spooled page.  Pages whose normalised output exceeds this cap
+/// return `signature: None` and the caller falls back to the in-memory
+/// path so signatures remain bit-for-bit compatible with
+/// [`crate::utils::hash_html`] in either case.
+pub const SPOOL_SIGNATURE_BUFFER_CAP: usize = 16 * 1024 * 1024; // 16 MiB
+
 /// Fully-described disk-spooled content handle carried end-to-end on
 /// `PageResponse` so the crawler never has to materialise the full HTML
 /// in a `Vec<u8>` when a page is written straight to disk during the
 /// chrome fetch under memory pressure.
 ///
 /// Every field is a small fixed-size value — a path, four cached vitals,
-/// and two bounded head/tail byte slices — so shipping one of these
-/// through the channel path carries the same cost as an owned
-/// `Box<SpooledContent>` regardless of the actual HTML size.
+/// two bounded head/tail byte slices, and a `u64` signature — so
+/// shipping one of these through the channel path carries the same cost
+/// as an owned `Box<SpooledContent>` regardless of the actual HTML
+/// size.
 #[derive(Debug, Clone, Default)]
 pub struct SpooledContent {
     /// Filesystem path to the spooled HTML.  Ownership of the file is
@@ -582,6 +591,14 @@ pub struct SpooledContent {
     /// Last ≤ [`SPOOL_HEAD_TAIL_CAP`] bytes of the document, captured
     /// via a rolling window during streaming.  Same use case as `head`.
     pub tail: bytes::Bytes,
+    /// Pre-computed `hash_html`-equivalent signature of the normalised
+    /// HTML, bit-for-bit identical to what
+    /// [`crate::utils::hash_html`] would return on the same raw bytes.
+    /// `None` when the normalised output exceeded
+    /// [`SPOOL_SIGNATURE_BUFFER_CAP`] — in that case the caller must
+    /// abort the direct-spool path and fall back to in-memory fetch so
+    /// signature-based dedup stays exact.
+    pub signature: Option<u64>,
 }
 
 /// Stateful, push-driven streaming spool writer.
