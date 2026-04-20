@@ -10745,7 +10745,8 @@ impl Website {
 
                                                 channel_send_page(
                                                     &shared.0, page.clone(), &shared.1,
-                                                );
+                                                )
+                                                .await;
                                                 if scrape || persist_links {
                                                     if let Some(p) = self.pages.as_mut() {
                                                         p.push(page);
@@ -10759,7 +10760,8 @@ impl Website {
                                             }
                                             channel_send_page(
                                                 &shared.0, page.clone(), &shared.1,
-                                            );
+                                            )
+                                            .await;
                                             if scrape || persist_links {
                                                 if let Some(p) = self.pages.as_mut() {
                                                     p.push(page);
