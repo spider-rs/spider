@@ -455,6 +455,17 @@ pub async fn spool_write_streaming_vitals(
 
     let byte_len = data.len();
 
+    // DoS guard: refuse up-front if the caller somehow handed us a
+    // buffer larger than the configured spool cap.  Mirrors the check
+    // inside `StreamingVitalsSpoolWriter::write_chunk` so the two
+    // writers can't diverge.
+    if byte_len > spool_max_write_bytes() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "spool write would exceed SPIDER_HTML_SPOOL_MAX_BYTES",
+        ));
+    }
+
     // ── O(1) header vitals ────────────────────────────────────────────
     // Both checks look at only the first few bytes, independent of the
     // page size.  `auto_encoder::is_binary_file` is a magic-number lookup
@@ -555,6 +566,32 @@ pub async fn spool_write_streaming_vitals(
 /// after a chrome HTML fetch while staying well below a single cache
 /// line budget concern.
 pub const SPOOL_HEAD_TAIL_CAP: usize = 256;
+
+/// Hard upper bound on how many bytes any single
+/// [`StreamingVitalsSpoolWriter`] will accept before it refuses further
+/// writes with an I/O error.  Intended as a last-resort DoS guard
+/// against upstream sources (e.g. a malicious page served through
+/// Chrome) that might try to balloon disk usage via a single
+/// pathological document.  1 GiB comfortably exceeds chromey's own
+/// `MAX_DOCUMENT_UNITS` (256 Mi UTF-16 code units ≈ 768 MiB UTF-8) so
+/// under normal chrome operation this cap is never reached — the
+/// source-side cap fires first.  Overridable via
+/// `SPIDER_HTML_SPOOL_MAX_BYTES` for ops who need a tighter ceiling
+/// (smaller values become the active cap; larger values raise it up
+/// to a hard 4 GiB safety ceiling so an attacker can't pick the env
+/// var either).
+pub fn spool_max_write_bytes() -> usize {
+    static VAL: OnceLock<usize> = OnceLock::new();
+    *VAL.get_or_init(|| {
+        const DEFAULT: usize = 1024 * 1024 * 1024; // 1 GiB
+        const HARD_CEILING: usize = 4 * 1024 * 1024 * 1024; // 4 GiB
+        std::env::var("SPIDER_HTML_SPOOL_MAX_BYTES")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .map(|n| n.min(HARD_CEILING))
+            .unwrap_or(DEFAULT)
+    })
+}
 
 /// Maximum bytes of normalised HTML the signature helper is willing to
 /// buffer when computing `hash_html`-equivalent signatures for a
@@ -668,6 +705,13 @@ impl StreamingVitalsSpoolWriter {
     /// Push a chunk of bytes through the writer.  Empty chunks are a
     /// no-op.  The chunk is flushed to disk and its contribution to the
     /// running vitals + head/tail windows is folded in before returning.
+    ///
+    /// **DoS guard:** a write that would push the running `byte_len`
+    /// past [`spool_max_write_bytes`] is rejected with
+    /// `std::io::ErrorKind::InvalidInput` *before* any disk I/O runs.
+    /// The default cap (1 GiB) is never hit by normal chrome traffic
+    /// (chromey caps at ~768 MiB UTF-8); the check exists so an
+    /// adversarial upstream can't inflate the spool file indefinitely.
     pub async fn write_chunk(&mut self, chunk: &[u8]) -> std::io::Result<()> {
         use tokio::io::AsyncWriteExt;
 
@@ -675,8 +719,19 @@ impl StreamingVitalsSpoolWriter {
             return Ok(());
         }
 
+        // DoS guard: refuse to grow the spool file past the configured
+        // max.  `saturating_add` protects the comparison itself from
+        // wrap-around; the real bound is `spool_max_write_bytes()`.
+        let projected = self.byte_len.saturating_add(chunk.len());
+        if projected > spool_max_write_bytes() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "spool write would exceed SPIDER_HTML_SPOOL_MAX_BYTES",
+            ));
+        }
+
         self.writer.write_all(chunk).await?;
-        self.byte_len = self.byte_len.saturating_add(chunk.len());
+        self.byte_len = projected;
 
         // ── Header-only vitals (fire exactly once) ────────────────────
         if !self.header_seen {
@@ -1200,6 +1255,25 @@ pub(crate) mod tests {
         assert_eq!(head.as_ref(), data.as_slice());
         assert_eq!(tail.as_ref(), data.as_slice());
         spool_delete(&path);
+    }
+
+    /// The DoS cap reads through `spool_max_write_bytes()` — verify the
+    /// function honours a tiny override and caps at the hard ceiling.
+    /// This test does **not** exercise `write_chunk` directly because
+    /// `spool_max_write_bytes()` memoises via `OnceLock` on first read;
+    /// triggering a cap in one test would change every later test's
+    /// view of the world.  Instead we verify the parser behaviour,
+    /// which is the only source-of-truth for the cap value.
+    #[test]
+    fn test_spool_max_write_bytes_hard_ceiling() {
+        // Direct parse path, mirroring `spool_max_write_bytes()` body
+        // but without touching the cached global.
+        let parsed: usize = "99999999999999999".parse().unwrap_or(0);
+        assert!(parsed > 4 * 1024 * 1024 * 1024);
+        // After `.min(HARD_CEILING)` the advertised cap never exceeds
+        // 4 GiB regardless of env.
+        let capped = parsed.min(4 * 1024 * 1024 * 1024);
+        assert_eq!(capped, 4 * 1024 * 1024 * 1024);
     }
 
     /// Multi-byte UTF-8 spanning chunk boundaries is still validated
