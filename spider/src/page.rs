@@ -5281,8 +5281,6 @@ impl Page {
                     let parent_host_scheme = &parent_frags[1];
                     let sub_matcher = &selectors.0;
 
-                    let external_domains_caseless = self.external_domains_caseless.clone();
-
                     let base1 = base.as_deref();
 
                     // original domain to match local pages.
@@ -5290,6 +5288,10 @@ impl Page {
                         self.set_url_parsed_direct_empty();
                         self.get_url_parsed_ref().as_ref().cloned()
                     };
+
+                    // Borrow the shared Arc rather than cloning — the borrow
+                    // is released when the rewriter (below) is dropped.
+                    let external_domains_caseless = &self.external_domains_caseless;
 
                     // Weighted upgrade score: avoids Chrome on a single weak signal.
                     // Strong signals (framework markers, hydration IDs) set the score
@@ -5419,7 +5421,7 @@ impl Page {
                                     parent_host_scheme,
                                     base_input_domain,
                                     sub_matcher,
-                                    &external_domains_caseless,
+                                    external_domains_caseless,
                                     &mut links_pages,
                                 );
                             }
@@ -5503,8 +5505,14 @@ impl Page {
                         }
                     }
 
+                    // Consume the rewriter in both branches so its closures
+                    // release their borrows of `self.external_domains_caseless`,
+                    // `upgrade_score`, `inner_map`, and the metadata slots
+                    // before the Chrome upgrade path touches `&mut self` below.
                     if !wrote_error {
                         let _ = rewriter.end();
+                    } else {
+                        drop(rewriter);
                     }
 
                     // Anti-bot detection is a strong signal (immediate upgrade).
@@ -5774,8 +5782,6 @@ impl Page {
                     let parent_host_scheme = &parent_frags[1];
                     let sub_matcher = &selectors.0;
 
-                    let external_domains_caseless = self.external_domains_caseless.clone();
-
                     let base1 = base.as_deref();
 
                     // original domain to match local pages.
@@ -5783,6 +5789,10 @@ impl Page {
                         self.set_url_parsed_direct_empty();
                         self.get_url_parsed_ref().as_ref().cloned()
                     };
+
+                    // Borrow the shared Arc rather than cloning — the borrow
+                    // is released when the rewriter (below) is dropped.
+                    let external_domains_caseless = &self.external_domains_caseless;
 
                     const SMART_UPGRADE_THRESHOLD: u8 = 10;
                     let upgrade_score = std::sync::atomic::AtomicU8::new(0);
@@ -5903,7 +5913,7 @@ impl Page {
                                         parent_host_scheme,
                                         base_input_domain,
                                         sub_matcher,
-                                        &external_domains_caseless,
+                                        external_domains_caseless,
                                         &mut links_pages,
                                     );
                                 }
@@ -5989,8 +5999,14 @@ impl Page {
                         }
                     }
 
+                    // Consume the rewriter in both branches so its closures
+                    // release their borrows of `self.external_domains_caseless`,
+                    // `upgrade_score`, `inner_map`, and the metadata slots
+                    // before the Chrome upgrade path touches `&mut self` below.
                     if !wrote_error {
                         let _ = rewriter.end();
+                    } else {
+                        drop(rewriter);
                     }
 
                     // Anti-bot detection is a strong signal (immediate upgrade).
@@ -6251,7 +6267,10 @@ impl Page {
                         self.get_url_parsed_ref().as_ref().cloned()
                     };
 
-                    let external_domains_caseless = self.external_domains_caseless.clone();
+                    // Borrow the shared Arc rather than cloning — the borrow
+                    // is released at the end of this block when the rewriter
+                    // drops, before the outer `self.html = Some(..)` write.
+                    let external_domains_caseless = &self.external_domains_caseless;
 
                     let base_links_settings = lol_html::element!(
                         "a[href]:not([aria-hidden=\"true\"]),script[src],link[href]",
@@ -6282,7 +6301,7 @@ impl Page {
                                     parent_host_scheme,
                                     base_input_domain,
                                     sub_matcher,
-                                    &external_domains_caseless,
+                                    external_domains_caseless,
                                     &mut links_pages,
                                 );
                             }
