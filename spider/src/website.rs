@@ -10463,7 +10463,7 @@ impl Website {
                                             }
 
                                             if link.ends_with(".xml") {
-                                                sitemaps.push(Box::new(link.into_string()));
+                                                sitemaps.push(Box::new(link.into_string().into()));
                                                 continue;
                                             }
 
