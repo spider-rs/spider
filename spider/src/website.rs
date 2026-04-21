@@ -7488,7 +7488,8 @@ impl Website {
                                                             _ => (link, None),
                                                         };
 
-                                                    let target_url_string = link_result.0.as_ref().to_string();
+                                                    let target_url_string =
+                                                        link_result.0.into_string();
 
                                                     // Cache-first: skip tab creation entirely for cached pages
                                                     #[cfg(any(feature = "cache", feature = "cache_mem", feature = "chrome_remote_cache"))]
@@ -8688,7 +8689,8 @@ impl Website {
                                                             Some(cb) => cb(link, None),
                                                             _ => (link, None),
                                                         };
-                                                    let target_url_string = link_result.0.as_ref().to_string();
+                                                    let target_url_string =
+                                                        link_result.0.into_string();
 
                                                     // Hedge-enabled Chrome path: race primary tab vs hedge tab (new WS connection)
                                                     #[cfg(feature = "hedge")]
@@ -10459,7 +10461,7 @@ impl Website {
                                             }
 
                                             if link.ends_with(".xml") {
-                                                sitemaps.push(Box::new(link.inner().clone()));
+                                                sitemaps.push(Box::new(link.into_string()));
                                                 continue;
                                             }
 
