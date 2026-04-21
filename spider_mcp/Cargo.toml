@@ -1,6 +1,6 @@
 [package]
 name = "spider_mcp"
-version = "2.51.85"
+version = "2.51.86"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "MCP (Model Context Protocol) server exposing Spider web crawler capabilities as tools."
 repository = "https://github.com/spider-rs/spider"
