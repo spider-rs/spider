@@ -3266,6 +3266,10 @@ impl Page {
                     }
                 }
             };
+            // Fall back to the same default as the `headers`-disabled path
+            // when the server didn't send a usable Retry-After. Without this,
+            // enabling the `headers` feature silently disables 429 backoff.
+            return Some(Duration::from_millis(2_500));
         } else if self.status_code == StatusCode::GATEWAY_TIMEOUT {
             return Some(Duration::from_millis(1_500));
         } else if self.status_code.as_u16() >= 598 {

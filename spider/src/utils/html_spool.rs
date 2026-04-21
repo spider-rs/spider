@@ -51,34 +51,28 @@ static CLEANUP_TX: OnceLock<tokio::sync::mpsc::UnboundedSender<PathBuf>> = OnceL
 
 /// Initialize the cleanup task and return the sender.
 ///
-/// When inside a tokio runtime: spawns a task that `recv().await`s on
-/// the channel — sleeps with zero CPU when idle, wakes instantly on send.
-/// Outside tokio (tests, CLI): falls back to a dedicated OS thread.
+/// Always spawns a dedicated OS thread with `blocking_recv`. The thread is
+/// independent of any tokio runtime, so it keeps processing deletes across
+/// runtime lifetimes — important for test binaries that run multiple
+/// `#[tokio::test]` cases back-to-back (each gets a fresh runtime that
+/// dies at test end), and for `#[test]` cases mixed in the same binary
+/// that have no runtime at all. Tying cleanup to a runtime that may die
+/// silently loses deletes after the first runtime shuts down.
+///
+/// `std::fs::remove_file` on a dedicated thread is fast enough — cleanup
+/// is a low-frequency background task, not a hot path.
 fn cleanup_sender() -> &'static tokio::sync::mpsc::UnboundedSender<PathBuf> {
     CLEANUP_TX.get_or_init(|| {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<PathBuf>();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PathBuf>();
 
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            // Tokio runtime available — spawn async cleanup task.
-            // `rx.recv().await` parks with zero CPU until a path arrives.
-            let mut rx = rx;
-            handle.spawn(async move {
-                while let Some(path) = rx.recv().await {
-                    let _ = crate::utils::uring_fs::remove_file(path.display().to_string()).await;
+        std::thread::Builder::new()
+            .name("spider-spool-cleanup".into())
+            .spawn(move || {
+                while let Some(path) = rx.blocking_recv() {
+                    let _ = std::fs::remove_file(&path);
                 }
-            });
-        } else {
-            // No tokio runtime — fallback to OS thread with blocking recv.
-            let mut rx = rx;
-            std::thread::Builder::new()
-                .name("spider-spool-cleanup".into())
-                .spawn(move || {
-                    while let Some(path) = rx.blocking_recv() {
-                        let _ = std::fs::remove_file(&path);
-                    }
-                })
-                .expect("failed to spawn spool cleanup thread");
-        }
+            })
+            .expect("failed to spawn spool cleanup thread");
 
         tx
     })

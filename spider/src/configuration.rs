@@ -898,7 +898,9 @@ impl Configuration {
 
             if let Some(custom) = &self.sitemap_url {
                 if !list.contains(custom) {
-                    list.push(*custom.clone());
+                    // Clone the inner CompactString directly; `*custom.clone()`
+                    // would allocate a new Box only to deref-move out of it.
+                    list.push((**custom).clone());
                     changes.added_custom = true;
                 }
             }

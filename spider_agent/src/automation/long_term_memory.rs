@@ -503,8 +503,8 @@ impl ExperienceMemory {
             .collect::<Vec<_>>()
             .join("\n\n");
 
-        let video_path_str = self.video_path.to_string_lossy().to_string();
-        let index_path_str = self.index_path.to_string_lossy().to_string();
+        let video_path_str = self.video_path.to_string_lossy().into_owned();
+        let index_path_str = self.index_path.to_string_lossy().into_owned();
         let chunk_size = self.config.chunk_size;
         let overlap = self.config.overlap;
 

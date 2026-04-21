@@ -10,7 +10,9 @@ pub fn setup_default_headers(
     configuration: &Configuration,
 ) -> crate::client::ClientBuilder {
     let mut headers = match &configuration.headers {
-        Some(h) => *h.clone(),
+        // Clone the inner SerializableHeaderMap directly; `*h.clone()` would
+        // allocate a new Box only to immediately deref-move out of it.
+        Some(h) => (**h).clone(),
         None => crate::configuration::SerializableHeaderMap::default(),
     };
 

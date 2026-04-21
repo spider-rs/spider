@@ -3337,8 +3337,8 @@ impl Website {
         }
 
         let url_ci = match &self.on_link_find_callback {
-            Some(cb) => cb(*self.url.clone(), None).0,
-            _ => *self.url.clone(),
+            Some(cb) => cb((*self.url).clone(), None).0,
+            _ => (*self.url).clone(),
         };
         self.insert_link(&url_ci).await;
 
@@ -3589,8 +3589,8 @@ impl Website {
             }
 
             let url = match &self.on_link_find_callback {
-                Some(cb) => cb(*self.url.clone(), None).0,
-                _ => *self.url.clone(),
+                Some(cb) => cb((*self.url).clone(), None).0,
+                _ => (*self.url).clone(),
             };
 
             self.insert_link(&url).await;
@@ -4254,8 +4254,8 @@ impl Website {
             }
 
             let url = match &self.on_link_find_callback {
-                Some(cb) => cb(*self.url.clone(), None).0,
-                _ => *self.url.clone(),
+                Some(cb) => cb((*self.url).clone(), None).0,
+                _ => (*self.url).clone(),
             };
 
             self.insert_link(&url).await;
@@ -4713,8 +4713,10 @@ impl Website {
             }
 
             let initial_url = match &self.on_link_find_callback {
-                Some(cb) => cb(*self.url.to_owned(), None).0,
-                _ => *self.url.to_owned(),
+                // Clone the inner CaseInsensitiveString directly instead of
+                // cloning the Box and then deref-moving out of it.
+                Some(cb) => cb((*self.url).clone(), None).0,
+                _ => (*self.url).clone(),
             };
             self.insert_link(&initial_url).await;
 
@@ -5067,8 +5069,8 @@ impl Website {
                 let initial_url = self
                     .on_link_find_callback
                     .as_ref()
-                    .map(|cb| cb(*self.url.clone(), None).0)
-                    .unwrap_or_else(|| *self.url.clone());
+                    .map(|cb| cb((*self.url).clone(), None).0)
+                    .unwrap_or_else(|| (*self.url).clone());
                 self.insert_link(&initial_url).await;
 
                 if self.configuration.return_page_links {
@@ -5284,8 +5286,8 @@ impl Website {
             let initial_url = self
                 .on_link_find_callback
                 .as_ref()
-                .map(|cb| cb(*self.url.clone(), None).0)
-                .unwrap_or_else(|| *self.url.clone());
+                .map(|cb| cb((*self.url).clone(), None).0)
+                .unwrap_or_else(|| (*self.url).clone());
             self.insert_link(&initial_url).await;
 
             let links = if !page_links.is_empty() {
@@ -5562,8 +5564,8 @@ impl Website {
         };
 
         let url = match &self.on_link_find_callback {
-            Some(cb) => cb(*self.url.clone(), None).0,
-            _ => *self.url.clone(),
+            Some(cb) => cb((*self.url).clone(), None).0,
+            _ => (*self.url).clone(),
         };
         self.insert_link(&url).await;
         self.links_visited
