@@ -5297,19 +5297,17 @@ pub async fn fetch_page_html_raw_conditional(
                     ..Default::default()
                 }
             } else {
-                // Store validators from this response for future conditional requests.
-                let etag = res
-                    .headers()
-                    .get("etag")
-                    .and_then(|v| v.to_str().ok())
-                    .map(|s| s.to_string());
-                let last_modified = res
-                    .headers()
-                    .get("last-modified")
-                    .and_then(|v| v.to_str().ok())
-                    .map(|s| s.to_string());
-
-                etag_cache.store(target_url, etag.as_deref(), last_modified.as_deref());
+                // Store validators from this response for future conditional
+                // requests. Borrow directly from the response headers; the
+                // etag_cache copies internally, so no owned String is needed.
+                {
+                    let etag = res.headers().get("etag").and_then(|v| v.to_str().ok());
+                    let last_modified = res
+                        .headers()
+                        .get("last-modified")
+                        .and_then(|v| v.to_str().ok());
+                    etag_cache.store(target_url, etag, last_modified);
+                }
 
                 handle_response_bytes(res, target_url, false).await
             }

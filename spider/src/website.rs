@@ -4773,7 +4773,7 @@ impl Website {
 
             let mut page = Page::new_page_with_cache(
                 &if http_worker && link.as_ref().starts_with("https") {
-                    link.inner().replacen("https", "http", 1).to_string()
+                    link.inner().replacen("https", "http", 1)
                 } else {
                     link.inner().to_string()
                 },
@@ -9486,14 +9486,14 @@ impl Website {
                             let on_link_find_callback = on_link_find_callback.clone();
 
                             spawn_set("page_fetch", &mut set, async move {
-                                let link_results = match &on_link_find_callback.clone() {
+                                let link_results = match &on_link_find_callback {
                                     Some(cb) => cb(link, None),
                                     _ => (link, None),
                                 };
                                 let link_results = link_results.0.as_ref();
                                 let page = Page::new_links_only(
                                     &if http_worker && link_results.starts_with("https") {
-                                        link_results.replacen("https", "http", 1).to_string()
+                                        link_results.replacen("https", "http", 1)
                                     } else {
                                         link_results.to_string()
                                     },

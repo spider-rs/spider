@@ -258,7 +258,7 @@ pub fn get_browser_config(
 
     let builder = match proxies {
         Some(proxies) => {
-            let mut chrome_args = Vec::from(CHROME_ARGS.map(|e| e.replace("://", "=").to_string()));
+            let mut chrome_args = Vec::from(CHROME_ARGS.map(|e| e.replace("://", "=")));
             if use_chrome_ai {
                 patch_chrome_ai_args(&mut chrome_args);
             }
@@ -337,9 +337,9 @@ pub fn get_browser_config(
 
     let mut chrome_args = Vec::from(CHROME_ARGS.map(|e| {
         if e == "--headless" {
-            "".to_string()
+            String::new()
         } else {
-            e.replace("://", "=").to_string()
+            e.replace("://", "=")
         }
     }));
 

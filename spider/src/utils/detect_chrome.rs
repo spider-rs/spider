@@ -47,7 +47,7 @@ pub fn get_detect_chrome_executable() -> Option<String> {
     // 2. Check standard executables in PATH using the `which` crate
     for name in CHROME_NAMES {
         if let Ok(path) = which::which(name) {
-            return Some(path.to_string_lossy().to_string());
+            return Some(path.to_string_lossy().into_owned());
         }
     }
 
@@ -56,7 +56,7 @@ pub fn get_detect_chrome_executable() -> Option<String> {
         for path_str in HOME_PATHS {
             let path = home.join(path_str);
             if path.exists() {
-                return Some(path.to_string_lossy().to_string());
+                return Some(path.to_string_lossy().into_owned());
             }
         }
     }
@@ -65,7 +65,7 @@ pub fn get_detect_chrome_executable() -> Option<String> {
     for path in FALLBACK_PATHS.iter() {
         let p = std::path::Path::new(path);
         if p.exists() {
-            return Some(p.to_string_lossy().to_string());
+            return Some(p.to_string_lossy().into_owned());
         }
     }
 
