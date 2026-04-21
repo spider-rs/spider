@@ -1,18 +1,6 @@
 lazy_static! {
-    /// Apache server forbidden.
-    pub static ref APACHE_FORBIDDEN: &'static [u8; 317] = br#"<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
-<html><head>
-<title>403 Forbidden</title>
-</head><body>
-<h1>Forbidden</h1>
-<p>You don't have permission to access this resource.</p>
-<p>Additionally, a 403 Forbidden
-error was encountered while trying to use an ErrorDocument to handle the request.</p>
-</body></html>"#;
-
-    /// Apache server forbidden.
-    pub static ref APACHE_FORBIDDEN2: &'static [u8; 357] = br#"<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
-<html><head>
+    /// Apache server forbidden — DOCTYPE-agnostic suffix shared by all Apache 403 variants.
+    pub static ref APACHE_FORBIDDEN_SUFFIX: &'static [u8; 266] = br#"<html><head>
 <title>403 Forbidden</title>
 </head><body>
 <h1>Forbidden</h1>

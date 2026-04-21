@@ -90,7 +90,7 @@ use crate::{
         AntiBotTech, Metadata, REWRITER_YIELD_INTERVAL, REWRITER_YIELD_THRESHOLD,
         STREAMING_CHUNK_SIZE,
     },
-    utils::templates::{APACHE_FORBIDDEN, APACHE_FORBIDDEN2},
+    utils::templates::APACHE_FORBIDDEN_SUFFIX,
     RelativeSelectors,
 };
 use abs::parse_absolute_url;
@@ -321,7 +321,7 @@ lazy_static! {
 /// Detect if apache hard 403 is forbidden and should not retry.
 #[inline(always)]
 pub fn detect_apache_forbidden(b: &[u8]) -> bool {
-    b == *APACHE_FORBIDDEN || b == *APACHE_FORBIDDEN2
+    b.ends_with(*APACHE_FORBIDDEN_SUFFIX)
 }
 
 /// Detect if openresty hard 403 is forbidden and should not retry.
@@ -8128,6 +8128,50 @@ mod tests {
         // Normal content
         assert!(!detect_hard_forbidden_content(
             b"<html><body>Hello</body></html>"
+        ));
+    }
+
+    #[test]
+    fn test_detect_apache_forbidden_doctype_variants() {
+        let suffix = br#"<html><head>
+<title>403 Forbidden</title>
+</head><body>
+<h1>Forbidden</h1>
+<p>You don't have permission to access this resource.</p>
+<p>Additionally, a 403 Forbidden
+error was encountered while trying to use an ErrorDocument to handle the request.</p>
+</body></html>"#;
+
+        // HTML 2.0 DOCTYPE (original APACHE_FORBIDDEN)
+        let mut html2 = br#"<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+"#
+        .to_vec();
+        html2.extend_from_slice(suffix);
+        assert!(detect_apache_forbidden(&html2));
+
+        // HTML 4.01 DOCTYPE (original APACHE_FORBIDDEN2)
+        let mut html4 = br#"<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+"#
+        .to_vec();
+        html4.extend_from_slice(suffix);
+        assert!(detect_apache_forbidden(&html4));
+
+        // HTML5 DOCTYPE — new variant the old exact-match path missed
+        let mut html5 = b"<!DOCTYPE html>\n".to_vec();
+        html5.extend_from_slice(suffix);
+        assert!(detect_apache_forbidden(&html5));
+
+        // No DOCTYPE at all
+        assert!(detect_apache_forbidden(suffix));
+
+        // Unrelated 403 page must not match
+        assert!(!detect_apache_forbidden(
+            b"<html><body>403 Forbidden</body></html>"
+        ));
+
+        // Truncated suffix must not match
+        assert!(!detect_apache_forbidden(
+            b"<html><body><h1>Forbidden</h1></body></html>"
         ));
     }
 
