@@ -109,12 +109,23 @@ lazy_static! {
 
 lazy_static! {
     /// Aho-Corasick automaton for DNS error detection — single O(n) scan.
+    ///
+    /// Safety net for resolvers whose errors do not surface through the
+    /// typed `io::Error(NotFound)` fast path. Patterns cover:
+    /// - tokio / system getaddrinfo → "dns error" / "failed to lookup address"
+    /// - glibc                      → "Name or service not known"
+    /// - macOS / BSD NODATA         → "No address associated with hostname"
+    /// - Node-style runtimes        → "ENOTFOUND"
+    /// - hickory ResolveError       → "no record found"
+    /// - our DnsCacheResolver       → "dns resolution returned no addresses"
     static ref DNS_ERROR_AC: aho_corasick::AhoCorasick = aho_corasick::AhoCorasick::new([
         "dns error",
         "failed to lookup address",
         "Name or service not known",
         "No address associated with hostname",
         "ENOTFOUND",
+        "no record found",
+        "dns resolution returned no addresses",
     ]).expect("valid patterns");
 }
 
@@ -1462,6 +1473,48 @@ pub fn is_chrome_error_page(content: &[u8]) -> bool {
     memchr::memmem::find(region, NEEDLE).is_some()
 }
 
+/// Extract the `errorCode` value (e.g. `"ERR_NAME_NOT_RESOLVED"`) from a
+/// Chrome error page's `loadTimeDataRaw` JSON blob. Scans only the final
+/// 4KB to stay O(1) on large responses. Returns `None` when the needle is
+/// absent or the value is not valid UTF-8.
+#[inline]
+pub fn extract_chrome_error_code(content: &[u8]) -> Option<&str> {
+    const NEEDLE: &[u8] = b"\"errorCode\":\"";
+
+    let region = if content.len() > 4096 {
+        &content[content.len() - 4096..]
+    } else {
+        content
+    };
+
+    let start = memchr::memmem::find(region, NEEDLE)? + NEEDLE.len();
+    let rest = region.get(start..)?;
+    let end = memchr::memchr(b'"', rest)?;
+    std::str::from_utf8(&rest[..end]).ok()
+}
+
+/// Return `true` when a Chrome `net::ERR_*` failure_text (or an `errorCode`
+/// extracted from a rendered Chrome error page) represents a permanent
+/// hostname-resolution failure — i.e. the DNS record does not exist and no
+/// amount of proxy/browser rotation will change that.
+///
+/// Matches the two Chrome net errors that surface a missing hostname:
+/// - `ERR_NAME_NOT_RESOLVED`   — classic NXDOMAIN / NOERROR-with-no-A case
+/// - `ERR_NAME_RESOLUTION_FAILED` — resolver rejected the name outright
+///
+/// Transient DNS conditions (timeouts, malformed responses, resolver 5xx) are
+/// intentionally excluded so they remain retryable.
+#[inline]
+pub fn is_chrome_name_resolution_error(code: &str) -> bool {
+    // Accept both the `net::ERR_*` failure_text form and the bare
+    // `ERR_*` errorCode form used in rendered error pages.
+    let trimmed = code.strip_prefix("net::").unwrap_or(code);
+    matches!(
+        trimmed,
+        "ERR_NAME_NOT_RESOLVED" | "ERR_NAME_RESOLUTION_FAILED"
+    )
+}
+
 /// Extract a specific type of error from a chain of errors.
 #[cfg(not(feature = "decentralized"))]
 fn extract_specific_error<'a, T: std::error::Error + 'static>(
@@ -1593,10 +1646,23 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
     // return HTTP 200 with ~157KB of error page content. Reclassify to 599
     // (spider internal error) so all retry paths treat it as a failed crawl.
     // Content is preserved for debugging but status signals failure.
+    //
+    // When the rendered errorCode reports a permanent name-resolution failure
+    // (ERR_NAME_NOT_RESOLVED / ERR_NAME_RESOLUTION_FAILED), downgrade to the
+    // DNS-specific 525 so the retry path treats it as permanent.
     let chrome_error =
         res.status_code.is_success() && res.content.as_deref().is_some_and(is_chrome_error_page);
     if chrome_error {
-        res.status_code = StatusCode::from_u16(599).unwrap_or(StatusCode::BAD_GATEWAY);
+        let dns_permanent = res
+            .content
+            .as_deref()
+            .and_then(extract_chrome_error_code)
+            .is_some_and(is_chrome_name_resolution_error);
+        res.status_code = if dns_permanent {
+            *DNS_RESOLVE_ERROR
+        } else {
+            StatusCode::from_u16(599).unwrap_or(StatusCode::BAD_GATEWAY)
+        };
     }
 
     let success = res.status_code.is_success() || res.status_code == StatusCode::NOT_FOUND;
@@ -8398,6 +8464,179 @@ fn test_normal_page_not_detected_as_chrome_error() {
         b"<html><head><title>My Blog</title></head><body><p>Hello world</p></body></html>";
     assert!(!is_chrome_error_page(normal_html));
     assert!(validate_empty(&Some(normal_html.to_vec()), true));
+}
+
+// ---------------------------------------------------------------------------
+// Chrome DNS-error reclassification (a.com / lema-gbr.de behaviour parity)
+// ---------------------------------------------------------------------------
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_is_chrome_name_resolution_error_matches_both_forms() {
+    // Accept both the CDP failure_text form and the JSON errorCode form.
+    assert!(is_chrome_name_resolution_error(
+        "net::ERR_NAME_NOT_RESOLVED"
+    ));
+    assert!(is_chrome_name_resolution_error("ERR_NAME_NOT_RESOLVED"));
+    assert!(is_chrome_name_resolution_error(
+        "net::ERR_NAME_RESOLUTION_FAILED"
+    ));
+    assert!(is_chrome_name_resolution_error(
+        "ERR_NAME_RESOLUTION_FAILED"
+    ));
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_is_chrome_name_resolution_error_rejects_transient_and_unrelated() {
+    // Transient DNS issues remain retryable — they are NOT permanent failures.
+    assert!(!is_chrome_name_resolution_error("net::ERR_DNS_TIMED_OUT"));
+    assert!(!is_chrome_name_resolution_error(
+        "net::ERR_DNS_SERVER_FAILED"
+    ));
+    assert!(!is_chrome_name_resolution_error(
+        "net::ERR_DNS_MALFORMED_RESPONSE"
+    ));
+    // Unrelated net errors must not be misclassified as DNS.
+    assert!(!is_chrome_name_resolution_error(
+        "net::ERR_TUNNEL_CONNECTION_FAILED"
+    ));
+    assert!(!is_chrome_name_resolution_error("net::ERR_FAILED"));
+    assert!(!is_chrome_name_resolution_error(
+        "net::ERR_CONNECTION_REFUSED"
+    ));
+    assert!(!is_chrome_name_resolution_error(""));
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_extract_chrome_error_code_basic() {
+    let padding = "x".repeat(1000);
+    let html = format!(
+        "<html><style>{padding}</style>\
+         <script>var loadTimeDataRaw = {{\"errorCode\":\"ERR_NAME_NOT_RESOLVED\",\
+         \"title\":\"a.com\"}};</script></html>"
+    );
+    assert_eq!(
+        extract_chrome_error_code(html.as_bytes()),
+        Some("ERR_NAME_NOT_RESOLVED")
+    );
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_extract_chrome_error_code_absent() {
+    let html = b"<html><body><p>no error marker here</p></body></html>";
+    assert_eq!(extract_chrome_error_code(html), None);
+}
+
+/// Rendered Chrome error page carrying ERR_NAME_NOT_RESOLVED must be
+/// reclassified to 525 (DNS resolve error, permanent) instead of the
+/// generic 599 — matching the behaviour for URLs whose DNS records do
+/// not exist (e.g. `https://a.com`).
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_chrome_error_page_dns_reclassified_to_525() {
+    let padding = "x".repeat(1000);
+    let html_str = format!(
+        "<html lang=\"en\" dir=\"ltr\">\n\
+         <style>{padding}</style>\n\
+         <div id=\"main-frame-error\" class=\"interstitial-wrapper\">\n\
+         <h1><span>This site can\u{2019}t be reached</span></h1>\n\
+         <div class=\"error-code\">ERR_NAME_NOT_RESOLVED</div>\n\
+         </div>\n\
+         <script>var loadTimeDataRaw = {{\"errorCode\":\"ERR_NAME_NOT_RESOLVED\",\
+         \"title\":\"a.com\"}};</script></html>"
+    );
+    let res = PageResponse {
+        status_code: StatusCode::OK,
+        content: Some(html_str.into_bytes()),
+        ..Default::default()
+    };
+    let page = build("https://a.com", res);
+    assert_eq!(
+        page.status_code, *DNS_RESOLVE_ERROR,
+        "Chrome ERR_NAME_NOT_RESOLVED must reclassify to 525, not 599"
+    );
+    assert!(
+        !page.should_retry,
+        "DNS resolution failures must not trigger a retry"
+    );
+    assert!(
+        !page.needs_retry(),
+        "needs_retry() must be false for permanent DNS failures"
+    );
+}
+
+/// Hickory resolver error strings (emitted when the `dns_cache` feature
+/// wraps hickory for reqwest) must be recognised by the string-scan safety
+/// net, so permanent DNS failures without a typed `io::Error(NotFound)`
+/// source still map to 525 instead of being retried as transient.
+#[test]
+fn test_dns_error_ac_matches_hickory_strings() {
+    assert!(
+        DNS_ERROR_AC.is_match(
+            "no record found for Query { name: Name(\"a.com.\"), query_type: A, query_class: IN }"
+        ),
+        "hickory NoRecordsFound Display must be caught by the safety-net AC scan"
+    );
+    assert!(
+        DNS_ERROR_AC.is_match("dns resolution returned no addresses"),
+        "DnsCacheResolver empty-addresses error must be caught"
+    );
+}
+
+/// The pre-existing resolver strings must continue to match after extending
+/// the automaton — regression guard for getaddrinfo / glibc / Node errors.
+#[test]
+fn test_dns_error_ac_matches_existing_resolver_strings() {
+    assert!(DNS_ERROR_AC
+        .is_match("dns error: failed to lookup address information: nodename nor servname"));
+    assert!(
+        DNS_ERROR_AC.is_match("error trying to connect: Name or service not known (os error -2)")
+    );
+    assert!(DNS_ERROR_AC.is_match("No address associated with hostname"));
+    assert!(DNS_ERROR_AC.is_match("getaddrinfo ENOTFOUND example.invalid"));
+}
+
+/// Unrelated transport errors must NOT be misclassified as DNS — otherwise
+/// legitimate transient failures (refused, reset, TLS) would stop retrying.
+#[test]
+fn test_dns_error_ac_rejects_unrelated_errors() {
+    assert!(!DNS_ERROR_AC.is_match("connection refused"));
+    assert!(!DNS_ERROR_AC.is_match("connection reset by peer"));
+    assert!(!DNS_ERROR_AC.is_match("tls handshake failure"));
+    assert!(!DNS_ERROR_AC.is_match("request timed out"));
+    assert!(!DNS_ERROR_AC.is_match("broken pipe"));
+    assert!(!DNS_ERROR_AC.is_match(""));
+}
+
+/// Non-DNS Chrome error pages keep the existing 599 (retryable) behaviour so
+/// proxy / tunnel / TLS failures still get rotated through the retry path.
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_chrome_error_page_non_dns_stays_599() {
+    let padding = "x".repeat(1000);
+    let html_str = format!(
+        "<html><style>{padding}</style>\
+         <script>var loadTimeDataRaw = {{\"errorCode\":\"ERR_TUNNEL_CONNECTION_FAILED\",\
+         \"title\":\"example.com\"}};</script></html>"
+    );
+    let res = PageResponse {
+        status_code: StatusCode::OK,
+        content: Some(html_str.into_bytes()),
+        ..Default::default()
+    };
+    let page = build("https://example.com", res);
+    assert_eq!(
+        page.status_code,
+        StatusCode::from_u16(599).unwrap(),
+        "non-DNS Chrome error pages must still map to 599"
+    );
+    assert!(
+        page.should_retry,
+        "599 errors remain retryable for proxy/tunnel rotation"
+    );
 }
 
 // ---------------------------------------------------------------------------

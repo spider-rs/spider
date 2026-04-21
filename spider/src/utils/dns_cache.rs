@@ -219,14 +219,37 @@ impl crate::client::dns::Resolve for DnsCacheResolver {
             }
 
             // Cache miss — resolve via async hickory resolver.
-            let lookup = async_resolver()
-                .lookup_ip(&host)
-                .await
-                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
+            //
+            // For permanent DNS failures (NXDOMAIN or NOERROR-with-no-records),
+            // wrap the error as `io::Error(ErrorKind::NotFound, ...)` so the
+            // downstream `page::is_dns_error` fast path (downcast + kind check)
+            // classifies the connect failure as a permanent 525 DNS error
+            // without falling back to string scanning. Transient resolver
+            // errors (timeouts, I/O, protocol) are passed through untyped so
+            // they remain retryable via the normal connect-error path.
+            //
+            // Same allocation count as before: one Box on the error path.
+            let lookup = async_resolver().lookup_ip(&host).await.map_err(
+                |e| -> Box<dyn std::error::Error + Send + Sync> {
+                    if e.is_no_records_found() {
+                        Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, e))
+                    } else {
+                        Box::new(e)
+                    }
+                },
+            )?;
 
             let ips: Vec<IpAddr> = lookup.iter().collect();
             if ips.is_empty() {
-                return Err("dns resolution returned no addresses".into());
+                // Treat empty-but-successful lookups as permanent DNS
+                // failures — there is no record to connect to. Using a
+                // NotFound io::Error matches the classification path above.
+                let empty: Box<dyn std::error::Error + Send + Sync> =
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "dns resolution returned no addresses",
+                    ));
+                return Err(empty);
             }
 
             let sockaddrs: Arc<[SocketAddr]> = ips

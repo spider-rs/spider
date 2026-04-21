@@ -1321,6 +1321,11 @@ pub async fn perform_chrome_http_request(
                     } else if let Some(failure_text) = &http_request.failure_text {
                         if failure_text == "net::ERR_FAILED" {
                             waf_check = true;
+                        } else if crate::page::is_chrome_name_resolution_error(failure_text) {
+                            // Permanent DNS failure — reclassify so retry paths
+                            // treat this as non-retryable instead of the default
+                            // 599 catch-all.
+                            status_code = *crate::page::DNS_RESOLVE_ERROR;
                         }
                     }
                 }
@@ -1487,6 +1492,11 @@ pub async fn perform_chrome_http_request_cache(
                 } else if let Some(failure_text) = &http_request.failure_text {
                     if failure_text == "net::ERR_FAILED" {
                         waf_check = true;
+                    } else if crate::page::is_chrome_name_resolution_error(failure_text) {
+                        // Permanent DNS failure — reclassify so retry paths
+                        // treat this as non-retryable instead of the default
+                        // 599 catch-all.
+                        status_code = *crate::page::DNS_RESOLVE_ERROR;
                     }
                 }
             }
