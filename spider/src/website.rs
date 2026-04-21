@@ -18,8 +18,9 @@ use crate::page::{
 use crate::utils::abs::{convert_abs_url, parse_absolute_url};
 use crate::utils::interner::ListBucket;
 use crate::utils::{
-    crawl_duration_expired, emit_log, emit_log_shutdown, get_path_from_url, get_semaphore,
-    networking_capable, prepare_url, setup_website_selectors, spawn_set, AllowedDomainTypes,
+    crawl_duration_expired, detect_apache_forbidden, emit_log, emit_log_shutdown,
+    get_path_from_url, get_semaphore, networking_capable, prepare_url, setup_website_selectors,
+    spawn_set, AllowedDomainTypes,
 };
 
 /// Run a future with an optional hard wall-clock timeout.
@@ -3164,12 +3165,12 @@ impl Website {
         page: &crate::page::Page,
         links: &HashSet<CaseInsensitiveString>,
     ) {
-        use crate::utils::{detect_open_resty_forbidden, APACHE_FORBIDDEN};
+        use crate::utils::detect_open_resty_forbidden;
 
         if page.status_code == reqwest::StatusCode::FORBIDDEN && links.is_empty() {
             if is_safe_javascript_challenge(page) {
                 self.website_meta_info = WebsiteMetaInfo::RequiresJavascript;
-            } else if page.get_html_bytes_u8() == *APACHE_FORBIDDEN {
+            } else if detect_apache_forbidden(page.get_html_bytes_u8()) {
                 self.website_meta_info = WebsiteMetaInfo::Apache403;
             } else if detect_open_resty_forbidden(page.get_html_bytes_u8()) {
                 self.website_meta_info = WebsiteMetaInfo::OpenResty403;

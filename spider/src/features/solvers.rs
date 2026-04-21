@@ -339,17 +339,6 @@ pub(crate) fn detect_cf_turnstyle(b: &[u8]) -> bool {
 }
 
 lazy_static! {
-    /// Apache server forbidden.
-    pub static ref APACHE_FORBIDDEN: &'static [u8; 317] = br#"<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
-<html><head>
-<title>403 Forbidden</title>
-</head><body>
-<h1>Forbidden</h1>
-<p>You don't have permission to access this resource.</p>
-<p>Additionally, a 403 Forbidden
-error was encountered while trying to use an ErrorDocument to handle the request.</p>
-</body></html>"#;
-
     /// Open Resty forbidden.
     pub static ref OPEN_RESTY_FORBIDDEN: &'static [u8; 125] = br#"<html><head><title>403 Forbidden</title></head>
 <body>
@@ -376,18 +365,6 @@ pub fn detect_imperva_verification_iframe(html: &[u8]) -> bool {
 #[inline(always)]
 pub fn looks_like_imperva_verify(content_len: usize, html: &[u8]) -> bool {
     imperva_challenge_sized(content_len) && detect_imperva_verification_iframe(html)
-}
-
-/// Detect if openresty hard 403 is forbidden and should not retry.
-#[inline(always)]
-pub fn detect_open_resty_forbidden(b: &[u8]) -> bool {
-    b.starts_with(*OPEN_RESTY_FORBIDDEN)
-}
-
-/// Detect if a page is forbidden and should not retry.
-#[inline(always)]
-pub fn detect_hard_forbidden_content(b: &[u8]) -> bool {
-    b == *APACHE_FORBIDDEN || detect_open_resty_forbidden(b)
 }
 
 /// Needs bot verification.

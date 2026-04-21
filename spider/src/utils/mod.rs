@@ -85,10 +85,12 @@ pub mod zero_copy;
 #[cfg(feature = "chrome")]
 use crate::features::automation::RemoteMultimodalConfigs;
 use crate::{
+    features::solvers::OPEN_RESTY_FORBIDDEN,
     page::{
         AntiBotTech, Metadata, REWRITER_YIELD_INTERVAL, REWRITER_YIELD_THRESHOLD,
         STREAMING_CHUNK_SIZE,
     },
+    utils::templates::{APACHE_FORBIDDEN, APACHE_FORBIDDEN2},
     RelativeSelectors,
 };
 use abs::parse_absolute_url;
@@ -195,22 +197,6 @@ pub static IGNORE_CONTENT_TYPES: phf::Set<&'static str> = phf_set! {
 };
 
 lazy_static! {
-    /// Apache server forbidden.
-    pub static ref APACHE_FORBIDDEN: &'static [u8; 317] = br#"<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
-<html><head>
-<title>403 Forbidden</title>
-</head><body>
-<h1>Forbidden</h1>
-<p>You don't have permission to access this resource.</p>
-<p>Additionally, a 403 Forbidden
-error was encountered while trying to use an ErrorDocument to handle the request.</p>
-</body></html>"#;
-
-    /// Open Resty forbidden.
-    pub static ref OPEN_RESTY_FORBIDDEN: &'static [u8; 125] = br#"<html><head><title>403 Forbidden</title></head>
-<body>
-<center><h1>403 Forbidden</h1></center>
-<hr><center>openresty</center>"#;
 
     /// Empty html.
     pub static ref EMPTY_HTML_BASIC: &'static [u8; 13] = b"<html></html>";
@@ -332,6 +318,12 @@ lazy_static! {
     };
 }
 
+/// Detect if apache hard 403 is forbidden and should not retry.
+#[inline(always)]
+pub fn detect_apache_forbidden(b: &[u8]) -> bool {
+    b == *APACHE_FORBIDDEN || b == *APACHE_FORBIDDEN2
+}
+
 /// Detect if openresty hard 403 is forbidden and should not retry.
 #[inline(always)]
 pub fn detect_open_resty_forbidden(b: &[u8]) -> bool {
@@ -341,7 +333,7 @@ pub fn detect_open_resty_forbidden(b: &[u8]) -> bool {
 /// Detect if a page is forbidden and should not retry.
 #[inline(always)]
 pub fn detect_hard_forbidden_content(b: &[u8]) -> bool {
-    b == *APACHE_FORBIDDEN || detect_open_resty_forbidden(b)
+    detect_apache_forbidden(b) || detect_open_resty_forbidden(b)
 }
 
 /// Returns true if the body should NOT be cached (empty, near-empty, or known-bad HTML).
