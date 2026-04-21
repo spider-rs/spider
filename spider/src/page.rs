@@ -1960,12 +1960,14 @@ pub(crate) fn get_charset_from_content_type(
 }
 
 #[cfg(feature = "chrome")]
-/// Set the metadata found on the page.
-
-pub(crate) fn set_metadata(mdata: &Option<Box<Metadata>>, metadata: &mut Metadata) {
-    if let Some(mdata) = &mdata {
+/// Move the automation results from an existing metadata record into a freshly
+/// built one. The source Option is about to be overwritten by the caller, so
+/// taking ownership avoids cloning a potentially-large Vec<AutomationResults>
+/// (each entry may hold base64 screenshot output).
+pub(crate) fn set_metadata(mdata: &mut Option<Box<Metadata>>, metadata: &mut Metadata) {
+    if let Some(mdata) = mdata {
         if mdata.automation.is_some() {
-            metadata.automation = mdata.automation.clone();
+            metadata.automation = mdata.automation.take();
         }
     }
 }
@@ -1973,7 +1975,7 @@ pub(crate) fn set_metadata(mdata: &Option<Box<Metadata>>, metadata: &mut Metadat
 /// Set the metadata found on the page.
 
 #[cfg(not(feature = "chrome"))]
-pub(crate) fn set_metadata(_mdata: &Option<Box<Metadata>>, _metadata: &mut Metadata) {}
+pub(crate) fn set_metadata(_mdata: &mut Option<Box<Metadata>>, _metadata: &mut Metadata) {}
 
 /// Check if urls are the same without the trailing slashes.
 fn exact_url_match(url: &str, target_url: &str) -> bool {
@@ -2578,7 +2580,7 @@ impl Page {
 
             if metadata_inner.exist() {
                 // Preserve automation results from existing metadata if present
-                set_metadata(&metadata, &mut metadata_inner);
+                set_metadata(&mut metadata, &mut metadata_inner);
                 metadata.replace(Box::new(metadata_inner));
             }
 
@@ -2818,7 +2820,7 @@ impl Page {
 
             if metadata_inner.exist() {
                 // Preserve automation results from existing metadata if present
-                set_metadata(&metadata, &mut metadata_inner);
+                set_metadata(&mut metadata, &mut metadata_inner);
                 metadata.replace(Box::new(metadata_inner));
             }
 
@@ -4800,8 +4802,8 @@ impl Page {
             metadata_inner.description = meta_description;
             metadata_inner.image = meta_og_image;
 
-            if metadata_inner.exist() && self.get_metadata().is_some() {
-                set_metadata(self.get_metadata(), &mut metadata_inner);
+            if metadata_inner.exist() && self.metadata.is_some() {
+                set_metadata(&mut self.metadata, &mut metadata_inner);
             }
 
             if metadata_inner.exist() {
@@ -5032,8 +5034,8 @@ impl Page {
             metadata_inner.description = meta_description;
             metadata_inner.image = meta_og_image;
 
-            if metadata_inner.exist() && self.get_metadata().is_some() {
-                set_metadata(self.get_metadata(), &mut metadata_inner);
+            if metadata_inner.exist() && self.metadata.is_some() {
+                set_metadata(&mut self.metadata, &mut metadata_inner);
             }
 
             if metadata_inner.exist() {
@@ -7388,7 +7390,7 @@ fn test_set_metadata_preserves_automation() {
         automation: Some(automation_results),
     };
 
-    let existing = Some(Box::new(existing_metadata));
+    let mut existing = Some(Box::new(existing_metadata));
 
     let mut new_metadata = Metadata {
         title: Some(CompactString::from("New Title")),
@@ -7397,7 +7399,7 @@ fn test_set_metadata_preserves_automation() {
         automation: None,
     };
 
-    set_metadata(&existing, &mut new_metadata);
+    set_metadata(&mut existing, &mut new_metadata);
 
     assert!(
         new_metadata.automation.is_some(),

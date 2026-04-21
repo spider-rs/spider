@@ -1838,8 +1838,11 @@ pub async fn put_hybrid_cache(
         //      max-age → respect it (HTTP semantics work via the heuristic).
         //   2. If the server says no-cache, no-store, or provides no caching
         //      signals at all → inject a 2-day max-age so Period(now-2d) works.
-        let mut policy_headers = http_response.headers.clone();
-        let cc_lower = policy_headers
+        // Inspect the response headers before deciding whether we need to
+        // materialise an owned copy for the policy override. The common path
+        // (server supplies usable cache signals) stays borrow-only.
+        let cc_lower = http_response
+            .headers
             .get("cache-control")
             .map(|v| v.to_lowercase());
 
@@ -1857,18 +1860,23 @@ pub async fn put_hybrid_cache(
                 .any(|val| val.trim().parse::<u64>().unwrap_or(0) > 0)
         });
 
-        let has_heuristic_signal =
-            policy_headers.contains_key("last-modified") || policy_headers.contains_key("expires");
+        let has_heuristic_signal = http_response.headers.contains_key("last-modified")
+            || http_response.headers.contains_key("expires");
 
         // Override when: explicit no-cache/no-store, OR no caching signal at all
-        if has_no_cache || (!has_positive_max_age && !has_heuristic_signal) {
-            policy_headers.insert(
-                "cache-control".to_string(),
-                "public, max-age=172800".to_string(),
-            );
-            // Remove conflicting headers that would override max-age
-            policy_headers.remove("pragma");
-        }
+        let policy_headers: std::borrow::Cow<'_, std::collections::HashMap<String, String>> =
+            if has_no_cache || (!has_positive_max_age && !has_heuristic_signal) {
+                let mut overridden = http_response.headers.clone();
+                overridden.insert(
+                    "cache-control".to_string(),
+                    "public, max-age=172800".to_string(),
+                );
+                // Remove conflicting headers that would override max-age
+                overridden.remove("pragma");
+                std::borrow::Cow::Owned(overridden)
+            } else {
+                std::borrow::Cow::Borrowed(&http_response.headers)
+            };
 
         let res = HttpResponseLike {
             status: StatusCode::from_u16(http_response.status)
@@ -1891,10 +1899,13 @@ pub async fn put_hybrid_cache(
                     url: http_response.url,
                     body: http_response.body,
                     headers: http_cache::HttpHeaders::Modern(
+                        // Consume the headers we owned in http_response instead
+                        // of cloning each (k, v) pair — the response is dropped
+                        // right after this call.
                         http_response
                             .headers
-                            .iter()
-                            .map(|(k, v)| (k.clone(), vec![v.clone()]))
+                            .into_iter()
+                            .map(|(k, v)| (k, vec![v]))
                             .collect(),
                     ),
                     version: match http_response.version {
