@@ -2148,12 +2148,11 @@ impl Page {
     #[cfg(feature = "webdriver")]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub fn new_webdriver(url: &str, html: String, status_code: StatusCode) -> Self {
-        Page {
-            html: Some(bytes::Bytes::from(html.into_bytes())),
-            url: url.into(),
-            status_code,
-            ..Default::default()
-        }
+        let mut page = Page::default();
+        page.html = Some(bytes::Bytes::from(html.into_bytes()));
+        page.url = url.into();
+        page.status_code = status_code;
+        page
     }
 
     /// Create a new page from WebDriver with full response.
@@ -2169,13 +2168,14 @@ impl Page {
         // Navigate to the URL
         if let Err(e) = attempt_navigation(url, driver, &timeout).await {
             log::error!("WebDriver navigation failed: {:?}", e);
-            return Page {
-                url: url.into(),
-                status_code: *UNKNOWN_STATUS_ERROR,
-                #[cfg(not(feature = "page_error_status_details"))]
-                error_status: Some(format!("WebDriver navigation failed: {:?}", e)),
-                ..Default::default()
-            };
+            let mut page = Page::default();
+            page.url = url.into();
+            page.status_code = *UNKNOWN_STATUS_ERROR;
+            #[cfg(not(feature = "page_error_status_details"))]
+            {
+                page.error_status = Some(format!("WebDriver navigation failed: {:?}", e));
+            }
+            return page;
         }
 
         // Get current URL (may have redirected)
@@ -2183,22 +2183,24 @@ impl Page {
 
         // Get page content
         match get_page_content(driver).await {
-            Ok(content) => Page {
-                html: Some(bytes::Bytes::from(content.into_bytes())),
-                url: url.into(),
-                status_code: StatusCode::OK,
-                final_redirect_destination: final_url,
-                ..Default::default()
-            },
+            Ok(content) => {
+                let mut page = Page::default();
+                page.html = Some(bytes::Bytes::from(content.into_bytes()));
+                page.url = url.into();
+                page.status_code = StatusCode::OK;
+                page.final_redirect_destination = final_url;
+                page
+            }
             Err(e) => {
                 log::error!("Failed to get WebDriver page content: {:?}", e);
-                Page {
-                    url: url.into(),
-                    status_code: *UNKNOWN_STATUS_ERROR,
-                    #[cfg(not(feature = "page_error_status_details"))]
-                    error_status: Some(format!("Failed to get page content: {:?}", e)),
-                    ..Default::default()
+                let mut page = Page::default();
+                page.url = url.into();
+                page.status_code = *UNKNOWN_STATUS_ERROR;
+                #[cfg(not(feature = "page_error_status_details"))]
+                {
+                    page.error_status = Some(format!("Failed to get page content: {:?}", e));
                 }
+                page
             }
         }
     }
@@ -2222,13 +2224,14 @@ impl Page {
         // Navigate to the URL
         if let Err(e) = attempt_navigation(url, driver, &timeout).await {
             log::error!("WebDriver navigation failed: {:?}", e);
-            return Page {
-                url: url.into(),
-                status_code: *UNKNOWN_STATUS_ERROR,
-                #[cfg(not(feature = "page_error_status_details"))]
-                error_status: Some(format!("WebDriver navigation failed: {:?}", e)),
-                ..Default::default()
-            };
+            let mut page = Page::default();
+            page.url = url.into();
+            page.status_code = *UNKNOWN_STATUS_ERROR;
+            #[cfg(not(feature = "page_error_status_details"))]
+            {
+                page.error_status = Some(format!("WebDriver navigation failed: {:?}", e));
+            }
+            return page;
         }
 
         // Run execution scripts for this URL
@@ -2269,22 +2272,24 @@ impl Page {
 
         // Get page content
         match get_page_content(driver).await {
-            Ok(content) => Page {
-                html: Some(bytes::Bytes::from(content.into_bytes())),
-                url: url.into(),
-                status_code: StatusCode::OK,
-                final_redirect_destination: final_url,
-                ..Default::default()
-            },
+            Ok(content) => {
+                let mut page = Page::default();
+                page.html = Some(bytes::Bytes::from(content.into_bytes()));
+                page.url = url.into();
+                page.status_code = StatusCode::OK;
+                page.final_redirect_destination = final_url;
+                page
+            }
             Err(e) => {
                 log::error!("Failed to get WebDriver page content: {:?}", e);
-                Page {
-                    url: url.into(),
-                    status_code: *UNKNOWN_STATUS_ERROR,
-                    #[cfg(not(feature = "page_error_status_details"))]
-                    error_status: Some(format!("Failed to get page content: {:?}", e)),
-                    ..Default::default()
+                let mut page = Page::default();
+                page.url = url.into();
+                page.status_code = *UNKNOWN_STATUS_ERROR;
+                #[cfg(not(feature = "page_error_status_details"))]
+                {
+                    page.error_status = Some(format!("Failed to get page content: {:?}", e));
                 }
+                page
             }
         }
     }

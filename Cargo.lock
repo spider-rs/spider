@@ -8068,7 +8068,7 @@ dependencies = [
  "serde_regex",
  "simdutf8",
  "smallvec",
- "spider_agent_types 2.51.93",
+ "spider_agent_types 2.51.94 (registry+https://github.com/rust-lang/crates.io-index)",
  "spider_fingerprint",
  "string-interner",
  "string_concat",
@@ -8213,9 +8213,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.51.93"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07c4136446375a8e09e3dd9ecbaab2fad815b4b2fb24fdaef7926cd5edecae32"
+version = "2.51.94"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8227,6 +8225,8 @@ dependencies = [
 [[package]]
 name = "spider_agent_types"
 version = "2.51.94"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a9c3f85ccdaca8556167c7edbf000f2c7911a313e6a03a5ef1cc7a236717bd3"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
