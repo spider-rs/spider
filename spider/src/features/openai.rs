@@ -33,6 +33,7 @@ lazy_static! {
             role: "system".to_string(),
             name: None,
             function_call: None,
+            ..Default::default()
        }
     };
 }
@@ -53,6 +54,7 @@ pub fn calculate_max_tokens(
                 role: "assistant".to_string(),
                 name: None,
                 function_call: None,
+                ..Default::default()
             },
         ]
     } else {
@@ -63,12 +65,14 @@ pub fn calculate_max_tokens(
                 role: "assistant".to_string(),
                 name: None,
                 function_call: None,
+                ..Default::default()
             },
             ChatCompletionRequestMessage {
                 content: Some(prompt.to_string()),
                 role: "user".to_string(),
                 name: None,
                 function_call: None,
+                ..Default::default()
             },
         ]
     };

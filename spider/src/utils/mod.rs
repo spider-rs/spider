@@ -6793,7 +6793,7 @@ pub async fn openai_request_base(
                 _ => gpt_base,
             };
 
-            let core_bpe = tiktoken_rs::get_bpe_from_model(&gpt_configs.model).ok();
+            let core_bpe = tiktoken_rs::bpe_for_model(&gpt_configs.model).ok();
 
             let (tokens, prompt_tokens) = match &core_bpe {
                 Some(core_bpe) => (
