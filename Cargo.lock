@@ -1094,8 +1094,8 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.51.101",
- "spider_utils 2.51.101",
+ "spider 2.51.102",
+ "spider_utils 2.51.102",
 ]
 
 [[package]]
@@ -1593,9 +1593,9 @@ dependencies = [
 
 [[package]]
 name = "chromey"
-version = "2.46.45"
+version = "2.46.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97e479a9018b008c651458d98e835bdf3b517b6066f44d87d0c7828ea21c00e0"
+checksum = "d9306630ca891c20464b7afc316a1a29a02b4a8bdd38fdc727ee8a90c360af26"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -2776,7 +2776,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4311,12 +4311,12 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "system-configuration 0.7.0",
  "tokio",
  "tower-service",
  "tracing",
- "windows-registry 0.5.3",
+ "windows-registry 0.6.1",
 ]
 
 [[package]]
@@ -4718,7 +4718,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6674,7 +6674,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.2",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -6712,7 +6712,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tracing",
  "windows-sys 0.59.0",
 ]
@@ -7377,7 +7377,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7445,7 +7445,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.7",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8110,7 +8110,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.51.101"
+version = "2.51.102"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -8169,10 +8169,12 @@ dependencies = [
  "smallvec",
  "sonic-rs",
  "spider_agent",
- "spider_agent_types 2.51.101",
+ "spider_agent_types 2.51.102",
  "spider_fingerprint",
  "spider_firewall",
+ "spider_network_blocker",
  "spider_remote_cache",
+ "spider_transformations",
  "sqlx",
  "statrs",
  "string-interner",
@@ -8197,7 +8199,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent"
-version = "2.51.101"
+version = "2.51.102"
 dependencies = [
  "aho-corasick",
  "async-openai 0.35.0",
@@ -8220,7 +8222,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spider_agent_html",
- "spider_agent_types 2.51.101",
+ "spider_agent_types 2.51.102",
  "spider_skills",
  "tempfile",
  "thirtyfour",
@@ -8231,13 +8233,13 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_html"
-version = "2.51.101"
+version = "2.51.102"
 dependencies = [
  "aho-corasick",
  "lol_html",
  "serde",
  "serde_json",
- "spider_agent_types 2.51.101",
+ "spider_agent_types 2.51.102",
 ]
 
 [[package]]
@@ -8255,7 +8257,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.51.101"
+version = "2.51.102"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8305,7 +8307,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.51.101"
+version = "2.51.102"
 dependencies = [
  "clap",
  "env_logger",
@@ -8314,7 +8316,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.51.101",
+ "spider 2.51.102",
  "spider_transformations",
  "tikv-jemallocator",
  "tokio",
@@ -8331,7 +8333,7 @@ dependencies = [
  "flexbuffers",
  "htr",
  "serde_json",
- "spider 2.51.101",
+ "spider 2.51.102",
  "spider_transformations",
  "spider_utils 2.51.99",
 ]
@@ -8372,7 +8374,7 @@ dependencies = [
 
 [[package]]
 name = "spider_mcp"
-version = "2.51.101"
+version = "2.51.102"
 dependencies = [
  "clap",
  "dashmap",
@@ -8381,7 +8383,7 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
- "spider 2.51.101",
+ "spider 2.51.102",
  "spider_transformations",
  "tokio",
  "uuid",
@@ -8389,9 +8391,9 @@ dependencies = [
 
 [[package]]
 name = "spider_network_blocker"
-version = "0.0.82"
+version = "0.0.83"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23f98a479b549af9bf753dc228cf34aca52abd8d8975a7d93bbc65aa1b0f1676"
+checksum = "5f681aa5665a44c0c6de41aab2dc84e8e4b0048abc0b7f52ed74e150c330eadf"
 dependencies = [
  "arc-swap",
  "convert_case 0.11.0",
@@ -8490,7 +8492,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.51.101"
+version = "2.51.102"
 dependencies = [
  "hashbrown 0.17.0",
  "indexmap 2.14.0",
@@ -8505,14 +8507,14 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.51.101"
+version = "2.51.102"
 dependencies = [
  "env_logger",
  "hyper",
  "hyper-util",
  "lazy_static",
  "rustls-pemfile",
- "spider 2.51.101",
+ "spider 2.51.102",
  "tokio-rustls",
  "warp",
 ]
@@ -9083,7 +9085,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10272,7 +10274,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10703,7 +10705,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
 dependencies = [
  "cfg-if",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

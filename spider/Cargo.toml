@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.51.101"
+version = "2.51.102"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -132,11 +132,11 @@ features = ["serde", "headers", "dynamic-versions"]
 
 [dependencies.spider_agent_types]
 path = "../spider_agent_types"
-version = "2.51.101"
+version = "2.51.102"
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.51.101"
+version = "2.51.102"
 optional = true
 default-features = false
 
@@ -184,6 +184,13 @@ reqwest = { version = "0.13", features = [
 serde_json = "1"
 env_logger = "0.11"
 criterion = { version = "0.8", features = ["async_tokio", "html_reports"] }
+# Needed by tests/logrocket_network_map.rs to classify observed URLs against
+# the shared blocklist tries (URL_IGNORE_TRIE, URL_IGNORE_XHR_TRIE, etc.) for
+# candidate extraction. Not pulled into the public build.
+spider_network_blocker = "0.0"
+# Same test uses this to snapshot the rendered page as markdown before/after
+# blocklist additions so we can diff and confirm no content disappears.
+spider_transformations = "2"
 
 [[bench]]
 name = "allocator_bench"
