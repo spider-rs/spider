@@ -438,6 +438,8 @@ pub fn create_handler_config(config: &Configuration) -> HandlerConfig {
         } else {
             None
         },
+        // JS / meta-refresh loop guard. `None` preserves prior behavior.
+        max_main_frame_navigations: config.max_main_frame_navigations,
         ..HandlerConfig::default()
     }
 }
@@ -1500,5 +1502,23 @@ mod tests {
             hc.max_redirects.is_none(),
             "RedirectPolicy::None must disable the Chrome cap too, matching HTTP semantics"
         );
+    }
+
+    #[test]
+    fn test_handler_config_max_main_frame_navigations_defaults_to_none() {
+        let cfg = Configuration::default();
+        let hc = create_handler_config(&cfg);
+        assert!(
+            hc.max_main_frame_navigations.is_none(),
+            "default Configuration must not cap main-frame navigations"
+        );
+    }
+
+    #[test]
+    fn test_handler_config_max_main_frame_navigations_plumbs_opt_in_value() {
+        let mut cfg = Configuration::default();
+        cfg.with_max_main_frame_navigations(Some(20));
+        let hc = create_handler_config(&cfg);
+        assert_eq!(hc.max_main_frame_navigations, Some(20));
     }
 }

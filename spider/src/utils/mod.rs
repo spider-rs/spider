@@ -1363,6 +1363,20 @@ pub async fn perform_chrome_http_request(
                     return attempt_once(page, &no_www, referrer).await;
                 }
             }
+            // Navigation-loop guard tripped. Surface as 310 (same bucket as
+            // ERR_TOO_MANY_REDIRECTS) so retry paths treat it as permanent —
+            // replaying a JS/meta-refresh loop is deterministic and wasteful.
+            if let chromiumoxide::error::CdpError::TooManyNavigations(_) = e {
+                return Ok(ChromeHTTPReqRes {
+                    waf_check: false,
+                    status_code: *crate::page::TOO_MANY_REDIRECTS_ERROR,
+                    method: "GET".to_string(),
+                    response_headers: Default::default(),
+                    request_headers: Default::default(),
+                    protocol: "http/1.1".to_string(),
+                    anti_bot_tech: AntiBotTech::default(),
+                });
+            }
             Err(e)
         }
     }
@@ -1503,6 +1517,8 @@ pub async fn perform_chrome_http_request_cache(
                         // treat this as non-retryable instead of the default
                         // 599 catch-all.
                         status_code = *crate::page::DNS_RESOLVE_ERROR;
+                    } else if failure_text == "net::ERR_TOO_MANY_REDIRECTS" {
+                        status_code = *crate::page::TOO_MANY_REDIRECTS_ERROR;
                     }
                 }
             }
@@ -1557,6 +1573,18 @@ pub async fn perform_chrome_http_request_cache(
                     )
                     .await;
                 }
+            }
+            // Navigation-loop guard — reuse 310 permanent classification.
+            if let chromiumoxide::error::CdpError::TooManyNavigations(_) = e {
+                return Ok(ChromeHTTPReqRes {
+                    waf_check: false,
+                    status_code: *crate::page::TOO_MANY_REDIRECTS_ERROR,
+                    method: "GET".to_string(),
+                    response_headers: Default::default(),
+                    request_headers: Default::default(),
+                    protocol: "http/1.1".to_string(),
+                    anti_bot_tech: AntiBotTech::default(),
+                });
             }
             Err(e)
         }

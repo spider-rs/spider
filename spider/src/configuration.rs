@@ -350,6 +350,16 @@ pub struct Configuration {
     /// behavior on pages whose navigation chains exceed the HTTP default of 7.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub redirect_limit_set: bool,
+    /// Cap on main-frame cross-document navigations during a single Chrome
+    /// `goto` (requires the `chrome` feature — no effect on the HTTP path).
+    ///
+    /// Defends against JS / meta-refresh / HTTP-Refresh-header loops that
+    /// bypass the HTTP redirect cap because each hop is a fresh document
+    /// rather than a 3xx redirect. `None` disables the guard (default) so
+    /// prior behavior is preserved; `Some(n)` aborts the navigation with a
+    /// `net::ERR_TOO_MANY_NAVIGATIONS` error once the main frame has
+    /// navigated more than `n` times since `goto`.
+    pub max_main_frame_navigations: Option<u32>,
     #[cfg(feature = "cookies")]
     /// Cookie string to use for network requests ex: "foo=bar; Domain=blog.spider"
     pub cookie_str: String,
@@ -1233,6 +1243,18 @@ impl Configuration {
     pub fn with_redirect_limit(&mut self, redirect_limit: usize) -> &mut Self {
         self.redirect_limit = redirect_limit;
         self.redirect_limit_set = true;
+        self
+    }
+
+    /// Cap the number of main-frame cross-document navigations per Chrome
+    /// `goto()` call. `None` disables the guard.
+    ///
+    /// This is the JS / meta-refresh counterpart to `with_redirect_limit` —
+    /// the HTTP redirect cap cannot catch loops implemented via
+    /// `location.href`, `<meta http-equiv="refresh">`, or `Refresh:` headers,
+    /// because each hop is a fresh document rather than a 3xx redirect.
+    pub fn with_max_main_frame_navigations(&mut self, cap: Option<u32>) -> &mut Self {
+        self.max_main_frame_navigations = cap;
         self
     }
 
