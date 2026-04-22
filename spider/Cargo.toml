@@ -184,13 +184,12 @@ reqwest = { version = "0.13", features = [
 serde_json = "1"
 env_logger = "0.11"
 criterion = { version = "0.8", features = ["async_tokio", "html_reports"] }
-# Needed by tests/logrocket_network_map.rs to classify observed URLs against
-# the shared blocklist tries (URL_IGNORE_TRIE, URL_IGNORE_XHR_TRIE, etc.) for
-# candidate extraction. Not pulled into the public build.
+# Used by local (gitignored) integration probes under `spider/tests/_*.rs`
+# to classify observed network URLs and snapshot markdown. Neither crate
+# depends on `spider`, so they're safe as dev-deps (no circular resolution
+# at publish time).
 spider_network_blocker = "0.0"
-# Same test uses this to snapshot the rendered page as markdown before/after
-# blocklist additions so we can diff and confirm no content disappears.
-spider_transformations = "2"
+fast_html2md = "0"
 
 [[bench]]
 name = "allocator_bench"
