@@ -1,6 +1,9 @@
 use crate::features::chrome_args::CHROME_ARGS;
 use crate::utils::{detect_chrome::get_detect_chrome_executable, log};
-use crate::{configuration::Configuration, tokio_stream::StreamExt};
+use crate::{
+    configuration::{Configuration, RedirectPolicy},
+    tokio_stream::StreamExt,
+};
 use chromiumoxide::cdp::browser_protocol::browser::{
     SetDownloadBehaviorBehavior, SetDownloadBehaviorParamsBuilder,
 };
@@ -422,6 +425,19 @@ pub fn create_handler_config(config: &Configuration) -> HandlerConfig {
         intercept_manager: config.chrome_intercept.intercept_manager,
         only_html: config.only_html && !config.full_resources,
         max_bytes_allowed: config.max_bytes_allowed,
+        // Only enforce the redirect cap on the Chrome path when the user
+        // explicitly opted in via `with_redirect_limit`. Otherwise leave
+        // Chromium's internal ~20-hop cap in effect to preserve prior
+        // behavior on pages with long but legitimate redirect chains.
+        // `RedirectPolicy::None` also disables enforcement so HTTP and
+        // Chrome agree.
+        max_redirects: if config.redirect_limit_set
+            && !matches!(config.redirect_policy, RedirectPolicy::None)
+        {
+            Some(config.redirect_limit)
+        } else {
+            None
+        },
         ..HandlerConfig::default()
     }
 }
@@ -1449,5 +1465,40 @@ impl Drop for TabCloseGuard {
                     tokio::time::timeout(tokio::time::Duration::from_secs(5), page.close()).await;
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_handler_config_max_redirects_defaults_to_none() {
+        let cfg = Configuration::default();
+        let hc = create_handler_config(&cfg);
+        assert!(
+            hc.max_redirects.is_none(),
+            "without explicit opt-in, Chrome path must not cap redirects"
+        );
+    }
+
+    #[test]
+    fn test_handler_config_max_redirects_plumbs_opt_in_value() {
+        let mut cfg = Configuration::default();
+        cfg.with_redirect_limit(5);
+        let hc = create_handler_config(&cfg);
+        assert_eq!(hc.max_redirects, Some(5));
+    }
+
+    #[test]
+    fn test_handler_config_max_redirects_disabled_by_policy_none() {
+        let mut cfg = Configuration::default();
+        cfg.with_redirect_limit(5);
+        cfg.with_redirect_policy(RedirectPolicy::None);
+        let hc = create_handler_config(&cfg);
+        assert!(
+            hc.max_redirects.is_none(),
+            "RedirectPolicy::None must disable the Chrome cap too, matching HTTP semantics"
+        );
     }
 }

@@ -12296,6 +12296,7 @@ impl Website {
         // Limits
         if let Some(v) = config.redirect_limit {
             self.configuration.redirect_limit = v;
+            self.configuration.redirect_limit_set = true;
         }
         if let Some(ref budget_map) = config.budget {
             let mut budget = hashbrown::HashMap::with_capacity(budget_map.len());

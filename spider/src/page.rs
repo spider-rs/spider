@@ -99,6 +99,10 @@ lazy_static! {
     /// DNS failure
     pub(crate) static ref DNS_RESOLVE_ERROR: StatusCode =
         StatusCode::from_u16(525).expect("valid status code");
+    /// Redirect-chain cap exceeded (IANA 310 "Loop Detected" — 3xx keeps retry
+    /// strategies from treating this as a transient 5xx).
+    pub(crate) static ref TOO_MANY_REDIRECTS_ERROR: StatusCode =
+        StatusCode::from_u16(310).expect("valid status code");
     /// Body decode failure
     pub(crate) static ref BODY_DECODE_ERROR: StatusCode =
         StatusCode::from_u16(400).expect("valid status code");
@@ -157,10 +161,11 @@ fn is_dns_error(err: &crate::client::Error) -> bool {
 }
 
 /// Whether a status code is retryable (transient server/network errors).
-/// DNS errors (525) are permanent and excluded.
+/// DNS errors (525) and redirect-cap hits (310) are permanent and excluded.
 #[inline]
 pub fn is_retryable_status(status: StatusCode) -> bool {
     status != *DNS_RESOLVE_ERROR
+        && status != *TOO_MANY_REDIRECTS_ERROR
         && (status.is_server_error()
             || matches!(
                 status,
@@ -8087,6 +8092,10 @@ fn test_is_retryable_status_excludes_dns() {
     assert!(
         !is_retryable_status(StatusCode::OK),
         "200 should not be retryable"
+    );
+    assert!(
+        !is_retryable_status(*TOO_MANY_REDIRECTS_ERROR),
+        "TOO_MANY_REDIRECTS_ERROR (310) must not be retryable — redirect loops are deterministic"
     );
 }
 

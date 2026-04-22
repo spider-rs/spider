@@ -1326,6 +1326,12 @@ pub async fn perform_chrome_http_request(
                             // treat this as non-retryable instead of the default
                             // 599 catch-all.
                             status_code = *crate::page::DNS_RESOLVE_ERROR;
+                        } else if failure_text == "net::ERR_TOO_MANY_REDIRECTS" {
+                            // Redirect cap hit (emitted by chromey when a
+                            // Document chain exceeds `max_redirects`). Surface
+                            // as 310 so retry paths mirror reqwest's permanent
+                            // classification instead of bouncing on 599.
+                            status_code = *crate::page::TOO_MANY_REDIRECTS_ERROR;
                         }
                     }
                 }

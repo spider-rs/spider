@@ -342,6 +342,14 @@ pub struct Configuration {
     pub redirect_limit: usize,
     /// The redirect policy type to use.
     pub redirect_policy: RedirectPolicy,
+    /// Whether `redirect_limit` was explicitly set by the caller.
+    ///
+    /// Set to `true` by `with_redirect_limit()` and by the external-config loader
+    /// when `redirect_limit` is provided. Chrome-path enforcement reads this flag
+    /// so it only caps redirects when the user opted in — preserving prior
+    /// behavior on pages whose navigation chains exceed the HTTP default of 7.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub redirect_limit_set: bool,
     #[cfg(feature = "cookies")]
     /// Cookie string to use for network requests ex: "foo=bar; Domain=blog.spider"
     pub cookie_str: String,
@@ -1218,8 +1226,13 @@ impl Configuration {
     }
 
     /// Set the max redirects allowed for request.
+    ///
+    /// Calling this method opts in to redirect-cap enforcement on both the HTTP
+    /// and Chrome paths. Without it, Chrome defers to Chromium's internal
+    /// ~20-hop cap to preserve prior behavior.
     pub fn with_redirect_limit(&mut self, redirect_limit: usize) -> &mut Self {
         self.redirect_limit = redirect_limit;
+        self.redirect_limit_set = true;
         self
     }
 
@@ -2676,6 +2689,22 @@ mod tests {
         assert_ne!(strict, RedirectPolicy::Loose);
         assert_ne!(none, RedirectPolicy::Loose);
         assert_ne!(strict, none);
+    }
+
+    #[test]
+    fn test_redirect_limit_is_opt_in_for_chrome_path() {
+        // Fresh config preserves prior behavior: no flag, no Chrome enforcement.
+        let fresh = Configuration::default();
+        assert!(
+            !fresh.redirect_limit_set,
+            "Configuration::default() must not claim the redirect_limit was set"
+        );
+
+        // Explicit opt-in flips the flag and records the cap.
+        let mut opt_in = Configuration::default();
+        opt_in.with_redirect_limit(3);
+        assert!(opt_in.redirect_limit_set);
+        assert_eq!(opt_in.redirect_limit, 3);
     }
 
     #[test]
