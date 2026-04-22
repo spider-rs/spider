@@ -11670,6 +11670,17 @@ impl Website {
         self
     }
 
+    /// Cap the number of main-frame cross-document navigations per Chrome
+    /// `goto`. `None` disables the guard (default).
+    ///
+    /// Complements `with_redirect_limit`: catches JS / meta-refresh /
+    /// `Refresh:` header loops which appear as fresh documents to Chromium
+    /// rather than 3xx redirects, and therefore bypass the HTTP redirect cap.
+    pub fn with_max_main_frame_navigations(&mut self, cap: Option<u32>) -> &mut Self {
+        self.configuration.with_max_main_frame_navigations(cap);
+        self
+    }
+
     /// Use request intercept for the request to only allow content that matches the host. If the content is from a 3rd party it needs to be part of our include list. This method does nothing if the `chrome_intercept` flag is not enabled.
     pub fn with_chrome_intercept(
         &mut self,
