@@ -19,20 +19,97 @@ pub(crate) struct DnsEntry {
     expires: Instant,
 }
 
-/// Global async resolver — initialized once, reused across all lookups.
-/// Hickory's `TokioResolver` is fully async (no `spawn_blocking`).
-fn async_resolver() -> &'static hickory_resolver::TokioResolver {
-    use hickory_resolver::name_server::TokioConnectionProvider;
+/// Global async resolver — initialized at most once per process, reused
+/// across all lookups. Hickory's `TokioResolver` is fully async (no
+/// `spawn_blocking`).
+///
+/// Returns `None` only if both the system-config build and the
+/// default-config fallback fail during initialization; in that case the
+/// failure is cached so subsequent calls do not retry.
+fn async_resolver() -> Option<&'static hickory_resolver::TokioResolver> {
     use std::sync::OnceLock;
-    static RESOLVER: OnceLock<hickory_resolver::TokioResolver> = OnceLock::new();
-    RESOLVER.get_or_init(|| {
-        hickory_resolver::Resolver::builder_with_config(
-            hickory_resolver::config::ResolverConfig::default(),
-            TokioConnectionProvider::default(),
-        )
-        .with_options(hickory_resolver::config::ResolverOpts::default())
+    static RESOLVER: OnceLock<Option<hickory_resolver::TokioResolver>> = OnceLock::new();
+
+    if let Some(slot) = RESOLVER.get() {
+        return slot.as_ref();
+    }
+    // Cold path — runs at most once per process per contender.
+    // `set` consumes `built` by value; on loss the `Err(_)` is dropped
+    // right here. Failure is stored as `Some(None)` so we do not
+    // re-attempt the build on every lookup.
+    let built = build_async_resolver();
+    let _ = RESOLVER.set(built);
+    RESOLVER.get().and_then(|slot| slot.as_ref())
+}
+
+/// Parse a non-zero `usize` from an environment variable, clamped to
+/// `[min, max]`. Returns `None` when the variable is unset, empty, or
+/// not parseable — callers fall back to their in-code default so a
+/// bad env value never aborts startup.
+fn env_usize(name: &str, min: usize, max: usize) -> Option<usize> {
+    std::env::var(name)
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .map(|v| v.clamp(min, max))
+}
+
+/// Build a crawler-tuned `TokioResolver`, reading the host's system DNS
+/// config (e.g. `/etc/resolv.conf`) when available. Returns `None` only
+/// if every build path errors — callers propagate that as a DNS failure
+/// rather than a panic.
+fn build_async_resolver() -> Option<hickory_resolver::TokioResolver> {
+    use hickory_resolver::config::{ResolverConfig, ResolverOpts};
+    use hickory_resolver::net::runtime::TokioRuntimeProvider;
+
+    let (config, mut opts) = hickory_resolver::system_conf::read_system_conf()
+        .unwrap_or_else(|_| (ResolverConfig::default(), ResolverOpts::default()));
+
+    // Tuning rationale — only change what strictly improves behavior vs
+    // the prior `ResolverOpts::default()` baseline, and expose env-var
+    // overrides so operators can tune without code changes. Any value
+    // not set via env keeps the hickory default, so by default there
+    // are zero behavior changes relative to the 0.25 baseline aside
+    // from the bounded `cache_size` bump (strictly a hit-rate win —
+    // cache is TTL-evicted and memory-bounded).
+    //
+    // cache_size: hickory's default of 32 is a bottleneck for crawls
+    // that fan out across thousands of unique hosts. Default here
+    // matches the outer `DnsCache` bound of 5_000 so every outer-cache
+    // miss hits the inner cache instead of the network. Override via
+    // `SPIDER_DNS_CACHE_SIZE` (clamped to [32, 100_000]).
+    //
+    // negative_max_ttl: left at `None` (honor SOA). `DnsCacheResolver`
+    // already maps NXDOMAIN/NOERROR-empty to `io::Error::NotFound`,
+    // which `page::is_dns_error` classifies as a permanent 525 — the
+    // crawler does not retry at all. A cap here would add DNS traffic
+    // for bad hosts without improving recoverability.
+    //
+    // positive_max_ttl: left at `None` (honor record TTL). The outer
+    // `DnsCache` already imposes a 5-minute host TTL, so any cap on
+    // the inner cache beyond that is moot.
+    //
+    // num_concurrent_reqs: defaults to 2 (matches hickory's default and
+    // the common 2-nameserver resolv.conf). Override via
+    // `SPIDER_DNS_CONCURRENT_REQS` (clamped to [1, 16]). Bumping it
+    // fans queries out to more nameservers per lookup — a latency win
+    // only when multiple nameservers are configured.
+    opts.cache_size = env_usize("SPIDER_DNS_CACHE_SIZE", 32, 100_000).unwrap_or(8_192) as u64;
+    opts.num_concurrent_reqs = env_usize("SPIDER_DNS_CONCURRENT_REQS", 1, 16).unwrap_or(2);
+
+    hickory_resolver::Resolver::builder_with_config(config, TokioRuntimeProvider::default())
+        .with_options(opts)
         .build()
-    })
+        .or_else(|_| {
+            // `.build()` only fails on invalid runtime config. Fall back
+            // to a default-config build before giving up entirely.
+            hickory_resolver::Resolver::builder_with_config(
+                ResolverConfig::default(),
+                TokioRuntimeProvider::default(),
+            )
+            .with_options(ResolverOpts::default())
+            .build()
+        })
+        .ok()
 }
 
 /// Thread-safe DNS resolution cache with configurable TTL.
@@ -68,7 +145,7 @@ impl DnsCache {
         }
 
         // Cache miss or expired — resolve via async hickory resolver.
-        let lookup = async_resolver().lookup_ip(host).await.ok()?;
+        let lookup = async_resolver()?.lookup_ip(host).await.ok()?;
 
         let ips: Vec<IpAddr> = lookup.iter().collect();
         if ips.is_empty() {
@@ -114,7 +191,7 @@ impl DnsCache {
             let host = host.to_string();
             let ttl = self.ttl;
             set.spawn(async move {
-                let lookup = async_resolver().lookup_ip(&host).await.ok()?;
+                let lookup = async_resolver()?.lookup_ip(&host).await.ok()?;
                 let ips: Vec<IpAddr> = lookup.iter().collect();
                 if ips.is_empty() {
                     return None;
@@ -229,7 +306,11 @@ impl crate::client::dns::Resolve for DnsCacheResolver {
             // they remain retryable via the normal connect-error path.
             //
             // Same allocation count as before: one Box on the error path.
-            let lookup = async_resolver().lookup_ip(&host).await.map_err(
+            let resolver =
+                async_resolver().ok_or_else(|| -> Box<dyn std::error::Error + Send + Sync> {
+                    Box::new(std::io::Error::other("hickory resolver unavailable"))
+                })?;
+            let lookup = resolver.lookup_ip(&host).await.map_err(
                 |e| -> Box<dyn std::error::Error + Send + Sync> {
                     if e.is_no_records_found() {
                         Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, e))

@@ -1094,8 +1094,8 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.51.95",
- "spider_utils 2.51.95",
+ "spider 2.51.96",
+ "spider_utils 2.51.96",
 ]
 
 [[package]]
@@ -3827,6 +3827,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "hickory-net"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c61c8db47fae51ba9f8f2a2748bd87542acfbe22f2ec9cf9c8ec72d1ee6e9a6"
+dependencies = [
+ "async-trait",
+ "cfg-if",
+ "data-encoding",
+ "futures-channel",
+ "futures-io",
+ "futures-util",
+ "hickory-proto 0.26.0",
+ "idna",
+ "ipnet",
+ "jni 0.22.4",
+ "rand 0.10.1",
+ "thiserror 2.0.18",
+ "tinyvec",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "hickory-proto"
 version = "0.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3852,6 +3876,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "hickory-proto"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a916d0494600d99ecb15aadfab677ad97c4de559e8f1af0c129353a733ac1fcc"
+dependencies = [
+ "data-encoding",
+ "idna",
+ "ipnet",
+ "jni 0.22.4",
+ "once_cell",
+ "prefix-trie",
+ "rand 0.10.1",
+ "ring",
+ "thiserror 2.0.18",
+ "tinyvec",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "hickory-resolver"
 version = "0.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3859,7 +3903,7 @@ checksum = "dc62a9a99b0bfb44d2ab95a7208ac952d31060efc16241c87eaf36406fecf87a"
 dependencies = [
  "cfg-if",
  "futures-util",
- "hickory-proto",
+ "hickory-proto 0.25.2",
  "ipconfig",
  "moka",
  "once_cell",
@@ -3867,6 +3911,32 @@ dependencies = [
  "rand 0.9.4",
  "resolv-conf",
  "smallvec",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "hickory-resolver"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a10bd64d950b4d38ca21e25c8ae230712e4955fb8290cfcb29a5e5dc6017e544"
+dependencies = [
+ "cfg-if",
+ "futures-util",
+ "hickory-net",
+ "hickory-proto 0.26.0",
+ "ipconfig",
+ "ipnet",
+ "jni 0.22.4",
+ "moka",
+ "ndk-context",
+ "once_cell",
+ "parking_lot",
+ "rand 0.10.1",
+ "resolv-conf",
+ "smallvec",
+ "system-configuration 0.7.0",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -4550,6 +4620,9 @@ name = "ipnet"
 version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "iri-string"
@@ -4664,6 +4737,36 @@ dependencies = [
  "thiserror 1.0.69",
  "walkdir",
  "windows-sys 0.45.0",
+]
+
+[[package]]
+name = "jni"
+version = "0.22.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5efd9a482cf3a427f00d6b35f14332adc7902ce91efb778580e180ff90fa3498"
+dependencies = [
+ "cfg-if",
+ "combine",
+ "jni-macros",
+ "jni-sys 0.4.1",
+ "log",
+ "simd_cesu8",
+ "thiserror 2.0.18",
+ "walkdir",
+ "windows-link 0.2.1",
+]
+
+[[package]]
+name = "jni-macros"
+version = "0.22.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a00109accc170f0bdb141fed3e393c565b6f5e072365c3bd58f5b062591560a3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "rustc_version",
+ "simd_cesu8",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -5429,6 +5532,12 @@ dependencies = [
  "portable-atomic-util",
  "rawpointer",
 ]
+
+[[package]]
+name = "ndk-context"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
 
 [[package]]
 name = "new_debug_unreachable"
@@ -6279,6 +6388,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
 
 [[package]]
+name = "prefix-trie"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23370be78b7e5bcbb0cab4a02047eb040279a693c78daad04c2c5f1c24a83503"
+dependencies = [
+ "either",
+ "ipnet",
+ "num-traits",
+]
+
+[[package]]
 name = "prettyplease"
 version = "0.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6960,7 +7080,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "hickory-resolver",
+ "hickory-resolver 0.25.2",
  "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
@@ -7269,7 +7389,7 @@ checksum = "1d99feebc72bae7ab76ba994bb5e121b8d83d910ca40b36e0921f53becc41784"
 dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys",
- "jni",
+ "jni 0.21.1",
  "log",
  "once_cell",
  "rustls",
@@ -7757,6 +7877,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214"
 
 [[package]]
+name = "simd_cesu8"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94f90157bb87cddf702797c5dadfa0be7d266cdf49e22da2fcaa32eff75b2c33"
+dependencies = [
+ "rustc_version",
+ "simdutf8",
+]
+
+[[package]]
 name = "simd_helpers"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7934,7 +8064,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.51.95"
+version = "2.51.96"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -7958,7 +8088,7 @@ dependencies = [
  "gemini-rust",
  "h2",
  "hashbrown 0.17.0",
- "hickory-resolver",
+ "hickory-resolver 0.26.0",
  "home",
  "http 1.4.0",
  "http-cache",
@@ -7993,7 +8123,7 @@ dependencies = [
  "smallvec",
  "sonic-rs",
  "spider_agent",
- "spider_agent_types 2.51.95",
+ "spider_agent_types 2.51.96",
  "spider_fingerprint",
  "spider_firewall",
  "spider_remote_cache",
@@ -8021,7 +8151,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent"
-version = "2.51.95"
+version = "2.51.96"
 dependencies = [
  "aho-corasick",
  "async-openai 0.33.1",
@@ -8044,7 +8174,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spider_agent_html",
- "spider_agent_types 2.51.95",
+ "spider_agent_types 2.51.96",
  "spider_skills",
  "tempfile",
  "thirtyfour",
@@ -8055,13 +8185,13 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_html"
-version = "2.51.95"
+version = "2.51.96"
 dependencies = [
  "aho-corasick",
  "lol_html",
  "serde",
  "serde_json",
- "spider_agent_types 2.51.95",
+ "spider_agent_types 2.51.96",
 ]
 
 [[package]]
@@ -8079,7 +8209,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.51.95"
+version = "2.51.96"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8129,7 +8259,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.51.95"
+version = "2.51.96"
 dependencies = [
  "clap",
  "env_logger",
@@ -8138,7 +8268,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.51.95",
+ "spider 2.51.96",
  "spider_transformations",
  "tikv-jemallocator",
  "tokio",
@@ -8155,7 +8285,7 @@ dependencies = [
  "flexbuffers",
  "htr",
  "serde_json",
- "spider 2.51.95",
+ "spider 2.51.96",
  "spider_transformations",
  "spider_utils 2.51.94",
 ]
@@ -8196,7 +8326,7 @@ dependencies = [
 
 [[package]]
 name = "spider_mcp"
-version = "2.51.95"
+version = "2.51.96"
 dependencies = [
  "clap",
  "dashmap",
@@ -8205,7 +8335,7 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
- "spider 2.51.95",
+ "spider 2.51.96",
  "spider_transformations",
  "tokio",
  "uuid",
@@ -8314,7 +8444,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.51.95"
+version = "2.51.96"
 dependencies = [
  "hashbrown 0.17.0",
  "indexmap 2.14.0",
@@ -8329,14 +8459,14 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.51.95"
+version = "2.51.96"
 dependencies = [
  "env_logger",
  "hyper",
  "hyper-util",
  "lazy_static",
  "rustls-pemfile",
- "spider 2.51.95",
+ "spider 2.51.96",
  "tokio-rustls",
  "warp",
 ]
@@ -10714,7 +10844,7 @@ dependencies = [
  "cookie_store 0.21.1",
  "encoding_rs",
  "futures-util",
- "hickory-resolver",
+ "hickory-resolver 0.25.2",
  "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
