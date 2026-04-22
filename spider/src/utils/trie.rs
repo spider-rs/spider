@@ -52,6 +52,33 @@ impl<V: Debug> Trie<V> {
         }
     }
 
+    /// Scan a segment starting at `haystack[0]`, returning the offset of the
+    /// next `/` (or `haystack.len()` if none) and whether a `.` was seen
+    /// before that terminator.
+    ///
+    /// Uses `memchr2` to find the first `/` or `.` in a single SIMD pass,
+    /// replacing the previous two-pass `memchr(b'/')` + `memchr(b'.')`.
+    /// Typical URL path segments have no `.`, so the common hot path returns
+    /// on the first match.
+    #[inline(always)]
+    fn scan_segment(haystack: &[u8]) -> (usize, bool) {
+        match memchr::memchr2(b'/', b'.', haystack) {
+            None => (haystack.len(), false),
+            Some(pos) => {
+                // Safe: `memchr2` only returns an in-bounds index.
+                if haystack[pos] == b'/' {
+                    (pos, false)
+                } else {
+                    // Saw a dot — scan the remainder for the slash.
+                    let after_dot = pos + 1;
+                    let slash = memchr::memchr(b'/', &haystack[after_dot..])
+                        .map_or(haystack.len(), |p| after_dot + p);
+                    (slash, true)
+                }
+            }
+        }
+    }
+
     /// Get the byte offset where the path portion starts, stripping scheme+host.
     #[inline]
     fn path_start(path: &str) -> usize {
@@ -95,11 +122,24 @@ impl<V: Debug> Trie<V> {
             }
 
             let seg_start = i;
-            let seg_end = memchr::memchr(b'/', &bytes[i..]).map_or(len, |p| i + p);
+            let (rel_end, saw_dot) = Self::scan_segment(&bytes[i..]);
+            let seg_end = i + rel_end;
             let segment = &path[seg_start..seg_end];
 
-            if memchr::memchr(b'.', segment.as_bytes()).is_none() {
-                node = node.children.entry_ref(segment).or_default();
+            if !saw_dot {
+                // hashbrown 0.17 requires `Q: ToOwned<Owned = K>` for
+                // `entry_ref` shortcuts like `or_default`, and `str::to_owned`
+                // returns `String` — which breaks for `Box<str>` keys. Use
+                // `insert_with_key` (bound: `Q: Equivalent<K>`, satisfied via
+                // `Box<str>: Borrow<str>`) so the key stays `Box<str>` with
+                // no allocation on hits and exactly one `Box::from` on miss.
+                use hashbrown::hash_map::EntryRef;
+                node = match node.children.entry_ref(segment) {
+                    EntryRef::Occupied(entry) => entry.into_mut(),
+                    EntryRef::Vacant(entry) => {
+                        entry.insert_with_key(Box::<str>::from(segment), TrieNode::new())
+                    }
+                };
             }
 
             i = seg_end;
@@ -133,10 +173,11 @@ impl<V: Debug> Trie<V> {
             }
 
             let seg_start = i;
-            let seg_end = memchr::memchr(b'/', &bytes[i..]).map_or(len, |p| i + p);
-            let segment = &input[seg_start..seg_end];
+            let (rel_end, saw_dot) = Self::scan_segment(&bytes[i..]);
+            let seg_end = i + rel_end;
 
-            if memchr::memchr(b'.', segment.as_bytes()).is_none() {
+            if !saw_dot {
+                let segment = &input[seg_start..seg_end];
                 if let Some(child) = node.children.get(segment) {
                     node = child;
                 } else if !self.match_all {

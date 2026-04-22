@@ -1,6 +1,6 @@
 [package]
 name = "spider_utils"
-version = "2.51.94"
+version = "2.51.95"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "Utilities to use for Spider Web Crawler."
 repository = "https://github.com/spider-rs/spider"
@@ -18,7 +18,7 @@ sxd-xpath = "0.4"
 serde = { version = "1", optional = true, features = ["derive"] }
 spider_scraper = "0.1"
 lazy_static = "1"
-hashbrown = { version = "0.16", default-features = true }
+hashbrown = { version = "0.17", default-features = true }
 log = "0.4"
 
 [dev-dependencies]

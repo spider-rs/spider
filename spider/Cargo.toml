@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.51.94"
+version = "2.51.95"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -17,7 +17,7 @@ maintenance = { status = "as-is" }
 [dependencies]
 url = "2"
 tokio-stream = "0.1"
-hashbrown = { version = "0.16", default-features = true }
+hashbrown = { version = "0.17", default-features = true }
 log = "0.4"
 percent-encoding = "2"
 regex = { version = "1" }
@@ -132,11 +132,11 @@ features = ["serde", "headers", "dynamic-versions"]
 
 [dependencies.spider_agent_types]
 path = "../spider_agent_types"
-version = "2.51.94"
+version = "2.51.95"
 
 [dependencies.spider_agent]
 path = "../spider_agent"
-version = "2.51.94"
+version = "2.51.95"
 optional = true
 default-features = false
 

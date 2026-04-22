@@ -1,6 +1,6 @@
 [package]
 name = "spider_agent"
-version = "2.51.94"
+version = "2.51.95"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A concurrent-safe multimodal agent for web automation and research."
 repository = "https://github.com/spider-rs/spider"
@@ -28,8 +28,8 @@ parking_lot = "0.12"
 base64 = "0.22"
 
 # Extracted types and HTML processing
-spider_agent_types = { version = "2.51.94", path = "../spider_agent_types" }
-spider_agent_html = { version = "2.51.94", path = "../spider_agent_html" }
+spider_agent_types = { version = "2.51.95", path = "../spider_agent_types" }
+spider_agent_html = { version = "2.51.95", path = "../spider_agent_html" }
 
 # HTML processing (still needed for engine internals)
 lol_html = "2"
@@ -64,8 +64,13 @@ memvid-rs = { version = "1.2", optional = true }
 spider_skills = { version = "0.1.7", optional = true, default-features = false, features = ["web_challenges"] }
 
 # S3 skill loading (optional)
-aws-sdk-s3 = { version = "1", optional = true }
-aws-config = { version = "1", optional = true }
+# default-features = false to drop the `rustls` (legacy rustls 0.21 via
+# aws-smithy-runtime/tls-rustls) feature that pulls rustls-webpki 0.101.7
+# (RUSTSEC-2026-0104). `default-https-client` gives us the modern
+# rustls-aws-lc chain. SSO is also dropped for S3 skill loading — env/instance
+# metadata creds are sufficient.
+aws-sdk-s3 = { version = "1", optional = true, default-features = false, features = ["default-https-client", "rt-tokio", "sigv4a"] }
+aws-config = { version = "1", optional = true, default-features = false, features = ["default-https-client", "rt-tokio", "credentials-process"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

@@ -122,8 +122,7 @@ fn update_process_memory(sys: &mut System) {
         if let Some(process) = sys.process(pid) {
             let rss = process.memory();
             let total = sys.total_memory();
-            if total > 0 {
-                let pct = (rss * 100) / total;
+            if let Some(pct) = (rss * 100).checked_div(total) {
                 PROCESS_MEMORY_STATE.store(determine_process_memory_state(pct), Ordering::Relaxed);
             }
         }
