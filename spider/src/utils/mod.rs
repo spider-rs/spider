@@ -2489,6 +2489,36 @@ async fn set_document_content_if_requested(
     }
 }
 
+#[cfg(feature = "chrome_remote_cache")]
+/// Inject a dedicated reqwest client into `spider_remote_cache` that
+/// **bypasses all proxies** — both user-configured proxies on
+/// [`crate::configuration::Configuration`] and env-var proxies (HTTP_PROXY,
+/// HTTPS_PROXY, ALL_PROXY) which reqwest auto-detects by default.
+///
+/// The remote `hybrid_cache_server` is part of spider's own infrastructure
+/// and should always be reachable directly; routing cache traffic through
+/// a user proxy (the crawl egress) would (a) leak crawl intent to the
+/// proxy, (b) add latency to every cache read/write, and (c) break when
+/// the proxy denies internal hostnames.
+///
+/// Idempotent: `spider_remote_cache::set_client` is backed by `OnceLock`,
+/// and an additional `OnceLock` here avoids rebuilding a reqwest client
+/// every call. Safe to invoke from both read and write paths.
+fn ensure_proxy_less_remote_cache_client() {
+    use std::sync::OnceLock;
+    static INIT: OnceLock<()> = OnceLock::new();
+    INIT.get_or_init(|| {
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .pool_idle_timeout(std::time::Duration::from_secs(90))
+            .tcp_keepalive(Some(std::time::Duration::from_secs(5)))
+            .pool_max_idle_per_host(10)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        spider_remote_cache::set_client(client);
+    });
+}
+
 #[cfg(all(feature = "chrome", feature = "chrome_remote_cache"))]
 /// Set the document if requested cached.
 async fn set_document_content_if_requested_cached(
@@ -2538,16 +2568,19 @@ async fn set_document_content_if_requested_cached(
         }
     };
 
+    // Install a proxy-less HTTP client for remote cache traffic (both
+    // reads and writes). Runs regardless of read-only so GET-path seeds
+    // via `seed_cache` / `get_cache_site` also bypass user proxies.
+    // Idempotent.
+    #[cfg(feature = "chrome_remote_cache")]
+    ensure_proxy_less_remote_cache_client();
+
     // Eagerly init the remote cache worker before the listener starts so
     // all uploads hit the fast try_enqueue path. Skip entirely in read-only
     // mode — no dumps will be enqueued, so spinning up the uploader would
-    // waste a client / task.
+    // waste a task.
     #[cfg(feature = "chrome_remote_cache")]
     if remote.is_some() && !remote_cache_read_only {
-        #[cfg(feature = "chrome")]
-        spider_remote_cache::set_client(chromiumoxide::browser::request_client().clone());
-        #[cfg(not(feature = "chrome"))]
-        spider_remote_cache::set_client(reqwest::Client::new());
         spider_remote_cache::init_default_worker().await;
     }
 
@@ -6272,6 +6305,10 @@ pub async fn get_cached_url_base(
     // data populated by browser_server's CDP interception.
     #[cfg(feature = "chrome_remote_cache")]
     {
+        // Ensure the remote cache client bypasses all proxies (user +
+        // env-var) before the first GET fires. Idempotent.
+        ensure_proxy_less_remote_cache_client();
+
         let cache_site = chromiumoxide::cache::manager::site_key_for_target_url(
             target_url,
             auth_opt.as_deref(),
@@ -6354,6 +6391,10 @@ pub async fn get_cached_url_base(
         Some(BasicCachePolicy::Period(t)) => *t,
         _ => std::time::SystemTime::now(),
     };
+
+    // Ensure the remote cache client bypasses all proxies (user + env-var)
+    // before the first GET fires. Idempotent.
+    ensure_proxy_less_remote_cache_client();
 
     let cache_site = chromiumoxide::cache::manager::site_key_for_target_url(
         target_url,
