@@ -3380,11 +3380,7 @@ impl Website {
         links.extend(links_ssg);
 
         self.initial_status_code = page.status_code;
-        self.initial_html_length = if page.is_empty() {
-            0
-        } else {
-            page.get_html_bytes_u8().len()
-        };
+        self.initial_html_length = if page.is_empty() { 0 } else { page.size() };
         self.initial_anti_bot_tech = page.anti_bot_tech;
         self.initial_page_should_retry = page.needs_retry();
         self.initial_page_waf_check = page.waf_check;
@@ -3633,11 +3629,7 @@ impl Website {
             links.extend(links_ssg);
 
             self.initial_status_code = page.status_code;
-            self.initial_html_length = if page.is_empty() {
-                0
-            } else {
-                page.get_html_bytes_u8().len()
-            };
+            self.initial_html_length = if page.is_empty() { 0 } else { page.size() };
             self.initial_anti_bot_tech = page.anti_bot_tech;
             self.initial_page_should_retry = page.needs_retry();
             self.initial_page_waf_check = page.waf_check;
@@ -4319,11 +4311,7 @@ impl Website {
             }
 
             self.initial_status_code = page.status_code;
-            self.initial_html_length = if page.is_empty() {
-                0
-            } else {
-                page.get_html_bytes_u8().len()
-            };
+            self.initial_html_length = if page.is_empty() { 0 } else { page.size() };
             self.initial_anti_bot_tech = page.anti_bot_tech;
             self.initial_page_should_retry = page.needs_retry();
             self.initial_page_waf_check = page.waf_check;
@@ -4754,11 +4742,7 @@ impl Website {
             self.insert_link(&initial_url).await;
 
             self.initial_status_code = page.status_code;
-            self.initial_html_length = if page.is_empty() {
-                0
-            } else {
-                page.get_html_bytes_u8().len()
-            };
+            self.initial_html_length = if page.is_empty() { 0 } else { page.size() };
             self.initial_anti_bot_tech = page.anti_bot_tech;
             self.initial_page_should_retry = page.needs_retry();
             self.initial_page_waf_check = page.waf_check;
@@ -5113,11 +5097,7 @@ impl Website {
                 links.extend(links_ssg);
 
                 self.initial_status_code = page.status_code;
-                self.initial_html_length = if page.is_empty() {
-                    0
-                } else {
-                    page.get_html_bytes_u8().len()
-                };
+                self.initial_html_length = if page.is_empty() { 0 } else { page.size() };
                 self.initial_anti_bot_tech = page.anti_bot_tech;
                 self.initial_page_should_retry = page.needs_retry();
                 self.initial_page_waf_check = page.waf_check;
@@ -5332,11 +5312,7 @@ impl Website {
             page.bytes_transferred = bytes_transferred;
 
             self.initial_status_code = page.status_code;
-            self.initial_html_length = if page.is_empty() {
-                0
-            } else {
-                page.get_html_bytes_u8().len()
-            };
+            self.initial_html_length = if page.is_empty() { 0 } else { page.size() };
             self.initial_anti_bot_tech = page.anti_bot_tech;
             self.initial_page_should_retry = page.needs_retry();
             self.initial_page_waf_check = page.waf_check;
@@ -5493,11 +5469,7 @@ impl Website {
             self.apply_custom_antibot_check(&mut page_response);
             let page = build(&target_url, page_response);
             self.initial_status_code = page.status_code;
-            self.initial_html_length = if page.is_empty() {
-                0
-            } else {
-                page.get_html_bytes_u8().len()
-            };
+            self.initial_html_length = if page.is_empty() { 0 } else { page.size() };
             self.links_visited
                 .insert(CaseInsensitiveString::from(target_url.as_str()));
             channel_send_page(&self.channel, page, &self.channel_guard).await;
@@ -5590,11 +5562,7 @@ impl Website {
 
         // Set initial metadata
         self.initial_status_code = page.status_code;
-        self.initial_html_length = if page.is_empty() {
-            0
-        } else {
-            page.get_html_bytes_u8().len()
-        };
+        self.initial_html_length = if page.is_empty() { 0 } else { page.size() };
 
         let url = match &self.on_link_find_callback {
             Some(cb) => cb((*self.url).clone(), None).0,
