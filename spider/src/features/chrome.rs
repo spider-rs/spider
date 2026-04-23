@@ -1414,11 +1414,36 @@ impl HedgeBrowser {
             handler: Some(handle),
         })
     }
+
+    /// Async teardown: disposes the isolated browser context on the remote
+    /// Chrome (freeing its storage + cookies) before aborting the CDP
+    /// message pump and dropping the websocket. Callers should prefer this
+    /// over relying on `Drop`, which only has a sync-path fallback and
+    /// cannot issue CDP commands without the message pump alive.
+    pub async fn close(mut self) {
+        if let Some(ctx_id) = self.context_id.take() {
+            let _ = tokio::time::timeout(
+                Duration::from_secs(2),
+                self.browser.dispose_browser_context(ctx_id),
+            )
+            .await;
+        }
+        if let Some(h) = self.handler.take() {
+            h.abort();
+        }
+        // self.browser drops here — websocket closes, context (now already
+        // disposed) cleanup is belt-and-suspenders.
+    }
 }
 
 #[cfg(feature = "hedge")]
 impl Drop for HedgeBrowser {
     fn drop(&mut self) {
+        // Fallback path only: callers should prefer `close().await` so the
+        // context is explicitly disposed on the remote browser. In Drop we
+        // can't issue async CDP commands, so we rely on the experimental
+        // `dispose_on_detach=true` set at context creation plus websocket
+        // disconnect to clean the context up.
         if let Some(h) = self.handler.take() {
             h.abort();
         }
@@ -1477,14 +1502,73 @@ fn tab_closer() -> &'static tokio::sync::mpsc::UnboundedSender<chromiumoxide::Pa
                         return;
                     }
                 };
+                // RAII cleanup that always removes the target_id from the
+                // in-flight dedup map on any exit path — success, timeout,
+                // panic, or task abort — so a close-task failure can never
+                // leave a stale entry that would permanently block re-queuing
+                // for the same tab.
+                struct DedupCleanup {
+                    map: &'static dashmap::DashMap<
+                        chromiumoxide::cdp::browser_protocol::target::TargetId,
+                        (),
+                    >,
+                    key: Option<chromiumoxide::cdp::browser_protocol::target::TargetId>,
+                }
+                impl Drop for DedupCleanup {
+                    fn drop(&mut self) {
+                        if let Some(k) = self.key.take() {
+                            self.map.remove(&k);
+                        }
+                    }
+                }
+
                 runtime.block_on(async move {
                     let in_flight = tab_closer_in_flight();
-                    while let Some(page) = rx.recv().await {
-                        let target_id = page.target_id().clone();
-                        let _ =
-                            tokio::time::timeout(tokio::time::Duration::from_secs(5), page.close())
-                                .await;
-                        in_flight.remove(&target_id);
+                    // Process closes concurrently on this runtime — close work
+                    // is CDP round-trip bound (mostly awaiting a response), so
+                    // a single-thread event loop with many in-flight tasks
+                    // saturates throughput without multi-thread overhead.
+                    let mut pending: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
+                    loop {
+                        tokio::select! {
+                            biased;
+                            // Reap completed closes to keep JoinSet bounded.
+                            // We ignore the Result: task panics are logged by
+                            // the JoinSet itself and the DedupCleanup Drop
+                            // will have already freed the dedup entry.
+                            _ = pending.join_next(), if !pending.is_empty() => {}
+                            page = rx.recv() => {
+                                match page {
+                                    Some(page) => {
+                                        let target_id = page.target_id().clone();
+                                        pending.spawn(async move {
+                                            let _cleanup = DedupCleanup {
+                                                map: in_flight,
+                                                key: Some(target_id),
+                                            };
+                                            let _ = tokio::time::timeout(
+                                                tokio::time::Duration::from_secs(5),
+                                                page.close(),
+                                            )
+                                            .await;
+                                            // _cleanup's Drop removes the
+                                            // dedup entry here, regardless of
+                                            // whether page.close returned Ok,
+                                            // Err, or timed out.
+                                        });
+                                    }
+                                    None => {
+                                        // Sender is `static` — this only
+                                        // fires at process exit; drain
+                                        // in-flight closes before shutting
+                                        // down. Each has a 5s timeout so
+                                        // drain is bounded.
+                                        while pending.join_next().await.is_some() {}
+                                        break;
+                                    }
+                                }
+                            }
+                        }
                     }
                 });
             });

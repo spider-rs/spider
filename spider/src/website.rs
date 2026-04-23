@@ -7624,33 +7624,41 @@ impl Website {
                                                                         None
                                                                     };
 
-                                                                    let hedge_fut = async {
-                                                                        match &hedge_browser {
-                                                                            Some(hb) => {
-                                                                                log::info!("[hedge-chrome] using new WS connection url={}", target_url);
-                                                                                chrome_page_fetch_on!(shared, target_url, &hb.browser, &hb.context_id)
+                                                                    // Scope hedge_fut to release its borrow on
+                                                                    // hedge_browser before we move it into close().
+                                                                    let race_result = {
+                                                                        let hedge_fut = async {
+                                                                            match &hedge_browser {
+                                                                                Some(hb) => {
+                                                                                    log::info!("[hedge-chrome] using new WS connection url={}", target_url);
+                                                                                    chrome_page_fetch_on!(shared, target_url, &hb.browser, &hb.context_id)
+                                                                                }
+                                                                                None => {
+                                                                                    chrome_page_fetch!(shared, target_url, retry_strategy_ref)
+                                                                                }
                                                                             }
-                                                                            None => {
-                                                                                chrome_page_fetch!(shared, target_url, retry_strategy_ref)
-                                                                            }
-                                                                        }
-                                                                    };
-                                                                    tokio::pin!(hedge_fut);
+                                                                        };
+                                                                        tokio::pin!(hedge_fut);
 
-                                                                    let race_result = tokio::select! {
-                                                                        biased;
-                                                                        result = &mut primary_fut => {
-                                                                            log::info!("[hedge-chrome] winner: primary url={}", target_url);
-                                                                            hedge_trk.record_outcome(false);
-                                                                            result
-                                                                        }
-                                                                        result = &mut hedge_fut => {
-                                                                            log::info!("[hedge-chrome] winner: hedge url={}", target_url);
-                                                                            hedge_trk.record_outcome(true);
-                                                                            result
+                                                                        tokio::select! {
+                                                                            biased;
+                                                                            result = &mut primary_fut => {
+                                                                                log::info!("[hedge-chrome] winner: primary url={}", target_url);
+                                                                                hedge_trk.record_outcome(false);
+                                                                                result
+                                                                            }
+                                                                            result = &mut hedge_fut => {
+                                                                                log::info!("[hedge-chrome] winner: hedge url={}", target_url);
+                                                                                hedge_trk.record_outcome(true);
+                                                                                result
+                                                                            }
                                                                         }
                                                                     };
-                                                                    // hedge_browser drops at scope exit — aborts handler, closes WS.
+                                                                    // Explicitly dispose the isolated remote context
+                                                                    // via CDP before the websocket drops.
+                                                                    if let Some(hb) = hedge_browser {
+                                                                        hb.close().await;
+                                                                    }
                                                                     race_result
                                                                 }
                                                             };
@@ -8737,33 +8745,41 @@ impl Website {
                                                                         None
                                                                     };
 
-                                                                    let hedge_fut = async {
-                                                                        match &hedge_browser {
-                                                                            Some(hb) => {
-                                                                                log::info!("[hedge-chrome] using new WS connection url={}", target_url);
-                                                                                chrome_page_fetch_on!(shared, target_url, &hb.browser, &hb.context_id)
+                                                                    // Scope hedge_fut to release its borrow on
+                                                                    // hedge_browser before we move it into close().
+                                                                    let race_result = {
+                                                                        let hedge_fut = async {
+                                                                            match &hedge_browser {
+                                                                                Some(hb) => {
+                                                                                    log::info!("[hedge-chrome] using new WS connection url={}", target_url);
+                                                                                    chrome_page_fetch_on!(shared, target_url, &hb.browser, &hb.context_id)
+                                                                                }
+                                                                                None => {
+                                                                                    chrome_page_fetch!(shared, target_url, retry_strategy_ref)
+                                                                                }
                                                                             }
-                                                                            None => {
-                                                                                chrome_page_fetch!(shared, target_url, retry_strategy_ref)
-                                                                            }
-                                                                        }
-                                                                    };
-                                                                    tokio::pin!(hedge_fut);
+                                                                        };
+                                                                        tokio::pin!(hedge_fut);
 
-                                                                    let race_result = tokio::select! {
-                                                                        biased;
-                                                                        result = &mut primary_fut => {
-                                                                            log::info!("[hedge-chrome] winner: primary url={}", target_url);
-                                                                            hedge_trk.record_outcome(false);
-                                                                            result
-                                                                        }
-                                                                        result = &mut hedge_fut => {
-                                                                            log::info!("[hedge-chrome] winner: hedge url={}", target_url);
-                                                                            hedge_trk.record_outcome(true);
-                                                                            result
+                                                                        tokio::select! {
+                                                                            biased;
+                                                                            result = &mut primary_fut => {
+                                                                                log::info!("[hedge-chrome] winner: primary url={}", target_url);
+                                                                                hedge_trk.record_outcome(false);
+                                                                                result
+                                                                            }
+                                                                            result = &mut hedge_fut => {
+                                                                                log::info!("[hedge-chrome] winner: hedge url={}", target_url);
+                                                                                hedge_trk.record_outcome(true);
+                                                                                result
+                                                                            }
                                                                         }
                                                                     };
-                                                                    // hedge_browser drops at scope exit — aborts handler, closes WS.
+                                                                    // Explicitly dispose the isolated remote context
+                                                                    // via CDP before the websocket drops.
+                                                                    if let Some(hb) = hedge_browser {
+                                                                        hb.close().await;
+                                                                    }
                                                                     race_result
                                                                 }
                                                             };

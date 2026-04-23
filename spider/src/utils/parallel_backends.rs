@@ -809,27 +809,32 @@ pub async fn fetch_cdp(
     // Always create an isolated browser context so parallel fetches don't
     // contend over the shared default context/tab of a persistent remote
     // Chrome. `dispose_on_detach` is set as a best-effort cleanup hint
-    // (experimental in the spec, not relied on) — explicit `Page.close`
-    // below remains the source of truth for tab cleanup.
+    // (experimental in the spec, not relied on) — `Page.close` +
+    // `Target.disposeBrowserContext` below remain the source of truth so the
+    // remote browser's storage/cookies are freed even when the connection
+    // stays alive (e.g. pooled connections).
     let mut ctx_params =
         chromiumoxide::cdp::browser_protocol::target::CreateBrowserContextParams::default();
     ctx_params.dispose_on_detach = Some(true);
     if let Some(ref proxy_addr) = proxy {
         ctx_params.proxy_server = Some(proxy_addr.clone());
     }
-    match browser.create_browser_context(ctx_params).await {
-        Ok(ctx) => {
-            let _ = browser.send_new_context(ctx).await;
-        }
-        Err(e) => {
-            log::warn!(
-                "{} browser context create failed ({}): {:?} — falling back to default context",
-                source_name,
-                endpoint,
-                e
-            );
-        }
-    }
+    let context_id: Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId> =
+        match browser.create_browser_context(ctx_params).await {
+            Ok(ctx) => {
+                let _ = browser.send_new_context(ctx.clone()).await;
+                Some(ctx)
+            }
+            Err(e) => {
+                log::warn!(
+                    "{} browser context create failed ({}): {:?} — falling back to default context",
+                    source_name,
+                    endpoint,
+                    e
+                );
+                None
+            }
+        };
 
     // Always open a fresh tab — never reuse `browser.pages()` which returns
     // the shared default tab on a persistent remote Chrome and races with
@@ -838,6 +843,13 @@ pub async fn fetch_cdp(
         Ok(p) => p,
         Err(e) => {
             log::warn!("{} page failed: {:?}", source_name, e);
+            if let Some(ctx_id) = context_id {
+                let _ = tokio::time::timeout(
+                    Duration::from_secs(2),
+                    browser.dispose_browser_context(ctx_id),
+                )
+                .await;
+            }
             handler_handle.abort();
             return None;
         }
@@ -870,10 +882,17 @@ pub async fn fetch_cdp(
             Err(_) => log::warn!("{} navigate timed out for {}", source_name, url),
             _ => {}
         }
-        // Defuse the guard, then close inline before killing the handler so
-        // CloseTarget propagates over CDP before the message pump dies.
+        // Defuse the guard, close tab, dispose the isolated context, then
+        // kill the handler — all CDP commands need the message pump alive.
         tab_guard.defuse();
         let _ = tokio::time::timeout(Duration::from_secs(2), page.close()).await;
+        if let Some(ctx_id) = context_id {
+            let _ = tokio::time::timeout(
+                Duration::from_secs(2),
+                browser.dispose_browser_context(ctx_id),
+            )
+            .await;
+        }
         handler_handle.abort();
         return None;
     }
@@ -891,11 +910,20 @@ pub async fn fetch_cdp(
     // Get the outer HTML.
     let html_result = tokio::time::timeout(Duration::from_secs(10), page.outer_html_bytes()).await;
 
-    // Close the tab synchronously before aborting the handler so the
-    // CloseTarget CDP message actually propagates — after `handler_handle.abort()`
-    // the message pump is dead and `page.close()` silently fails.
+    // Close the tab, dispose the isolated context, then abort the handler.
+    // Order matters: all CDP commands need the message pump alive, so close
+    // + dispose run inline before `handler_handle.abort()`. Dispose frees
+    // the remote context's storage/cookies even when the browser connection
+    // itself is pooled and kept alive by a future caller.
     tab_guard.defuse();
     let _ = tokio::time::timeout(Duration::from_secs(2), page.close()).await;
+    if let Some(ctx_id) = context_id {
+        let _ = tokio::time::timeout(
+            Duration::from_secs(2),
+            browser.dispose_browser_context(ctx_id),
+        )
+        .await;
+    }
     handler_handle.abort();
 
     let html_bytes: Vec<u8> = match html_result {
