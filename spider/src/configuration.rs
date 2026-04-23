@@ -452,6 +452,15 @@ pub struct Configuration {
     /// Always present (zero cost when unset); its effect is gated by whichever
     /// cache feature is active.
     pub cache_namespace: Option<Box<String>>,
+    /// Read-only mode for the remote Chrome cache. When enabled the local
+    /// cache + per-session cache still serve hits, but no responses are ever
+    /// uploaded to the remote `hybrid_cache_server` (neither via
+    /// `spider_remote_cache` enqueue nor via chromey's CDP listener). Intended
+    /// for deployments where an upstream proxy is the sole writer and spider
+    /// should only consume the cache. Default `false` preserves the existing
+    /// write-through behavior.
+    #[cfg(feature = "chrome_remote_cache")]
+    pub chrome_remote_cache_read_only: bool,
     #[cfg(feature = "chrome")]
     /// Enable or disable service workers. Enabled by default.
     pub service_worker_enabled: bool,
@@ -1418,6 +1427,37 @@ impl Configuration {
         self.cache_namespace.as_ref().map(|s| s.as_str())
     }
 
+    /// Enable read-only mode for the remote Chrome cache. When `true`, the
+    /// local cache + per-session cache continue to serve hits but no
+    /// responses are uploaded to the remote `hybrid_cache_server`. Has no
+    /// observable effect without the `chrome_remote_cache` feature.
+    #[cfg(feature = "chrome_remote_cache")]
+    pub fn with_chrome_remote_cache_read_only(&mut self, read_only: bool) -> &mut Self {
+        self.chrome_remote_cache_read_only = read_only;
+        self
+    }
+
+    /// Enable read-only mode for the remote Chrome cache. This method does
+    /// nothing without the `chrome_remote_cache` feature.
+    #[cfg(not(feature = "chrome_remote_cache"))]
+    pub fn with_chrome_remote_cache_read_only(&mut self, _read_only: bool) -> &mut Self {
+        self
+    }
+
+    /// Whether the remote Chrome cache is in read-only mode. Always `false`
+    /// without the `chrome_remote_cache` feature.
+    #[inline]
+    pub(crate) fn chrome_remote_cache_read_only_enabled(&self) -> bool {
+        #[cfg(feature = "chrome_remote_cache")]
+        {
+            self.chrome_remote_cache_read_only
+        }
+        #[cfg(not(feature = "chrome_remote_cache"))]
+        {
+            false
+        }
+    }
+
     #[cfg(feature = "chrome")]
     /// Enable or disable Service Workers. This method does nothing if the `chrome` feature is not enabled.
     pub fn with_service_worker_enabled(&mut self, enabled: bool) -> &mut Self {
@@ -1949,6 +1989,7 @@ impl Configuration {
             track_events: &self.track_events,
             cache_policy: &self.cache_policy,
             remote_multimodal: &self.remote_multimodal,
+            remote_cache_read_only: self.chrome_remote_cache_read_only_enabled(),
         }
     }
 

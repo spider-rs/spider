@@ -2066,6 +2066,7 @@ pub async fn cache_chrome_response(
     chrome_http_req_res: ChromeHTTPReqRes,
     cache_options: &Option<CacheOptions>,
     namespace: Option<&str>,
+    remote_cache_read_only: bool,
 ) {
     // Skip caching empty content.
     let body = match page_response.content.as_ref() {
@@ -2111,8 +2112,12 @@ pub async fn cache_chrome_response(
 
     // Prepare remote dump data BEFORE put_hybrid_cache consumes the HttpResponse.
     // Use the same body/headers — the worker batches, deduplicates, and uploads.
+    // Skip the clones entirely in read-only mode so no bytes/headers are
+    // allocated for an upload we'll never send.
     #[cfg(feature = "chrome_remote_cache")]
-    let remote_dump_data = {
+    let remote_dump_data = if remote_cache_read_only {
+        None
+    } else {
         let cache_site =
             chromiumoxide::cache::manager::site_key_for_target_url(target_url, None, namespace);
         let remote_version = match chromey_version {
@@ -2191,6 +2196,7 @@ pub async fn cache_chrome_response(
     _chrome_http_req_res: ChromeHTTPReqRes,
     _cache_options: &Option<CacheOptions>,
     _namespace: Option<&str>,
+    _remote_cache_read_only: bool,
 ) {
 }
 
@@ -2495,11 +2501,21 @@ async fn set_document_content_if_requested_cached(
     resp_headers: &Option<HeaderMap<HeaderValue>>,
     chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
     namespace: Option<&str>,
+    remote_cache_read_only: bool,
 ) {
     let auth_opt = cache_auth_token(cache_options);
     let cache_policy = chrome_cache_policy(cache_policy);
     let cache_strategy = None;
-    let remote = Some("true");
+    // In read-only mode we still want reads (listener seeds the per-session
+    // cache from response bodies), but we must not POST to the remote
+    // server. Suppress `dump_remote` so chromey's listener caches locally
+    // only; reads via `seed_cache` / `get_cache_site` still hit the remote
+    // endpoint explicitly below.
+    let remote: Option<&str> = if remote_cache_read_only {
+        None
+    } else {
+        Some("true")
+    };
     let target_url = url_target.unwrap_or_default();
     let cache_site =
         chromiumoxide::cache::manager::site_key_for_target_url(target_url, auth_opt, namespace);
@@ -2523,9 +2539,11 @@ async fn set_document_content_if_requested_cached(
     };
 
     // Eagerly init the remote cache worker before the listener starts so
-    // all uploads hit the fast try_enqueue path.
+    // all uploads hit the fast try_enqueue path. Skip entirely in read-only
+    // mode — no dumps will be enqueued, so spinning up the uploader would
+    // waste a client / task.
     #[cfg(feature = "chrome_remote_cache")]
-    if remote.is_some() {
+    if remote.is_some() && !remote_cache_read_only {
         #[cfg(feature = "chrome")]
         spider_remote_cache::set_client(chromiumoxide::browser::request_client().clone());
         #[cfg(not(feature = "chrome"))]
@@ -2533,15 +2551,22 @@ async fn set_document_content_if_requested_cached(
         spider_remote_cache::init_default_worker().await;
     }
 
+    // `seed_cache` GETs from the remote cache server to warm the per-session
+    // cache. Always keep this regardless of read-only — read-only disables
+    // writes, not reads. The chromey listener receives `dump_readonly` so
+    // intercepted response bodies populate local session cache only.
+    let seed_remote: Option<&str> = Some("true");
+
     let (_, __, _cache_future) = tokio::join!(
         page.spawn_cache_listener(
             &cache_site,
             auth_opt.map(|f| f.into()),
             cache_strategy,
             remote.map(|f| f.into()),
+            remote_cache_read_only,
             namespace,
         ),
-        page.seed_cache(target_url, auth_opt, remote, namespace),
+        page.seed_cache(target_url, auth_opt, seed_remote, namespace),
         cache_future
     );
 
@@ -2646,6 +2671,7 @@ pub async fn run_navigate_or_content_set_core(
     resp_headers: &Option<HeaderMap<HeaderValue>>,
     chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
     _namespace: Option<&str>,
+    _remote_cache_read_only: bool,
 ) -> Result<(), chromiumoxide::error::CdpError> {
     if page_set {
         return Ok(());
@@ -2702,6 +2728,7 @@ pub async fn run_navigate_or_content_set_core(
     resp_headers: &Option<HeaderMap<HeaderValue>>,
     chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
     namespace: Option<&str>,
+    remote_cache_read_only: bool,
 ) -> Result<(), chromiumoxide::error::CdpError> {
     if page_set {
         return Ok(());
@@ -2726,6 +2753,7 @@ pub async fn run_navigate_or_content_set_core(
                 resp_headers,
                 chrome_intercept,
                 namespace,
+                remote_cache_read_only,
             )
             .await;
         } else {
@@ -3109,6 +3137,13 @@ pub struct ChromeFetchParams<'a> {
     pub cache_policy: &'a Option<BasicCachePolicy>,
     /// Remote multimodal automation configuration.
     pub remote_multimodal: &'a Option<Box<RemoteMultimodalConfigs>>,
+    /// When `true`, the remote Chrome cache is read-only: local + session
+    /// cache serve hits but no responses are uploaded to the remote
+    /// `hybrid_cache_server`. Only meaningful when `chrome_remote_cache` is
+    /// enabled; ignored otherwise (including no-op at the chromey call site
+    /// under other feature combinations). Always present so callers don't
+    /// have to cfg-gate the field at construction sites.
+    pub remote_cache_read_only: bool,
 }
 
 #[cfg(feature = "chrome")]
@@ -3139,6 +3174,8 @@ pub async fn fetch_page_html_chrome_base(
     let track_events = params.track_events;
     let cache_policy = params.cache_policy;
     let remote_multimodal = params.remote_multimodal;
+    #[cfg(any(feature = "cache_request", feature = "chrome_remote_cache"))]
+    let remote_cache_read_only = params.remote_cache_read_only;
     use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES, UNKNOWN_STATUS_ERROR};
     use chromiumoxide::{
         cdp::browser_protocol::network::{
@@ -3580,6 +3617,16 @@ pub async fn fetch_page_html_chrome_base(
             resp_headers,
             chrome_intercept,
             cache_namespace,
+            {
+                #[cfg(any(feature = "cache_request", feature = "chrome_remote_cache"))]
+                {
+                    remote_cache_read_only
+                }
+                #[cfg(not(any(feature = "cache_request", feature = "chrome_remote_cache")))]
+                {
+                    false
+                }
+            },
         )
         .await
     };
@@ -4264,7 +4311,7 @@ pub async fn fetch_page_html_chrome_base(
                         if !page_set && cache_request {
                             let _ = tokio::time::timeout(
                                 base_timeout,
-                                cache_chrome_response(source_str, &page_response, chrome_http_req_res1, &cache_options, cache_namespace),
+                                cache_chrome_response(source_str, &page_response, chrome_http_req_res1, &cache_options, cache_namespace, remote_cache_read_only),
                             )
                             .await;
                         }
@@ -4534,6 +4581,7 @@ pub async fn fetch_page_html_chrome_base(
                             chrome_http_req_res,
                             &cache_options,
                             cache_namespace,
+                            remote_cache_read_only,
                         ),
                     )
                     .await;
