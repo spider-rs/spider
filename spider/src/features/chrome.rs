@@ -1475,23 +1475,40 @@ static TAB_CLOSER_IN_FLIGHT: std::sync::OnceLock<
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 fn tab_closer_in_flight(
 ) -> &'static dashmap::DashMap<chromiumoxide::cdp::browser_protocol::target::TargetId, ()> {
-    TAB_CLOSER_IN_FLIGHT.get_or_init(dashmap::DashMap::new)
+    // Lock-free lazy init via get/set. `get_or_init` would block concurrent
+    // first-callers inside std's internal mutex; with get/set, losers of the
+    // atomic set() race simply drop their freshly-constructed DashMap (cheap)
+    // and return the winner's map.
+    if let Some(m) = TAB_CLOSER_IN_FLIGHT.get() {
+        return m;
+    }
+    let _ = TAB_CLOSER_IN_FLIGHT.set(dashmap::DashMap::new());
+    TAB_CLOSER_IN_FLIGHT
+        .get()
+        .expect("dedup map was just set on this path")
 }
 
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 fn tab_closer() -> &'static tokio::sync::mpsc::UnboundedSender<chromiumoxide::Page> {
-    TAB_CLOSER_TX.get_or_init(|| {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<chromiumoxide::Page>();
+    // Fast path: already initialised — pure atomic load, no lock.
+    if let Some(tx) = TAB_CLOSER_TX.get() {
+        return tx;
+    }
 
-        // Dedicated OS thread + own current_thread runtime so the watcher is
-        // independent of any caller-supplied runtime.  Closes are processed
-        // serially with a 5s per-close timeout — fast in the common case
-        // (~sub-100ms), bounded under failure so a hung close can't stall the
-        // queue forever.  Serial avoids per-page spawns entirely; no
-        // throughput need has materialised that justifies a worker pool.
-        let spawn_result = std::thread::Builder::new()
-            .name("spider-tab-closer".into())
-            .spawn(move || {
+    // Slow path: lock-free lazy init. We create the channel unconditionally
+    // (cheap), then atomically try to publish `tx`. Only the set() winner
+    // spawns the watcher thread — losers drop their rx here with nothing
+    // else to clean up. This avoids `get_or_init`'s internal Mutex and the
+    // wasted thread spawns that a naïve get/set pattern would produce on
+    // every concurrent first-call.
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<chromiumoxide::Page>();
+
+    match TAB_CLOSER_TX.set(tx) {
+        Ok(()) => {
+            // We won the race — spawn the watcher to service our rx.
+            let spawn_result = std::thread::Builder::new()
+                .name("spider-tab-closer".into())
+                .spawn(move || {
                 let runtime = match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -1573,12 +1590,23 @@ fn tab_closer() -> &'static tokio::sync::mpsc::UnboundedSender<chromiumoxide::Pa
                 });
             });
 
-        if let Err(e) = spawn_result {
-            log::error!("[tab-closer] thread spawn failed: {:?}", e);
+            if let Err(e) = spawn_result {
+                log::error!(
+                    "[tab-closer] thread spawn failed: {:?} — tab closes will be dropped",
+                    e
+                );
+            }
         }
+        Err(_our_tx) => {
+            // Lost the atomic set() race. `_our_tx` drops at end of this arm,
+            // our locally-owned `rx` drops when this function returns — neither
+            // is referenced elsewhere, so nothing to tear down.
+        }
+    }
 
-        tx
-    })
+    TAB_CLOSER_TX
+        .get()
+        .expect("tab-closer sender was just published on this path")
 }
 
 /// Guard that closes a Chrome tab when dropped.
