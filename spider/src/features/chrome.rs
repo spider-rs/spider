@@ -1509,86 +1509,86 @@ fn tab_closer() -> &'static tokio::sync::mpsc::UnboundedSender<chromiumoxide::Pa
             let spawn_result = std::thread::Builder::new()
                 .name("spider-tab-closer".into())
                 .spawn(move || {
-                let runtime = match tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                {
-                    Ok(rt) => rt,
-                    Err(e) => {
-                        log::error!("[tab-closer] runtime build failed: {:?}", e);
-                        return;
+                    let runtime = match tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    {
+                        Ok(rt) => rt,
+                        Err(e) => {
+                            log::error!("[tab-closer] runtime build failed: {:?}", e);
+                            return;
+                        }
+                    };
+                    // RAII cleanup that always removes the target_id from the
+                    // in-flight dedup map on any exit path — success, timeout,
+                    // panic, or task abort — so a close-task failure can never
+                    // leave a stale entry that would permanently block re-queuing
+                    // for the same tab.
+                    struct DedupCleanup {
+                        map: &'static dashmap::DashMap<
+                            chromiumoxide::cdp::browser_protocol::target::TargetId,
+                            (),
+                        >,
+                        key: Option<chromiumoxide::cdp::browser_protocol::target::TargetId>,
                     }
-                };
-                // RAII cleanup that always removes the target_id from the
-                // in-flight dedup map on any exit path — success, timeout,
-                // panic, or task abort — so a close-task failure can never
-                // leave a stale entry that would permanently block re-queuing
-                // for the same tab.
-                struct DedupCleanup {
-                    map: &'static dashmap::DashMap<
-                        chromiumoxide::cdp::browser_protocol::target::TargetId,
-                        (),
-                    >,
-                    key: Option<chromiumoxide::cdp::browser_protocol::target::TargetId>,
-                }
-                impl Drop for DedupCleanup {
-                    fn drop(&mut self) {
-                        if let Some(k) = self.key.take() {
-                            self.map.remove(&k);
+                    impl Drop for DedupCleanup {
+                        fn drop(&mut self) {
+                            if let Some(k) = self.key.take() {
+                                self.map.remove(&k);
+                            }
                         }
                     }
-                }
 
-                runtime.block_on(async move {
-                    let in_flight = tab_closer_in_flight();
-                    // Process closes concurrently on this runtime — close work
-                    // is CDP round-trip bound (mostly awaiting a response), so
-                    // a single-thread event loop with many in-flight tasks
-                    // saturates throughput without multi-thread overhead.
-                    let mut pending: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
-                    loop {
-                        tokio::select! {
-                            biased;
-                            // Reap completed closes to keep JoinSet bounded.
-                            // We ignore the Result: task panics are logged by
-                            // the JoinSet itself and the DedupCleanup Drop
-                            // will have already freed the dedup entry.
-                            _ = pending.join_next(), if !pending.is_empty() => {}
-                            page = rx.recv() => {
-                                match page {
-                                    Some(page) => {
-                                        let target_id = page.target_id().clone();
-                                        pending.spawn(async move {
-                                            let _cleanup = DedupCleanup {
-                                                map: in_flight,
-                                                key: Some(target_id),
-                                            };
-                                            let _ = tokio::time::timeout(
-                                                tokio::time::Duration::from_secs(5),
-                                                page.close(),
-                                            )
-                                            .await;
-                                            // _cleanup's Drop removes the
-                                            // dedup entry here, regardless of
-                                            // whether page.close returned Ok,
-                                            // Err, or timed out.
-                                        });
-                                    }
-                                    None => {
-                                        // Sender is `static` — this only
-                                        // fires at process exit; drain
-                                        // in-flight closes before shutting
-                                        // down. Each has a 5s timeout so
-                                        // drain is bounded.
-                                        while pending.join_next().await.is_some() {}
-                                        break;
+                    runtime.block_on(async move {
+                        let in_flight = tab_closer_in_flight();
+                        // Process closes concurrently on this runtime — close work
+                        // is CDP round-trip bound (mostly awaiting a response), so
+                        // a single-thread event loop with many in-flight tasks
+                        // saturates throughput without multi-thread overhead.
+                        let mut pending: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
+                        loop {
+                            tokio::select! {
+                                biased;
+                                // Reap completed closes to keep JoinSet bounded.
+                                // We ignore the Result: task panics are logged by
+                                // the JoinSet itself and the DedupCleanup Drop
+                                // will have already freed the dedup entry.
+                                _ = pending.join_next(), if !pending.is_empty() => {}
+                                page = rx.recv() => {
+                                    match page {
+                                        Some(page) => {
+                                            let target_id = page.target_id().clone();
+                                            pending.spawn(async move {
+                                                let _cleanup = DedupCleanup {
+                                                    map: in_flight,
+                                                    key: Some(target_id),
+                                                };
+                                                let _ = tokio::time::timeout(
+                                                    tokio::time::Duration::from_secs(5),
+                                                    page.close(),
+                                                )
+                                                .await;
+                                                // _cleanup's Drop removes the
+                                                // dedup entry here, regardless of
+                                                // whether page.close returned Ok,
+                                                // Err, or timed out.
+                                            });
+                                        }
+                                        None => {
+                                            // Sender is `static` — this only
+                                            // fires at process exit; drain
+                                            // in-flight closes before shutting
+                                            // down. Each has a 5s timeout so
+                                            // drain is bounded.
+                                            while pending.join_next().await.is_some() {}
+                                            break;
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
+                    });
                 });
-            });
 
             if let Err(e) = spawn_result {
                 log::error!(

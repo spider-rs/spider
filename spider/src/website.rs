@@ -535,15 +535,43 @@ static JS_SAFE_CHALLENGE_PATTERNS: &[&str] = &[
 
 /// check if the page is a javascript challenge
 pub fn is_safe_javascript_challenge(page: &Page) -> bool {
-    let page = page.get_html_bytes_u8();
+    const MAX_BYTES: usize = 10_000;
 
-    let page_size = page.len();
+    let page_size = page.size();
 
-    if page_size == 0 || page_size > 10_000 {
+    if page_size == 0 || page_size > MAX_BYTES || !page.is_valid_utf8 {
         return false;
     }
 
-    AC_JS_CHALLENGE.find(page).is_some()
+    if page.is_binary_spool_aware() {
+        return false;
+    }
+
+    let bytes = page.get_html_bytes_u8();
+    if !bytes.is_empty() {
+        return AC_JS_CHALLENGE.find(bytes).is_some();
+    }
+
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+    {
+        use std::io::{BufRead, BufReader};
+
+        const SCAN_BYTES: usize = 4096;
+
+        if let Some(path) = page.get_html_spool_path() {
+            if let Ok(file) = std::fs::File::open(path) {
+                let cap = page_size.min(SCAN_BYTES).max(1);
+                let mut reader = BufReader::with_capacity(cap, file);
+                if let Ok(chunk) = reader.fill_buf() {
+                    if !chunk.is_empty() {
+                        return AC_JS_CHALLENGE.find(chunk).is_some();
+                    }
+                }
+            }
+        }
+    }
+
+    false
 }
 
 #[cfg(all(
@@ -3977,6 +4005,10 @@ impl Website {
 
                                 (out_links, signature)
                             });
+                        } else {
+                            self.links_visited.remove(&link);
+                            self.extra_links_insert(link);
+                            break;
                         }
 
                         self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
@@ -7231,6 +7263,10 @@ impl Website {
 
                                     (links, signature)
                                 });
+                            } else {
+                                self.links_visited.remove(&link);
+                                self.extra_links_insert(link);
+                                break;
                             }
 
                             self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
@@ -7940,6 +7976,10 @@ impl Website {
 
                                                     results
                                                 });
+                                            } else {
+                                                self.links_visited.remove(&link);
+                                                self.extra_links_insert(link);
+                                                break;
                                             }
 
                                             self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
@@ -8473,6 +8513,10 @@ impl Website {
 
                                     (links, signature)
                                 });
+                            } else {
+                                website.links_visited.remove(&link);
+                                website.extra_links_insert(link);
+                                break;
                             }
 
                             website.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
@@ -8956,6 +9000,10 @@ impl Website {
 
                                                     results
                                                 });
+                                            } else {
+                                                website.links_visited.remove(&link);
+                                                website.extra_links_insert(link);
+                                                break;
                                             }
 
                                             website.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
@@ -9358,6 +9406,10 @@ impl Website {
 
                                             (links, signature)
                                         });
+                                    } else {
+                                        self.links_visited.remove(&link);
+                                        self.extra_links_insert(link);
+                                        break;
                                     }
 
                                     self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
@@ -9528,6 +9580,10 @@ impl Website {
                             });
 
                             self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
+                        } else {
+                            self.links_visited.remove(&link);
+                            self.extra_links_insert(link);
+                            break;
                         }
                     }
                     _ => break,
@@ -9899,6 +9955,10 @@ impl Website {
 
                                     (links, signature)
                                 });
+                            } else {
+                                self.links_visited.remove(&link);
+                                self.extra_links_insert(link);
+                                break;
                             }
 
                             self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;

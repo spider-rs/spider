@@ -153,6 +153,36 @@ where
         }
     }
 
+    /// Remove a link from the visited set so it can be retried.
+    ///
+    /// Bloom filter membership is intentionally not cleared (bloom filters do
+    /// not support removal). A stale bloom bit only forces the HashSet lookup,
+    /// which correctly reports absence after this call.
+    #[inline(always)]
+    pub fn remove(&mut self, link: &K) -> bool {
+        #[cfg(any(
+            feature = "string_interner_bucket_backend",
+            feature = "string_interner_string_backend",
+            feature = "string_interner_buffer_backend",
+        ))]
+        {
+            if let Some(symbol) = self.interner.get(link.as_ref()) {
+                self.links_visited.remove(&symbol)
+            } else {
+                false
+            }
+        }
+
+        #[cfg(not(any(
+            feature = "string_interner_bucket_backend",
+            feature = "string_interner_string_backend",
+            feature = "string_interner_buffer_backend",
+        )))]
+        {
+            self.links_visited.remove(link)
+        }
+    }
+
     /// Does the bucket contain the link.
     ///
     /// When the `bloom` feature is enabled, the mmap-backed bloom filter is
