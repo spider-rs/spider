@@ -1094,8 +1094,8 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.51.108",
- "spider_utils 2.51.108",
+ "spider 2.51.109",
+ "spider_utils 2.51.109",
 ]
 
 [[package]]
@@ -1593,9 +1593,9 @@ dependencies = [
 
 [[package]]
 name = "chromey"
-version = "2.46.49"
+version = "2.46.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afab8dc9fa4f155ea7804fa469142cacc8a1df22df34a2de324372200e6e12f1"
+checksum = "799c1d63d9018c0e81c251325f8750ae61b56c3bc59d00a77beba757e88d28f8"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -8047,9 +8047,9 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.51.107"
+version = "2.51.108"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8dac3f1d0c449e36c83f35c71fce9782428321d904acdb1722dc63dd13e80ed8"
+checksum = "9b0bb4456fd2a2d2a23ffbd7210706906e02c24a76aa3e4bc428c8c5b46d38b0"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -8075,7 +8075,7 @@ dependencies = [
  "serde_regex",
  "simdutf8",
  "smallvec",
- "spider_agent_types 2.51.107",
+ "spider_agent_types 2.51.108",
  "spider_fingerprint",
  "string-interner",
  "string_concat",
@@ -8088,7 +8088,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.51.108"
+version = "2.51.109"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -8148,7 +8148,7 @@ dependencies = [
  "smallvec",
  "sonic-rs",
  "spider_agent",
- "spider_agent_types 2.51.108",
+ "spider_agent_types 2.51.109",
  "spider_fingerprint",
  "spider_firewall",
  "spider_network_blocker",
@@ -8177,7 +8177,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent"
-version = "2.51.108"
+version = "2.51.109"
 dependencies = [
  "aho-corasick",
  "async-openai 0.35.0",
@@ -8200,7 +8200,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spider_agent_html",
- "spider_agent_types 2.51.108",
+ "spider_agent_types 2.51.109",
  "spider_skills",
  "tempfile",
  "thirtyfour",
@@ -8211,20 +8211,20 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_html"
-version = "2.51.108"
+version = "2.51.109"
 dependencies = [
  "aho-corasick",
  "lol_html",
  "serde",
  "serde_json",
- "spider_agent_types 2.51.108",
+ "spider_agent_types 2.51.109",
 ]
 
 [[package]]
 name = "spider_agent_types"
-version = "2.51.107"
+version = "2.51.108"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ff72d5d7861bffc8650419cb7b49522ca0d911b49805bf2a0fbb67deed69e82"
+checksum = "1179459277aecbc9b2ddc589be42748f92dac0892b61e43a47e6acd4d677bf67"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8235,7 +8235,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.51.108"
+version = "2.51.109"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8285,7 +8285,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.51.108"
+version = "2.51.109"
 dependencies = [
  "clap",
  "env_logger",
@@ -8294,7 +8294,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.51.108",
+ "spider 2.51.109",
  "spider_transformations",
  "tikv-jemallocator",
  "tokio",
@@ -8311,9 +8311,9 @@ dependencies = [
  "flexbuffers",
  "htr",
  "serde_json",
- "spider 2.51.108",
+ "spider 2.51.109",
  "spider_transformations",
- "spider_utils 2.51.107",
+ "spider_utils 2.51.108",
 ]
 
 [[package]]
@@ -8352,7 +8352,7 @@ dependencies = [
 
 [[package]]
 name = "spider_mcp"
-version = "2.51.108"
+version = "2.51.109"
 dependencies = [
  "clap",
  "dashmap",
@@ -8361,7 +8361,7 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
- "spider 2.51.108",
+ "spider 2.51.109",
  "spider_transformations",
  "tokio",
  "uuid",
@@ -8446,7 +8446,7 @@ dependencies = [
  "phf_codegen 0.11.3",
  "regex",
  "serde",
- "spider 2.51.107",
+ "spider 2.51.108",
  "spider_scraper",
  "tendril",
  "thiserror 1.0.69",
@@ -8456,9 +8456,9 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.51.107"
+version = "2.51.108"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91899d79e32153b7c105846eff09c6e0ec7da174fd656d850e9ba615111bf210"
+checksum = "343ff9b57ed3aef27474ab0cd52fb11e7cef6f21ee46873f6e770e9270883fa8"
 dependencies = [
  "hashbrown 0.17.0",
  "lazy_static",
@@ -8470,7 +8470,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.51.108"
+version = "2.51.109"
 dependencies = [
  "hashbrown 0.17.0",
  "indexmap 2.14.0",
@@ -8485,14 +8485,14 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.51.108"
+version = "2.51.109"
 dependencies = [
  "env_logger",
  "hyper",
  "hyper-util",
  "lazy_static",
  "rustls-pemfile",
- "spider 2.51.108",
+ "spider 2.51.109",
  "tokio-rustls",
  "warp",
 ]
