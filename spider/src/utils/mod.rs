@@ -2490,26 +2490,23 @@ async fn set_document_content_if_requested(
 }
 
 #[cfg(feature = "chrome_remote_cache")]
-/// Inject a dedicated reqwest client into `spider_remote_cache` that
-/// **bypasses all proxies** — both user-configured proxies on
-/// [`crate::configuration::Configuration`] and env-var proxies (HTTP_PROXY,
-/// HTTPS_PROXY, ALL_PROXY) which reqwest auto-detects by default.
+/// Inject a dedicated reqwest client into `spider_remote_cache`.
 ///
-/// The remote `hybrid_cache_server` is part of spider's own infrastructure
-/// and should always be reachable directly; routing cache traffic through
-/// a user proxy (the crawl egress) would (a) leak crawl intent to the
-/// proxy, (b) add latency to every cache read/write, and (c) break when
-/// the proxy denies internal hostnames.
+/// The client deliberately does **not** carry the user's configured
+/// crawl proxy (`Configuration.proxies`) — cache traffic is part of
+/// spider's own infrastructure, not the crawl egress. Standard env
+/// proxies (`HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`) are left to
+/// reqwest's default auto-detection so operators can still route
+/// internal traffic through a corporate proxy if needed.
 ///
 /// Idempotent: `spider_remote_cache::set_client` is backed by `OnceLock`,
 /// and an additional `OnceLock` here avoids rebuilding a reqwest client
 /// every call. Safe to invoke from both read and write paths.
-fn ensure_proxy_less_remote_cache_client() {
+fn ensure_remote_cache_client() {
     use std::sync::OnceLock;
     static INIT: OnceLock<()> = OnceLock::new();
     INIT.get_or_init(|| {
         let client = reqwest::Client::builder()
-            .no_proxy()
             .pool_idle_timeout(std::time::Duration::from_secs(90))
             .tcp_keepalive(Some(std::time::Duration::from_secs(5)))
             .pool_max_idle_per_host(10)
@@ -2573,7 +2570,7 @@ async fn set_document_content_if_requested_cached(
     // via `seed_cache` / `get_cache_site` also bypass user proxies.
     // Idempotent.
     #[cfg(feature = "chrome_remote_cache")]
-    ensure_proxy_less_remote_cache_client();
+    ensure_remote_cache_client();
 
     // Eagerly init the remote cache worker before the listener starts so
     // all uploads hit the fast try_enqueue path. Skip entirely in read-only
@@ -6307,7 +6304,7 @@ pub async fn get_cached_url_base(
     {
         // Ensure the remote cache client bypasses all proxies (user +
         // env-var) before the first GET fires. Idempotent.
-        ensure_proxy_less_remote_cache_client();
+        ensure_remote_cache_client();
 
         let cache_site = chromiumoxide::cache::manager::site_key_for_target_url(
             target_url,
@@ -6394,7 +6391,7 @@ pub async fn get_cached_url_base(
 
     // Ensure the remote cache client bypasses all proxies (user + env-var)
     // before the first GET fires. Idempotent.
-    ensure_proxy_less_remote_cache_client();
+    ensure_remote_cache_client();
 
     let cache_site = chromiumoxide::cache::manager::site_key_for_target_url(
         target_url,
