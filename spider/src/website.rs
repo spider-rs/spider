@@ -262,7 +262,21 @@ macro_rules! chrome_page_fetch {
 
                 Some(page)
             }
-            _ => None,
+            _ => {
+                // Tab creation failed (browser hang, dead WS, CDP error).
+                // Emit a synthetic timeout Page so subscribers always see
+                // every URL that was attempted instead of a silent drop.
+                // request_timeout is meant to cancel waits — it should not
+                // swallow the subscriber notification.
+                if $shared.2.is_some() {
+                    let mut resp = crate::utils::PageResponse::default();
+                    resp.status_code = reqwest::StatusCode::GATEWAY_TIMEOUT;
+                    let mut synthetic = crate::page::build($target_url, resp);
+                    synthetic.should_retry = false;
+                    channel_send_page(&$shared.2, synthetic, &$shared.4).await;
+                }
+                None
+            }
         }
     }};
 }
@@ -330,7 +344,20 @@ macro_rules! chrome_page_fetch_on {
 
                 Some(page)
             }
-            _ => None,
+            _ => {
+                // Hedge tab creation failed — still notify subscribers so
+                // every attempted URL produces a Page event. The primary
+                // path independently may have sent its own Page; broadcast
+                // delivers both to subscribers, matching the normal race.
+                if $shared.2.is_some() {
+                    let mut resp = crate::utils::PageResponse::default();
+                    resp.status_code = reqwest::StatusCode::GATEWAY_TIMEOUT;
+                    let mut synthetic = crate::page::build($target_url, resp);
+                    synthetic.should_retry = false;
+                    channel_send_page(&$shared.2, synthetic, &$shared.4).await;
+                }
+                None
+            }
         }
     }};
 }
@@ -6670,7 +6697,7 @@ impl Website {
                                     // Track whether the select!-based race ran so the
                                     // downstream collection phase can skip its redundant
                                     // grace-period loop and stat recording.
-                                    #[allow(unused_mut, unused_assignments)]
+                                    #[allow(unused_mut, unused_assignments, unused_variables)]
                                     let mut pb_race_active = false;
 
                                     // Hedge-enabled path: race primary vs delayed hedge on different proxy
