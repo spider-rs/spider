@@ -1425,6 +1425,78 @@ impl Drop for HedgeBrowser {
     }
 }
 
+/// Global sender for the background tab-closer task.  `TabCloseGuard::Drop`
+/// pushes pages here instead of spawning a fresh task each time — under heavy
+/// crawl cancellation we used to spawn thousands of single-use tasks per
+/// second; one long-lived watcher amortises that to a single channel send.
+///
+/// Initialised once via `OnceLock` on the first `Drop` that needs to close a
+/// tab.  Lives in a dedicated OS thread with its own `current_thread` runtime
+/// so the watcher survives across tokio runtime lifetimes — important for
+/// `#[tokio::test]` bodies that spin up + tear down a runtime per test, which
+/// would otherwise silently lose closes after the first runtime shuts down.
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+static TAB_CLOSER_TX: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<chromiumoxide::Page>> =
+    std::sync::OnceLock::new();
+
+/// Tracks `target_id`s currently queued for close so re-entrant Drop paths
+/// don't hammer `page.close()` on the same tab twice.  Entries are removed
+/// after the close future resolves (or times out).
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+static TAB_CLOSER_IN_FLIGHT: std::sync::OnceLock<
+    dashmap::DashMap<chromiumoxide::cdp::browser_protocol::target::TargetId, ()>,
+> = std::sync::OnceLock::new();
+
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+fn tab_closer_in_flight(
+) -> &'static dashmap::DashMap<chromiumoxide::cdp::browser_protocol::target::TargetId, ()> {
+    TAB_CLOSER_IN_FLIGHT.get_or_init(dashmap::DashMap::new)
+}
+
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+fn tab_closer() -> &'static tokio::sync::mpsc::UnboundedSender<chromiumoxide::Page> {
+    TAB_CLOSER_TX.get_or_init(|| {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<chromiumoxide::Page>();
+
+        // Dedicated OS thread + own current_thread runtime so the watcher is
+        // independent of any caller-supplied runtime.  Closes are processed
+        // serially with a 5s per-close timeout — fast in the common case
+        // (~sub-100ms), bounded under failure so a hung close can't stall the
+        // queue forever.  Serial avoids per-page spawns entirely; no
+        // throughput need has materialised that justifies a worker pool.
+        let spawn_result = std::thread::Builder::new()
+            .name("spider-tab-closer".into())
+            .spawn(move || {
+                let runtime = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        log::error!("[tab-closer] runtime build failed: {:?}", e);
+                        return;
+                    }
+                };
+                runtime.block_on(async move {
+                    let in_flight = tab_closer_in_flight();
+                    while let Some(page) = rx.recv().await {
+                        let target_id = page.target_id().clone();
+                        let _ =
+                            tokio::time::timeout(tokio::time::Duration::from_secs(5), page.close())
+                                .await;
+                        in_flight.remove(&target_id);
+                    }
+                });
+            });
+
+        if let Err(e) = spawn_result {
+            log::error!("[tab-closer] thread spawn failed: {:?}", e);
+        }
+
+        tx
+    })
+}
+
 /// Guard that closes a Chrome tab when dropped.
 ///
 /// chromiumoxide's `Page` does **not** close the underlying Chrome tab on drop —
@@ -1433,10 +1505,12 @@ impl Drop for HedgeBrowser {
 /// browser resources.  Over time the leaked tabs exhaust Chrome, causing
 /// `browser.new_page()` to hang and deadlocking the crawl.
 ///
-/// `TabCloseGuard` holds a clone of the `Page` handle.  On drop it spawns a
-/// fire-and-forget `page.close()` task so the tab is cleaned up even when the
-/// owning future is cancelled.  Call [`defuse`](Self::defuse) before an
-/// explicit `.close().await` to avoid a double-close.
+/// `TabCloseGuard` holds a clone of the `Page` handle.  On drop it hands the
+/// page off to a background watcher (single OS thread + tokio runtime) via a
+/// channel send — no per-Drop `tokio::spawn`.  The watcher dedups by
+/// `target_id` so re-entrant cleanup paths don't double-close the same tab.
+/// Call [`defuse`](Self::defuse) before an explicit `.close().await` to skip
+/// the channel send entirely.
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 pub(crate) struct TabCloseGuard(Option<chromiumoxide::Page>);
 
@@ -1460,12 +1534,13 @@ impl TabCloseGuard {
 impl Drop for TabCloseGuard {
     fn drop(&mut self) {
         if let Some(page) = self.0.take() {
-            tokio::task::spawn(async move {
-                // Timeout prevents zombie tasks when Chrome is unresponsive.
-                // 5 seconds is generous — tab close is normally sub-100ms.
-                let _ =
-                    tokio::time::timeout(tokio::time::Duration::from_secs(5), page.close()).await;
-            });
+            // Skip if a close for this target_id is already queued — prevents
+            // hammering page.close on the same tab when multiple guards
+            // (or a defuse-followed-by-explicit-close path) race.
+            let target_id = page.target_id().clone();
+            if tab_closer_in_flight().insert(target_id, ()).is_none() {
+                let _ = tab_closer().send(page);
+            }
         }
     }
 }

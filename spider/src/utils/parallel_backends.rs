@@ -806,36 +806,48 @@ pub async fn fetch_cdp(
         }
     };
 
-    // If a proxy is configured, create an isolated browser context with
-    // proxy_server so this backend's requests route through it.
+    // Always create an isolated browser context so parallel fetches don't
+    // contend over the shared default context/tab of a persistent remote
+    // Chrome. `dispose_on_detach` is set as a best-effort cleanup hint
+    // (experimental in the spec, not relied on) — explicit `Page.close`
+    // below remains the source of truth for tab cleanup.
+    let mut ctx_params =
+        chromiumoxide::cdp::browser_protocol::target::CreateBrowserContextParams::default();
+    ctx_params.dispose_on_detach = Some(true);
     if let Some(ref proxy_addr) = proxy {
-        let mut ctx_params =
-            chromiumoxide::cdp::browser_protocol::target::CreateBrowserContextParams::default();
-        ctx_params.dispose_on_detach = Some(true);
         ctx_params.proxy_server = Some(proxy_addr.clone());
-        if let Ok(ctx) = browser.create_browser_context(ctx_params).await {
+    }
+    match browser.create_browser_context(ctx_params).await {
+        Ok(ctx) => {
             let _ = browser.send_new_context(ctx).await;
-        } else {
+        }
+        Err(e) => {
             log::warn!(
-                "{} proxy browser context failed for {}, continuing without proxy",
+                "{} browser context create failed ({}): {:?} — falling back to default context",
                 source_name,
-                proxy_addr
+                endpoint,
+                e
             );
         }
     }
 
-    // Get the default page.
-    let page = match browser.pages().await {
-        Ok(mut p) if !p.is_empty() => p.swap_remove(0),
-        _ => match browser.new_page(url).await {
-            Ok(p) => p,
-            Err(e) => {
-                log::warn!("{} page failed: {:?}", source_name, e);
-                handler_handle.abort();
-                return None;
-            }
-        },
+    // Always open a fresh tab — never reuse `browser.pages()` which returns
+    // the shared default tab on a persistent remote Chrome and races with
+    // other concurrent fetches.
+    let page = match browser.new_page("about:blank").await {
+        Ok(p) => p,
+        Err(e) => {
+            log::warn!("{} page failed: {:?}", source_name, e);
+            handler_handle.abort();
+            return None;
+        }
     };
+
+    // Guard closes the tab if this future is cancelled mid-flight (e.g. by
+    // `race_backends::abort_all()`). Drop sends the page to the background
+    // watcher — no per-Drop spawn — and the watcher dedups by `target_id`
+    // so this never double-closes alongside the explicit close paths below.
+    let tab_guard = crate::features::chrome::TabCloseGuard::new(page.clone());
 
     // Apply the same page-level config as the primary Chrome path.
     crate::features::chrome::setup_chrome_events(&page, config).await;
@@ -851,18 +863,19 @@ pub async fn fetch_cdp(
     .await;
 
     // Navigate.
-    match tokio::time::timeout(timeout, page.goto(url)).await {
-        Ok(Ok(_)) => {}
-        Ok(Err(e)) => {
-            log::warn!("{} navigate failed for {}: {:?}", source_name, url, e);
-            handler_handle.abort();
-            return None;
+    let nav_result = tokio::time::timeout(timeout, page.goto(url)).await;
+    if !matches!(nav_result, Ok(Ok(_))) {
+        match &nav_result {
+            Ok(Err(e)) => log::warn!("{} navigate failed for {}: {:?}", source_name, url, e),
+            Err(_) => log::warn!("{} navigate timed out for {}", source_name, url),
+            _ => {}
         }
-        Err(_) => {
-            log::warn!("{} navigate timed out for {}", source_name, url);
-            handler_handle.abort();
-            return None;
-        }
+        // Defuse the guard, then close inline before killing the handler so
+        // CloseTarget propagates over CDP before the message pump dies.
+        tab_guard.defuse();
+        let _ = tokio::time::timeout(Duration::from_secs(2), page.close()).await;
+        handler_handle.abort();
+        return None;
     }
 
     // Wait for load event if configured.
@@ -878,7 +891,11 @@ pub async fn fetch_cdp(
     // Get the outer HTML.
     let html_result = tokio::time::timeout(Duration::from_secs(10), page.outer_html_bytes()).await;
 
-    // Clean up.
+    // Close the tab synchronously before aborting the handler so the
+    // CloseTarget CDP message actually propagates — after `handler_handle.abort()`
+    // the message pump is dead and `page.close()` silently fails.
+    tab_guard.defuse();
+    let _ = tokio::time::timeout(Duration::from_secs(2), page.close()).await;
     handler_handle.abort();
 
     let html_bytes: Vec<u8> = match html_result {
