@@ -33,10 +33,29 @@ mod inner {
     /// Whether the io_uring FS worker is running and healthy.
     static URING_FS_ENABLED: AtomicBool = AtomicBool::new(false);
 
-    /// Channel to the io_uring worker thread.
-    /// `mpsc::UnboundedSender` is `Send + Sync`, safe for `OnceLock`.
-    static URING_FS_POOL: std::sync::OnceLock<mpsc::UnboundedSender<FileIoTask>> =
-        std::sync::OnceLock::new();
+    /// Round-robin pool of io_uring worker threads. Each worker owns its own
+    /// ring and services tasks serially; the pool fans tasks across workers
+    /// so multiple `submit_and_wait(1)` calls can run in parallel on
+    /// different rings instead of queueing behind one thread.
+    struct UringFsPool {
+        senders: Box<[mpsc::UnboundedSender<FileIoTask>]>,
+        next: std::sync::atomic::AtomicUsize,
+    }
+
+    static URING_FS_POOL: std::sync::OnceLock<UringFsPool> = std::sync::OnceLock::new();
+
+    /// Number of io_uring worker threads to spawn. Default 2. Override via
+    /// `SPIDER_URING_WORKERS` (clamped to 1..=16).
+    fn worker_count() -> usize {
+        static CACHE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+        *CACHE.get_or_init(|| {
+            std::env::var("SPIDER_URING_WORKERS")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .map(|n| n.clamp(1, 16))
+                .unwrap_or(2)
+        })
+    }
 
     /// A self-contained I/O task sent to the worker thread.
     enum FileIoTask {
@@ -632,32 +651,73 @@ mod inner {
 
         // Probe: try to create a ring. Fails gracefully on AWS AL2, ECS,
         // Lambda, seccomp-filtered containers, kernels < 5.1, etc.
-        let ring = match probe_io_uring() {
+        let probe = match probe_io_uring() {
             Some(r) => r,
             None => return false,
         };
 
-        let (tx, rx) = mpsc::unbounded_channel();
-        let builder = std::thread::Builder::new().name("uring-fs-worker".into());
+        let n = worker_count();
+        let mut senders: Vec<mpsc::UnboundedSender<FileIoTask>> = Vec::with_capacity(n);
 
-        match builder.spawn(move || worker_loop(rx, ring)) {
-            Ok(_) => {
-                if URING_FS_POOL.set(tx).is_ok() {
-                    URING_FS_ENABLED.store(true, Ordering::Release);
-                }
-                // If set() failed, another thread won the race. Our worker
-                // will exit when its rx is dropped — no leak.
-            }
+        // Worker 0 reuses the probe ring — don't waste the successful build.
+        let (tx0, rx0) = mpsc::unbounded_channel();
+        match std::thread::Builder::new()
+            .name("uring-fs-worker-0".into())
+            .spawn(move || worker_loop(rx0, probe))
+        {
+            Ok(_) => senders.push(tx0),
             Err(e) => {
-                log::warn!("Failed to spawn io_uring FS worker thread: {}", e);
+                log::warn!("Failed to spawn io_uring FS worker 0: {}", e);
                 return false;
             }
         }
 
+        // Additional workers each build their own ring. Partial failure is
+        // fine: we run with however many workers we managed to start.
+        for i in 1..n {
+            let ring = match io_uring::IoUring::builder().build(64) {
+                Ok(r) => r,
+                Err(e) => {
+                    log::warn!(
+                        "io_uring worker {i}: ring build failed ({e}); stopping pool growth"
+                    );
+                    break;
+                }
+            };
+            let (tx, rx) = mpsc::unbounded_channel();
+            match std::thread::Builder::new()
+                .name(format!("uring-fs-worker-{i}"))
+                .spawn(move || worker_loop(rx, ring))
+            {
+                Ok(_) => senders.push(tx),
+                Err(e) => {
+                    log::warn!("io_uring worker {i}: spawn failed ({e}); stopping pool growth");
+                    break;
+                }
+            }
+        }
+
+        if senders.is_empty() {
+            return false;
+        }
+
+        let pool = UringFsPool {
+            senders: senders.into_boxed_slice(),
+            next: std::sync::atomic::AtomicUsize::new(0),
+        };
+
+        if URING_FS_POOL.set(pool).is_ok() {
+            URING_FS_ENABLED.store(true, Ordering::Release);
+        }
+        // If set() failed, another thread won the race. Our senders drop at
+        // end of scope → workers exit cleanly when their rx is dropped.
+
         URING_FS_ENABLED.load(Ordering::Acquire)
     }
 
-    /// Send a task to the io_uring worker and await the result.
+    /// Send a task to an io_uring worker and await the result. Tasks are
+    /// dispatched round-robin across the worker pool so concurrent file I/O
+    /// runs on parallel rings instead of serializing on one.
     /// Returns `None` if io_uring is not available (caller falls back).
     async fn try_uring<T>(
         make_task: impl FnOnce(oneshot::Sender<io::Result<T>>) -> FileIoTask,
@@ -665,7 +725,13 @@ mod inner {
         if !URING_FS_ENABLED.load(Ordering::Acquire) {
             return None;
         }
-        let sender = URING_FS_POOL.get()?;
+        let pool = URING_FS_POOL.get()?;
+        let len = pool.senders.len();
+        if len == 0 {
+            return None;
+        }
+        let idx = pool.next.fetch_add(1, Ordering::Relaxed) % len;
+        let sender = &pool.senders[idx];
         let (tx, rx) = oneshot::channel();
         if sender.send(make_task(tx)).is_err() {
             return Some(Err(io::Error::new(
