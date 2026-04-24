@@ -1323,7 +1323,7 @@ pub(crate) mod tests {
     async fn test_streaming_writer_matches_single_shot() {
         let mut data: Vec<u8> = Vec::with_capacity(200 * 1024);
         for i in 0..(200 * 1024) {
-            data.push(((b'a' + (i % 26) as u8)));
+            data.push(b'a' + (i % 26) as u8);
         }
         // Reference: single-shot writer.
         let ref_path = next_spool_path();
