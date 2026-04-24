@@ -1677,7 +1677,7 @@ pub async fn run_openai_request(
                         .evaluate_function(string_concat!(
                             "async function() { ",
                             json_res.js,
-                            "; return document.documentElement.outerHTML; }"
+                            "\n; return document.documentElement.outerHTML; }"
                         ))
                         .await
                     {
@@ -2484,8 +2484,10 @@ async fn goto_with_html_once(
                     if matches!(e, chromiumoxide::error::CdpError::Timeout) {
                         *block_bytes = true;
                     }
-                    let _ = page.execute(DisableParams {}).await;
-                    let _ = page.set_request_interception(true).await;
+                    let _ = tokio::join!(
+                        page.send_command(DisableParams {}),
+                        page.set_request_interception(true),
+                    );
                     return Err(e);
                 }
             }
@@ -2509,8 +2511,10 @@ async fn goto_with_html_once(
                     binary_response_headers: None,
                 }).await;
 
-                let _ = page.execute(DisableParams {}).await;
-                let _ = page.set_request_interception(true).await;
+                let _ = tokio::join!(
+                    page.send_command(DisableParams {}),
+                    page.set_request_interception(true),
+                );
 
                 match res {
                     Ok(_) => {
@@ -2540,8 +2544,10 @@ async fn goto_with_html_once(
         }
     }
 
-    let _ = page.execute(DisableParams {}).await;
-    let _ = page.set_request_interception(true).await;
+    let _ = tokio::join!(
+        page.send_command(DisableParams {}),
+        page.set_request_interception(true),
+    );
 
     Ok(())
 }
