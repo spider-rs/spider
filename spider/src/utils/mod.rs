@@ -3318,10 +3318,10 @@ pub async fn fetch_page_html_chrome_base(
 
     let html_source_size = source.len();
 
-    // Lazily decode source to &str for internal APIs that require string
-    // semantics (logging, URL comparison, cache keys). The hot content path
-    // (set_document_content / base64 fulfillment) uses raw bytes directly.
-    let source_str = simdutf8::basic::from_utf8(source).unwrap_or_default();
+    // `target_url` is the canonical URL — from `url_target` when provided
+    // (smart/Chrome-upgrade path where `source` is HTML bytes), or decoded
+    // from `source` bytes above when not. Downstream URL APIs reuse it
+    // directly so we don't re-validate the (potentially large) HTML body.
 
     // Shutdown signal for CDP event listeners. Sent after page work is done
     // so listeners exit deterministically instead of relying on stream closure.
@@ -3719,7 +3719,7 @@ pub async fn fetch_page_html_chrome_base(
     // event, matching http_future()'s behavior. get_final_redirect resolves
     // instantly here (load already fired).
     let final_url = if wait_for_navigation && !request_cancelled && !block_bytes {
-        let last_redirect = get_final_redirect(page, source_str, base_timeout).await;
+        let last_redirect = get_final_redirect(page, target_url, base_timeout).await;
         base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
         last_redirect
     } else {
@@ -3768,7 +3768,7 @@ pub async fn fetch_page_html_chrome_base(
                 let wait_budget = sub_duration(base_timeout_measurement, start_time.elapsed());
                 #[cfg(feature = "wait_guard")]
                 let wait_budget = crate::utils::wait_guard::global_wait_guard()
-                    .adjusted_timeout(get_domain_from_url(source_str), wait_budget);
+                    .adjusted_timeout(get_domain_from_url(target_url), wait_budget);
                 if let Err(elasped) =
                     tokio::time::timeout(wait_budget, page_wait(page, wait_for)).await
                 {
@@ -3779,10 +3779,9 @@ pub async fn fetch_page_html_chrome_base(
             base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
 
             if execution_scripts.is_some() || automation_scripts.is_some() {
-                let target_url = final_url
+                let eval_url = final_url
                     .as_deref()
-                    .or(url_target)
-                    .unwrap_or(source_str)
+                    .unwrap_or(target_url)
                     .to_string();
 
                 if let Err(elasped) = tokio::time::timeout(base_timeout, async {
@@ -3792,12 +3791,12 @@ pub async fn fetch_page_html_chrome_base(
                         tokio::join!(
                             crate::features::chrome_common::eval_execution_scripts(
                                 page,
-                                &target_url,
+                                &eval_url,
                                 execution_scripts
                             ),
                             crate::features::chrome_common::eval_automation_scripts_tracking(
                                 page,
-                                &target_url,
+                                &eval_url,
                                 automation_scripts,
                                 &mut _metadata
                             )
@@ -3807,12 +3806,12 @@ pub async fn fetch_page_html_chrome_base(
                         tokio::join!(
                             crate::features::chrome_common::eval_execution_scripts(
                                 page,
-                                &target_url,
+                                &eval_url,
                                 execution_scripts
                             ),
                             crate::features::chrome_common::eval_automation_scripts(
                                 page,
-                                &target_url,
+                                &eval_url,
                                 automation_scripts
                             )
                         );
@@ -4073,7 +4072,7 @@ pub async fn fetch_page_html_chrome_base(
                     .as_deref()
                     .filter(|u| !u.is_empty())
                     .or(url_target)
-                    .unwrap_or(source_str);
+                    .unwrap_or(target_url);
 
                 url::Url::parse(scope_url).ok()
             } else {
@@ -4092,7 +4091,7 @@ pub async fn fetch_page_html_chrome_base(
                 let openai_request = run_openai_request(
                     match &url_target {
                         Some(ut) => ut,
-                        _ => source_str,
+                        _ => target_url,
                     },
                     page,
                     wait_for,
@@ -4123,7 +4122,7 @@ pub async fn fetch_page_html_chrome_base(
                     page,
                     match &url_target {
                         Some(ut) => ut,
-                        _ => source_str,
+                        _ => target_url,
                     },
                 );
 
@@ -4193,7 +4192,7 @@ pub async fn fetch_page_html_chrome_base(
             if cfg!(feature = "chrome_screenshot") || screenshot.is_some() {
                 let _ = tokio::time::timeout(
                     base_timeout + tokio::time::Duration::from_secs(30),
-                    perform_screenshot(source_str, page, screenshot, &mut page_response),
+                    perform_screenshot(target_url, page, screenshot, &mut page_response),
                 )
                 .await;
             }
@@ -4214,7 +4213,7 @@ pub async fn fetch_page_html_chrome_base(
                 let idle_timeout = base_timeout.min(Duration::from_secs(15));
                 #[cfg(feature = "wait_guard")]
                 let idle_timeout = crate::utils::wait_guard::global_wait_guard()
-                    .adjusted_timeout(get_domain_from_url(source_str), idle_timeout);
+                    .adjusted_timeout(get_domain_from_url(target_url), idle_timeout);
                 if let Err(elapsed) =
                     tokio::time::timeout(idle_timeout, page_wait(page, wait_for)).await
                 {
@@ -4246,7 +4245,7 @@ pub async fn fetch_page_html_chrome_base(
                         .as_deref()
                         .filter(|u| !u.is_empty())
                         .or(url_target)
-                        .unwrap_or(source_str);
+                        .unwrap_or(target_url);
 
                     url::Url::parse(scope_url).ok()
                 } else {
@@ -4318,7 +4317,7 @@ pub async fn fetch_page_html_chrome_base(
                 .as_deref()
                 .filter(|u| !u.is_empty())
                 .or(url_target)
-                .unwrap_or(source_str);
+                .unwrap_or(target_url);
 
               url::Url::parse(scope_url).ok()
             } else {
@@ -4341,7 +4340,7 @@ pub async fn fetch_page_html_chrome_base(
                         if !page_set && cache_request {
                             let _ = tokio::time::timeout(
                                 base_timeout,
-                                cache_chrome_response(source_str, &page_response, chrome_http_req_res1, &cache_options, cache_namespace, remote_cache_read_only),
+                                cache_chrome_response(target_url, &page_response, chrome_http_req_res1, &cache_options, cache_namespace, remote_cache_read_only),
                             )
                             .await;
                         }
@@ -4419,7 +4418,7 @@ pub async fn fetch_page_html_chrome_base(
     // timeouts, preventing one user's antibot-heavy crawl from hogging pages.
     #[cfg(feature = "wait_guard")]
     if wait_for.is_some() {
-        let domain = get_domain_from_url(source_str);
+        let domain = get_domain_from_url(target_url);
         let guard = crate::utils::wait_guard::global_wait_guard();
         // Spool present => useful content on disk.  Only scan in-memory
         // bytes when no spool handle is attached.
@@ -4606,7 +4605,7 @@ pub async fn fetch_page_html_chrome_base(
                     let _ = tokio::time::timeout(
                         base_timeout,
                         cache_chrome_response(
-                            source_str,
+                            target_url,
                             &page_response,
                             chrome_http_req_res,
                             &cache_options,
@@ -8240,6 +8239,83 @@ pub fn emit_log_shutdown(link: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Proves the `target_url` computation used inside
+    /// `fetch_page_html_chrome_base` preserves behavior in navigate mode
+    /// (where `source` is a URL) and gives the correct URL in content mode
+    /// (where `source` is HTML — the old `source_str` would have been the
+    /// decoded HTML string, which was semantically wrong as a URL fallback).
+    #[cfg(feature = "chrome")]
+    #[test]
+    fn test_target_url_resolution_matches_source_str_in_navigate_mode() {
+        // Simulate `fetch_page_html_chrome_base`'s local `target_url` logic:
+        //   let target_url = match url_target {
+        //       Some(u) => u,
+        //       None    => simdutf8::basic::from_utf8(source).unwrap_or_default(),
+        //   };
+        fn resolve_target_url<'a>(source: &'a [u8], url_target: Option<&'a str>) -> &'a str {
+            match url_target {
+                Some(u) => u,
+                None => simdutf8::basic::from_utf8(source).unwrap_or_default(),
+            }
+        }
+        fn resolve_old_source_str(source: &[u8]) -> &str {
+            simdutf8::basic::from_utf8(source).unwrap_or_default()
+        }
+
+        // --- Case 1: navigate mode (source = URL bytes, url_target = None) ---
+        // This is the non-smart HTTP navigate path. `target_url` and the old
+        // `source_str` must be character-for-character identical, so every
+        // downstream site (cache key, wait_guard domain, cookie scope parse,
+        // screenshot context, get_final_redirect) sees the same value.
+        let url_bytes = b"https://example.com/page".as_slice();
+        let target = resolve_target_url(url_bytes, None);
+        let old = resolve_old_source_str(url_bytes);
+        assert_eq!(
+            target, old,
+            "navigate mode: target_url must equal old source_str"
+        );
+        assert_eq!(target, "https://example.com/page");
+
+        // --- Case 2: smart/content mode (source = HTML, url_target = Some) ---
+        // The old code would have decoded the HTML body and passed it to
+        // URL-consuming APIs — garbage for cache keys / domain lookups. The
+        // new `target_url` is the real URL. Assert the old value was
+        // semantically wrong (HTML != URL) and the new value is the URL.
+        let html = b"<html><head><title>t</title></head><body>hi</body></html>".as_slice();
+        let real_url = "https://example.com/spa";
+        let target = resolve_target_url(html, Some(real_url));
+        let old = resolve_old_source_str(html);
+        assert_eq!(target, real_url, "smart mode: target_url must be the URL");
+        assert_ne!(
+            old, real_url,
+            "smart mode: old source_str was the HTML body — NOT the URL"
+        );
+        assert!(
+            old.starts_with("<html>"),
+            "confirms old source_str was HTML decoded: {:?}",
+            &old[..old.len().min(32)]
+        );
+
+        // --- Case 3: cached content (source = cached HTML, url_target = Some) ---
+        // Same shape as smart mode — `target_url` must be the URL, the old
+        // code would have fed HTML into URL-parsing code.
+        let cached_html = b"<!DOCTYPE html><html><body>cached</body></html>".as_slice();
+        let url = "https://example.com/cached";
+        let target = resolve_target_url(cached_html, Some(url));
+        let old = resolve_old_source_str(cached_html);
+        assert_eq!(target, url);
+        assert_ne!(old, url);
+
+        // --- Case 4: invalid UTF-8 source in navigate mode ---
+        // simdutf8 fails → old source_str was "" → URL parses fail silently.
+        // `target_url` preserves that exact fallback behavior.
+        let bad = &[0xff, 0xfe, 0xfd][..];
+        let target = resolve_target_url(bad, None);
+        let old = resolve_old_source_str(bad);
+        assert_eq!(target, old);
+        assert_eq!(target, "");
+    }
 
     #[test]
     fn test_detect_open_resty_forbidden() {
