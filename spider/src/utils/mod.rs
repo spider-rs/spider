@@ -2200,6 +2200,86 @@ pub async fn cache_chrome_response(
 ) {
 }
 
+/// Dump a fresh HTTP (skip_browser) response into the shared
+/// `spider_remote_cache` worker.
+///
+/// Intended for the HTTP-only crawl path: when the crawler fetches a URL
+/// via `reqwest` (no chrome) and wants to publish the response into the
+/// hybrid cache server. This is the *counterpart* to the chrome dump path
+/// in [`cache_chrome_response`], but it never touches chromey's CDP
+/// listener or the local hybrid disk cache.
+///
+/// Fire-and-forget: the enqueue is best-effort — body size, memory budget,
+/// and on-disk spool limits are enforced inside `spider_remote_cache`
+/// itself. Empty bodies and unparseable URLs are dropped silently.
+///
+/// Callers control whether this fires via
+/// [`Configuration::with_remote_cache_skip_browser`] — check that flag
+/// before calling this helper.
+#[cfg(feature = "chrome_remote_cache")]
+pub async fn cache_http_response_skip_browser(
+    target_url: &str,
+    page_response: &PageResponse,
+    method: &str,
+    cache_options: &Option<CacheOptions>,
+    namespace: Option<&str>,
+) {
+    let body = match page_response.content.as_ref() {
+        Some(b) if !is_cacheable_body_empty(b) => b.clone(),
+        _ => return,
+    };
+
+    if url::Url::parse(target_url).is_err() {
+        return;
+    }
+
+    let auth_opt = cache_auth_token(cache_options);
+    let cache_key = create_cache_key_raw(target_url, Some(method), auth_opt, namespace);
+    let cache_site =
+        chromiumoxide::cache::manager::site_key_for_target_url(target_url, None, namespace);
+
+    let response_headers: std::collections::HashMap<String, String> = page_response
+        .headers
+        .as_ref()
+        .map(|hm| {
+            hm.iter()
+                .filter_map(|(k, v)| {
+                    v.to_str()
+                        .ok()
+                        .map(|s| (k.as_str().to_string(), s.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Best-effort detection of HTTP version from headers; defaults to HTTP/1.1
+    // since reqwest does not expose the negotiated version on `HeaderMap`.
+    let http_version = spider_remote_cache::HttpVersion::Http11;
+
+    let job = spider_remote_cache::DumpJob {
+        cache_key,
+        cache_site,
+        url: target_url.to_string(),
+        method: method.to_string(),
+        status: page_response.status_code.as_u16(),
+        request_headers: std::collections::HashMap::new(),
+        response_headers,
+        body,
+        http_version,
+        dump_remote: None,
+    };
+
+    if spider_remote_cache::worker_inited() {
+        if !spider_remote_cache::try_enqueue(job) {
+            log::debug!("skip_browser remote dump dropped (worker + spool full)");
+        }
+    } else {
+        if let Err(_) = spider_remote_cache::enqueue(job).await {
+            log::debug!("skip_browser remote dump dropped (worker init failed)");
+        }
+    }
+}
+
 /// 5 mins in ms
 pub(crate) const FIVE_MINUTES: u32 = 300_000;
 
@@ -5456,7 +5536,25 @@ pub async fn fetch_page_html_raw_cached(
         return response;
     }
 
-    fetch_page_html_raw_base(target_url, client, false).await
+    let response = fetch_page_html_raw_base(target_url, client, false).await;
+
+    // On a cache miss, publish the fresh HTTP response to the shared
+    // remote cache worker when the runtime flag is on. Best-effort —
+    // bounded in-memory queue + on-disk spool inside `spider_remote_cache`
+    // absorb bursts; wait-free on the hot path.
+    #[cfg(feature = "chrome_remote_cache")]
+    if spider_remote_cache::skip_browser_dumps_enabled() && response.status_code.is_success() {
+        cache_http_response_skip_browser(
+            target_url,
+            &response,
+            "GET",
+            &cache_options,
+            cache_namespace,
+        )
+        .await;
+    }
+
+    response
 }
 
 /// Perform a network request to a resource extracting all content streaming.

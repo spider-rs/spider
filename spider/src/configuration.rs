@@ -461,6 +461,15 @@ pub struct Configuration {
     /// write-through behavior.
     #[cfg(feature = "chrome_remote_cache")]
     pub chrome_remote_cache_read_only: bool,
+    /// Publish fresh HTTP (skip_browser) responses to the shared remote
+    /// cache worker. When enabled, successful HTTP fetches made through
+    /// the skip_browser path are enqueued into `spider_remote_cache` so
+    /// they become available for later cache lookups. Independent of
+    /// chrome-path dumps — you can have chrome dumps off (via
+    /// `chrome_remote_cache_read_only = true`) while still publishing
+    /// from the HTTP path. Default `false` is a no-op.
+    #[cfg(feature = "chrome_remote_cache")]
+    pub remote_cache_skip_browser: bool,
     #[cfg(feature = "chrome")]
     /// Enable or disable service workers. Enabled by default.
     pub service_worker_enabled: bool,
@@ -1451,6 +1460,48 @@ impl Configuration {
         #[cfg(feature = "chrome_remote_cache")]
         {
             self.chrome_remote_cache_read_only
+        }
+        #[cfg(not(feature = "chrome_remote_cache"))]
+        {
+            false
+        }
+    }
+
+    /// Enable publishing of fresh HTTP (skip_browser) responses to the
+    /// shared remote cache worker. Updates the process-global dump flag
+    /// on `spider_remote_cache` — the setter is wait-free (single atomic
+    /// store) and safe to call from any thread. Also opts into the
+    /// disk-backed overflow spool so bursty crawls don't drop under
+    /// memory pressure. Has no observable effect without the
+    /// `chrome_remote_cache` feature.
+    #[cfg(feature = "chrome_remote_cache")]
+    pub fn with_remote_cache_skip_browser(&mut self, enabled: bool) -> &mut Self {
+        self.remote_cache_skip_browser = enabled;
+        spider_remote_cache::set_skip_browser_dumps_enabled(enabled);
+        spider_remote_cache::set_spool_enabled(enabled);
+        self
+    }
+
+    /// Enable publishing of fresh HTTP (skip_browser) responses to the
+    /// shared remote cache worker. This method does nothing without the
+    /// `chrome_remote_cache` feature.
+    #[cfg(not(feature = "chrome_remote_cache"))]
+    pub fn with_remote_cache_skip_browser(&mut self, _enabled: bool) -> &mut Self {
+        self
+    }
+
+    /// Whether HTTP (skip_browser) responses should be enqueued to the
+    /// shared remote cache worker. Always `false` without the
+    /// `chrome_remote_cache` feature. Mirrors the process-global state
+    /// held in `spider_remote_cache::skip_browser_dumps_enabled()` —
+    /// callers that need the runtime toggle should read the global
+    /// directly for wait-free access from the hot path.
+    #[inline]
+    #[allow(dead_code)]
+    pub(crate) fn remote_cache_skip_browser_enabled(&self) -> bool {
+        #[cfg(feature = "chrome_remote_cache")]
+        {
+            self.remote_cache_skip_browser
         }
         #[cfg(not(feature = "chrome_remote_cache"))]
         {
