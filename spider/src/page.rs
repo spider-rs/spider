@@ -99,6 +99,16 @@ lazy_static! {
     /// DNS failure
     pub(crate) static ref DNS_RESOLVE_ERROR: StatusCode =
         StatusCode::from_u16(525).expect("valid status code");
+    /// Address / origin permanently unreachable — the destination host or port
+    /// cannot be reached from this path, and no amount of proxy rotation or
+    /// retrying is going to change that. Emitted for:
+    ///   - io::ErrorKind::{HostUnreachable, NetworkUnreachable}
+    ///   - Chrome `net::ERR_ADDRESS_UNREACHABLE` (e.g. SOCKS reply 0x04)
+    ///   - Chrome `net::ERR_CONNECTION_REFUSED` (origin port not listening)
+    /// Kept distinct from 525 (DNS) so operators can tell DNS-dead from
+    /// reachable-but-refused targets; both are excluded from retry.
+    pub(crate) static ref ADDRESS_UNREACHABLE_ERROR: StatusCode =
+        StatusCode::from_u16(526).expect("valid status code");
     /// Redirect-chain cap exceeded (IANA 310 "Loop Detected" — 3xx keeps retry
     /// strategies from treating this as a transient 5xx).
     pub(crate) static ref TOO_MANY_REDIRECTS_ERROR: StatusCode =
@@ -161,10 +171,12 @@ fn is_dns_error(err: &crate::client::Error) -> bool {
 }
 
 /// Whether a status code is retryable (transient server/network errors).
-/// DNS errors (525) and redirect-cap hits (310) are permanent and excluded.
+/// DNS errors (525), address-unreachable (526), and redirect-cap hits (310)
+/// are permanent and excluded.
 #[inline]
 pub fn is_retryable_status(status: StatusCode) -> bool {
     status != *DNS_RESOLVE_ERROR
+        && status != *ADDRESS_UNREACHABLE_ERROR
         && status != *TOO_MANY_REDIRECTS_ERROR
         && (status.is_server_error()
             || matches!(
@@ -198,8 +210,13 @@ pub(crate) fn get_error_http_status_code(err: &crate::client::Error) -> StatusCo
                 io::ErrorKind::ConnectionAborted => return *CONNECTION_ABORTED_ERROR,
                 io::ErrorKind::ConnectionReset => return *CONNECTION_RESET_ERROR,
                 io::ErrorKind::NotFound => return *UNREACHABLE_REQUEST_ERROR,
+                // Kernel-level "no route" / "host unreachable" means the
+                // destination itself is not reachable from this path — no
+                // retry through a different proxy will change that. Map
+                // to 526 (ADDRESS_UNREACHABLE_ERROR) so `is_retryable_status`
+                // treats it as permanent.
                 io::ErrorKind::HostUnreachable | io::ErrorKind::NetworkUnreachable => {
-                    return *UNREACHABLE_REQUEST_ERROR
+                    return *ADDRESS_UNREACHABLE_ERROR
                 }
                 io::ErrorKind::TimedOut => return *CONNECTION_TIMEOUT_ERROR,
                 _ => (),
@@ -1520,6 +1537,58 @@ pub fn is_chrome_name_resolution_error(code: &str) -> bool {
     )
 }
 
+/// Return `true` when a Chrome `net::ERR_*` failure_text (or an `errorCode`
+/// extracted from a rendered Chrome error page) represents a **target-side**
+/// permanent failure — the destination itself is unreachable / refused /
+/// doesn't exist, so retrying through a different proxy or connection will
+/// not help.
+///
+/// Superset of [`is_chrome_name_resolution_error`]. Matches:
+/// - `ERR_NAME_NOT_RESOLVED`      — classic NXDOMAIN
+/// - `ERR_NAME_RESOLUTION_FAILED` — resolver rejected the name outright
+/// - `ERR_ADDRESS_UNREACHABLE`    — no route to host; also emitted by Chrome
+///   when a SOCKS proxy returns reply 0x04 ("host unreachable") for the
+///   target, which is a target-side failure even though it arrives via the
+///   proxy channel
+/// - `ERR_CONNECTION_REFUSED`     — origin closed the port with RST / ICMP;
+///   the host is up but no service is listening, which no proxy swap will fix
+///
+/// Transient conditions (timeouts, resets mid-stream, proxy failures,
+/// certificate issues) are intentionally excluded so they remain retryable
+/// against a different proxy or connection.
+#[inline]
+pub fn is_chrome_permanent_failure(code: &str) -> bool {
+    let trimmed = code.strip_prefix("net::").unwrap_or(code);
+    matches!(
+        trimmed,
+        "ERR_NAME_NOT_RESOLVED"
+            | "ERR_NAME_RESOLUTION_FAILED"
+            | "ERR_ADDRESS_UNREACHABLE"
+            | "ERR_CONNECTION_REFUSED"
+    )
+}
+
+/// Map a Chrome `net::ERR_*` permanent-failure code to the spider HTTP
+/// status code that records WHY it was permanent. Callers should first gate
+/// on [`is_chrome_permanent_failure`]; this helper assumes the code is
+/// already known to be permanent and is only choosing between 525 (DNS)
+/// and 526 (address/origin unreachable).
+///
+/// Unknown (non-permanent) codes fall back to 525 as a safe default —
+/// `is_retryable_status` excludes both 525 and 526 so either answer still
+/// halts the retry loop. Picked 525 over 526 for the fallback so the behavior
+/// is identical to the previous version of the retry path when only
+/// `is_chrome_name_resolution_error` existed — important for anyone
+/// downstream pattern-matching on 525 specifically.
+#[inline]
+pub(crate) fn chrome_permanent_failure_status(code: &str) -> StatusCode {
+    let trimmed = code.strip_prefix("net::").unwrap_or(code);
+    match trimmed {
+        "ERR_ADDRESS_UNREACHABLE" | "ERR_CONNECTION_REFUSED" => *ADDRESS_UNREACHABLE_ERROR,
+        _ => *DNS_RESOLVE_ERROR,
+    }
+}
+
 /// Extract a specific type of error from a chain of errors.
 #[cfg(not(feature = "decentralized"))]
 fn extract_specific_error<'a, T: std::error::Error + 'static>(
@@ -1571,7 +1640,15 @@ fn get_error_status_base(
         Some(e) => match e {
             Ok(_) => None,
             Err(er) => {
-                if er.is_timeout() || (er.is_connect() && !is_dns_error(&er)) {
+                // Only set should_retry on connect errors whose mapped
+                // status code is retryable. DNS failures (525), address
+                // unreachable (526), and redirect-cap hits (310) stay
+                // non-retryable; timeouts (524) remain retryable. This
+                // supersedes the earlier `!is_dns_error` gate — a single
+                // is_retryable_status check covers all permanent codes.
+                if er.is_timeout()
+                    || (er.is_connect() && is_retryable_status(get_error_http_status_code(&er)))
+                {
                     *should_retry = true;
                 }
                 if !*should_retry && should_attempt_retry(&er) {
@@ -1652,19 +1729,21 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
     // (spider internal error) so all retry paths treat it as a failed crawl.
     // Content is preserved for debugging but status signals failure.
     //
-    // When the rendered errorCode reports a permanent name-resolution failure
-    // (ERR_NAME_NOT_RESOLVED / ERR_NAME_RESOLUTION_FAILED), downgrade to the
-    // DNS-specific 525 so the retry path treats it as permanent.
+    // When the rendered errorCode reports a permanent target-side failure
+    // (DNS absent / address unreachable / connection refused), downgrade to
+    // the appropriate non-retryable code — 525 for DNS or 526 for reachable-
+    // but-refused — so the retry path treats it as permanent instead of the
+    // generic 599 catch-all.
     let chrome_error =
         res.status_code.is_success() && res.content.as_deref().is_some_and(is_chrome_error_page);
     if chrome_error {
-        let dns_permanent = res
+        let permanent_code = res
             .content
             .as_deref()
             .and_then(extract_chrome_error_code)
-            .is_some_and(is_chrome_name_resolution_error);
-        res.status_code = if dns_permanent {
-            *DNS_RESOLVE_ERROR
+            .filter(|code| is_chrome_permanent_failure(code));
+        res.status_code = if let Some(code) = permanent_code {
+            chrome_permanent_failure_status(code)
         } else {
             StatusCode::from_u16(599).unwrap_or(StatusCode::BAD_GATEWAY)
         };
@@ -1675,8 +1754,10 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
 
     let status = res.status_code;
 
-    // DNS resolve error (525) is permanent — never retry
+    // DNS resolve error (525) and address-unreachable (526) are permanent —
+    // never retry.
     let should_retry_status = status != *DNS_RESOLVE_ERROR
+        && status != *ADDRESS_UNREACHABLE_ERROR
         && (status.is_server_error()
             || matches!(
                 status,
@@ -8624,6 +8705,180 @@ fn test_dns_error_ac_rejects_unrelated_errors() {
     assert!(!DNS_ERROR_AC.is_match("request timed out"));
     assert!(!DNS_ERROR_AC.is_match("broken pipe"));
     assert!(!DNS_ERROR_AC.is_match(""));
+}
+
+// ---------------------------------------------------------------------------
+// is_chrome_permanent_failure — broader classifier for target-side failures
+// ---------------------------------------------------------------------------
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_is_chrome_permanent_failure_accepts_all_target_side_codes() {
+    for code in [
+        "net::ERR_NAME_NOT_RESOLVED",
+        "ERR_NAME_NOT_RESOLVED",
+        "net::ERR_NAME_RESOLUTION_FAILED",
+        "ERR_NAME_RESOLUTION_FAILED",
+        "net::ERR_ADDRESS_UNREACHABLE",
+        "ERR_ADDRESS_UNREACHABLE",
+        "net::ERR_CONNECTION_REFUSED",
+        "ERR_CONNECTION_REFUSED",
+    ] {
+        assert!(
+            is_chrome_permanent_failure(code),
+            "{code} must classify as a permanent target-side failure"
+        );
+    }
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_is_chrome_permanent_failure_rejects_transient_and_unrelated() {
+    // Transient / retryable conditions stay eligible for retry.
+    for code in [
+        "net::ERR_DNS_TIMED_OUT",
+        "net::ERR_DNS_SERVER_FAILED",
+        "net::ERR_DNS_MALFORMED_RESPONSE",
+        "net::ERR_TUNNEL_CONNECTION_FAILED",
+        "net::ERR_PROXY_CONNECTION_FAILED",
+        "net::ERR_CONNECTION_RESET",
+        "net::ERR_CONNECTION_TIMED_OUT",
+        "net::ERR_TIMED_OUT",
+        "net::ERR_CERT_INVALID",
+        "net::ERR_FAILED",
+        "",
+    ] {
+        assert!(
+            !is_chrome_permanent_failure(code),
+            "{code} must remain retryable"
+        );
+    }
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_chrome_permanent_failure_status_maps_dns_to_525() {
+    // NAME_* codes stay on 525 (DNS) for backward compatibility with any
+    // downstream that pattern-matches specifically on 525.
+    assert_eq!(
+        chrome_permanent_failure_status("net::ERR_NAME_NOT_RESOLVED"),
+        *DNS_RESOLVE_ERROR
+    );
+    assert_eq!(
+        chrome_permanent_failure_status("ERR_NAME_RESOLUTION_FAILED"),
+        *DNS_RESOLVE_ERROR
+    );
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_chrome_permanent_failure_status_maps_unreachable_to_526() {
+    // ADDRESS_UNREACHABLE and CONNECTION_REFUSED get the distinct 526 code
+    // so operators can distinguish "DNS dead" from "reachable-but-refused".
+    assert_eq!(
+        chrome_permanent_failure_status("net::ERR_ADDRESS_UNREACHABLE"),
+        *ADDRESS_UNREACHABLE_ERROR
+    );
+    assert_eq!(
+        chrome_permanent_failure_status("ERR_CONNECTION_REFUSED"),
+        *ADDRESS_UNREACHABLE_ERROR
+    );
+}
+
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_is_retryable_status_excludes_address_unreachable() {
+    assert!(
+        !is_retryable_status(*ADDRESS_UNREACHABLE_ERROR),
+        "526 (ADDRESS_UNREACHABLE_ERROR) must not be retryable"
+    );
+    // The distinct-but-similar 525 stays non-retryable too (regression guard).
+    assert!(
+        !is_retryable_status(*DNS_RESOLVE_ERROR),
+        "525 (DNS_RESOLVE_ERROR) must not be retryable"
+    );
+    // Generic 5xx codes that aren't our permanent markers remain retryable.
+    assert!(is_retryable_status(StatusCode::from_u16(502).unwrap()));
+    assert!(is_retryable_status(StatusCode::from_u16(503).unwrap()));
+    assert!(is_retryable_status(StatusCode::from_u16(521).unwrap()));
+}
+
+/// `is_chrome_name_resolution_error` is a public API and must keep its
+/// narrower (NAME-only) semantics — callers depending on the old behaviour
+/// should not see newly-matched codes leak through.
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_is_chrome_name_resolution_error_backward_compat() {
+    assert!(is_chrome_name_resolution_error("ERR_NAME_NOT_RESOLVED"));
+    assert!(is_chrome_name_resolution_error("ERR_NAME_RESOLUTION_FAILED"));
+    // The broader permanent-failure codes must NOT flow through the older
+    // narrow helper — that's what `is_chrome_permanent_failure` is for.
+    assert!(!is_chrome_name_resolution_error(
+        "ERR_ADDRESS_UNREACHABLE"
+    ));
+    assert!(!is_chrome_name_resolution_error("ERR_CONNECTION_REFUSED"));
+}
+
+/// Rendered Chrome error page carrying ERR_ADDRESS_UNREACHABLE must be
+/// reclassified to 526 (address unreachable, permanent) instead of the
+/// generic 599. This is the SOCKS-0x04-through-proxy case the fix targets.
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_chrome_error_page_address_unreachable_reclassified_to_526() {
+    let padding = "x".repeat(1000);
+    let html_str = format!(
+        "<html lang=\"en\" dir=\"ltr\">\n\
+         <style>{padding}</style>\n\
+         <div class=\"error-code\">ERR_ADDRESS_UNREACHABLE</div>\n\
+         <script>var loadTimeDataRaw = {{\"errorCode\":\"ERR_ADDRESS_UNREACHABLE\",\
+         \"title\":\"example.invalid\"}};</script></html>"
+    );
+    let res = PageResponse {
+        status_code: StatusCode::OK,
+        content: Some(html_str.into_bytes()),
+        ..Default::default()
+    };
+    let page = build("https://example.invalid", res);
+    assert_eq!(
+        page.status_code, *ADDRESS_UNREACHABLE_ERROR,
+        "Chrome ERR_ADDRESS_UNREACHABLE must reclassify to 526, not 599"
+    );
+    assert!(
+        !page.should_retry,
+        "address-unreachable failures must not trigger a retry"
+    );
+    assert!(
+        !page.needs_retry(),
+        "needs_retry() must be false for permanent address-unreachable failures"
+    );
+}
+
+/// Rendered Chrome error page carrying ERR_CONNECTION_REFUSED must be
+/// reclassified to 526 so the retry chain doesn't cycle through every
+/// configured proxy for a target that has actively refused the connection.
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_chrome_error_page_connection_refused_reclassified_to_526() {
+    let padding = "x".repeat(1000);
+    let html_str = format!(
+        "<html><style>{padding}</style>\
+         <script>var loadTimeDataRaw = {{\"errorCode\":\"ERR_CONNECTION_REFUSED\",\
+         \"title\":\"example.invalid\"}};</script></html>"
+    );
+    let res = PageResponse {
+        status_code: StatusCode::OK,
+        content: Some(html_str.into_bytes()),
+        ..Default::default()
+    };
+    let page = build("https://example.invalid", res);
+    assert_eq!(
+        page.status_code, *ADDRESS_UNREACHABLE_ERROR,
+        "Chrome ERR_CONNECTION_REFUSED must reclassify to 526"
+    );
+    assert!(
+        !page.should_retry,
+        "connection-refused failures through proxy chain must not retry"
+    );
 }
 
 /// Non-DNS Chrome error pages keep the existing 599 (retryable) behaviour so

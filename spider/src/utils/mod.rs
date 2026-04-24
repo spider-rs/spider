@@ -1321,11 +1321,15 @@ pub async fn perform_chrome_http_request(
                     } else if let Some(failure_text) = &http_request.failure_text {
                         if failure_text == "net::ERR_FAILED" {
                             waf_check = true;
-                        } else if crate::page::is_chrome_name_resolution_error(failure_text) {
-                            // Permanent DNS failure — reclassify so retry paths
-                            // treat this as non-retryable instead of the default
-                            // 599 catch-all.
-                            status_code = *crate::page::DNS_RESOLVE_ERROR;
+                        } else if crate::page::is_chrome_permanent_failure(failure_text) {
+                            // Permanent target-side failure (DNS absent /
+                            // address unreachable / connection refused) —
+                            // reclassify so retry paths treat this as
+                            // non-retryable instead of the default 599
+                            // catch-all. 525 for DNS, 526 for reachable-
+                            // but-refused; both excluded from retry.
+                            status_code =
+                                crate::page::chrome_permanent_failure_status(failure_text);
                         } else if failure_text == "net::ERR_TOO_MANY_REDIRECTS" {
                             // Redirect cap hit (emitted by chromey when a
                             // Document chain exceeds `max_redirects`). Surface
@@ -1512,11 +1516,12 @@ pub async fn perform_chrome_http_request_cache(
                 } else if let Some(failure_text) = &http_request.failure_text {
                     if failure_text == "net::ERR_FAILED" {
                         waf_check = true;
-                    } else if crate::page::is_chrome_name_resolution_error(failure_text) {
-                        // Permanent DNS failure — reclassify so retry paths
-                        // treat this as non-retryable instead of the default
-                        // 599 catch-all.
-                        status_code = *crate::page::DNS_RESOLVE_ERROR;
+                    } else if crate::page::is_chrome_permanent_failure(failure_text) {
+                        // Permanent target-side failure — reclassify so retry
+                        // paths treat this as non-retryable instead of the
+                        // default 599 catch-all. 525 for DNS, 526 for
+                        // reachable-but-refused; both excluded from retry.
+                        status_code = crate::page::chrome_permanent_failure_status(failure_text);
                     } else if failure_text == "net::ERR_TOO_MANY_REDIRECTS" {
                         status_code = *crate::page::TOO_MANY_REDIRECTS_ERROR;
                     }
