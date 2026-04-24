@@ -33,7 +33,7 @@ mod e2e {
         };
 
         let mut website = Website::new("https://example.com")
-            .with_chrome_connection(Some(ws.into()))
+            .with_chrome_connection(Some(ws))
             .with_limit(1)
             .with_request_timeout(Some(Duration::from_secs(30)))
             .build()

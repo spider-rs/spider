@@ -15099,7 +15099,7 @@ async fn test_spool_subscription_stream_from_disk() {
 
         // Verify is_html_on_disk marker is correct.
         let idx: usize = url.rsplit('/').next().unwrap().parse().unwrap();
-        if idx % 2 == 0 {
+        if idx.is_multiple_of(2) {
             assert!(page.is_html_on_disk(), "even page should be on disk: {url}");
         } else {
             assert!(

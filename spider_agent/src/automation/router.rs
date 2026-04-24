@@ -956,7 +956,7 @@ mod tests {
         let ranked = selector.ranked(&reqs);
 
         // With CheapestFirst, cheaper model should rank higher
-        assert!(ranked.len() >= 1);
+        assert!(!ranked.is_empty());
     }
 
     #[test]

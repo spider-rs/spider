@@ -10,7 +10,7 @@ use spider::website::Website;
 #[tokio::main]
 async fn main() {
     let mut website: Website = Website::new("https://choosealicense.com");
-    website.configuration.request_timeout = Some(std::time::Duration::from_secs(60).into());
+    website.configuration.request_timeout = Some(std::time::Duration::from_secs(60));
     let mut rx2 = website.subscribe(18);
     let mut rxg = website.subscribe_guard().unwrap();
 

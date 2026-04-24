@@ -548,7 +548,7 @@ mod tests {
     async fn pre_resolve_populates_cache() {
         let cache = DnsCache::new(Duration::from_secs(60));
         cache.pre_resolve(&["localhost"]).await;
-        assert!(cache.len() >= 1);
+        assert!(!cache.is_empty());
         // Subsequent resolve should be a cache hit.
         let result = cache.resolve("localhost").await;
         assert!(result.is_some());

@@ -3779,10 +3779,7 @@ pub async fn fetch_page_html_chrome_base(
             base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
 
             if execution_scripts.is_some() || automation_scripts.is_some() {
-                let eval_url = final_url
-                    .as_deref()
-                    .unwrap_or(target_url)
-                    .to_string();
+                let eval_url = final_url.as_deref().unwrap_or(target_url).to_string();
 
                 if let Err(elasped) = tokio::time::timeout(base_timeout, async {
                     let mut _metadata = Vec::new();

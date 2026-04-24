@@ -287,7 +287,7 @@ mod inner {
             for h in handles {
                 h.join().unwrap();
             }
-            assert!(cache.len() > 0);
+            assert!(!cache.is_empty());
         }
     }
 }

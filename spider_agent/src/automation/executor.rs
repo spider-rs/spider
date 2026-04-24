@@ -884,10 +884,7 @@ mod tests {
         let sem = Arc::new(Semaphore::new(1));
         sem.close();
 
-        let permit = match sem.acquire().await {
-            Ok(p) => Some(p),
-            Err(_) => None,
-        };
+        let permit = sem.acquire().await.ok();
         assert!(
             permit.is_none(),
             "closed semaphore must yield None, not panic"
@@ -898,10 +895,7 @@ mod tests {
     #[tokio::test]
     async fn test_semaphore_open_returns_valid_permit() {
         let sem = Arc::new(Semaphore::new(1));
-        let permit = match sem.acquire().await {
-            Ok(p) => Some(p),
-            Err(_) => None,
-        };
+        let permit = sem.acquire().await.ok();
         assert!(permit.is_some(), "open semaphore must yield a permit");
     }
 
@@ -941,10 +935,7 @@ mod tests {
         for i in 0..10usize {
             let sem = sem.clone();
             set.spawn(async move {
-                let _permit = match sem.acquire().await {
-                    Ok(p) => Some(p),
-                    Err(_) => None,
-                };
+                let _permit = sem.acquire().await.ok();
                 i * 2 // actual work
             });
         }

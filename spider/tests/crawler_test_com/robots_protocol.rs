@@ -137,7 +137,7 @@ async fn x_robots_tag_noindex() {
             .get("x-robots-tag")
             .map(|v| v.to_str().unwrap_or("").to_lowercase());
         assert!(
-            x_robots.map_or(false, |v| v.contains("noindex")),
+            x_robots.is_some_and(|v| v.contains("noindex")),
             "should have X-Robots-Tag: noindex header"
         );
     }

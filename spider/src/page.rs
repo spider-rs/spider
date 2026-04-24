@@ -6840,7 +6840,7 @@ async fn test_status_code() {
 async fn test_duration() {
     let client = Client::default();
     let link_result = "https://choosealicense.com/";
-    let page: Page = Page::new_page(&link_result, &client).await;
+    let page: Page = Page::new_page(link_result, &client).await;
     let duration_elasped = page.get_duration_elapsed().as_millis();
 
     assert!(
