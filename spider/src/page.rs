@@ -4049,6 +4049,7 @@ impl Page {
             self.html.as_deref(),
             self.status_code,
             &self.anti_bot_tech,
+            self.get_url(),
         )
     }
 

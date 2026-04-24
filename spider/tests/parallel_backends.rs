@@ -165,6 +165,7 @@ quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequa
         Some(html),
         reqwest::StatusCode::OK,
         &spider::page::AntiBotTech::None,
+        "",
     );
     // Should be high: 200 + content + body tag + not empty + no bot = ~100
     assert!(score >= 90, "Expected >= 90, got {}", score);
@@ -177,6 +178,7 @@ fn test_quality_score_antibot_page() {
         Some(html),
         reqwest::StatusCode::FORBIDDEN,
         &spider::page::AntiBotTech::Cloudflare,
+        "",
     );
     // Anti-bot + 403 = very low
     assert!(score < 50, "Expected < 50, got {}", score);

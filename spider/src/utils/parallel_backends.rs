@@ -181,7 +181,7 @@ pub fn html_quality_score_validated(
     source: &str,
     validator: Option<&QualityValidator>,
 ) -> u16 {
-    let base = html_quality_score(content, status_code, anti_bot);
+    let base = html_quality_score(content, status_code, anti_bot, url);
 
     if let Some(v) = validator {
         let result = v(content, status_code, url, source);
@@ -202,10 +202,16 @@ pub fn html_quality_score_validated(
 ///
 /// Used by [`race_backends`] to pick the best response when multiple backends
 /// complete within the grace period.
+///
+/// `url` is used to detect asset responses (images, PDFs, media, fonts) so
+/// HTML-specific probes — the `<body` tag scan and the empty-HTML-shell
+/// check — are skipped on binary content where they'd both return `false`
+/// by construction and cost a full-body `memmem` scan each.
 pub fn html_quality_score(
     content: Option<&[u8]>,
     status_code: StatusCode,
     anti_bot: &AntiBotTech,
+    url: &str,
 ) -> u16 {
     let mut score: u16 = 0;
 
@@ -218,6 +224,9 @@ pub fn html_quality_score(
         score += 5;
     }
     // 4xx / 5xx contribute 0.
+
+    // Cheap URL-extension check first; only probe bytes if that misses.
+    let url_is_asset = crate::page::is_asset_url(url);
 
     if let Some(body) = content {
         let len = body.len();
@@ -233,16 +242,30 @@ pub fn html_quality_score(
             score += 10;
         }
 
-        // Has a <body tag (max 15). Fast memchr scan.
-        if memchr::memmem::find(body, b"<body").is_some()
-            || memchr::memmem::find(body, b"<BODY").is_some()
-        {
-            score += 15;
-        }
+        // Byte-level binary check picks up extension-less assets
+        // (e.g. `/download`, `/file/abc123`) that `is_asset_url` misses.
+        let is_asset = url_is_asset || (len > 0 && auto_encoder::is_binary_file(body));
 
-        // Not an empty HTML shell (max 10).
-        if !crate::utils::is_cacheable_body_empty(body) {
-            score += 10;
+        if is_asset {
+            // Asset bodies are binary — the `<body` scan and HTML-shell
+            // detector don't apply. A 2xx asset with content is "good
+            // enough" on the HTML-structure axis; award the combined 25
+            // points so cross-backend comparisons stay comparable.
+            if len > 0 && status_code.is_success() {
+                score += 25;
+            }
+        } else {
+            // Has a <body tag (max 15). Fast memchr scan.
+            if memchr::memmem::find(body, b"<body").is_some()
+                || memchr::memmem::find(body, b"<BODY").is_some()
+            {
+                score += 15;
+            }
+
+            // Not an empty HTML shell (max 10).
+            if !crate::utils::is_cacheable_body_empty(body) {
+                score += 10;
+            }
         }
     }
 
@@ -946,7 +969,7 @@ pub async fn fetch_cdp(
     let dur = start.elapsed();
     let status = StatusCode::OK;
 
-    let score = html_quality_score(Some(&html_bytes), status, &AntiBotTech::None);
+    let score = html_quality_score(Some(&html_bytes), status, &AntiBotTech::None, url);
     let byte_len = html_bytes.len();
     let res = crate::utils::PageResponse {
         content: Some(html_bytes),
@@ -1064,7 +1087,7 @@ pub async fn fetch_webdriver(
     let html_bytes = source.into_bytes();
     let status = StatusCode::OK;
 
-    let score = html_quality_score(Some(&html_bytes), status, &AntiBotTech::None);
+    let score = html_quality_score(Some(&html_bytes), status, &AntiBotTech::None, url);
     let byte_len = html_bytes.len();
     let res = crate::utils::PageResponse {
         content: Some(html_bytes),
@@ -1386,21 +1409,21 @@ mod tests {
     #[test]
     fn test_quality_score_perfect_response() {
         let body = make_html(&"x".repeat(5000));
-        let score = html_quality_score(Some(&body), StatusCode::OK, &AntiBotTech::None);
+        let score = html_quality_score(Some(&body), StatusCode::OK, &AntiBotTech::None, "");
         // 30 (200) + 5 (>0) + 10 (>512) + 10 (>4096) + 15 (<body>) + 10 (not empty) + 20 (no bot) = 100
         assert_eq!(score, 100);
     }
 
     #[test]
     fn test_quality_score_empty_body() {
-        let score = html_quality_score(Some(&[]), StatusCode::OK, &AntiBotTech::None);
+        let score = html_quality_score(Some(&[]), StatusCode::OK, &AntiBotTech::None, "");
         // 30 (200) + 0 (empty) + 0 + 0 + 0 + 0 (is_cacheable_body_empty → true for empty) + 20 = 50
         assert_eq!(score, 50);
     }
 
     #[test]
     fn test_quality_score_none_content() {
-        let score = html_quality_score(None, StatusCode::OK, &AntiBotTech::None);
+        let score = html_quality_score(None, StatusCode::OK, &AntiBotTech::None, "");
         // 30 (200) + 20 (no bot) = 50
         assert_eq!(score, 50);
     }
@@ -1408,7 +1431,7 @@ mod tests {
     #[test]
     fn test_quality_score_empty_html_shell() {
         let body = b"<html><head></head><body></body></html>";
-        let score = html_quality_score(Some(body), StatusCode::OK, &AntiBotTech::None);
+        let score = html_quality_score(Some(body), StatusCode::OK, &AntiBotTech::None, "");
         // 30 + 5 (>0) + 0 (38 bytes, <512) + 0 + 15 (<body) + 0 (empty shell) + 20 = 70
         assert_eq!(score, 70);
     }
@@ -1416,8 +1439,12 @@ mod tests {
     #[test]
     fn test_quality_score_antibot_cloudflare() {
         let body = make_html("blocked");
-        let score =
-            html_quality_score(Some(&body), StatusCode::FORBIDDEN, &AntiBotTech::Cloudflare);
+        let score = html_quality_score(
+            Some(&body),
+            StatusCode::FORBIDDEN,
+            &AntiBotTech::Cloudflare,
+            "",
+        );
         // 0 (403) + 5 + 0 + 0 + 15 + 10 + 0 (bot!) = 30
         assert_eq!(score, 30);
     }
@@ -1429,6 +1456,7 @@ mod tests {
             Some(&body),
             StatusCode::INTERNAL_SERVER_ERROR,
             &AntiBotTech::None,
+            "",
         );
         // 0 (500) + 5 + 0 + 0 + 15 + 10 + 20 = 50
         assert_eq!(score, 50);
@@ -1436,7 +1464,7 @@ mod tests {
 
     #[test]
     fn test_quality_score_redirect() {
-        let score = html_quality_score(None, StatusCode::MOVED_PERMANENTLY, &AntiBotTech::None);
+        let score = html_quality_score(None, StatusCode::MOVED_PERMANENTLY, &AntiBotTech::None, "");
         // 5 (301) + 20 = 25
         assert_eq!(score, 25);
     }
@@ -1444,7 +1472,7 @@ mod tests {
     #[test]
     fn test_quality_score_small_body_with_body_tag() {
         let body = b"<html><body>hi</body></html>";
-        let score = html_quality_score(Some(body), StatusCode::OK, &AntiBotTech::None);
+        let score = html_quality_score(Some(body), StatusCode::OK, &AntiBotTech::None, "");
         // 30 + 5 (>0) + 0 (<512) + 0 + 15 (<body) + 10 (not empty) + 20 = 80
         assert_eq!(score, 80);
     }
@@ -1452,9 +1480,46 @@ mod tests {
     #[test]
     fn test_quality_score_large_body_no_body_tag() {
         let body = "x".repeat(5000);
-        let score = html_quality_score(Some(body.as_bytes()), StatusCode::OK, &AntiBotTech::None);
+        let score = html_quality_score(
+            Some(body.as_bytes()),
+            StatusCode::OK,
+            &AntiBotTech::None,
+            "",
+        );
         // 30 + 5 + 10 + 10 + 0 (no <body) + 10 (not empty) + 20 = 85
         assert_eq!(score, 85);
+    }
+
+    #[test]
+    fn test_quality_score_asset_url_skips_body_probe() {
+        // Binary asset body — `<body` scan would miss (no tag in PNG header)
+        // and `is_cacheable_body_empty` is HTML-specific noise. The asset
+        // branch awards the combined 25 points for a 2xx response with
+        // content, keeping parity with a well-formed HTML response.
+        let png_header = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x01\x00\x00\x00\x01\x00";
+        let score = html_quality_score(
+            Some(png_header),
+            StatusCode::OK,
+            &AntiBotTech::None,
+            "https://example.com/logo.png",
+        );
+        // 30 (200) + 5 (>0) + 0 (<512) + 0 + 25 (asset bundle) + 20 (no bot) = 80
+        assert_eq!(score, 80);
+    }
+
+    #[test]
+    fn test_quality_score_extensionless_binary_detected_from_bytes() {
+        // URL has no extension so is_asset_url returns false — byte-level
+        // binary check must pick it up so `<body` scan is skipped.
+        let pdf = b"%PDF-1.4\n%\xE2\xE3\xCF\xD3\n1 0 obj\n<< /Type /Catalog >>\nendobj";
+        let score = html_quality_score(
+            Some(pdf),
+            StatusCode::OK,
+            &AntiBotTech::None,
+            "https://example.com/download/abc123",
+        );
+        // 30 (200) + 5 (>0) + 0 (<512) + 0 + 25 (asset bundle) + 20 (no bot) = 80
+        assert_eq!(score, 80);
     }
 
     // ---- Backend Tracker ----
