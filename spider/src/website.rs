@@ -12,8 +12,8 @@ use crate::features::chrome_common::RequestInterceptConfiguration;
 use crate::features::disk::DatabaseHandler;
 use crate::packages::robotparser::parser::RobotFileParser;
 use crate::page::{
-    AntiBotTech, Page, PageLinkBuildSettings, CHROME_UNKNOWN_STATUS_ERROR, DNS_RESOLVE_ERROR,
-    UNKNOWN_STATUS_ERROR,
+    AntiBotTech, Page, PageLinkBuildSettings, ADDRESS_UNREACHABLE_ERROR,
+    CHROME_UNKNOWN_STATUS_ERROR, DNS_RESOLVE_ERROR, UNKNOWN_STATUS_ERROR,
 };
 use crate::utils::abs::{convert_abs_url, parse_absolute_url};
 use crate::utils::interner::ListBucket;
@@ -3233,7 +3233,9 @@ impl Website {
             self.status = CrawlStatus::Blocked;
         } else if page.status_code == reqwest::StatusCode::TOO_MANY_REQUESTS {
             self.status = CrawlStatus::RateLimited;
-        } else if page.status_code == *DNS_RESOLVE_ERROR {
+        } else if page.status_code == *DNS_RESOLVE_ERROR
+            || page.status_code == *ADDRESS_UNREACHABLE_ERROR
+        {
             self.status = CrawlStatus::ConnectError;
         } else if (page.status_code == *UNKNOWN_STATUS_ERROR
             || page.status_code == *CHROME_UNKNOWN_STATUS_ERROR)
