@@ -1787,8 +1787,23 @@ impl Configuration {
     /// Set multiple remote Chrome connection URLs for failover. When a
     /// connection fails after retries, the next URL is tried. Takes
     /// priority over `chrome_connection_url` when set.
+    ///
+    /// A single-URL vec routes through `chrome_connection_url` so the
+    /// normal single-endpoint path (10 retries w/ backoff) is used
+    /// instead of the failover path (3 retries, no other endpoint to try).
     pub fn with_chrome_connections(&mut self, urls: Vec<String>) -> &mut Self {
-        self.chrome_connection_urls = if urls.is_empty() { None } else { Some(urls) };
+        match urls.len() {
+            0 => {
+                self.chrome_connection_urls = None;
+            }
+            1 => {
+                self.chrome_connection_url = urls.into_iter().next();
+                self.chrome_connection_urls = None;
+            }
+            _ => {
+                self.chrome_connection_urls = Some(urls);
+            }
+        }
         self
     }
 
