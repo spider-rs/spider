@@ -105,6 +105,10 @@ lazy_static! {
     ///   - io::ErrorKind::{HostUnreachable, NetworkUnreachable}
     ///   - Chrome `net::ERR_ADDRESS_UNREACHABLE` (e.g. SOCKS reply 0x04)
     ///   - Chrome `net::ERR_CONNECTION_REFUSED` (origin port not listening)
+    ///   - SSL/TLS handshake failures (cipher / protocol version mismatch,
+    ///     invalid cert chain) — both reqwest and Chrome paths. These cannot
+    ///     be fixed by retrying with the same client, so they are bucketed
+    ///     with reachable-but-refused.
     /// Kept distinct from 525 (DNS) so operators can tell DNS-dead from
     /// reachable-but-refused targets; both are excluded from retry.
     pub(crate) static ref ADDRESS_UNREACHABLE_ERROR: StatusCode =
@@ -141,6 +145,41 @@ lazy_static! {
         "no record found",
         "dns resolution returned no addresses",
     ]).expect("valid patterns");
+
+    /// Aho-Corasick automaton for SSL/TLS handshake error detection — single
+    /// O(n) scan against an `err.to_string()`. The destination's TLS protocol
+    /// or cipher suite is incompatible with the client; retrying through a
+    /// different proxy will not change that.
+    ///
+    /// Patterns cover both rustls and native-tls (OpenSSL) error surfaces, plus
+    /// Chrome `net::ERR_*` strings that may surface through wrapped HTTP paths:
+    /// - rustls         → "received fatal alert: HandshakeFailure",
+    ///                    "alert: HandshakeFailure", "ProtocolVersion"
+    /// - native-tls     → "no shared cipher", "wrong_version_number",
+    ///                    "wrong version number", "unsupported protocol"
+    /// - generic / wrap → "tls handshake", "TLS handshake",
+    ///                    "ssl handshake",  "SSL handshake"
+    /// - Chrome surface → "ERR_SSL_VERSION_OR_CIPHER_MISMATCH",
+    ///                    "ERR_SSL_PROTOCOL_ERROR"
+    static ref SSL_HANDSHAKE_ERROR_AC: aho_corasick::AhoCorasick = aho_corasick::AhoCorasick::new([
+        // rustls
+        "HandshakeFailure",
+        "handshake failure",
+        "ProtocolVersion",
+        // OpenSSL / native-tls
+        "no shared cipher",
+        "wrong_version_number",
+        "wrong version number",
+        "unsupported protocol",
+        // generic
+        "tls handshake",
+        "TLS handshake",
+        "ssl handshake",
+        "SSL handshake",
+        // Chrome `net::ERR_*` strings
+        "ERR_SSL_VERSION_OR_CIPHER_MISMATCH",
+        "ERR_SSL_PROTOCOL_ERROR",
+    ]).expect("valid patterns");
 }
 
 /// Check if a connect error is a DNS resolution failure.
@@ -170,9 +209,19 @@ fn is_dns_error(err: &crate::client::Error) -> bool {
     DNS_ERROR_AC.is_match(&err.to_string())
 }
 
+/// Check whether a reqwest error is a permanent SSL/TLS handshake failure.
+/// Routes through `SSL_HANDSHAKE_ERROR_AC`, which catches rustls / native-tls /
+/// generic / Chrome-wrapped surfaces in a single O(n) scan over the error
+/// chain's Display string. SSL handshake mismatches cannot be fixed by retry
+/// through the same client — caller maps the result to 526
+/// (ADDRESS_UNREACHABLE_ERROR) so `is_retryable_status` rejects it.
+fn is_ssl_handshake_error(err: &crate::client::Error) -> bool {
+    SSL_HANDSHAKE_ERROR_AC.is_match(&err.to_string())
+}
+
 /// Whether a status code is retryable (transient server/network errors).
-/// DNS errors (525), address-unreachable (526), and redirect-cap hits (310)
-/// are permanent and excluded.
+/// DNS errors (525), address-unreachable / SSL-handshake (526), and
+/// redirect-cap hits (310) are permanent and excluded.
 #[inline]
 pub fn is_retryable_status(status: StatusCode) -> bool {
     status != *DNS_RESOLVE_ERROR
@@ -197,6 +246,15 @@ pub(crate) fn get_error_http_status_code(err: &crate::client::Error) -> StatusCo
 
     if err.is_timeout() {
         return *CONNECTION_TIMEOUT_ERROR;
+    }
+
+    // SSL/TLS handshake failures are permanent for this destination — the
+    // server's protocol/cipher suite is incompatible with the client. Retrying
+    // through another proxy/connection won't fix it. Checked before the
+    // is_connect / is_request branches because reqwest classifies SSL errors
+    // inconsistently across its TLS backends. Maps to 526 so retry paths skip.
+    if is_ssl_handshake_error(err) {
+        return *ADDRESS_UNREACHABLE_ERROR;
     }
 
     if err.is_connect() {
@@ -8802,6 +8860,105 @@ fn test_is_retryable_status_excludes_address_unreachable() {
     assert!(is_retryable_status(StatusCode::from_u16(502).unwrap()));
     assert!(is_retryable_status(StatusCode::from_u16(503).unwrap()));
     assert!(is_retryable_status(StatusCode::from_u16(521).unwrap()));
+}
+
+/// `SSL_HANDSHAKE_ERROR_AC` must match the surfaces emitted by both reqwest
+/// TLS backends and Chrome-wrapped error strings. Hits here flow through
+/// `is_ssl_handshake_error` → 526 (`ADDRESS_UNREACHABLE_ERROR`) so the
+/// page/website retry chain treats the destination as permanently
+/// unreachable instead of cycling proxies for a TLS mismatch that no
+/// connection rotation can fix.
+#[test]
+fn test_ssl_handshake_error_ac_matches_known_surfaces() {
+    for s in [
+        // rustls
+        "received fatal alert: HandshakeFailure",
+        "alert: HandshakeFailure",
+        "rustls handshake failure",
+        "peer alert: ProtocolVersion",
+        // OpenSSL / native-tls
+        "error:1408F10B:SSL routines:ssl3_get_record:wrong version number",
+        "error:1408A0C1:SSL routines:ssl3_get_client_hello:no shared cipher",
+        "tls error: unsupported protocol",
+        // generic / wrappers
+        "tls handshake error",
+        "TLS handshake failed",
+        "ssl handshake failed",
+        // Chrome surface (ChromeMessage strings can leak into wrapped reqwest errors)
+        "net::ERR_SSL_VERSION_OR_CIPHER_MISMATCH",
+        "net::ERR_SSL_PROTOCOL_ERROR",
+    ] {
+        assert!(
+            SSL_HANDSHAKE_ERROR_AC.is_match(s),
+            "{s:?} must classify as SSL handshake failure"
+        );
+    }
+}
+
+/// Unrelated errors must NOT match the SSL detector — guards against the
+/// pattern set widening to swallow transient connect/dns/timeout errors.
+#[test]
+fn test_ssl_handshake_error_ac_rejects_unrelated() {
+    for s in [
+        // Unrelated connect/transport
+        "connection reset by peer",
+        "broken pipe",
+        "operation timed out",
+        // DNS surfaces (handled separately by DNS_ERROR_AC / 525)
+        "dns error: ENOTFOUND",
+        "failed to lookup address",
+        // Plain HTTP/protocol noise
+        "invalid HTTP response",
+        "decode error",
+        "",
+    ] {
+        assert!(
+            !SSL_HANDSHAKE_ERROR_AC.is_match(s),
+            "{s:?} must NOT classify as SSL handshake failure"
+        );
+    }
+}
+
+/// SSL handshake errors must surface as 526 (`ADDRESS_UNREACHABLE_ERROR`),
+/// which `is_retryable_status` excludes — so neither the in-page retry loop
+/// nor the website-level retry loop will hammer an origin whose TLS stack
+/// is fundamentally incompatible with the client.
+#[test]
+fn test_is_retryable_status_excludes_ssl_handshake_bucket() {
+    // 526 is the bucket SSL handshake failures land in.
+    assert!(
+        !is_retryable_status(*ADDRESS_UNREACHABLE_ERROR),
+        "526 must remain non-retryable for SSL handshake failures"
+    );
+}
+
+/// End-to-end guard for the SSL classification: a `PageResponse` produced
+/// by the Chrome fallback (status 526, empty body) must yield a `Page` with
+/// `should_retry=false` and `needs_retry()=false`. This is what stops the
+/// website-level retry loop and prevents the page itself from looping —
+/// matching the user's contract: "the page should not have should_retry on
+/// it and the website should not retry it".
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_ssl_handshake_page_is_not_retryable_end_to_end() {
+    let res = PageResponse {
+        status_code: *ADDRESS_UNREACHABLE_ERROR,
+        content: None,
+        ..Default::default()
+    };
+    let page = build("https://www.example.invalid/legal/impressum", res);
+    assert_eq!(
+        page.status_code, *ADDRESS_UNREACHABLE_ERROR,
+        "SSL handshake page must keep its 526 classification through build()"
+    );
+    assert!(
+        !page.should_retry,
+        "Page::should_retry must be false for SSL handshake failures"
+    );
+    assert!(
+        !page.needs_retry(),
+        "Page::needs_retry() must be false so the website retry loop skips"
+    );
 }
 
 /// `is_chrome_name_resolution_error` is a public API and must keep its

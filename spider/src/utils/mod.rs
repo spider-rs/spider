@@ -1183,6 +1183,25 @@ fn is_ssl_protocol_error(err: &chromiumoxide::error::CdpError) -> bool {
     }
 }
 
+#[cfg(feature = "chrome")]
+/// Build a synthetic permanent-failure response for an exhausted SSL fallback.
+/// The destination's TLS protocol/cipher suite is incompatible with the client
+/// and the scheme-flip / strip-www fallbacks already failed (or were not
+/// available). Status 526 (`ADDRESS_UNREACHABLE_ERROR`) is excluded from
+/// `is_retryable_status`, so page- and website-level retry loops skip the URL
+/// instead of hammering an unreachable origin.
+fn ssl_handshake_permanent_response() -> ChromeHTTPReqRes {
+    ChromeHTTPReqRes {
+        waf_check: false,
+        status_code: *crate::page::ADDRESS_UNREACHABLE_ERROR,
+        method: "GET".to_string(),
+        response_headers: Default::default(),
+        request_headers: Default::default(),
+        protocol: "http/1.1".to_string(),
+        anti_bot_tech: AntiBotTech::default(),
+    }
+}
+
 /// Strip the `www.` prefix from a URL's host, if present.
 /// Returns `None` if the URL has no `www.` prefix.
 /// Example: `https://www.docs.github.com/foo` → `https://docs.github.com/foo`
@@ -1359,13 +1378,33 @@ pub async fn perform_chrome_http_request(
         Err(e) => {
             if is_cipher_mismatch(&e) {
                 if let Some(flipped) = flip_http_https(source) {
-                    return attempt_once(page, &flipped, referrer).await;
+                    // Try once with the flipped scheme. If the fallback also
+                    // hits an SSL error, treat the destination as permanently
+                    // unreachable rather than bubbling a CdpError that would
+                    // land as 599 (retryable) at the page/website layer.
+                    return match attempt_once(page, &flipped, referrer).await {
+                        Ok(ok) => Ok(ok),
+                        Err(e2) if is_cipher_mismatch(&e2) || is_ssl_protocol_error(&e2) => {
+                            Ok(ssl_handshake_permanent_response())
+                        }
+                        Err(e2) => Err(e2),
+                    };
                 }
+                // No scheme flip available — SSL handshake failure is permanent.
+                return Ok(ssl_handshake_permanent_response());
             }
             if is_ssl_protocol_error(&e) {
                 if let Some(no_www) = strip_www(source) {
-                    return attempt_once(page, &no_www, referrer).await;
+                    return match attempt_once(page, &no_www, referrer).await {
+                        Ok(ok) => Ok(ok),
+                        Err(e2) if is_cipher_mismatch(&e2) || is_ssl_protocol_error(&e2) => {
+                            Ok(ssl_handshake_permanent_response())
+                        }
+                        Err(e2) => Err(e2),
+                    };
                 }
+                // No `www.` prefix to strip — protocol/cert mismatch is permanent.
+                return Ok(ssl_handshake_permanent_response());
             }
             // Navigation-loop guard tripped. Surface as 310 (same bucket as
             // ERR_TOO_MANY_REDIRECTS) so retry paths treat it as permanent —
@@ -1555,7 +1594,9 @@ pub async fn perform_chrome_http_request_cache(
         Err(e) => {
             if is_cipher_mismatch(&e) {
                 if let Some(flipped) = flip_http_https(source) {
-                    return attempt_once(
+                    // Mirrors the non-cache path: classify a follow-up SSL
+                    // failure as 526 instead of bubbling a 599-bound CdpError.
+                    return match attempt_once(
                         page,
                         &flipped,
                         referrer.clone(),
@@ -1563,12 +1604,20 @@ pub async fn perform_chrome_http_request_cache(
                         cache_policy,
                         cache_namespace,
                     )
-                    .await;
+                    .await
+                    {
+                        Ok(ok) => Ok(ok),
+                        Err(e2) if is_cipher_mismatch(&e2) || is_ssl_protocol_error(&e2) => {
+                            Ok(ssl_handshake_permanent_response())
+                        }
+                        Err(e2) => Err(e2),
+                    };
                 }
+                return Ok(ssl_handshake_permanent_response());
             }
             if is_ssl_protocol_error(&e) {
                 if let Some(no_www) = strip_www(source) {
-                    return attempt_once(
+                    return match attempt_once(
                         page,
                         &no_www,
                         referrer,
@@ -1576,8 +1625,16 @@ pub async fn perform_chrome_http_request_cache(
                         cache_policy,
                         cache_namespace,
                     )
-                    .await;
+                    .await
+                    {
+                        Ok(ok) => Ok(ok),
+                        Err(e2) if is_cipher_mismatch(&e2) || is_ssl_protocol_error(&e2) => {
+                            Ok(ssl_handshake_permanent_response())
+                        }
+                        Err(e2) => Err(e2),
+                    };
                 }
+                return Ok(ssl_handshake_permanent_response());
             }
             // Navigation-loop guard — reuse 310 permanent classification.
             if let chromiumoxide::error::CdpError::TooManyNavigations(_) = e {
