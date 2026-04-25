@@ -1184,6 +1184,38 @@ fn is_ssl_protocol_error(err: &chromiumoxide::error::CdpError) -> bool {
 }
 
 #[cfg(feature = "chrome")]
+/// Combined cipher-mismatch / SSL-protocol detector — used after a fallback
+/// retry already failed, where we'd otherwise call `is_cipher_mismatch` AND
+/// `is_ssl_protocol_error` back-to-back. The combined helper does at most
+/// ONE `to_string()` allocation per call (the standalone helpers each call
+/// `to_string()` independently when the error is not a `ChromeMessage`,
+/// which would double the allocation cost on the slow path). Hot-path-aware:
+/// the `ChromeMessage` fast path borrows the message string and never
+/// allocates; the slow path falls through to a single Display materialisation.
+#[inline]
+fn is_chrome_ssl_failure(err: &chromiumoxide::error::CdpError) -> bool {
+    use chromiumoxide::error::CdpError;
+    match err {
+        // Fast path: borrow the message — zero allocations.
+        CdpError::ChromeMessage(msg) => {
+            msg.contains("net::ERR_SSL_VERSION_OR_CIPHER_MISMATCH")
+                || msg.contains("net::ERR_SSL_PROTOCOL_ERROR")
+                || msg.contains("net::ERR_CERT_COMMON_NAME_INVALID")
+                || msg.contains("net::ERR_CERT_AUTHORITY_INVALID")
+        }
+        // Slow path: materialise Display once, then run all four substring
+        // checks against the same buffer.
+        other => {
+            let s = other.to_string();
+            s.contains("net::ERR_SSL_VERSION_OR_CIPHER_MISMATCH")
+                || s.contains("net::ERR_SSL_PROTOCOL_ERROR")
+                || s.contains("net::ERR_CERT_COMMON_NAME_INVALID")
+                || s.contains("net::ERR_CERT_AUTHORITY_INVALID")
+        }
+    }
+}
+
+#[cfg(feature = "chrome")]
 /// Build a synthetic permanent-failure response for an exhausted SSL fallback.
 /// The destination's TLS protocol/cipher suite is incompatible with the client
 /// and the scheme-flip / strip-www fallbacks already failed (or were not
@@ -1384,7 +1416,7 @@ pub async fn perform_chrome_http_request(
                     // land as 599 (retryable) at the page/website layer.
                     return match attempt_once(page, &flipped, referrer).await {
                         Ok(ok) => Ok(ok),
-                        Err(e2) if is_cipher_mismatch(&e2) || is_ssl_protocol_error(&e2) => {
+                        Err(e2) if is_chrome_ssl_failure(&e2) => {
                             Ok(ssl_handshake_permanent_response())
                         }
                         Err(e2) => Err(e2),
@@ -1397,7 +1429,7 @@ pub async fn perform_chrome_http_request(
                 if let Some(no_www) = strip_www(source) {
                     return match attempt_once(page, &no_www, referrer).await {
                         Ok(ok) => Ok(ok),
-                        Err(e2) if is_cipher_mismatch(&e2) || is_ssl_protocol_error(&e2) => {
+                        Err(e2) if is_chrome_ssl_failure(&e2) => {
                             Ok(ssl_handshake_permanent_response())
                         }
                         Err(e2) => Err(e2),
@@ -1607,7 +1639,7 @@ pub async fn perform_chrome_http_request_cache(
                     .await
                     {
                         Ok(ok) => Ok(ok),
-                        Err(e2) if is_cipher_mismatch(&e2) || is_ssl_protocol_error(&e2) => {
+                        Err(e2) if is_chrome_ssl_failure(&e2) => {
                             Ok(ssl_handshake_permanent_response())
                         }
                         Err(e2) => Err(e2),
@@ -1628,7 +1660,7 @@ pub async fn perform_chrome_http_request_cache(
                     .await
                     {
                         Ok(ok) => Ok(ok),
-                        Err(e2) if is_cipher_mismatch(&e2) || is_ssl_protocol_error(&e2) => {
+                        Err(e2) if is_chrome_ssl_failure(&e2) => {
                             Ok(ssl_handshake_permanent_response())
                         }
                         Err(e2) => Err(e2),

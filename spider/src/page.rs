@@ -151,32 +151,47 @@ lazy_static! {
     /// or cipher suite is incompatible with the client; retrying through a
     /// different proxy will not change that.
     ///
+    /// Patterns are kept deliberately specific to error-message phrasing to
+    /// avoid false positives from URLs or response bodies that happen to
+    /// contain TLS-adjacent words (e.g. a URL like `/tls-handshake-demo` would
+    /// NOT match because reqwest URL-encodes `?` and spaces, and the surrounding
+    /// punctuation in the patterns below is unlikely in any encoded URL).
     /// Patterns cover both rustls and native-tls (OpenSSL) error surfaces, plus
     /// Chrome `net::ERR_*` strings that may surface through wrapped HTTP paths:
     /// - rustls         → "received fatal alert: HandshakeFailure",
-    ///                    "alert: HandshakeFailure", "ProtocolVersion"
+    ///                    "alert: HandshakeFailure",
+    ///                    "alert: ProtocolVersion"
     /// - native-tls     → "no shared cipher", "wrong_version_number",
     ///                    "wrong version number", "unsupported protocol"
-    /// - generic / wrap → "tls handshake", "TLS handshake",
-    ///                    "ssl handshake",  "SSL handshake"
+    /// - generic / wrap → "tls handshake error", "TLS handshake error",
+    ///                    "tls handshake failure", "TLS handshake failure",
+    ///                    "tls handshake failed", "TLS handshake failed",
+    ///                    "ssl handshake failure", "SSL handshake failure",
+    ///                    "ssl handshake failed",  "SSL handshake failed"
     /// - Chrome surface → "ERR_SSL_VERSION_OR_CIPHER_MISMATCH",
     ///                    "ERR_SSL_PROTOCOL_ERROR"
     static ref SSL_HANDSHAKE_ERROR_AC: aho_corasick::AhoCorasick = aho_corasick::AhoCorasick::new([
-        // rustls
-        "HandshakeFailure",
-        "handshake failure",
-        "ProtocolVersion",
+        // rustls — colon disambiguates from incidental URL hits
+        "alert: HandshakeFailure",
+        "alert: ProtocolVersion",
+        "received fatal alert",
         // OpenSSL / native-tls
         "no shared cipher",
         "wrong_version_number",
         "wrong version number",
         "unsupported protocol",
-        // generic
-        "tls handshake",
-        "TLS handshake",
-        "ssl handshake",
-        "SSL handshake",
-        // Chrome `net::ERR_*` strings
+        // generic / wrap — punctuation+verb tightens the match
+        "tls handshake error",
+        "TLS handshake error",
+        "tls handshake failure",
+        "TLS handshake failure",
+        "tls handshake failed",
+        "TLS handshake failed",
+        "ssl handshake failure",
+        "SSL handshake failure",
+        "ssl handshake failed",
+        "SSL handshake failed",
+        // Chrome `net::ERR_*` strings — uppercase+underscore, URL-safe
         "ERR_SSL_VERSION_OR_CIPHER_MISMATCH",
         "ERR_SSL_PROTOCOL_ERROR",
     ]).expect("valid patterns");
@@ -210,23 +225,41 @@ fn is_dns_error(err: &crate::client::Error) -> bool {
 }
 
 /// Check whether a reqwest error is a permanent SSL/TLS handshake failure.
-/// Routes through `SSL_HANDSHAKE_ERROR_AC`, which catches rustls / native-tls /
-/// generic / Chrome-wrapped surfaces in a single O(n) scan over the error
-/// chain's Display string. SSL handshake mismatches cannot be fixed by retry
-/// through the same client — caller maps the result to 526
-/// (ADDRESS_UNREACHABLE_ERROR) so `is_retryable_status` rejects it.
+///
+/// Fast path: gated on `err.is_connect() || err.is_request()` — reqwest only
+/// emits SSL errors through these two classifiers, so any other kind (timeout,
+/// body decode, status, redirect) returns instantly without allocating the
+/// Display string. This keeps the success path zero-cost (the helper isn't
+/// even reached when the request succeeded) and the non-SSL error path
+/// allocation-free.
+///
+/// Slow path: a single Aho-Corasick pass over `err.to_string()` (one alloc)
+/// covering rustls, native-tls, generic-wrap and Chrome-wrapped surfaces.
+/// Patterns are tightened to phrases that include punctuation/verbs so they
+/// cannot accidentally match URL-encoded query strings.
 fn is_ssl_handshake_error(err: &crate::client::Error) -> bool {
+    if !(err.is_connect() || err.is_request()) {
+        return false;
+    }
     SSL_HANDSHAKE_ERROR_AC.is_match(&err.to_string())
 }
 
 /// Whether a status code is retryable (transient server/network errors).
 /// DNS errors (525), address-unreachable / SSL-handshake (526), and
-/// redirect-cap hits (310) are permanent and excluded.
+/// redirect-cap hits (310) are permanent and excluded. Three 5xx codes are
+/// explicitly excluded too because the server is announcing a deterministic
+/// "won't do" condition that no retry can change:
+/// - 501 Not Implemented (server doesn't recognise the method)
+/// - 505 HTTP Version Not Supported (HTTP version mismatch)
+/// - 511 Network Authentication Required (captive portal — needs login)
 #[inline]
 pub fn is_retryable_status(status: StatusCode) -> bool {
     status != *DNS_RESOLVE_ERROR
         && status != *ADDRESS_UNREACHABLE_ERROR
         && status != *TOO_MANY_REDIRECTS_ERROR
+        && status != StatusCode::NOT_IMPLEMENTED
+        && status != StatusCode::HTTP_VERSION_NOT_SUPPORTED
+        && status != StatusCode::NETWORK_AUTHENTICATION_REQUIRED
         && (status.is_server_error()
             || matches!(
                 status,
@@ -255,6 +288,15 @@ pub(crate) fn get_error_http_status_code(err: &crate::client::Error) -> StatusCo
     // inconsistently across its TLS backends. Maps to 526 so retry paths skip.
     if is_ssl_handshake_error(err) {
         return *ADDRESS_UNREACHABLE_ERROR;
+    }
+
+    // HTTP/2 permanent reasons (`INADEQUATE_SECURITY`, `HTTP_1_1_REQUIRED`).
+    // Same "client can't reach this destination" semantics as SSL — bucketed
+    // at 526 so `is_retryable_status` returns false. Walks the error chain
+    // once via the same extractor used by `should_attempt_retry`.
+    #[cfg(not(feature = "decentralized"))]
+    if let Some(status) = h2_permanent_reason_status(err) {
+        return status;
     }
 
     if err.is_connect() {
@@ -1598,8 +1640,8 @@ pub fn is_chrome_name_resolution_error(code: &str) -> bool {
 /// Return `true` when a Chrome `net::ERR_*` failure_text (or an `errorCode`
 /// extracted from a rendered Chrome error page) represents a **target-side**
 /// permanent failure — the destination itself is unreachable / refused /
-/// doesn't exist, so retrying through a different proxy or connection will
-/// not help.
+/// doesn't exist / can't be reached securely, so retrying through a different
+/// proxy or connection will not help.
 ///
 /// Superset of [`is_chrome_name_resolution_error`]. Matches:
 /// - `ERR_NAME_NOT_RESOLVED`      — classic NXDOMAIN
@@ -1610,10 +1652,16 @@ pub fn is_chrome_name_resolution_error(code: &str) -> bool {
 ///   proxy channel
 /// - `ERR_CONNECTION_REFUSED`     — origin closed the port with RST / ICMP;
 ///   the host is up but no service is listening, which no proxy swap will fix
+/// - `ERR_HTTP2_INADEQUATE_TRANSPORT_SECURITY` — h2 refused over weak TLS;
+///   destination requires a TLS profile the client cannot meet, retry futile
+/// - `ERR_INVALID_URL`, `ERR_UNSAFE_PORT`, `ERR_DISALLOWED_URL_SCHEME`,
+///   `ERR_UNKNOWN_URL_SCHEME` — Chrome refuses to navigate to the URL
+///   itself (malformed / blocked port / scheme not supported); retrying the
+///   same URL will deterministically fail the same way
 ///
-/// Transient conditions (timeouts, resets mid-stream, proxy failures,
-/// certificate issues) are intentionally excluded so they remain retryable
-/// against a different proxy or connection.
+/// Transient conditions (timeouts, resets mid-stream, proxy failures, generic
+/// cert issues) are intentionally excluded so they remain retryable against a
+/// different proxy or connection.
 #[inline]
 pub fn is_chrome_permanent_failure(code: &str) -> bool {
     let trimmed = code.strip_prefix("net::").unwrap_or(code);
@@ -1623,26 +1671,43 @@ pub fn is_chrome_permanent_failure(code: &str) -> bool {
             | "ERR_NAME_RESOLUTION_FAILED"
             | "ERR_ADDRESS_UNREACHABLE"
             | "ERR_CONNECTION_REFUSED"
+            | "ERR_HTTP2_INADEQUATE_TRANSPORT_SECURITY"
+            | "ERR_INVALID_URL"
+            | "ERR_UNSAFE_PORT"
+            | "ERR_DISALLOWED_URL_SCHEME"
+            | "ERR_UNKNOWN_URL_SCHEME"
     )
 }
 
 /// Map a Chrome `net::ERR_*` permanent-failure code to the spider HTTP
 /// status code that records WHY it was permanent. Callers should first gate
 /// on [`is_chrome_permanent_failure`]; this helper assumes the code is
-/// already known to be permanent and is only choosing between 525 (DNS)
-/// and 526 (address/origin unreachable).
+/// already known to be permanent and is only picking between three buckets:
+/// - **525** (DNS)                — `ERR_NAME_*`
+/// - **526** (origin unreachable) — `ERR_ADDRESS_UNREACHABLE`,
+///   `ERR_CONNECTION_REFUSED`, `ERR_HTTP2_INADEQUATE_TRANSPORT_SECURITY`
+///   (h2 over weak TLS — same "destination not reachable from this client"
+///   semantics as the SSL handshake bucket)
+/// - **400** (malformed request)  — `ERR_INVALID_URL`, `ERR_UNSAFE_PORT`,
+///   `ERR_DISALLOWED_URL_SCHEME`, `ERR_UNKNOWN_URL_SCHEME` (the URL itself
+///   is the problem, not the destination)
 ///
-/// Unknown (non-permanent) codes fall back to 525 as a safe default —
-/// `is_retryable_status` excludes both 525 and 526 so either answer still
-/// halts the retry loop. Picked 525 over 526 for the fallback so the behavior
-/// is identical to the previous version of the retry path when only
-/// `is_chrome_name_resolution_error` existed — important for anyone
-/// downstream pattern-matching on 525 specifically.
+/// Unknown (non-permanent) codes fall back to 525 — `is_retryable_status`
+/// excludes 525 / 526 / 400 so any of them still halts the retry loop.
+/// Keeping 525 as the default matches the historical behavior when only
+/// `is_chrome_name_resolution_error` existed — important for downstream
+/// callers that pattern-match on 525 specifically.
 #[inline]
 pub(crate) fn chrome_permanent_failure_status(code: &str) -> StatusCode {
     let trimmed = code.strip_prefix("net::").unwrap_or(code);
     match trimmed {
-        "ERR_ADDRESS_UNREACHABLE" | "ERR_CONNECTION_REFUSED" => *ADDRESS_UNREACHABLE_ERROR,
+        "ERR_ADDRESS_UNREACHABLE"
+        | "ERR_CONNECTION_REFUSED"
+        | "ERR_HTTP2_INADEQUATE_TRANSPORT_SECURITY" => *ADDRESS_UNREACHABLE_ERROR,
+        "ERR_INVALID_URL"
+        | "ERR_UNSAFE_PORT"
+        | "ERR_DISALLOWED_URL_SCHEME"
+        | "ERR_UNKNOWN_URL_SCHEME" => StatusCode::BAD_REQUEST,
         _ => *DNS_RESOLVE_ERROR,
     }
 }
@@ -1686,6 +1751,41 @@ fn should_attempt_retry(error: &(dyn std::error::Error + 'static)) -> bool {
         }
     }
     false
+}
+
+/// Map an HTTP/2 transport-level error to a permanent spider status code when
+/// the underlying h2 reason is one the destination will keep emitting on
+/// every retry. Returns `None` when no h2 error is in the chain or the reason
+/// is transient.
+///
+/// Permanent reasons:
+/// - `INADEQUATE_SECURITY` — server requires a stronger TLS profile than the
+///   client offers; rotating proxies won't change the client's TLS stack.
+///   Bucketed with the SSL handshake family at 526.
+/// - `HTTP_1_1_REQUIRED`   — server explicitly refuses HTTP/2 for this
+///   resource. Reqwest will not transparently downgrade an in-flight request,
+///   so retrying via h2 keeps failing. Mapped to 526 too — same "this client
+///   cannot reach this destination" semantics.
+///
+/// Walks the source chain via `extract_specific_error` (no allocation, no
+/// locks). Hot path runs only on the error branch; never invoked on the
+/// happy path of a successful request.
+#[cfg(not(feature = "decentralized"))]
+#[inline]
+fn h2_permanent_reason_status(err: &crate::client::Error) -> Option<StatusCode> {
+    let h2_err = extract_specific_error::<h2::Error>(err)?;
+    if !h2_err.is_remote() {
+        return None;
+    }
+    let reason = h2_err.reason()?;
+    if matches!(
+        reason,
+        h2::Reason::INADEQUATE_SECURITY | h2::Reason::HTTP_1_1_REQUIRED
+    ) {
+        Some(*ADDRESS_UNREACHABLE_ERROR)
+    } else {
+        None
+    }
 }
 
 /// Get the error status of the page base.
@@ -1813,10 +1913,16 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
 
     let status = res.status_code;
 
-    // DNS resolve error (525) and address-unreachable (526) are permanent —
-    // never retry.
+    // DNS resolve error (525) and address-unreachable / SSL-handshake (526)
+    // are permanent — never retry. 501 / 505 / 511 are 5xx codes the server
+    // emits to declare a deterministic "won't do" condition (method not
+    // implemented / HTTP version mismatch / captive portal): retrying without
+    // changing the request will keep failing.
     let should_retry_status = status != *DNS_RESOLVE_ERROR
         && status != *ADDRESS_UNREACHABLE_ERROR
+        && status != StatusCode::NOT_IMPLEMENTED
+        && status != StatusCode::HTTP_VERSION_NOT_SUPPORTED
+        && status != StatusCode::NETWORK_AUTHENTICATION_REQUIRED
         && (status.is_server_error()
             || matches!(
                 status,
@@ -8871,11 +8977,10 @@ fn test_is_retryable_status_excludes_address_unreachable() {
 #[test]
 fn test_ssl_handshake_error_ac_matches_known_surfaces() {
     for s in [
-        // rustls
+        // rustls — full and short forms
         "received fatal alert: HandshakeFailure",
         "alert: HandshakeFailure",
-        "rustls handshake failure",
-        "peer alert: ProtocolVersion",
+        "alert: ProtocolVersion",
         // OpenSSL / native-tls
         "error:1408F10B:SSL routines:ssl3_get_record:wrong version number",
         "error:1408A0C1:SSL routines:ssl3_get_client_hello:no shared cipher",
@@ -8884,6 +8989,7 @@ fn test_ssl_handshake_error_ac_matches_known_surfaces() {
         "tls handshake error",
         "TLS handshake failed",
         "ssl handshake failed",
+        "TLS handshake failure",
         // Chrome surface (ChromeMessage strings can leak into wrapped reqwest errors)
         "net::ERR_SSL_VERSION_OR_CIPHER_MISMATCH",
         "net::ERR_SSL_PROTOCOL_ERROR",
@@ -8896,7 +9002,11 @@ fn test_ssl_handshake_error_ac_matches_known_surfaces() {
 }
 
 /// Unrelated errors must NOT match the SSL detector — guards against the
-/// pattern set widening to swallow transient connect/dns/timeout errors.
+/// pattern set widening to swallow transient connect/dns/timeout errors,
+/// AND against URL-borne false positives. The tightened patterns now require
+/// punctuation/verb tokens that don't survive URL encoding, so a URL like
+/// `https://example.com/blog/tls-handshake-overview?topic=ProtocolVersion`
+/// no longer matches.
 #[test]
 fn test_ssl_handshake_error_ac_rejects_unrelated() {
     for s in [
@@ -8911,6 +9021,11 @@ fn test_ssl_handshake_error_ac_rejects_unrelated() {
         "invalid HTTP response",
         "decode error",
         "",
+        // URL-borne false-positive guards — tightened patterns won't trip:
+        "error sending request for url (https://example.com/blog/tls-handshake-overview)",
+        "error sending request for url (https://example.com/blog/ssl-handshake-explained)",
+        "error sending request for url (https://example.com/?topic=ProtocolVersion)",
+        "error sending request for url (https://example.com/HandshakeFailure-explained)",
     ] {
         assert!(
             !SSL_HANDSHAKE_ERROR_AC.is_match(s),
@@ -8930,6 +9045,155 @@ fn test_is_retryable_status_excludes_ssl_handshake_bucket() {
         !is_retryable_status(*ADDRESS_UNREACHABLE_ERROR),
         "526 must remain non-retryable for SSL handshake failures"
     );
+}
+
+/// 501, 505, 511 are 5xx codes whose semantics are deterministic — the
+/// server is announcing a "won't do" condition that no retry can change.
+/// They must be excluded from `is_retryable_status` so the website retry
+/// loop skips them, and from `build()`'s `should_retry_status` so the page
+/// itself does not flag itself for retry.
+#[test]
+fn test_is_retryable_status_excludes_permanent_5xx() {
+    for code in [
+        StatusCode::NOT_IMPLEMENTED,                 // 501
+        StatusCode::HTTP_VERSION_NOT_SUPPORTED,      // 505
+        StatusCode::NETWORK_AUTHENTICATION_REQUIRED, // 511
+    ] {
+        assert!(
+            !is_retryable_status(code),
+            "{code} must be permanent (server-declared won't-do)"
+        );
+    }
+    // Other 5xx still retryable — regression guard.
+    for code in [
+        StatusCode::INTERNAL_SERVER_ERROR, // 500
+        StatusCode::BAD_GATEWAY,           // 502
+        StatusCode::SERVICE_UNAVAILABLE,   // 503
+        StatusCode::GATEWAY_TIMEOUT,       // 504
+    ] {
+        assert!(is_retryable_status(code), "{code} must remain retryable");
+    }
+}
+
+/// End-to-end guard for the new permanent 5xx codes: a `PageResponse` with
+/// 501 / 505 / 511 must yield a `Page` whose `should_retry=false` and
+/// `needs_retry()=false`. Mirrors the SSL end-to-end test.
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_permanent_5xx_pages_are_not_retryable_end_to_end() {
+    for code in [
+        StatusCode::NOT_IMPLEMENTED,
+        StatusCode::HTTP_VERSION_NOT_SUPPORTED,
+        StatusCode::NETWORK_AUTHENTICATION_REQUIRED,
+    ] {
+        let res = PageResponse {
+            status_code: code,
+            content: None,
+            ..Default::default()
+        };
+        let page = build("https://example.invalid", res);
+        assert_eq!(page.status_code, code);
+        assert!(
+            !page.should_retry,
+            "Page::should_retry must be false for {code}"
+        );
+        assert!(
+            !page.needs_retry(),
+            "Page::needs_retry() must be false for {code}"
+        );
+    }
+}
+
+/// New Chrome `net::ERR_*` codes (h2 inadequate security + URL-malformed
+/// family) must classify as permanent and route to the right status bucket.
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_is_chrome_permanent_failure_extended_codes() {
+    for code in [
+        // h2 inadequate security — bucketed with SSL family at 526
+        "ERR_HTTP2_INADEQUATE_TRANSPORT_SECURITY",
+        "net::ERR_HTTP2_INADEQUATE_TRANSPORT_SECURITY",
+        // URL-malformed family — bucketed at 400
+        "ERR_INVALID_URL",
+        "ERR_UNSAFE_PORT",
+        "ERR_DISALLOWED_URL_SCHEME",
+        "ERR_UNKNOWN_URL_SCHEME",
+        "net::ERR_INVALID_URL",
+    ] {
+        assert!(
+            is_chrome_permanent_failure(code),
+            "{code} must classify as a permanent Chrome failure"
+        );
+    }
+}
+
+/// `chrome_permanent_failure_status` must route the new codes correctly:
+/// h2 inadequate security → 526 (origin unreachable bucket), URL-malformed
+/// family → 400 (BAD_REQUEST). Both are excluded from `is_retryable_status`.
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_chrome_permanent_failure_status_routes_extended_codes() {
+    assert_eq!(
+        chrome_permanent_failure_status("net::ERR_HTTP2_INADEQUATE_TRANSPORT_SECURITY"),
+        *ADDRESS_UNREACHABLE_ERROR
+    );
+    for code in [
+        "ERR_INVALID_URL",
+        "ERR_UNSAFE_PORT",
+        "ERR_DISALLOWED_URL_SCHEME",
+        "ERR_UNKNOWN_URL_SCHEME",
+    ] {
+        assert_eq!(
+            chrome_permanent_failure_status(code),
+            StatusCode::BAD_REQUEST,
+            "{code} must route to 400"
+        );
+        assert!(
+            !is_retryable_status(chrome_permanent_failure_status(code)),
+            "{code} status must not be retryable"
+        );
+    }
+}
+
+/// End-to-end guard: a `PageResponse` whose Chrome error page declares an
+/// `errorCode` from the new permanent set must reclassify and refuse retry.
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_chrome_error_page_extended_codes_reclassified() {
+    let cases: &[(&str, StatusCode)] = &[
+        (
+            "ERR_HTTP2_INADEQUATE_TRANSPORT_SECURITY",
+            *ADDRESS_UNREACHABLE_ERROR,
+        ),
+        ("ERR_INVALID_URL", StatusCode::BAD_REQUEST),
+        ("ERR_UNSAFE_PORT", StatusCode::BAD_REQUEST),
+    ];
+    let padding = "x".repeat(1000);
+    for (code, expected) in cases {
+        let html_str = format!(
+            "<html><style>{padding}</style>\
+             <script>var loadTimeDataRaw = {{\"errorCode\":\"{code}\",\
+             \"title\":\"example.invalid\"}};</script></html>"
+        );
+        let res = PageResponse {
+            status_code: StatusCode::OK,
+            content: Some(html_str.into_bytes()),
+            ..Default::default()
+        };
+        let page = build("https://example.invalid", res);
+        assert_eq!(
+            page.status_code, *expected,
+            "Chrome {code} must reclassify to {expected}"
+        );
+        assert!(
+            !page.should_retry,
+            "{code} must not flag the page for retry"
+        );
+        assert!(
+            !page.needs_retry(),
+            "{code} must not trigger website-level retry"
+        );
+    }
 }
 
 /// End-to-end guard for the SSL classification: a `PageResponse` produced
@@ -9073,10 +9337,20 @@ fn test_chrome_error_page_non_dns_stays_599() {
 
 #[test]
 fn test_retryable_status_server_errors() {
-    // All 5xx except 525 are retryable
-    for code in [500, 501, 502, 503, 504, 521, 522, 523, 524, 598, 599] {
+    // 5xx codes are retryable EXCEPT the permanent set: 525 (DNS), 526
+    // (origin-unreachable / SSL-handshake), 501 (Not Implemented), 505 (HTTP
+    // Version Not Supported), 511 (Network Auth Required). Server explicitly
+    // declared a "won't do" condition for those — retrying just adds load.
+    for code in [500, 502, 503, 504, 521, 522, 523, 524, 598, 599] {
         let status = StatusCode::from_u16(code).unwrap();
         assert!(is_retryable_status(status), "{code} should be retryable");
+    }
+    for code in [501, 505, 511, 525, 526] {
+        let status = StatusCode::from_u16(code).unwrap();
+        assert!(
+            !is_retryable_status(status),
+            "{code} must NOT be retryable (permanent declaration)"
+        );
     }
 }
 
