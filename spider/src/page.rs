@@ -1730,9 +1730,14 @@ fn extract_specific_error<'a, T: std::error::Error + 'static>(
 /// Determine if the response is goaway and should retry.
 /// Covers transient HTTP/2 errors where a retry is likely to succeed:
 /// - GO_AWAY + NO_ERROR: graceful server shutdown (load balancer rotation)
-/// - REFUSED_STREAM: server rejected the stream before processing
+/// - REFUSED_STREAM: server rejected the stream before processing (RFC 7540
+///   guarantees the request was not handled — safe to retry)
 /// - ENHANCE_YOUR_CALM: server-side rate limiting (HTTP/2 equivalent of 429)
-/// - INTERNAL_ERROR: transient server error
+///
+/// `INTERNAL_ERROR` is intentionally excluded: the server may have partially
+/// processed the request, and the condition is often deterministic (server
+/// bug rather than transient noise). Retrying just adds load on a broken
+/// endpoint without a meaningful chance of success.
 #[cfg(not(feature = "decentralized"))]
 fn should_attempt_retry(error: &(dyn std::error::Error + 'static)) -> bool {
     if let Some(e) = extract_specific_error::<h2::Error>(error) {
@@ -1743,9 +1748,7 @@ fn should_attempt_retry(error: &(dyn std::error::Error + 'static)) -> bool {
             if let Some(reason) = e.reason() {
                 return matches!(
                     reason,
-                    h2::Reason::REFUSED_STREAM
-                        | h2::Reason::ENHANCE_YOUR_CALM
-                        | h2::Reason::INTERNAL_ERROR
+                    h2::Reason::REFUSED_STREAM | h2::Reason::ENHANCE_YOUR_CALM
                 );
             }
         }
