@@ -4474,11 +4474,22 @@ pub async fn fetch_page_html_chrome_base(
     };
 
     let mut content: Option<Vec<u8>> = None;
+    // Tracks whether the HTML extraction path inside `run_page_response`
+    // actually executed.  When `true`, the consolidated finalizer below
+    // can skip its speculative fill-fetch — the extraction just ran
+    // back-to-back with no work in between, so a re-fetch on the same
+    // page state would just produce the same empty result.  When the
+    // `rx1` arm captured a CDP body event instead (typically a non-HTML
+    // media response), no HTML fetch happened and we still want the
+    // fallback fill so HTML pages misclassified as media don't silently
+    // become empty.
+    let mut did_html_fetch = false;
 
     let page_response = match rx1 {
         Some(rx1) => {
             tokio::select! {
                 v = tokio::time::timeout(base_timeout, run_page_response) => {
+                    did_html_fetch = true;
                     v.map_err(|_| CdpError::Timeout)
                 }
                 c = rx1 => {
@@ -4547,7 +4558,10 @@ pub async fn fetch_page_html_chrome_base(
                 }
             }
         }
-        _ => Ok(run_page_response.await),
+        _ => {
+            did_html_fetch = true;
+            Ok(run_page_response.await)
+        }
     };
 
     let mut page_response = page_response.unwrap_or_default();
@@ -4577,7 +4591,18 @@ pub async fn fetch_page_html_chrome_base(
             } else {
                 let needs_fill = page_response.content.as_ref().is_none_or(|b| b.is_empty());
 
-                if needs_fill {
+                // The fill-fetch is only worth running when no HTML
+                // extraction has happened on this page yet — i.e. the
+                // `rx1` arm captured a CDP body event but produced no
+                // usable bytes (empty media body, or HTML page
+                // misclassified as media).  When `run_page_response`
+                // ran, FETCH 1 already executed back-to-back; an
+                // empty result there means the page is genuinely
+                // empty and a second extraction on the same state
+                // would just repeat the work and return the same
+                // bytes.  The downstream 504 downgrade + outer-loop
+                // retry handles legitimate transition cases.
+                if needs_fill && !did_html_fetch {
                     tokio::time::timeout(base_timeout, fetch_chrome_html_adaptive(page))
                         .await
                         .ok()
