@@ -3168,6 +3168,87 @@ async fn fetch_chrome_html_adaptive(
     page.outer_html_bytes().await
 }
 
+/// Drive chromey's `Page::content_bytes_stream` chunk-by-chunk through a
+/// caller-supplied lol_html link/metadata rewriter while accumulating the
+/// raw bytes into `collected` for downstream consumers (WAF detection,
+/// openai/multimodal, anti-bot heuristics, signature hashing).
+///
+/// This is the chrome-side mirror of [`handle_response_bytes_writer`] —
+/// extraction runs **on the fly** as bytes arrive from CDP, eliminating
+/// the second `links_stream_base` walk currently required by
+/// `chrome_page_post_process!`.  Returns `Ok(true)` when the rewriter
+/// accepted every chunk and was successfully `end()`-ed; `Ok(false)`
+/// when a rewriter error occurred mid-stream (caller should treat the
+/// extraction as incomplete and fall back to the legacy
+/// `page.links()` second pass).  Returns `Err` on any CDP-level
+/// streaming failure — caller falls back to `outer_html_bytes`.
+///
+/// Constraints:
+/// - The rewriter must use the `Send`-able variant
+///   (`lol_html::send::HtmlRewriter`) because the rewriter outlives
+///   each `.await` boundary inside the chunk-pump loop.
+/// - The lol_html sink receives post-rewrite bytes; these are NOT the
+///   bytes pushed to `collected`.  Callers populate `collected` with the
+///   raw chromey chunk so downstream byte consumers see the same bytes
+///   they would have via `outer_html_bytes`.
+/// - On rewriter write failure we drop further rewriter calls but keep
+///   accumulating bytes — the spool / WAF path still gets a complete
+///   buffer to work with.
+/// - Caller owns the [`crate::page::ChromeStreamingExtractor`] and is
+///   responsible for calling `extractor.end()` (consumes by value)
+///   after this function returns `Ok(())` — matching the
+///   [`handle_response_bytes_writer`] handshake on the HTTP path.
+///   Once a mid-stream write fails, the extractor's internal
+///   `extract_succeeded` flag flips to false; subsequent chunks still
+///   get appended to `collected` so downstream consumers see the
+///   complete byte stream, but the rewriter is dormant.
+#[cfg(feature = "chrome")]
+#[allow(dead_code)] // wired in Step 4 (chrome_page_fetch! macro changes)
+pub(crate) async fn fetch_chrome_html_streaming_into_writer<'h>(
+    page: &chromiumoxide::Page,
+    extractor: &mut crate::page::ChromeStreamingExtractor<'h>,
+    collected: &mut Vec<u8>,
+) -> Result<(), chromiumoxide::error::CdpError> {
+    use tokio_stream::StreamExt;
+
+    let mut stream = Box::pin(page.content_bytes_stream(None));
+
+    while let Some(item) = stream.next().await {
+        let chunk = item?;
+        extractor.write(&chunk);
+        collected.extend_from_slice(&chunk);
+    }
+
+    // Stream drained without a CDP error — flag the extractor as a
+    // valid candidate for a single-pass `end()`.  Mid-stream `?` exits
+    // skip this call so the post-process layer falls back to the
+    // legacy second-pass walk on partial data.
+    extractor.mark_streamed();
+
+    Ok(())
+}
+
+/// Chrome HTML byte-stream pump — no extraction.  Used by call sites
+/// that need only the assembled `Vec<u8>` (multimodal next-content,
+/// post-wait re-fetch, fill-fetch).  Same chunked memory profile as
+/// [`fetch_chrome_html_streaming_into_writer`] but skips the rewriter
+/// allocation when we don't need to extract links.  Strictly non-worse
+/// than the prior single-shot `outer_html_bytes` path on memory.
+#[cfg(feature = "chrome")]
+#[allow(dead_code)] // wired in Step 4
+pub(crate) async fn fetch_chrome_html_bytes(
+    page: &chromiumoxide::Page,
+) -> Result<Vec<u8>, chromiumoxide::error::CdpError> {
+    use tokio_stream::StreamExt;
+
+    let mut stream = Box::pin(page.content_bytes_stream(None));
+    let mut collected = Vec::new();
+    while let Some(item) = stream.next().await {
+        collected.extend_from_slice(&item?);
+    }
+    Ok(collected)
+}
+
 /// Drive chromey's `Page::content_bytes_stream` chunk-by-chunk directly
 /// into a [`StreamingVitalsSpoolWriter`], landing the HTML on disk
 /// without ever materialising it as a single `Vec<u8>` on the Rust side.
@@ -3318,6 +3399,139 @@ pub(crate) async fn fetch_chrome_html_to_spool(
     })
 }
 
+/// Same as [`fetch_chrome_html_to_spool`] but additionally feeds each
+/// chromey chunk through a caller-supplied lol_html link/metadata
+/// rewriter before the spool write — so link extraction completes
+/// **during** the disk-spool stream, eliminating the second pass that
+/// `links_stream_base_from_disk` performs by re-reading the spool
+/// file.
+///
+/// Returns `(Option<SpooledContent>, extract_succeeded)`.
+/// - `Option<SpooledContent>` — `Some(..)` on a successful spool, `None`
+///   on partial-write failure or empty doc (matches the legacy
+///   function's contract bit-for-bit).
+/// - `extract_succeeded` — `true` when every chunk fed cleanly through
+///   the rewriter; `false` when a rewriter write failed mid-stream.
+///   Caller invokes `rewriter.end()` only when `true`.
+///
+/// Caller responsibilities (matches [`fetch_chrome_html_streaming_into_writer`]):
+/// - Owns the `Send`-able `HtmlRewriter`; we only borrow `&mut`.
+/// - Calls `rewriter.end()` after this returns when
+///   `extract_succeeded`.  On `false`, the rewriter is in an error
+///   state and `end()` must NOT be called — fall back to a legacy
+///   second-pass extraction (`links_stream_base_from_disk`) over the
+///   spooled bytes.
+#[cfg(all(
+    feature = "chrome",
+    feature = "balance",
+    not(feature = "decentralized")
+))]
+#[allow(dead_code)] // wired in Step 4 (chrome_page_fetch! macro changes)
+pub(crate) async fn fetch_chrome_html_to_spool_with_writer<'h>(
+    page: &chromiumoxide::Page,
+    extractor: &mut crate::page::ChromeStreamingExtractor<'h>,
+) -> Option<crate::utils::html_spool::SpooledContent> {
+    use tokio_stream::StreamExt;
+
+    // Same cancellation-safe cleanup guard as `fetch_chrome_html_to_spool`.
+    // Inlined locally so this function can land additively without
+    // disturbing the existing one.  When Step 4 swaps the caller, the
+    // legacy guard becomes follow-up cleanup.
+    struct SpoolCleanupGuard {
+        path: std::path::PathBuf,
+        armed: bool,
+    }
+    impl SpoolCleanupGuard {
+        #[inline]
+        fn new(path: std::path::PathBuf) -> Self {
+            Self { path, armed: true }
+        }
+        #[inline]
+        fn path(&self) -> &std::path::Path {
+            &self.path
+        }
+        #[inline]
+        fn disarm(mut self) -> std::path::PathBuf {
+            self.armed = false;
+            std::mem::take(&mut self.path)
+        }
+    }
+    impl Drop for SpoolCleanupGuard {
+        fn drop(&mut self) {
+            if self.armed {
+                let p = std::mem::take(&mut self.path);
+                if !p.as_os_str().is_empty() {
+                    crate::utils::html_spool::queue_spool_delete(p);
+                }
+            }
+        }
+    }
+
+    let guard = SpoolCleanupGuard::new(crate::utils::html_spool::next_spool_path());
+    let mut writer =
+        match crate::utils::html_spool::StreamingVitalsSpoolWriter::new(guard.path()).await {
+            Ok(w) => w,
+            Err(_) => return None,
+        };
+
+    let mut stream = Box::pin(page.content_bytes_stream(None));
+
+    while let Some(item) = stream.next().await {
+        match item {
+            Ok(chunk) => {
+                // Feed extractor first — disk write happens regardless
+                // of rewriter outcome so the spool stays authoritative
+                // for downstream consumers (WAF, signature, second-pass
+                // fallback).
+                extractor.write(&chunk);
+                if writer.write_chunk(&chunk).await.is_err() {
+                    return None;
+                }
+            }
+            Err(_) => {
+                return None;
+            }
+        }
+    }
+
+    // Full stream consumed — caller's `extractor.end()` may now report
+    // success (gated on no rewriter write errors).
+    extractor.mark_streamed();
+
+    let (vitals, head, tail) = match writer.finish().await {
+        Ok(t) => t,
+        Err(_) => return None,
+    };
+
+    if vitals.byte_len == 0 {
+        return None;
+    }
+
+    if vitals.byte_len.saturating_mul(3) / 4 > crate::utils::html_spool::SPOOL_SIGNATURE_BUFFER_CAP
+    {
+        return None;
+    }
+
+    let signature = compute_spool_signature(
+        guard.path(),
+        crate::utils::html_spool::SPOOL_SIGNATURE_BUFFER_CAP,
+        Some(vitals.byte_len),
+    )
+    .await;
+
+    signature?;
+
+    let path = guard.disarm();
+
+    Some(crate::utils::html_spool::SpooledContent {
+        path,
+        vitals,
+        head,
+        tail,
+        signature,
+    })
+}
+
 /// Cheap V8-side probe: is the rendered document large enough that the
 /// `real_browser` solver loop would already have been skipped on the
 /// in-memory path?  Uses chromey's `Page::content_byte_length()` — one
@@ -3377,7 +3591,20 @@ pub struct ChromeFetchParams<'a> {
 
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
-pub async fn fetch_page_html_chrome_base(
+///
+/// `extract` is the opt-in streaming-extraction context.  When `Some`,
+/// the chrome chunk pump feeds the wrapped lol_html rewriter on the fly
+/// — eliminating the second `links_stream_base` walk performed by
+/// `chrome_page_post_process!`.  When `None`, behaviour is byte-for-byte
+/// identical to prior releases (legacy `fetch_chrome_html_adaptive` /
+/// `fetch_chrome_html_to_spool` paths).
+///
+/// `ChromeStreamingExtractor` is intentionally `pub(crate)` — external
+/// users keep calling this function with `extract = None` exactly as
+/// before; the streaming hook is a crate-internal optimisation surfaced
+/// only to `chrome_page_fetch!` macro plumbing.
+#[allow(private_interfaces)]
+pub async fn fetch_page_html_chrome_base<'h>(
     source: &[u8],
     page: &chromiumoxide::Page,
     content: bool,
@@ -3392,6 +3619,7 @@ pub async fn fetch_page_html_chrome_base(
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     cache_namespace: Option<&str>,
     params: &ChromeFetchParams<'_>,
+    mut extract: Option<&mut crate::page::ChromeStreamingExtractor<'h>>,
 ) -> Result<PageResponse, chromiumoxide::error::CdpError> {
     let wait_for = params.wait_for;
     let screenshot = params.screenshot;
@@ -4055,8 +4283,22 @@ pub async fn fetch_page_html_chrome_base(
                     // `HALF_MAX_PAGE_TIMEOUT` (2.5 min) and blow past the
                     // caller's `request_timeout` on the failure path.
                     let spool_budget = (base_timeout / 2).max(Duration::from_secs(10));
-                    match tokio::time::timeout(spool_budget, fetch_chrome_html_to_spool(page)).await
-                    {
+                    // When `extract` is `Some`, fold link extraction
+                    // into the chunk pump so the second-pass walk that
+                    // `links_stream_base_from_disk` performs is no
+                    // longer needed on the happy path.  The extractor
+                    // is borrowed for the spool attempt and released
+                    // before the legacy-fallback branch below.
+                    let spool_outcome = if let Some(ext) = extract.as_deref_mut() {
+                        tokio::time::timeout(
+                            spool_budget,
+                            fetch_chrome_html_to_spool_with_writer(page, ext),
+                        )
+                        .await
+                    } else {
+                        tokio::time::timeout(spool_budget, fetch_chrome_html_to_spool(page)).await
+                    };
+                    match spool_outcome {
                         Ok(Some(spool)) => {
                             // Gate already rules out waf_check = true,
                             // anti-bot, openai, and multimodal — so the
@@ -4082,7 +4324,21 @@ pub async fn fetch_page_html_chrome_base(
                             }
                             (Some(pr), true)
                         }
-                        _ => (None, true),
+                        _ => {
+                            // Spool failure: the extractor may have
+                            // partially consumed the chunk stream before
+                            // the writer / signature step bailed.  The
+                            // fallback non-spool path below would feed
+                            // the same bytes again, double-feeding the
+                            // rewriter and corrupting parser state.
+                            // Invalidate the extractor so `end()` reports
+                            // failure and the post-process layer falls
+                            // back to the legacy `page.links()` walk.
+                            if let Some(ext) = extract.as_deref_mut() {
+                                ext.invalidate();
+                            }
+                            (None, true)
+                        }
                     }
                 } else {
                     (None, false)
@@ -4105,16 +4361,6 @@ pub async fn fetch_page_html_chrome_base(
             let mut page_response = if let Some(pr) = spooled_response {
                 pr
             } else {
-                let page_fn = async {
-                    if !xml_target {
-                        return fetch_chrome_html_adaptive(page).await;
-                    }
-                    match page.content_bytes_xml().await {
-                        Ok(b) if !b.is_empty() => Ok(b),
-                        _ => fetch_chrome_html_adaptive(page).await,
-                    }
-                };
-
                 // When we fell through from a failed spool attempt, use
                 // only the remaining budget (no `HALF_MAX_PAGE_TIMEOUT`
                 // floor) so the total wall time never exceeds the
@@ -4126,11 +4372,65 @@ pub async fn fetch_page_html_chrome_base(
                 } else {
                     base_timeout.max(HALF_MAX_PAGE_TIMEOUT)
                 };
-                let results = tokio::time::timeout(fallback_budget, page_fn);
 
-                let mut res: Vec<u8> = match results.await {
-                    Ok(v) => v.unwrap_or_default(),
-                    _ => Default::default(),
+                // When `extract` is `Some`, fold link extraction into the
+                // chrome chunk pump.  XML pages bypass the rewriter
+                // (chromey serializes XML differently and the existing
+                // post-pass via `links_stream_xml_links_stream_base`
+                // covers them) — preserves today's XML carve-out at
+                // chrome_page_post_process! exactly.
+                let mut res: Vec<u8> = if let Some(ext) = extract.as_deref_mut() {
+                    if !xml_target {
+                        let mut collected: Vec<u8> = Vec::new();
+                        let pump_fut =
+                            fetch_chrome_html_streaming_into_writer(page, ext, &mut collected);
+                        match tokio::time::timeout(fallback_budget, pump_fut).await {
+                            Ok(Ok(())) => collected,
+                            // CDP error mid-stream — fall back to legacy
+                            // single-shot path so the caller still gets a
+                            // body to inspect for WAF/anti-bot/etc.  The
+                            // rewriter's `extract_succeeded` flag will be
+                            // false (or the rewriter saw partial bytes),
+                            // which the macro consults to decide whether
+                            // to run a second-pass `page.links()` walk.
+                            Ok(Err(_)) | Err(_) => {
+                                let fb =
+                                    tokio::time::timeout(fallback_budget, page.outer_html_bytes());
+                                match fb.await {
+                                    Ok(Ok(v)) => v,
+                                    _ => Default::default(),
+                                }
+                            }
+                        }
+                    } else {
+                        // XML carve-out: keep legacy two-step API for parity.
+                        let page_fn = async {
+                            match page.content_bytes_xml().await {
+                                Ok(b) if !b.is_empty() => Ok(b),
+                                _ => fetch_chrome_html_adaptive(page).await,
+                            }
+                        };
+                        let results = tokio::time::timeout(fallback_budget, page_fn);
+                        match results.await {
+                            Ok(v) => v.unwrap_or_default(),
+                            _ => Default::default(),
+                        }
+                    }
+                } else {
+                    let page_fn = async {
+                        if !xml_target {
+                            return fetch_chrome_html_adaptive(page).await;
+                        }
+                        match page.content_bytes_xml().await {
+                            Ok(b) if !b.is_empty() => Ok(b),
+                            _ => fetch_chrome_html_adaptive(page).await,
+                        }
+                    };
+                    let results = tokio::time::timeout(fallback_budget, page_fn);
+                    match results.await {
+                        Ok(v) => v.unwrap_or_default(),
+                        _ => Default::default(),
+                    }
                 };
 
                 let forbidden = waf_check && res.starts_with(b"<html><head>\n    <style global=") && res.ends_with(b";</script><iframe height=\"1\" width=\"1\" style=\"position: absolute; top: 0px; left: 0px; border: none; visibility: hidden;\"></iframe>\n\n</body></html>");
@@ -4139,6 +4439,13 @@ pub async fn fetch_page_html_chrome_base(
                 {
                     // guard entry to real pages.
                     if res.len() <= crate::page::TURNSTILE_WALL_PAGE_SIZE {
+                        // Any solver below may overwrite `res` with the
+                        // post-challenge body — invalidate the streaming
+                        // extractor up front so the post-process layer
+                        // re-runs link extraction over the new body.
+                        if let Some(ext) = extract.as_deref_mut() {
+                            ext.invalidate();
+                        }
                         if anti_bot_tech == AntiBotTech::Cloudflare || waf_check {
                             if crate::features::solvers::detect_cf_turnstyle(&res) {
                                 if let Err(_e) = tokio::time::timeout(base_timeout, async {
@@ -4297,6 +4604,14 @@ pub async fn fetch_page_html_chrome_base(
                 );
 
                 let _ = tokio::time::timeout(base_timeout, openai_request).await;
+
+                // OpenAI flow may execute JS that mutates the DOM and
+                // overwrites `page_response.content` — invalidate the
+                // streaming extractor so the post-process layer
+                // re-extracts links from the updated body.
+                if let Some(ext) = extract.as_deref_mut() {
+                    ext.invalidate();
+                }
             }
 
             if remote_multimodal.is_some() && !base_timeout.is_zero() {
@@ -4372,8 +4687,14 @@ pub async fn fetch_page_html_chrome_base(
                     };
 
                 if multimodal_success {
+                    // Multimodal automation already ran on the original
+                    // body; this is a refresh fetch only.  No streaming
+                    // extraction is wanted here — the link sets were
+                    // captured during the primary fetch.  Use the
+                    // no-extract chunk-pump shim so the post-process
+                    // layer stays on its happy path.
                     let next_content =
-                        tokio::time::timeout(base_timeout, fetch_chrome_html_adaptive(page))
+                        tokio::time::timeout(base_timeout, fetch_chrome_html_bytes(page))
                             .await
                             .ok()
                             .and_then(Result::ok)
@@ -4381,6 +4702,13 @@ pub async fn fetch_page_html_chrome_base(
 
                     if next_content.is_some() {
                         page_response.content = next_content;
+                        // Body just changed underneath the streaming
+                        // extractor — its link set targeted the prior
+                        // body.  Invalidate so the post-process layer
+                        // re-extracts via `page.links()`.
+                        if let Some(ext) = extract.as_deref_mut() {
+                            ext.invalidate();
+                        }
                     }
                 }
             }
@@ -6252,7 +6580,8 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
 /// Perform a network request to a resource extracting all content as text streaming.
 #[cfg(all(feature = "fs", feature = "chrome"))]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
-pub async fn fetch_page_html(
+#[allow(private_interfaces)]
+pub async fn fetch_page_html<'h>(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
@@ -6263,6 +6592,7 @@ pub async fn fetch_page_html(
     #[cfg(feature = "cookies")] jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     cache_namespace: Option<&str>,
     params: &ChromeFetchParams<'_>,
+    extract: Option<&mut crate::page::ChromeStreamingExtractor<'h>>,
 ) -> PageResponse {
     use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
@@ -6314,6 +6644,7 @@ pub async fn fetch_page_html(
                 jar,
                 cache_namespace,
                 params,
+                extract,
             )
             .await
             {
@@ -6453,7 +6784,8 @@ pub async fn fetch_page_html(
 /// `fetch_page_html_chrome_seeded`, which accepts the seeded resource via
 /// `_fetch_page_html_chrome`.
 #[cfg(all(feature = "fs", feature = "chrome"))]
-pub async fn fetch_page_html_seeded(
+#[allow(private_interfaces)]
+pub async fn fetch_page_html_seeded<'h>(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
@@ -6465,6 +6797,7 @@ pub async fn fetch_page_html_seeded(
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     cache_namespace: Option<&str>,
     params: &ChromeFetchParams<'_>,
+    extract: Option<&mut crate::page::ChromeStreamingExtractor<'h>>,
 ) -> PageResponse {
     fetch_page_html_chrome_seeded(
         target_url,
@@ -6478,6 +6811,7 @@ pub async fn fetch_page_html_seeded(
         jar,
         cache_namespace,
         params,
+        extract,
     )
     .await
 }
@@ -6889,7 +7223,8 @@ pub async fn get_cached_url(
 
 #[cfg(all(not(feature = "fs"), feature = "chrome"))]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
-pub async fn fetch_page_html_base(
+#[allow(private_interfaces)]
+pub async fn fetch_page_html_base<'h>(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
@@ -6901,6 +7236,7 @@ pub async fn fetch_page_html_base(
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     cache_namespace: Option<&str>,
     params: &ChromeFetchParams<'_>,
+    extract: Option<&mut crate::page::ChromeStreamingExtractor<'h>>,
 ) -> PageResponse {
     let skip_browser = cache_skip_browser(&cache_options);
     let cached_html = if let Some(seeded) = seeded_resource {
@@ -6952,6 +7288,7 @@ pub async fn fetch_page_html_base(
         jar,
         cache_namespace,
         params,
+        extract,
     )
     .await
     {
@@ -6965,7 +7302,8 @@ pub async fn fetch_page_html_base(
 
 #[cfg(all(not(feature = "fs"), feature = "chrome"))]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
-pub async fn fetch_page_html(
+#[allow(private_interfaces)]
+pub async fn fetch_page_html<'h>(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
@@ -6975,6 +7313,7 @@ pub async fn fetch_page_html(
     cache_options: Option<CacheOptions>,
     cache_namespace: Option<&str>,
     params: &ChromeFetchParams<'_>,
+    extract: Option<&mut crate::page::ChromeStreamingExtractor<'h>>,
 ) -> PageResponse {
     fetch_page_html_base(
         target_url,
@@ -6988,13 +7327,15 @@ pub async fn fetch_page_html(
         None,
         cache_namespace,
         params,
+        extract,
     )
     .await
 }
 
 #[cfg(all(not(feature = "fs"), feature = "chrome"))]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
-pub async fn fetch_page_html_seeded(
+#[allow(private_interfaces)]
+pub async fn fetch_page_html_seeded<'h>(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
@@ -7006,6 +7347,7 @@ pub async fn fetch_page_html_seeded(
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     cache_namespace: Option<&str>,
     params: &ChromeFetchParams<'_>,
+    extract: Option<&mut crate::page::ChromeStreamingExtractor<'h>>,
 ) -> PageResponse {
     fetch_page_html_base(
         target_url,
@@ -7019,13 +7361,14 @@ pub async fn fetch_page_html_seeded(
         jar,
         cache_namespace,
         params,
+        extract,
     )
     .await
 }
 
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
-async fn _fetch_page_html_chrome(
+async fn _fetch_page_html_chrome<'h>(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
@@ -7037,6 +7380,7 @@ async fn _fetch_page_html_chrome(
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     cache_namespace: Option<&str>,
     params: &ChromeFetchParams<'_>,
+    extract: Option<&mut crate::page::ChromeStreamingExtractor<'h>>,
 ) -> PageResponse {
     let duration = if cfg!(feature = "time") {
         Some(tokio::time::Instant::now())
@@ -7088,6 +7432,7 @@ async fn _fetch_page_html_chrome(
                 jar,
                 cache_namespace,
                 params,
+                extract,
             )
             .await
             {
@@ -7177,7 +7522,8 @@ async fn _fetch_page_html_chrome(
 
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome.
-pub async fn fetch_page_html_chrome(
+#[allow(private_interfaces)]
+pub async fn fetch_page_html_chrome<'h>(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
@@ -7188,6 +7534,7 @@ pub async fn fetch_page_html_chrome(
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     cache_namespace: Option<&str>,
     params: &ChromeFetchParams<'_>,
+    extract: Option<&mut crate::page::ChromeStreamingExtractor<'h>>,
 ) -> PageResponse {
     _fetch_page_html_chrome(
         target_url,
@@ -7201,13 +7548,15 @@ pub async fn fetch_page_html_chrome(
         jar,
         cache_namespace,
         params,
+        extract,
     )
     .await
 }
 
 #[cfg(feature = "chrome")]
 /// Perform a network request to a resource extracting all content as text streaming via chrome seeded.
-pub async fn fetch_page_html_chrome_seeded(
+#[allow(private_interfaces)]
+pub async fn fetch_page_html_chrome_seeded<'h>(
     target_url: &str,
     client: &Client,
     page: &chromiumoxide::Page,
@@ -7219,6 +7568,7 @@ pub async fn fetch_page_html_chrome_seeded(
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     cache_namespace: Option<&str>,
     params: &ChromeFetchParams<'_>,
+    extract: Option<&mut crate::page::ChromeStreamingExtractor<'h>>,
 ) -> PageResponse {
     _fetch_page_html_chrome(
         target_url,
@@ -7232,6 +7582,7 @@ pub async fn fetch_page_html_chrome_seeded(
         jar,
         cache_namespace,
         params,
+        extract,
     )
     .await
 }

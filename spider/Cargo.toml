@@ -1,6 +1,6 @@
 [package]
 name = "spider"
-version = "2.51.130"
+version = "2.51.131"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A web crawler and scraper, building blocks for data curation workloads."
 repository = "https://github.com/spider-rs/spider"
@@ -193,6 +193,10 @@ fast_html2md = "0"
 
 [[bench]]
 name = "allocator_bench"
+harness = false
+
+[[bench]]
+name = "streaming_link_extraction"
 harness = false
 
 [features]

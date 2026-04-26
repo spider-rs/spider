@@ -77,14 +77,17 @@ const BACKOFF_MAX_DURATION: tokio::time::Duration = tokio::time::Duration::from_
 /// orphaned Chrome tab is closed instead of leaking.
 #[cfg(all(feature = "hedge", feature = "chrome", not(feature = "decentralized")))]
 macro_rules! chrome_page_fetch {
-    ($shared:expr, $target_url:expr) => {{
+    ($shared:expr, $target_url:expr, $full_resources:expr, $return_page_links:expr, $skip_links:expr) => {{
         chrome_page_fetch!(
             $shared,
             $target_url,
-            None::<&std::sync::Arc<dyn crate::retry_strategy::RetryStrategy>>
+            None::<&std::sync::Arc<dyn crate::retry_strategy::RetryStrategy>>,
+            $full_resources,
+            $return_page_links,
+            $skip_links
         )
     }};
-    ($shared:expr, $target_url:expr, $strategy:expr) => {{
+    ($shared:expr, $target_url:expr, $strategy:expr, $full_resources:expr, $return_page_links:expr, $skip_links:expr) => {{
         match crate::features::chrome::attempt_navigation(
             "about:blank",
             &$shared.5,
@@ -109,7 +112,19 @@ macro_rules! chrome_page_fetch {
                     )
                 );
 
-                let mut page = Page::new(
+                // Pre-allocate the link set + optional page-link set so the
+                // streaming extractor can borrow them across the chunk pump.
+                // Capacity hint comes from the cross-page EMA.
+                let mut links: hashbrown::HashSet<CaseInsensitiveString> =
+                    hashbrown::HashSet::with_capacity(crate::page::link_set_capacity());
+                let mut links_pages: Option<hashbrown::HashSet<CaseInsensitiveString>> =
+                    if $return_page_links {
+                        Some(Default::default())
+                    } else {
+                        None
+                    };
+
+                let (mut page, mut extract_succeeded) = Page::new_streaming(
                     $target_url,
                     &$shared.0,
                     &hedge_tab,
@@ -119,6 +134,18 @@ macro_rules! chrome_page_fetch {
                     $shared.6.get_cache_options(),
                     $shared.6.cache_namespace_str(),
                     &$shared.6.chrome_fetch_params(),
+                    &$shared.1,
+                    &$shared.3,
+                    &mut links,
+                    &mut links_pages,
+                    $full_resources,
+                    $skip_links,
+                    // Recursive crawl never runs the SSG manifest discovery —
+                    // that's reserved for the initial-page entry point
+                    // (`crawl_establish`).  Same as today's `chrome_page_fetch!`
+                    // → `chrome_page_post_process!` flow which calls
+                    // `page.links()` (no SSG) instead of `page.links_ssg()`.
+                    false,
                 )
                 .await;
 
@@ -203,8 +230,15 @@ macro_rules! chrome_page_fetch {
                             )
                         );
 
+                        // Reset extracted state from the prior attempt — only
+                        // the final attempt's links should reach the caller.
+                        links.clear();
+                        if let Some(ref mut lp) = links_pages {
+                            lp.clear();
+                        }
+
                         if let Err(_elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                            let p = Page::new(
+                            let (p, succ) = Page::new_streaming(
                                 $target_url,
                                 &$shared.0,
                                 &retry_tab,
@@ -214,9 +248,17 @@ macro_rules! chrome_page_fetch {
                                 $shared.6.get_cache_options(),
                                 $shared.6.cache_namespace_str(),
                                 &$shared.6.chrome_fetch_params(),
+                                &$shared.1,
+                                &$shared.3,
+                                &mut links,
+                                &mut links_pages,
+                                $full_resources,
+                                $skip_links,
+                                false,
                             )
                             .await;
                             page = p;
+                            extract_succeeded = succ;
                         })
                         .await
                         {
@@ -260,7 +302,7 @@ macro_rules! chrome_page_fetch {
                 _tab_guard.defuse();
                 let _ = hedge_tab.close().await;
 
-                Some(page)
+                Some((page, links, links_pages, extract_succeeded))
             }
             _ => {
                 // Tab creation failed (browser hang, dead WS, CDP error).
@@ -288,7 +330,8 @@ macro_rules! chrome_page_fetch {
 /// Tab is wrapped in a [`TabCloseGuard`] for cancellation safety.
 #[cfg(all(feature = "hedge", feature = "chrome", not(feature = "decentralized")))]
 macro_rules! chrome_page_fetch_on {
-    ($shared:expr, $target_url:expr, $browser:expr, $context_id:expr) => {{
+    ($shared:expr, $target_url:expr, $browser:expr, $context_id:expr,
+     $full_resources:expr, $return_page_links:expr, $skip_links:expr) => {{
         match crate::features::chrome::attempt_navigation(
             "about:blank",
             $browser,
@@ -312,7 +355,16 @@ macro_rules! chrome_page_fetch_on {
                     )
                 );
 
-                let page = Page::new(
+                let mut links: hashbrown::HashSet<CaseInsensitiveString> =
+                    hashbrown::HashSet::with_capacity(crate::page::link_set_capacity());
+                let mut links_pages: Option<hashbrown::HashSet<CaseInsensitiveString>> =
+                    if $return_page_links {
+                        Some(Default::default())
+                    } else {
+                        None
+                    };
+
+                let (page, extract_succeeded) = Page::new_streaming(
                     $target_url,
                     &$shared.0,
                     &hedge_tab,
@@ -322,6 +374,13 @@ macro_rules! chrome_page_fetch_on {
                     $shared.6.get_cache_options(),
                     $shared.6.cache_namespace_str(),
                     &$shared.6.chrome_fetch_params(),
+                    &$shared.1,
+                    &$shared.3,
+                    &mut links,
+                    &mut links_pages,
+                    $full_resources,
+                    $skip_links,
+                    false,
                 )
                 .await;
 
@@ -342,7 +401,7 @@ macro_rules! chrome_page_fetch_on {
                 _tab_guard.defuse();
                 let _ = hedge_tab.close().await;
 
-                Some(page)
+                Some((page, links, links_pages, extract_succeeded))
             }
             _ => {
                 // Hedge tab creation failed — still notify subscribers so
@@ -364,11 +423,23 @@ macro_rules! chrome_page_fetch_on {
 
 /// Inline post-processing for Chrome page fetch results (link extraction, normalization, channel send).
 /// Used by both hedge and non-hedge Chrome crawl paths.
+///
+/// `$pre_links` / `$pre_links_pages` / `$extract_succeeded` carry the
+/// streaming-extracted state from `chrome_page_fetch!`. When
+/// `$extract_succeeded` is true, the precomputed link set is used as-is
+/// and no second lol_html pass runs. When false (mid-stream rewriter
+/// error or the chrome path bypassed streaming), the legacy
+/// `page.links()` / `page.links_full()` walk runs over the assembled
+/// body, preserving today's behavior bit-for-bit.
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 macro_rules! chrome_page_post_process {
-    ($page:expr, $shared:expr, $add_external:expr, $full_resources:expr,
+    ($page:expr, $pre_links:expr, $pre_links_pages:expr, $extract_succeeded:expr,
+     $shared:expr, $add_external:expr, $full_resources:expr,
      $return_page_links:expr, $on_should_crawl_callback:expr, $permit:expr) => {{
         let mut page = $page;
+        let pre_links = $pre_links;
+        let pre_links_pages = $pre_links_pages;
+        let extract_succeeded: bool = $extract_succeeded;
 
         if $add_external {
             page.set_external($shared.3.clone());
@@ -376,13 +447,27 @@ macro_rules! chrome_page_post_process {
         let prev_domain = page.base.take();
         page.set_url_parsed_direct();
         let page_base = page.base.take().map(Box::new);
-        if $return_page_links {
-            page.page_links = Some(Default::default());
-        }
-        let links = if $full_resources {
-            page.links_full(&$shared.1, &page_base).await
+        let links = if extract_succeeded {
+            // Streaming pass already populated everything we need. Move
+            // the `return_page_links` set onto the Page so consumers see
+            // it via `page.page_links`, mirroring the legacy
+            // post-process branch (`page.page_links = Some(Default)` +
+            // implicit population by `links_stream_base`).
+            if $return_page_links {
+                page.page_links = pre_links_pages.map(Box::new);
+            }
+            pre_links
         } else {
-            page.links(&$shared.1, &page_base).await
+            // Streaming hit a mid-stream error — fall back to the
+            // legacy second-pass walk so behavior matches prior releases.
+            if $return_page_links {
+                page.page_links = Some(Default::default());
+            }
+            if $full_resources {
+                page.links_full(&$shared.1, &page_base).await
+            } else {
+                page.links(&$shared.1, &page_base).await
+            }
         };
         page.base = prev_domain;
         if $shared.6.normalize {
@@ -402,10 +487,17 @@ macro_rules! chrome_page_post_process {
         (links, signature)
     }};
     // Variant with parallel backends support.
-    ($page:expr, $shared:expr, $add_external:expr, $full_resources:expr,
+    ($page:expr, $pre_links:expr, $pre_links_pages:expr, $extract_succeeded:expr,
+     $shared:expr, $add_external:expr, $full_resources:expr,
      $return_page_links:expr, $on_should_crawl_callback:expr, $permit:expr,
      $pb_backend_set:expr, $pb_config_ref:expr, $pb_tracker_ref:expr) => {{
         let mut page = $page;
+        let pre_links = $pre_links;
+        let pre_links_pages = $pre_links_pages;
+        // `mut` may be unused under non-`parallel_backends` builds because
+        // only the parallel-backends winner replacement reassigns it.
+        #[allow(unused_mut)]
+        let mut extract_succeeded: bool = $extract_succeeded;
 
         // ── Parallel backends: binary content-type early-out (Chrome path) ──
         #[cfg(feature = "parallel_backends")]
@@ -483,6 +575,12 @@ macro_rules! chrome_page_post_process {
                     if let Some(winner) = best_alt {
                         pb_trk.record_win(winner.backend_index);
                         page = winner.page;
+                        // Streaming-extracted links applied to the
+                        // primary's body — if a parallel backend wins,
+                        // the body changes and we must re-extract via
+                        // the legacy second-pass walk to stay byte-
+                        // identical with prior releases.
+                        extract_succeeded = false;
                     } else {
                         pb_trk.record_win(0);
                     }
@@ -506,13 +604,20 @@ macro_rules! chrome_page_post_process {
         let prev_domain = page.base.take();
         page.set_url_parsed_direct();
         let page_base = page.base.take().map(Box::new);
-        if $return_page_links {
-            page.page_links = Some(Default::default());
-        }
-        let links = if $full_resources {
-            page.links_full(&$shared.1, &page_base).await
+        let links = if extract_succeeded {
+            if $return_page_links {
+                page.page_links = pre_links_pages.map(Box::new);
+            }
+            pre_links
         } else {
-            page.links(&$shared.1, &page_base).await
+            if $return_page_links {
+                page.page_links = Some(Default::default());
+            }
+            if $full_resources {
+                page.links_full(&$shared.1, &page_base).await
+            } else {
+                page.links(&$shared.1, &page_base).await
+            }
         };
         page.base = prev_domain;
         if $shared.6.normalize {
@@ -4128,35 +4233,68 @@ impl Website {
                 self.setup_chrome_interception(chrome_page)
             );
 
-            let mut page = if let Some(seeded_html) = self.get_seeded_html() {
-                Page::new_seeded(
-                    self.url.inner(),
-                    client,
-                    chrome_page,
-                    false, // we use the initial about:blank page.
-                    self.configuration.referer.clone(),
-                    self.configuration.max_page_bytes,
-                    self.configuration.get_cache_options(),
-                    Some(seeded_html.clone()),
-                    Some(&self.cookie_jar),
-                    self.configuration.cache_namespace_str(),
-                    &self.configuration.chrome_fetch_params(),
-                )
-                .await
+            // Pre-allocate the link sets so the streaming extractor can
+            // populate them on the fly — same flow as the recursive
+            // chrome_page_fetch! macro. SSG manifest discovery + XML
+            // fallback are handled inside Page::new_seeded_streaming /
+            // Page::new_streaming, eliminating the legacy two-pass walk
+            // that previously ran after this block.
+            let return_page_links = self.configuration.return_page_links;
+            let full_resources = self.configuration.full_resources;
+            let skip_links = self.single_page() && !return_page_links;
+
+            let mut links: HashSet<CaseInsensitiveString> =
+                HashSet::with_capacity(crate::page::link_set_capacity());
+            let mut links_pages: Option<HashSet<CaseInsensitiveString>> = if return_page_links {
+                Some(Default::default())
             } else {
-                Page::new(
-                    self.url.inner(),
-                    client,
-                    chrome_page,
-                    false, // we use the initial about:blank page.
-                    self.configuration.referer.clone(),
-                    self.configuration.max_page_bytes,
-                    self.configuration.get_cache_options(),
-                    self.configuration.cache_namespace_str(),
-                    &self.configuration.chrome_fetch_params(),
-                )
-                .await
+                None
             };
+
+            let (mut page, mut extract_succeeded) =
+                if let Some(seeded_html) = self.get_seeded_html() {
+                    Page::new_seeded_streaming(
+                        self.url.inner(),
+                        client,
+                        chrome_page,
+                        false, // we use the initial about:blank page.
+                        self.configuration.referer.clone(),
+                        self.configuration.max_page_bytes,
+                        self.configuration.get_cache_options(),
+                        Some(seeded_html.clone()),
+                        Some(&self.cookie_jar),
+                        self.configuration.cache_namespace_str(),
+                        &self.configuration.chrome_fetch_params(),
+                        &*base,
+                        &self.configuration.external_domains_caseless,
+                        &mut links,
+                        &mut links_pages,
+                        full_resources,
+                        skip_links,
+                        true,
+                    )
+                    .await
+                } else {
+                    Page::new_streaming(
+                        self.url.inner(),
+                        client,
+                        chrome_page,
+                        false, // we use the initial about:blank page.
+                        self.configuration.referer.clone(),
+                        self.configuration.max_page_bytes,
+                        self.configuration.get_cache_options(),
+                        self.configuration.cache_namespace_str(),
+                        &self.configuration.chrome_fetch_params(),
+                        &*base,
+                        &self.configuration.external_domains_caseless,
+                        &mut links,
+                        &mut links_pages,
+                        full_resources,
+                        skip_links,
+                        true,
+                    )
+                    .await
+                };
 
             let retry_strategy = self.retry_strategy.clone();
             let mut retry_count: u32 = match &retry_strategy {
@@ -4219,9 +4357,16 @@ impl Website {
                 });
                 tokio::time::sleep(status_delay.max(backoff)).await;
 
+                // Drop prior attempt's extracted state so only the
+                // final attempt's links flow downstream.
+                links.clear();
+                if let Some(ref mut lp) = links_pages {
+                    lp.clear();
+                }
+
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                     if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                        let next_page = Page::new(
+                        let (next_page, succ) = Page::new_streaming(
                             self.url.inner(),
                             client,
                             chrome_page,
@@ -4231,16 +4376,24 @@ impl Website {
                             self.configuration.get_cache_options(),
                             self.configuration.cache_namespace_str(),
                             &self.configuration.chrome_fetch_params(),
+                            &*base,
+                            &self.configuration.external_domains_caseless,
+                            &mut links,
+                            &mut links_pages,
+                            full_resources,
+                            skip_links,
+                            true,
                         )
                         .await;
                         page = next_page;
+                        extract_succeeded = succ;
                     })
                     .await
                     {
                         log::warn!("backoff timeout {elasped}");
                     }
                 } else {
-                    let next_page = Page::new(
+                    let (next_page, succ) = Page::new_streaming(
                         self.url.inner(),
                         client,
                         chrome_page,
@@ -4250,9 +4403,17 @@ impl Website {
                         self.configuration.get_cache_options(),
                         self.configuration.cache_namespace_str(),
                         &self.configuration.chrome_fetch_params(),
+                        &*base,
+                        &self.configuration.external_domains_caseless,
+                        &mut links,
+                        &mut links_pages,
+                        full_resources,
+                        skip_links,
+                        true,
                     )
                     .await;
                     page = next_page;
+                    extract_succeeded = succ;
                 }
 
                 // Stamp the profile key from the strategy directive.
@@ -4314,28 +4475,39 @@ impl Website {
 
             self.insert_link(&url).await;
 
-            // setup link tracking.
-            if self.configuration.return_page_links && page.page_links.is_none() {
-                page.page_links = Some(Box::default());
-            }
-
-            // Skip link extraction for single-page crawls unless the user wants page links.
-            let skip_links = self.single_page() && !self.configuration.return_page_links;
-            let xml_file = page.is_xml;
-
-            let mut links = if skip_links {
-                Default::default()
-            } else if !page.is_empty() && !xml_file {
-                page.links_ssg(base, client, &self.domain_parsed).await
+            // The streaming pump in `Page::new_streaming` /
+            // `Page::new_seeded_streaming` populated `links` (and
+            // `links_pages` when `return_page_links` was set) on the
+            // fly — including SSG manifest discovery for HTML pages and
+            // quick_xml extraction for `is_xml` responses.  Only fall
+            // back to the legacy two-pass walk when streaming declined
+            // (mid-stream rewriter error, redirect-base mismatch,
+            // body-mutating solver, etc.) so behavior stays byte-
+            // identical with prior releases.
+            if extract_succeeded {
+                if return_page_links {
+                    page.page_links = links_pages.take().map(Box::new);
+                }
             } else {
-                Default::default()
-            };
-
-            if !skip_links && xml_file {
-                if let Some(xml_bytes) = page.html.take() {
-                    page.links_stream_xml_links_stream_base(base, &xml_bytes, &mut links, &None)
+                if return_page_links && page.page_links.is_none() {
+                    page.page_links = Some(Box::default());
+                }
+                let xml_file = page.is_xml;
+                links = if skip_links {
+                    Default::default()
+                } else if !page.is_empty() && !xml_file {
+                    page.links_ssg(base, client, &self.domain_parsed).await
+                } else {
+                    Default::default()
+                };
+                if !skip_links && xml_file {
+                    if let Some(xml_bytes) = page.html.take() {
+                        page.links_stream_xml_links_stream_base(
+                            base, &xml_bytes, &mut links, &None,
+                        )
                         .await;
-                    page.html = Some(xml_bytes);
+                        page.html = Some(xml_bytes);
+                    }
                 }
             }
 
@@ -4381,8 +4553,27 @@ impl Website {
                 self.setup_chrome_interception(chrome_page)
             );
 
-            let mut page = Page::new(
-                url.unwrap_or(self.url.inner()),
+            // Same streaming-extraction setup as `crawl_establish` —
+            // SSG manifest discovery + XML extraction happen inside
+            // `Page::new_streaming` so the legacy post-fetch
+            // `links_ssg` / XML walks below are only reached when
+            // streaming declined (redirect-base mismatch, mid-stream
+            // error, etc.).
+            let return_page_links = self.configuration.return_page_links;
+            let full_resources = self.configuration.full_resources;
+            let skip_links = self.single_page() && !return_page_links;
+
+            let mut links: HashSet<CaseInsensitiveString> =
+                HashSet::with_capacity(crate::page::link_set_capacity());
+            let mut links_pages: Option<HashSet<CaseInsensitiveString>> = if return_page_links {
+                Some(Default::default())
+            } else {
+                None
+            };
+
+            let target_url = url.unwrap_or(self.url.inner());
+            let (mut page, mut extract_succeeded) = Page::new_streaming(
+                target_url,
                 client,
                 chrome_page,
                 false, // we use the initial about:blank page.
@@ -4391,6 +4582,13 @@ impl Website {
                 self.configuration.get_cache_options(),
                 self.configuration.cache_namespace_str(),
                 &self.configuration.chrome_fetch_params(),
+                &*base,
+                &self.configuration.external_domains_caseless,
+                &mut links,
+                &mut links_pages,
+                full_resources,
+                skip_links,
+                true,
             )
             .await;
 
@@ -4454,9 +4652,16 @@ impl Website {
                 });
                 tokio::time::sleep(status_delay.max(backoff)).await;
 
+                // Drop prior attempt's extracted state so only the
+                // final attempt's links flow downstream.
+                links.clear();
+                if let Some(ref mut lp) = links_pages {
+                    lp.clear();
+                }
+
                 if page.status_code == StatusCode::GATEWAY_TIMEOUT {
                     if let Err(elasped) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                        let next_page = Page::new(
+                        let (next_page, succ) = Page::new_streaming(
                             self.url.inner(),
                             client,
                             chrome_page,
@@ -4466,16 +4671,24 @@ impl Website {
                             self.configuration.get_cache_options(),
                             self.configuration.cache_namespace_str(),
                             &self.configuration.chrome_fetch_params(),
+                            &*base,
+                            &self.configuration.external_domains_caseless,
+                            &mut links,
+                            &mut links_pages,
+                            full_resources,
+                            skip_links,
+                            true,
                         )
                         .await;
                         page = next_page;
+                        extract_succeeded = succ;
                     })
                     .await
                     {
                         log::warn!("backoff timeout {elasped}");
                     }
                 } else {
-                    let next_page = Page::new(
+                    let (next_page, succ) = Page::new_streaming(
                         self.url.inner(),
                         client,
                         chrome_page,
@@ -4485,9 +4698,17 @@ impl Website {
                         self.configuration.get_cache_options(),
                         self.configuration.cache_namespace_str(),
                         &self.configuration.chrome_fetch_params(),
+                        &*base,
+                        &self.configuration.external_domains_caseless,
+                        &mut links,
+                        &mut links_pages,
+                        full_resources,
+                        skip_links,
+                        true,
                     )
                     .await;
                     page = next_page;
+                    extract_succeeded = succ;
                 }
 
                 // Stamp the profile key from the strategy directive.
@@ -4535,27 +4756,34 @@ impl Website {
 
             emit_log(self.url.inner());
 
-            if self.configuration.return_page_links && page.page_links.is_none() {
-                page.page_links = Some(Box::default());
-            }
-
-            // Skip link extraction for single-page crawls unless the user wants page links.
-            let skip_links = self.single_page() && !self.configuration.return_page_links;
-            let xml_file = page.is_xml;
-
-            let mut links = if skip_links {
-                Default::default()
-            } else if !page.is_empty() && !xml_file {
-                page.links_ssg(base, client, &self.domain_parsed).await
+            // Streaming pump populated `links` (and `links_pages`) on
+            // the fly, including SSG manifest discovery and quick_xml
+            // for `is_xml` responses. Fall back to the legacy two-pass
+            // walk only when streaming declined.
+            if extract_succeeded {
+                if return_page_links {
+                    page.page_links = links_pages.take().map(Box::new);
+                }
             } else {
-                Default::default()
-            };
-
-            if !skip_links && xml_file {
-                if let Some(xml_bytes) = page.html.take() {
-                    page.links_stream_xml_links_stream_base(base, &xml_bytes, &mut links, &None)
+                if return_page_links && page.page_links.is_none() {
+                    page.page_links = Some(Box::default());
+                }
+                let xml_file = page.is_xml;
+                links = if skip_links {
+                    Default::default()
+                } else if !page.is_empty() && !xml_file {
+                    page.links_ssg(base, client, &self.domain_parsed).await
+                } else {
+                    Default::default()
+                };
+                if !skip_links && xml_file {
+                    if let Some(xml_bytes) = page.html.take() {
+                        page.links_stream_xml_links_stream_base(
+                            base, &xml_bytes, &mut links, &None,
+                        )
                         .await;
-                    page.html = Some(xml_bytes);
+                        page.html = Some(xml_bytes);
+                    }
                 }
             }
 
@@ -4874,6 +5102,10 @@ impl Website {
         let expanded = self.get_expanded_links(&self.url.inner().as_str());
         self.configuration.configure_allowlist();
 
+        let return_page_links = self.configuration.return_page_links;
+        let full_resources = self.configuration.full_resources;
+        let skip_links = self.single_page() && !return_page_links;
+
         for link in expanded {
             let allowed = self.is_allowed(&link);
 
@@ -4884,7 +5116,18 @@ impl Website {
                 continue;
             }
 
-            let mut page = Page::new(
+            // Per-glob-URL streaming pump: same SSG/XML/skip_links
+            // story as the non-glob `crawl_establish`.
+            let mut next_links: HashSet<CaseInsensitiveString> =
+                HashSet::with_capacity(crate::page::link_set_capacity());
+            let mut next_links_pages: Option<HashSet<CaseInsensitiveString>> = if return_page_links
+            {
+                Some(Default::default())
+            } else {
+                None
+            };
+
+            let (mut page, extract_succeeded) = Page::new_streaming(
                 &link.inner().as_str(),
                 &client,
                 &page,
@@ -4894,6 +5137,13 @@ impl Website {
                 self.configuration.get_cache_options(),
                 self.configuration.cache_namespace_str(),
                 &self.configuration.chrome_fetch_params(),
+                &*base,
+                &self.configuration.external_domains_caseless,
+                &mut next_links,
+                &mut next_links_pages,
+                full_resources,
+                skip_links,
+                true,
             )
             .await;
 
@@ -4911,15 +5161,22 @@ impl Website {
 
             self.insert_link(&link_result.0).await;
 
-            if self.configuration.return_page_links {
-                page.page_links = Some(Default::default());
-            }
-
-            // Skip link extraction for single-page crawls unless the user wants page links.
-            let next_links = if self.single_page() && !self.configuration.return_page_links {
-                Default::default()
+            // Apply streamed page-links + fall back to legacy walk
+            // when streaming declined (redirect-base mismatch, etc.).
+            let next_links = if extract_succeeded {
+                if return_page_links {
+                    page.page_links = next_links_pages.take().map(Box::new);
+                }
+                next_links
             } else {
-                HashSet::from(page.links(&base, &self.domain_parsed).await)
+                if return_page_links {
+                    page.page_links = Some(Default::default());
+                }
+                if skip_links {
+                    Default::default()
+                } else {
+                    HashSet::from(page.links(&base, &self.domain_parsed).await)
+                }
             };
             channel_send_page(&self.channel, page, &self.channel_guard).await;
             links.extend(next_links);
@@ -7405,6 +7662,10 @@ impl Website {
                             let retry_strategy_ref = self.retry_strategy.clone();
                             let full_resources = self.configuration.full_resources;
                             let return_page_links = self.configuration.return_page_links;
+                            // Honor single-page mode: skip link extraction
+                            // entirely when no caller actually needs the links.
+                            // Same gate as the non-streaming initial-page paths.
+                            let skip_links = self.single_page() && !return_page_links;
                             #[cfg(any(
                                 feature = "cache",
                                 feature = "cache_mem",
@@ -7628,10 +7889,15 @@ impl Website {
                                                         let target_url = target_url_string.as_str();
                                                         let fetch_start = Instant::now();
 
-                                                        let page_opt: Option<Page> = if should_hedge {
+                                                        let page_opt: Option<(
+                                                            Page,
+                                                            hashbrown::HashSet<CaseInsensitiveString>,
+                                                            Option<hashbrown::HashSet<CaseInsensitiveString>>,
+                                                            bool,
+                                                        )> = if should_hedge {
                                                             let base_delay = hedge_cfg.as_ref().unwrap().delay;
                                                             let delay = hedge_trk.adaptive_delay(base_delay);
-                                                            let primary_fut = async { chrome_page_fetch!(shared, target_url, retry_strategy_ref) };
+                                                            let primary_fut = async { chrome_page_fetch!(shared, target_url, retry_strategy_ref, full_resources, return_page_links, skip_links) };
                                                             tokio::pin!(primary_fut);
 
                                                             let result = tokio::select! {
@@ -7664,10 +7930,10 @@ impl Website {
                                                                             match &hedge_browser {
                                                                                 Some(hb) => {
                                                                                     log::info!("[hedge-chrome] using new WS connection url={}", target_url);
-                                                                                    chrome_page_fetch_on!(shared, target_url, &hb.browser, &hb.context_id)
+                                                                                    chrome_page_fetch_on!(shared, target_url, &hb.browser, &hb.context_id, full_resources, return_page_links, skip_links)
                                                                                 }
                                                                                 None => {
-                                                                                    chrome_page_fetch!(shared, target_url, retry_strategy_ref)
+                                                                                    chrome_page_fetch!(shared, target_url, retry_strategy_ref, full_resources, return_page_links, skip_links)
                                                                                 }
                                                                             }
                                                                         };
@@ -7696,16 +7962,16 @@ impl Website {
                                                                 }
                                                             };
                                                             hedge_trk.record(fetch_start.elapsed());
-                                                            if result.as_ref().is_some_and(|p| p.status_code.is_server_error()) {
+                                                            if result.as_ref().is_some_and(|t| t.0.status_code.is_server_error()) {
                                                                 hedge_trk.record_error();
                                                             } else if result.is_some() {
                                                                 hedge_trk.record_success();
                                                             }
                                                             result
                                                         } else {
-                                                            let result = chrome_page_fetch!(shared, target_url, retry_strategy_ref);
+                                                            let result = chrome_page_fetch!(shared, target_url, retry_strategy_ref, full_resources, return_page_links, skip_links);
                                                             hedge_trk.record(fetch_start.elapsed());
-                                                            if result.as_ref().is_some_and(|p| p.status_code.is_server_error()) {
+                                                            if result.as_ref().is_some_and(|t| t.0.status_code.is_server_error()) {
                                                                 hedge_trk.record_error();
                                                             } else if result.is_some() {
                                                                 hedge_trk.record_success();
@@ -7715,7 +7981,7 @@ impl Website {
 
                                                         #[allow(unused_assignments)]
                                                         match page_opt {
-                                                            Some(page) => chrome_page_post_process!(page, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit, pb_backend_set, pb_config_ref, pb_tracker_ref),
+                                                            Some((page, pre_links, pre_links_pages, extract_succeeded)) => chrome_page_post_process!(page, pre_links, pre_links_pages, extract_succeeded, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit, pb_backend_set, pb_config_ref, pb_tracker_ref),
                                                             None => {
                                                                 // Abort any spawned parallel backend tasks on primary failure.
                                                                 #[cfg(feature = "parallel_backends")]
@@ -7752,7 +8018,12 @@ impl Website {
 
                                                             let target_url = target_url_string.as_str();
 
-                                                            let mut page = Page::new(
+                                                            let mut links: hashbrown::HashSet<CaseInsensitiveString> =
+                                                                hashbrown::HashSet::with_capacity(crate::page::link_set_capacity());
+                                                            let mut links_pages: Option<hashbrown::HashSet<CaseInsensitiveString>> =
+                                                                if return_page_links { Some(Default::default()) } else { None };
+
+                                                            let (mut page, mut extract_succeeded) = Page::new_streaming(
                                                                 target_url,
                                                                 &shared.0,
                                                                 &new_page,
@@ -7762,6 +8033,13 @@ impl Website {
                                                                 shared.6.get_cache_options(),
                                                                 shared.6.cache_namespace_str(),
                                                                 &shared.6.chrome_fetch_params(),
+                                                                &shared.1,
+                                                                &shared.3,
+                                                                &mut links,
+                                                                &mut links_pages,
+                                                                full_resources,
+                                                                skip_links,
+                                                                false,
                                                             )
                                                             .await;
 
@@ -7829,8 +8107,13 @@ impl Website {
                                                                         )
                                                                     );
 
+                                                                    // Drop prior attempt's extracted state so only the
+                                                                    // final attempt's links flow downstream.
+                                                                    links.clear();
+                                                                    if let Some(ref mut lp) = links_pages { lp.clear(); }
+
                                                                     if let Err(_elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                                                                        let p = Page::new(
+                                                                        let (p, succ) = Page::new_streaming(
                                                                             target_url,
                                                                             &shared.0,
                                                                             &retry_page,
@@ -7840,8 +8123,16 @@ impl Website {
                                                                             shared.6.get_cache_options(),
                                                                             shared.6.cache_namespace_str(),
                                                                             &shared.6.chrome_fetch_params(),
+                                                                            &shared.1,
+                                                                            &shared.3,
+                                                                            &mut links,
+                                                                            &mut links_pages,
+                                                                            full_resources,
+                                                                            skip_links,
+                                                                            false,
                                                                         ).await;
                                                                         page = p;
+                                                                        extract_succeeded = succ;
                                                                     }).await {
                                                                         log::info!("{target_url} chrome retry backoff timeout exceeded {_elapsed}");
                                                                         page.should_retry = false;
@@ -7946,6 +8237,8 @@ impl Website {
                                                                             log::info!("[parallel_backends] backend {} won for {} (score={}, primary={})", winner.backend_index, page.get_url(), winner.quality_score, primary_score);
                                                                             pb_trk.record_win(winner.backend_index);
                                                                             page = winner.page;
+                                                                            // Body changed — invalidate streamed extraction.
+                                                                            extract_succeeded = false;
                                                                         } else {
                                                                             pb_trk.record_win(0);
                                                                             crate::utils::parallel_backends::tag_page_source(&mut page, "primary");
@@ -7962,7 +8255,7 @@ impl Website {
                                                             #[cfg(feature = "parallel_backends")]
                                                             drop(pb_backend_set);
 
-                                                            chrome_page_post_process!(page, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit)
+                                                            chrome_page_post_process!(page, links, links_pages, extract_succeeded, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit)
                                                         }
                                                         _ => Default::default(),
                                                     }
@@ -8653,6 +8946,9 @@ impl Website {
                             let retry_strategy_ref = self.retry_strategy.clone();
                             let full_resources = self.configuration.full_resources;
                             let return_page_links = self.configuration.return_page_links;
+                            // Honor single-page mode: skip link extraction
+                            // entirely when no caller actually needs the links.
+                            let skip_links = self.single_page() && !return_page_links;
                             #[cfg(feature = "hedge")]
                             let hedge_config = self.configuration.hedge.clone();
                             #[cfg(feature = "hedge")]
@@ -8757,10 +9053,15 @@ impl Website {
                                                         let target_url = target_url_string.as_str();
                                                         let fetch_start = Instant::now();
 
-                                                        let page_opt: Option<Page> = if should_hedge {
+                                                        let page_opt: Option<(
+                                                            Page,
+                                                            hashbrown::HashSet<CaseInsensitiveString>,
+                                                            Option<hashbrown::HashSet<CaseInsensitiveString>>,
+                                                            bool,
+                                                        )> = if should_hedge {
                                                             let base_delay = hedge_cfg.as_ref().unwrap().delay;
                                                             let delay = hedge_trk.adaptive_delay(base_delay);
-                                                            let primary_fut = async { chrome_page_fetch!(shared, target_url, retry_strategy_ref) };
+                                                            let primary_fut = async { chrome_page_fetch!(shared, target_url, retry_strategy_ref, full_resources, return_page_links, skip_links) };
                                                             tokio::pin!(primary_fut);
 
                                                             let result = tokio::select! {
@@ -8793,10 +9094,10 @@ impl Website {
                                                                             match &hedge_browser {
                                                                                 Some(hb) => {
                                                                                     log::info!("[hedge-chrome] using new WS connection url={}", target_url);
-                                                                                    chrome_page_fetch_on!(shared, target_url, &hb.browser, &hb.context_id)
+                                                                                    chrome_page_fetch_on!(shared, target_url, &hb.browser, &hb.context_id, full_resources, return_page_links, skip_links)
                                                                                 }
                                                                                 None => {
-                                                                                    chrome_page_fetch!(shared, target_url, retry_strategy_ref)
+                                                                                    chrome_page_fetch!(shared, target_url, retry_strategy_ref, full_resources, return_page_links, skip_links)
                                                                                 }
                                                                             }
                                                                         };
@@ -8825,16 +9126,16 @@ impl Website {
                                                                 }
                                                             };
                                                             hedge_trk.record(fetch_start.elapsed());
-                                                            if result.as_ref().is_some_and(|p| p.status_code.is_server_error()) {
+                                                            if result.as_ref().is_some_and(|t| t.0.status_code.is_server_error()) {
                                                                 hedge_trk.record_error();
                                                             } else if result.is_some() {
                                                                 hedge_trk.record_success();
                                                             }
                                                             result
                                                         } else {
-                                                            let result = chrome_page_fetch!(shared, target_url, retry_strategy_ref);
+                                                            let result = chrome_page_fetch!(shared, target_url, retry_strategy_ref, full_resources, return_page_links, skip_links);
                                                             hedge_trk.record(fetch_start.elapsed());
-                                                            if result.as_ref().is_some_and(|p| p.status_code.is_server_error()) {
+                                                            if result.as_ref().is_some_and(|t| t.0.status_code.is_server_error()) {
                                                                 hedge_trk.record_error();
                                                             } else if result.is_some() {
                                                                 hedge_trk.record_success();
@@ -8843,7 +9144,7 @@ impl Website {
                                                         };
 
                                                         match page_opt {
-                                                            Some(page) => chrome_page_post_process!(page, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit),
+                                                            Some((page, pre_links, pre_links_pages, extract_succeeded)) => chrome_page_post_process!(page, pre_links, pre_links_pages, extract_succeeded, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit),
                                                             None => Default::default(),
                                                         }
                                                     };
@@ -8873,7 +9174,12 @@ impl Website {
                                                                     )
                                                                 );
 
-                                                                let mut page = Page::new(
+                                                                let mut links: hashbrown::HashSet<CaseInsensitiveString> =
+                                                                    hashbrown::HashSet::with_capacity(crate::page::link_set_capacity());
+                                                                let mut links_pages: Option<hashbrown::HashSet<CaseInsensitiveString>> =
+                                                                    if return_page_links { Some(Default::default()) } else { None };
+
+                                                                let (mut page, mut extract_succeeded) = Page::new_streaming(
                                                                     target_url,
                                                                     &shared.0,
                                                                     &new_page,
@@ -8883,6 +9189,13 @@ impl Website {
                                                                     shared.6.get_cache_options(),
                                                                     shared.6.cache_namespace_str(),
                                                                     &shared.6.chrome_fetch_params(),
+                                                                    &shared.1,
+                                                                    &shared.3,
+                                                                    &mut links,
+                                                                    &mut links_pages,
+                                                                    full_resources,
+                                                                    skip_links,
+                                                                    false,
                                                                 )
                                                                 .await;
 
@@ -8945,8 +9258,12 @@ impl Website {
                                                                             )
                                                                         );
 
+                                                                        // Drop prior attempt's extracted state.
+                                                                        links.clear();
+                                                                        if let Some(ref mut lp) = links_pages { lp.clear(); }
+
                                                                         if let Err(_elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                                                                            let p = Page::new(
+                                                                            let (p, succ) = Page::new_streaming(
                                                                                 target_url,
                                                                                 &shared.0,
                                                                                 &retry_page,
@@ -8956,8 +9273,16 @@ impl Website {
                                                                                 shared.6.get_cache_options(),
                                                                                 shared.6.cache_namespace_str(),
                                                                                 &shared.6.chrome_fetch_params(),
+                                                                                &shared.1,
+                                                                                &shared.3,
+                                                                                &mut links,
+                                                                                &mut links_pages,
+                                                                                full_resources,
+                                                                                skip_links,
+                                                                                false,
                                                                             ).await;
                                                                             page = p;
+                                                                            extract_succeeded = succ;
                                                                         }).await {
                                                                             log::info!("{target_url} chrome retry backoff timeout exceeded {_elapsed}");
                                                                             page.should_retry = false;
@@ -8987,7 +9312,7 @@ impl Website {
                                                                 _tab_guard.defuse();
                                                                 let _ = new_page.close().await;
 
-                                                                chrome_page_post_process!(page, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit)
+                                                                chrome_page_post_process!(page, links, links_pages, extract_succeeded, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit)
                                                             }
                                                             _ => Default::default(),
                                                         }
@@ -10458,18 +10783,37 @@ impl Website {
                                                                     )
                                                                 );
 
-                                                                let mut page = Page::new(
-                                                                    &link.inner(),
-                                                                    &client,
-                                                                    &new_page,
-                                                                    false,
-                                                                    shared.3.referer.clone(),
-                                                                    shared.3.max_page_bytes,
-                                                                    shared.3.get_cache_options(),
-                                                                    shared.3.cache_namespace_str(),
-                                                                    &shared.3.chrome_fetch_params(),
-                                                                )
-                                                                .await;
+                                                                // Streaming pump populates `page_links_buf`
+                                                                // during fetch — same handler vector as
+                                                                // `page.links()` would have run after.
+                                                                let mut page_links_buf: HashSet<
+                                                                    CaseInsensitiveString,
+                                                                > = HashSet::with_capacity(
+                                                                    crate::page::link_set_capacity(),
+                                                                );
+                                                                let mut _placeholder_links_pages: Option<
+                                                                    HashSet<CaseInsensitiveString>,
+                                                                > = None;
+                                                                let (mut page, succeeded) =
+                                                                    Page::new_streaming(
+                                                                        &link.inner(),
+                                                                        &client,
+                                                                        &new_page,
+                                                                        false,
+                                                                        shared.3.referer.clone(),
+                                                                        shared.3.max_page_bytes,
+                                                                        shared.3.get_cache_options(),
+                                                                        shared.3.cache_namespace_str(),
+                                                                        &shared.3.chrome_fetch_params(),
+                                                                        &shared.6,
+                                                                        &shared.3.external_domains_caseless,
+                                                                        &mut page_links_buf,
+                                                                        &mut _placeholder_links_pages,
+                                                                        shared.3.full_resources,
+                                                                        false, // sitemap fetch always needs links
+                                                                        false, // recursive fetch — no SSG
+                                                                    )
+                                                                    .await;
 
                                                                 if let Some(intercept_handle) = intercept_handle
                                                                 {
@@ -10491,8 +10835,17 @@ impl Website {
                                                                 let _ = new_page.close().await;
 
                                                                 if page.page_links.is_none() {
-                                                                    let links =
-                                                                        page.links(&shared.6, &shared.7).await;
+                                                                    let links: HashSet<
+                                                                        CaseInsensitiveString,
+                                                                    > = if succeeded {
+                                                                        page_links_buf
+                                                                    } else {
+                                                                        // Streaming declined — fall back to
+                                                                        // the legacy second-pass walk so the
+                                                                        // sitemap downstream gets populated
+                                                                        // links exactly as before.
+                                                                        page.links(&shared.6, &shared.7).await
+                                                                    };
                                                                     page.page_links = Some(links.into());
                                                                 }
 
@@ -10581,7 +10934,18 @@ impl Website {
                                                             )
                                                         );
 
-                                                        let mut page = Page::new(
+                                                        // Streaming pump populates `page_links_buf`
+                                                        // during fetch — same handler vector as
+                                                        // `page.links()` would have run after.
+                                                        let mut page_links_buf: HashSet<
+                                                            CaseInsensitiveString,
+                                                        > = HashSet::with_capacity(
+                                                            crate::page::link_set_capacity(),
+                                                        );
+                                                        let mut _placeholder_links_pages: Option<
+                                                            HashSet<CaseInsensitiveString>,
+                                                        > = None;
+                                                        let (mut page, succeeded) = Page::new_streaming(
                                                             &link.inner(),
                                                             &client,
                                                             &new_page,
@@ -10591,6 +10955,13 @@ impl Website {
                                                             shared.3.get_cache_options(),
                                                             shared.3.cache_namespace_str(),
                                                             &shared.3.chrome_fetch_params(),
+                                                            &shared.6,
+                                                            &shared.3.external_domains_caseless,
+                                                            &mut page_links_buf,
+                                                            &mut _placeholder_links_pages,
+                                                            shared.3.full_resources,
+                                                            false,
+                                                            false,
                                                         )
                                                         .await;
 
@@ -10612,7 +10983,13 @@ impl Website {
                                                         let _ = new_page.close().await;
 
                                                         if page.page_links.is_none() {
-                                                            let links = page.links(&shared.6, &shared.7).await;
+                                                            let links: HashSet<CaseInsensitiveString> =
+                                                                if succeeded {
+                                                                    page_links_buf
+                                                                } else {
+                                                                    page.links(&shared.6, &shared.7)
+                                                                        .await
+                                                                };
                                                             page.page_links = Some(links.into());
                                                         }
 

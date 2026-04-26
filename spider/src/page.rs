@@ -574,7 +574,7 @@ static LINK_CAPACITY_HINT: std::sync::atomic::AtomicUsize = std::sync::atomic::A
 
 /// Read the current link capacity hint (minimum 32).
 #[inline(always)]
-fn link_set_capacity() -> usize {
+pub(crate) fn link_set_capacity() -> usize {
     LINK_CAPACITY_HINT
         .load(std::sync::atomic::Ordering::Relaxed)
         .max(32)
@@ -582,7 +582,7 @@ fn link_set_capacity() -> usize {
 
 /// Update the EMA after a page extraction. Uses 3:1 weighting (75% old, 25% new).
 #[inline(always)]
-fn update_link_capacity_hint(count: usize) {
+pub(crate) fn update_link_capacity_hint(count: usize) {
     let prev = LINK_CAPACITY_HINT.load(std::sync::atomic::Ordering::Relaxed);
     let next = if prev == 0 {
         count.max(32)
@@ -2366,6 +2366,396 @@ pub(crate) fn metadata_handlers<'h>(
     ]
 }
 
+/// Type-erased streaming link/metadata extractor used by the Chrome
+/// fetch chain.  Wraps a [`lol_html::send::HtmlRewriter`] behind a
+/// `Box<dyn FnMut>` output sink so the struct itself is non-generic —
+/// callers in `fetch_page_html_chrome_base` and friends can plumb
+/// `Option<&mut ChromeStreamingExtractor<'_>>` without infecting the
+/// signature with `OS`-generic parameters.
+///
+/// **Lifetime story.** `'h` ties together every borrow the caller's
+/// lol_html closures hold (`&mut links`, `&mut links_pages`,
+/// `&base_input_url`, `&mut meta_*`, …).  The macro that builds the
+/// extractor owns those slots; the rewriter (and therefore the
+/// extractor) cannot outlive them.  Passing
+/// `Option<&'a mut ChromeStreamingExtractor<'h>>` through the async
+/// fetch chain is sound as long as the macro awaits the chain inside
+/// the same scope where the slots live — which is exactly how
+/// `chrome_page_fetch!` is structured.
+///
+/// **Cancellation safety.** If the wrapping future is dropped
+/// mid-stream, `Drop` runs on the rewriter (which releases its parser
+/// state) and on every captured borrow.  No leak.
+/// Zero-sized no-op output sink for [`ChromeStreamingExtractor`].
+/// We never consume the rewriter's output bytes — chrome callers feed
+/// the raw chromey chunks directly to their byte accumulator
+/// (`collected: Vec<u8>` in [`crate::utils::fetch_chrome_html_streaming_into_writer`]).
+/// Keeping the sink concrete (instead of `Box<dyn FnMut>`) eliminates
+/// the one-per-page heap allocation the trait object would otherwise
+/// require.
+#[cfg(feature = "chrome")]
+pub(crate) struct NoopOutputSink;
+
+#[cfg(feature = "chrome")]
+impl lol_html::OutputSink for NoopOutputSink {
+    #[inline]
+    fn handle_chunk(&mut self, _: &[u8]) {}
+}
+
+#[cfg(feature = "chrome")]
+#[allow(dead_code)] // wired in upcoming macro changes
+pub(crate) struct ChromeStreamingExtractor<'h> {
+    rewriter: lol_html::send::HtmlRewriter<'h, NoopOutputSink>,
+    /// Tripped when a `write` returns Err (parser rejection / OOM).
+    write_failed: bool,
+    /// Set by [`mark_streamed`] when the chrome chunk pump confirms it
+    /// fed every chunk through to completion.  Without this flag,
+    /// `end()` defaults to `false` so callers fall back to the legacy
+    /// `page.links()` second-pass walk — the safe choice when the
+    /// extractor was constructed but no streaming ran (e.g. XML
+    /// carve-out, CDP-error fallback, post-multimodal refresh, fill-
+    /// fetch, or the chrome events-failed branch).
+    streamed_through: bool,
+}
+
+#[cfg(feature = "chrome")]
+#[allow(dead_code)]
+impl<'h> ChromeStreamingExtractor<'h> {
+    /// Build the extractor from a handler vector produced by
+    /// [`build_link_extract_handlers`].  The output sink is a no-op
+    /// `Box<dyn FnMut>` — chrome callers consume the raw chromey
+    /// chunks separately for downstream byte consumers.
+    pub(crate) fn new(
+        handlers: Vec<(
+            std::borrow::Cow<'static, lol_html::Selector>,
+            lol_html::send::ElementContentHandlers<'h>,
+        )>,
+        encoding: Option<lol_html::AsciiCompatibleEncoding>,
+        adjust_charset_on_meta_tag: bool,
+    ) -> Self {
+        let settings = lol_html::send::Settings {
+            element_content_handlers: handlers,
+            adjust_charset_on_meta_tag,
+            encoding: encoding.unwrap_or_else(lol_html::AsciiCompatibleEncoding::utf_8),
+            ..lol_html::send::Settings::new_for_handler_types()
+        };
+        Self {
+            rewriter: lol_html::send::HtmlRewriter::new(settings, NoopOutputSink),
+            write_failed: false,
+            streamed_through: false,
+        }
+    }
+
+    /// Feed a chunk to the rewriter.  Idempotent on prior failure —
+    /// further writes are silently ignored after the first error so
+    /// the chunk-pump stays cheap.
+    #[inline]
+    pub(crate) fn write(&mut self, chunk: &[u8]) {
+        if !self.write_failed && self.rewriter.write(chunk).is_err() {
+            self.write_failed = true;
+        }
+    }
+
+    /// Caller signal that the chrome chunk pump fed the rewriter every
+    /// byte from the response stream.  Required before `end()` will
+    /// report success — without it, the post-process layer falls back
+    /// to the legacy second-pass so empty link sets aren't published.
+    #[inline]
+    pub(crate) fn mark_streamed(&mut self) {
+        self.streamed_through = true;
+    }
+
+    /// Mark the extractor as stale because the page body was replaced
+    /// after streaming completed (multimodal refresh, parallel-backend
+    /// winner, etc.).  Forces `end()` to return `false` so the post-
+    /// process layer re-extracts links from the new body.
+    #[inline]
+    pub(crate) fn invalidate(&mut self) {
+        self.write_failed = true;
+    }
+
+    /// Finalize the rewriter.  Returns `true` only when every chunk
+    /// fed cleanly, [`mark_streamed`] was called, **and** `end()`
+    /// succeeded.  On `false`, the caller must fall back to a legacy
+    /// `page.links()` second pass; the link sets are not safe to
+    /// publish.
+    pub(crate) fn end(self) -> bool {
+        if self.write_failed || !self.streamed_through {
+            return false;
+        }
+        self.rewriter.end().is_ok()
+    }
+
+    /// Whether the extractor is still in a clean state (no rewriter
+    /// errors so far).  Useful for early-exit checks.
+    #[inline]
+    pub(crate) fn ok(&self) -> bool {
+        !self.write_failed
+    }
+}
+
+/// Borrow-only context bag for [`build_link_extract_handlers`].  Every
+/// reference is owned by the caller for the lifetime of the rewriter;
+/// this struct just bundles them so the helper signature stays sane.
+///
+/// Behaviour is byte-identical to the hand-rolled handler vectors at:
+///   - `Page::new_page_streaming`            (page.rs ~2654)
+///   - `Page::new_page_streaming_from_bytes` (page.rs ~3014)
+///   - `Page::links_stream_base`             (page.rs ~4636)
+///   - `Page::links_stream_base_from_disk`   (page.rs ~4805)
+///   - `Page::links_stream_base_ssg`         (page.rs ~5168)
+///   - `Page::links_stream_full_resource`    (page.rs ~6593)
+///
+/// SSG capture has two modes preserved verbatim from existing call
+/// sites — `ssg_raw_src_cell` stores the unresolved `src` (caller
+/// resolves later) and `ssg_resolved_path_cell` stores the
+/// `convert_abs_path`-resolved value.  At most one of the two should
+/// be `Some` at a time.
+pub(crate) struct LinkExtractCtx<'h, A> {
+    /// Domain selectors for `push_link` resolution.
+    pub selectors: &'h RelativeSelectors,
+    /// External-domain allowlist used by `push_link` for cross-host
+    /// inclusion decisions.
+    pub external_domains_caseless: &'h Arc<HashSet<CaseInsensitiveString>>,
+    /// Output set populated by every matched anchor.
+    pub map: &'h mut hashbrown::HashSet<A>,
+    /// Optional secondary set for `return_page_links` mode — `None`
+    /// when page-link tracking is disabled.
+    pub links_pages: &'h mut Option<hashbrown::HashSet<A>>,
+    /// `<base href>` capture cell.  Interior-mut so the base-element
+    /// handler `set`s while the link handler reads.
+    pub base_input_url: &'h tokio::sync::OnceCell<Url>,
+    /// Caller-derived base URL for relative-link resolution
+    /// (post-redirect domain or `prior_domain`).
+    pub base: Option<&'h Url>,
+    /// Original document URL — fallback when the relative href is
+    /// directory-style or `base` is unset.
+    pub original_page: Option<&'h Url>,
+    /// SSG manifest capture (raw `src` value).  Mirrors
+    /// `Page::new_page_streaming` semantics: caller resolves the
+    /// stored value via `convert_abs_path` after rewriter ends.
+    /// Selector: `script` (matches all script tags, filters in handler).
+    pub ssg_raw_src_cell: Option<&'h tokio::sync::OnceCell<String>>,
+    /// SSG manifest capture (pre-resolved absolute path).  Mirrors
+    /// `Page::links_stream_base_ssg` semantics.  Selector: `script[src]`
+    /// (pre-filtered).  Resolution happens inside the closure via
+    /// `convert_abs_path` against `base`; if `base` is `None` the
+    /// closure no-ops, identical to the legacy site at page.rs:5282.
+    pub ssg_resolved_path_cell: Option<&'h tokio::sync::OnceCell<String>>,
+    /// Page is `*.xml` — pick the XML link selector.  No effect when
+    /// `full_resources = true` (full_resources uses a unified
+    /// anchor+script+link selector regardless of doc type).
+    pub xml_file: bool,
+    /// Capture every `a[href]`, `script[src]`, `link[href]` instead
+    /// of just `<a>`.  Mirrors the `r_settings.full_resources` branch.
+    pub full_resources: bool,
+    /// Skip the link-selector handler entirely.  Metadata, base href,
+    /// and SSG handlers still install.  Used for single-page crawls
+    /// where the caller only wants page-level data.
+    pub skip_links: bool,
+}
+
+/// Build the canonical link+metadata handler vector.  Single source of
+/// truth for the lol_html element handlers used by every link
+/// extraction path (HTTP streaming, in-memory, disk-spooled, SSG, and
+/// — once Steps 2-4 land — the Chrome streaming pump).
+///
+/// Caller is responsible for:
+///   - feeding bytes to the rewriter (`rewriter.write(chunk)`),
+///   - calling `rewriter.end()` on success,
+///   - draining `links_pages` into `self.page_links` after `end()`,
+///   - building `Metadata` from `meta_title`/`meta_description`/`meta_og_image` after `end()`,
+///   - resolving `ssg_raw_src_cell` via `convert_abs_path` after `end()` (the resolved-path cell mode does this inline).
+pub(crate) fn build_link_extract_handlers<'h, A>(
+    ctx: LinkExtractCtx<'h, A>,
+    meta_title: &'h mut Option<CompactString>,
+    meta_description: &'h mut Option<CompactString>,
+    meta_og_image: &'h mut Option<CompactString>,
+) -> Vec<(
+    std::borrow::Cow<'static, lol_html::Selector>,
+    lol_html::send::ElementContentHandlers<'h>,
+)>
+where
+    A: PartialEq
+        + Eq
+        + Sync
+        + Send
+        + Clone
+        + Default
+        + std::hash::Hash
+        + From<String>
+        + for<'a> From<&'a str>,
+{
+    let LinkExtractCtx {
+        selectors,
+        external_domains_caseless,
+        map,
+        links_pages,
+        base_input_url,
+        base,
+        original_page,
+        ssg_raw_src_cell,
+        ssg_resolved_path_cell,
+        xml_file,
+        full_resources,
+        skip_links,
+    } = ctx;
+
+    // Borrow projections from selectors — derived once so each closure
+    // doesn't re-walk the tuple at every match.
+    let parent_host = &selectors.1[0];
+    let parent_host_scheme = &selectors.1[1];
+    let base_input_domain = &selectors.2;
+    let sub_matcher = &selectors.0;
+
+    let mut handlers = Vec::with_capacity(
+        3 /* metadata */
+            + 1 /* base element */
+            + (!skip_links) as usize
+            + ssg_raw_src_cell.is_some() as usize
+            + ssg_resolved_path_cell.is_some() as usize,
+    );
+
+    // 1. Metadata: title / meta[name=description] / meta[property=og:image].
+    handlers.extend(metadata_handlers(
+        meta_title,
+        meta_description,
+        meta_og_image,
+    ));
+
+    // 2. <base href> capture — runs first because well-formed docs
+    // place `<base>` in `<head>` before any `<a>`, so the link
+    // handler's `base_input_url.initialized()` check sees the value.
+    handlers.push(element_precompiled!(
+        compiled_base_element_selector(),
+        move |el| {
+            if let Some(href) = el.get_attribute("href") {
+                if let Ok(parsed_base) = Url::parse(&href) {
+                    let _ = base_input_url.set(parsed_base);
+                }
+            }
+            Ok(())
+        }
+    ));
+
+    // 3. Link handler — full_resources unifies a/script/link, otherwise
+    //    pick the precompiled HTML or XML anchor selector.
+    if !skip_links {
+        if full_resources {
+            handlers.push(lol_html::element!(
+                "a[href]:not([aria-hidden=\"true\"]),script[src],link[href]",
+                move |el| {
+                    let tag_name = el.tag_name();
+                    let attribute = if tag_name == "script" { "src" } else { "href" };
+
+                    if let Some(href) = el.get_attribute(attribute) {
+                        let b = if relative_directory_url(&href) || base.is_none() {
+                            original_page
+                        } else {
+                            base
+                        };
+                        let b = if base_input_url.initialized() {
+                            base_input_url.get()
+                        } else {
+                            b
+                        };
+
+                        push_link(
+                            &b,
+                            &href,
+                            map,
+                            sub_matcher,
+                            parent_host,
+                            parent_host_scheme,
+                            base_input_domain,
+                            sub_matcher,
+                            external_domains_caseless,
+                            links_pages,
+                        );
+                    }
+
+                    Ok(())
+                }
+            ));
+        } else {
+            handlers.push(element_precompiled!(
+                if xml_file {
+                    compiled_xml_selector()
+                } else {
+                    compiled_selector()
+                },
+                move |el| {
+                    if let Some(href) = el.get_attribute("href") {
+                        let b = if relative_directory_url(&href) || base.is_none() {
+                            original_page
+                        } else {
+                            base
+                        };
+                        let b = if base_input_url.initialized() {
+                            base_input_url.get()
+                        } else {
+                            b
+                        };
+
+                        push_link(
+                            &b,
+                            &href,
+                            map,
+                            sub_matcher,
+                            parent_host,
+                            parent_host_scheme,
+                            base_input_domain,
+                            sub_matcher,
+                            external_domains_caseless,
+                            links_pages,
+                        );
+                    }
+                    Ok(())
+                }
+            ));
+        }
+    }
+
+    // 4a. SSG manifest — raw-src mode (caller resolves later).
+    //     Mirrors `Page::new_page_streaming` (page.rs:2754) which uses
+    //     the bare `script` selector and filters inside the closure.
+    if let Some(cell) = ssg_raw_src_cell {
+        handlers.push(lol_html::element!("script", move |el| {
+            if let Some(build_path) = el.get_attribute("src") {
+                if build_path.starts_with("/_next/static/")
+                    && build_path.ends_with("/_ssgManifest.js")
+                {
+                    // `get_attribute` returns an owned `String`; move
+                    // straight into the cell instead of copying via
+                    // `to_string()`.
+                    let _ = cell.set(build_path);
+                }
+            }
+            Ok(())
+        }));
+    }
+
+    // 4b. SSG manifest — resolved-path mode.  Mirrors
+    //     `Page::links_stream_base_ssg` (page.rs:5277) which uses the
+    //     `script[src]` pre-filtered selector and resolves inline via
+    //     `convert_abs_path`.  No-ops when `base` is `None` (matches
+    //     the legacy `if let Some(b) = base.map(...)` guard).
+    if let Some(cell) = ssg_resolved_path_cell {
+        handlers.push(lol_html::element!("script[src]", move |el| {
+            if let Some(source) = el.get_attribute("src") {
+                if source.starts_with("/_next/static/") && source.ends_with("/_ssgManifest.js") {
+                    if let Some(b) = base {
+                        let _ = cell.set(convert_abs_path(b, &source).to_string());
+                    }
+                }
+            }
+            Ok(())
+        }));
+    }
+
+    handlers
+}
+
 impl Page {
     /// Whether the page needs a retry based on `should_retry`, a retryable status code,
     /// a truncated response (upstream stream ended prematurely), or a proxy-retryable
@@ -2643,127 +3033,39 @@ impl Page {
                 };
 
                 let original_page = Url::parse(url).ok();
-
-                let parent_host = &selectors.1[0];
-                // the host schemes
-                let parent_host_scheme = &selectors.1[1];
-                let base_input_domain = &selectors.2; // the domain after redirects
-                let sub_matcher = &selectors.0;
                 let xml_file = target_url.ends_with(".xml");
 
-                let base_links_settings = if r_settings.full_resources {
-                    lol_html::element!(
-                        "a[href]:not([aria-hidden=\"true\"]),script[src],link[href]",
-                        |el| {
-                            let tag_name = el.tag_name();
+                // Locals used by the post-rewriter SSG block below for
+                // its own `push_link` calls — kept around even after the
+                // helper consumes its own copy of the same projections.
+                let parent_host = &selectors.1[0];
+                let parent_host_scheme = &selectors.1[1];
+                let base_input_domain = &selectors.2;
+                let sub_matcher = &selectors.0;
 
-                            let attribute = if tag_name == "script" { "src" } else { "href" };
-
-                            if let Some(href) = el.get_attribute(attribute) {
-                                let base = if relative_directory_url(&href) || base.is_none() {
-                                    original_page.as_ref()
-                                } else {
-                                    base.as_deref()
-                                };
-                                let base = if base_input_url.initialized() {
-                                    base_input_url.get()
-                                } else {
-                                    base
-                                };
-
-                                push_link(
-                                    &base,
-                                    &href,
-                                    map,
-                                    &selectors.0,
-                                    parent_host,
-                                    parent_host_scheme,
-                                    base_input_domain,
-                                    sub_matcher,
-                                    external_domains_caseless,
-                                    links_pages,
-                                );
-                            }
-
-                            Ok(())
-                        }
-                    )
-                } else {
-                    element_precompiled!(
-                        if xml_file {
-                            compiled_xml_selector()
+                let element_content_handlers = build_link_extract_handlers(
+                    LinkExtractCtx {
+                        selectors,
+                        external_domains_caseless,
+                        map,
+                        links_pages,
+                        base_input_url: &base_input_url,
+                        base: base.as_deref(),
+                        original_page: original_page.as_ref(),
+                        ssg_raw_src_cell: if r_settings.ssg_build && !r_settings.skip_links {
+                            cell.as_ref()
                         } else {
-                            compiled_selector()
+                            None
                         },
-                        |el| {
-                            if let Some(href) = el.get_attribute("href") {
-                                let base = if relative_directory_url(&href) || base.is_none() {
-                                    original_page.as_ref()
-                                } else {
-                                    base.as_deref()
-                                };
-                                let base = if base_input_url.initialized() {
-                                    base_input_url.get()
-                                } else {
-                                    base
-                                };
-                                push_link(
-                                    &base,
-                                    &href,
-                                    map,
-                                    &selectors.0,
-                                    parent_host,
-                                    parent_host_scheme,
-                                    base_input_domain,
-                                    sub_matcher,
-                                    external_domains_caseless,
-                                    links_pages,
-                                );
-                            }
-                            Ok(())
-                        }
-                    )
-                };
-
-                let mut element_content_handlers =
-                    Vec::with_capacity(if r_settings.ssg_build { 2 } else { 1 } + 4);
-
-                element_content_handlers.push(element_precompiled!(
-                    compiled_base_element_selector(),
-                    |el| {
-                        if let Some(href) = el.get_attribute("href") {
-                            if let Ok(parsed_base) = Url::parse(&href) {
-                                let _ = base_input_url.set(parsed_base);
-                            }
-                        }
-
-                        Ok(())
-                    }
-                ));
-                if !r_settings.skip_links {
-                    element_content_handlers.push(base_links_settings);
-                }
-
-                element_content_handlers.extend(metadata_handlers(
+                        ssg_resolved_path_cell: None,
+                        xml_file,
+                        full_resources: r_settings.full_resources,
+                        skip_links: r_settings.skip_links,
+                    },
                     &mut meta_title,
                     &mut meta_description,
                     &mut meta_og_image,
-                ));
-
-                if r_settings.ssg_build && !r_settings.skip_links {
-                    element_content_handlers.push(lol_html::element!("script", |el| {
-                        if let Some(build_path) = el.get_attribute("src") {
-                            if build_path.starts_with("/_next/static/")
-                                && build_path.ends_with("/_ssgManifest.js")
-                            {
-                                if let Some(ref cell) = cell {
-                                    let _ = cell.set(build_path.to_string());
-                                }
-                            }
-                        }
-                        Ok(())
-                    }));
-                }
+                );
 
                 let settings = lol_html::send::Settings {
                     element_content_handlers,
@@ -3006,109 +3308,30 @@ impl Page {
             domain_parsed
         };
 
-        let parent_host = &selectors.1[0];
-        let parent_host_scheme = &selectors.1[1];
-        let base_input_domain = &selectors.2;
-        let sub_matcher = &selectors.0;
-
         let xml_file = url.ends_with(".xml");
 
-        let base_links_settings = if r_settings.full_resources {
-            lol_html::element!(
-                "a[href]:not([aria-hidden=\"true\"]),script[src],link[href]",
-                |el| {
-                    let tag_name = el.tag_name();
-                    let attribute = if tag_name == "script" { "src" } else { "href" };
-
-                    if let Some(href) = el.get_attribute(attribute) {
-                        let base = if relative_directory_url(&href) || base.is_none() {
-                            original_page.as_ref()
-                        } else {
-                            base.as_deref()
-                        };
-                        let base = if base_input_url.initialized() {
-                            base_input_url.get()
-                        } else {
-                            base
-                        };
-
-                        push_link(
-                            &base,
-                            &href,
-                            map,
-                            &selectors.0,
-                            parent_host,
-                            parent_host_scheme,
-                            base_input_domain,
-                            sub_matcher,
-                            external_domains_caseless,
-                            links_pages,
-                        );
-                    }
-
-                    Ok(())
-                }
-            )
-        } else {
-            element_precompiled!(
-                if xml_file {
-                    compiled_xml_selector()
-                } else {
-                    compiled_selector()
-                },
-                |el| {
-                    if let Some(href) = el.get_attribute("href") {
-                        let base = if relative_directory_url(&href) || base.is_none() {
-                            original_page.as_ref()
-                        } else {
-                            base.as_deref()
-                        };
-                        let base = if base_input_url.initialized() {
-                            base_input_url.get()
-                        } else {
-                            base
-                        };
-
-                        push_link(
-                            &base,
-                            &href,
-                            map,
-                            &selectors.0,
-                            parent_host,
-                            parent_host_scheme,
-                            base_input_domain,
-                            sub_matcher,
-                            external_domains_caseless,
-                            links_pages,
-                        );
-                    }
-                    Ok(())
-                }
-            )
-        };
-
-        let mut element_content_handlers =
-            Vec::with_capacity(if r_settings.ssg_build { 2 } else { 1 } + 4);
-
-        element_content_handlers.push(element_precompiled!(
-            compiled_base_element_selector(),
-            |el| {
-                if let Some(href) = el.get_attribute("href") {
-                    if let Ok(parsed_base) = Url::parse(&href) {
-                        let _ = base_input_url.set(parsed_base);
-                    }
-                }
-                Ok(())
-            }
-        ));
-
-        element_content_handlers.push(base_links_settings);
-
-        element_content_handlers.extend(metadata_handlers(
+        let element_content_handlers = build_link_extract_handlers(
+            LinkExtractCtx {
+                selectors,
+                external_domains_caseless,
+                map,
+                links_pages,
+                base_input_url: &base_input_url,
+                base: base.as_deref(),
+                original_page: original_page.as_ref(),
+                // Preserves prior behavior: this function never installed
+                // an SSG handler (capacity hint at the legacy site was
+                // off-by-one but no handler was pushed).
+                ssg_raw_src_cell: None,
+                ssg_resolved_path_cell: None,
+                xml_file,
+                full_resources: r_settings.full_resources,
+                skip_links: false,
+            },
             &mut meta_title,
             &mut meta_description,
             &mut meta_og_image,
-        ));
+        );
 
         let settings = lol_html::send::Settings {
             element_content_handlers,
@@ -3171,7 +3394,7 @@ impl Page {
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     /// Instantiate a new page and gather the html.
-    pub(crate) async fn new_base(
+    pub(crate) async fn new_base<'h>(
         url: &str,
         client: &Client,
         page: &chromiumoxide::Page,
@@ -3183,6 +3406,7 @@ impl Page {
         jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
         cache_namespace: Option<&str>,
         params: &crate::utils::ChromeFetchParams<'_>,
+        extract: Option<&mut ChromeStreamingExtractor<'h>>,
     ) -> Self {
         let page_resource = if seeded_resource.is_some() {
             crate::utils::fetch_page_html_seeded(
@@ -3197,6 +3421,7 @@ impl Page {
                 jar,
                 cache_namespace,
                 params,
+                extract,
             )
             .await
         } else {
@@ -3214,6 +3439,7 @@ impl Page {
                     jar,
                     cache_namespace,
                     params,
+                    extract,
                 )
                 .await
             }
@@ -3230,6 +3456,7 @@ impl Page {
                     cache_options,
                     cache_namespace,
                     params,
+                    extract,
                 )
                 .await
             }
@@ -3270,8 +3497,226 @@ impl Page {
             None,
             cache_namespace,
             params,
+            None,
         )
         .await
+    }
+
+    /// Streaming-extraction variant of [`Page::new`].  Used by
+    /// `chrome_page_fetch!` to fold link/metadata extraction into the
+    /// chrome chunk pump — a single lol_html pass over the response
+    /// bytes instead of the legacy `fetch + page.links()` two-pass.
+    ///
+    /// Caller pre-allocates the `links` and `links_pages` sets and
+    /// passes them by `&mut`.  On success (`extract_succeeded = true`)
+    /// the sets are populated and the post-process layer skips the
+    /// redundant `page.links()` walk.  On failure (CDP error
+    /// mid-stream, rewriter write error) the post-process layer falls
+    /// back to the legacy second-pass extraction over the assembled
+    /// body — keeping behavior byte-identical to prior releases.
+    ///
+    /// Metadata (`title` / `description` / `og:image`) is captured in
+    /// the same handler vector and copied onto `Page::metadata` after
+    /// the rewriter ends, mirroring the legacy `links_stream_base`
+    /// post-stream block exactly.
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    pub(crate) async fn new_streaming<A>(
+        url: &str,
+        client: &Client,
+        page: &chromiumoxide::Page,
+        page_set: bool,
+        referrer: Option<String>,
+        max_page_bytes: Option<f64>,
+        cache_options: Option<CacheOptions>,
+        cache_namespace: Option<&str>,
+        params: &crate::utils::ChromeFetchParams<'_>,
+        selectors: &RelativeSelectors,
+        external_domains_caseless: &Arc<HashSet<CaseInsensitiveString>>,
+        links: &mut HashSet<A>,
+        links_pages: &mut Option<HashSet<A>>,
+        full_resources: bool,
+        skip_links: bool,
+        ssg_enabled: bool,
+    ) -> (Self, bool)
+    where
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + ToString
+            + std::hash::Hash
+            + From<String>
+            + Into<CaseInsensitiveString>
+            + for<'a> From<&'a str>,
+    {
+        let parsed_target = Url::parse(url).ok();
+        let xml_file = url.ends_with(".xml");
+        let base_input_url = tokio::sync::OnceCell::new();
+        let ssg_cell = if ssg_enabled && !skip_links && !xml_file {
+            Some(tokio::sync::OnceCell::new())
+        } else {
+            None
+        };
+
+        let mut meta_title: Option<CompactString> = None;
+        let mut meta_description: Option<CompactString> = None;
+        let mut meta_og_image: Option<CompactString> = None;
+
+        let (page_out, mut extract_succeeded) = {
+            let handlers = build_link_extract_handlers(
+                LinkExtractCtx {
+                    selectors,
+                    external_domains_caseless,
+                    map: links,
+                    links_pages,
+                    base_input_url: &base_input_url,
+                    base: parsed_target.as_ref(),
+                    original_page: parsed_target.as_ref(),
+                    ssg_raw_src_cell: None,
+                    ssg_resolved_path_cell: ssg_cell.as_ref(),
+                    xml_file,
+                    full_resources,
+                    // When the caller already knows it doesn't need
+                    // links (single-page mode without return_page_links),
+                    // skip the link handler entirely — metadata + base
+                    // capture still install so meta_title/description/
+                    // og_image stay populated for downstream consumers.
+                    skip_links,
+                },
+                &mut meta_title,
+                &mut meta_description,
+                &mut meta_og_image,
+            );
+
+            let mut extract = ChromeStreamingExtractor::new(handlers, None, true);
+            let p = Self::new_base(
+                url,
+                client,
+                page,
+                page_set,
+                referrer,
+                max_page_bytes,
+                cache_options,
+                None,
+                None,
+                cache_namespace,
+                params,
+                Some(&mut extract),
+            )
+            .await;
+            let succeeded = extract.end();
+            (p, succeeded)
+        };
+
+        let mut p = page_out;
+
+        // SSG manifest capture (post-stream).  Mirrors
+        // `Page::links_stream_base_ssg` exactly — fetches the build
+        // manifest URL captured by the rewriter and appends every quoted
+        // path to the link set, modulo selector / external-domain rules.
+        if extract_succeeded && !skip_links {
+            if let Some(cell) = ssg_cell.as_ref() {
+                if let Some(build_ssg_path) = cell.get() {
+                    if !build_ssg_path.is_empty() {
+                        let build_page = Self::new_page(build_ssg_path, client).await;
+                        let parent_host = &selectors.1[0];
+                        let parent_host_scheme = &selectors.1[1];
+                        let base_input_domain = &selectors.2;
+                        let sub_matcher = &selectors.0;
+                        let ssg_base = if base_input_url.initialized() {
+                            base_input_url.get()
+                        } else {
+                            parsed_target.as_ref()
+                        };
+
+                        for cap in SSG_CAPTURE.captures_iter(build_page.get_html_bytes_u8()) {
+                            if let Some(matched) = cap.get(1) {
+                                let href =
+                                    auto_encode_bytes(matched.as_bytes()).replace(r#"\u002F"#, "/");
+                                let last_segment = crate::utils::get_last_segment(&href);
+
+                                if !(last_segment.starts_with("[") && last_segment.ends_with("]")) {
+                                    let resolved_base =
+                                        if relative_directory_url(&href) || ssg_base.is_none() {
+                                            parsed_target.as_ref()
+                                        } else {
+                                            ssg_base
+                                        };
+
+                                    push_link(
+                                        &resolved_base,
+                                        &href,
+                                        links,
+                                        sub_matcher,
+                                        parent_host,
+                                        parent_host_scheme,
+                                        base_input_domain,
+                                        sub_matcher,
+                                        external_domains_caseless,
+                                        &mut None,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // XML extraction — chrome's xml_target carve-out at
+        // `fetch_page_html_chrome_base` skips the lol_html pump entirely,
+        // so streaming reports failure and `page.is_xml` (set from the
+        // `<?xml` content prefix) routes us through `quick_xml` here.
+        // Mirrors the legacy `Page::links_stream_xml_links_stream_base`
+        // call previously made by `crawl_establish` after fetch.
+        if !extract_succeeded && !skip_links && p.is_xml {
+            if let Some(html_bytes) = p.html.take() {
+                p.links_stream_xml_links_stream_base(selectors, &html_bytes, links, &None)
+                    .await;
+                p.html = Some(html_bytes);
+                extract_succeeded = true;
+            }
+        }
+
+        // Behavior parity with the legacy `chrome_page_post_process!`
+        // path: `set_url_parsed_direct` uses `final_redirect_destination`
+        // when present.  The streaming pass resolved relative links
+        // against the *requested* `url`, so a redirect to a different
+        // origin would skew base-URL resolution. Invalidate when the
+        // recorded redirect doesn't match the requested URL — the
+        // post-process layer will re-extract via `page.links()` over the
+        // assembled body using the correct base.
+        if extract_succeeded {
+            if let Some(redirect) = p.final_redirect_destination.as_deref() {
+                if redirect != url {
+                    extract_succeeded = false;
+                }
+            }
+        }
+
+        if extract_succeeded {
+            let valid_meta =
+                meta_title.is_some() || meta_description.is_some() || meta_og_image.is_some();
+
+            if valid_meta {
+                let mut metadata_inner = Metadata::default();
+                metadata_inner.title = meta_title;
+                metadata_inner.description = meta_description;
+                metadata_inner.image = meta_og_image;
+
+                if metadata_inner.exist() {
+                    set_metadata(&mut p.metadata, &mut metadata_inner);
+                    p.metadata.replace(Box::new(metadata_inner));
+                }
+            }
+
+            update_link_capacity_hint(links.len());
+        }
+
+        (p, extract_succeeded)
     }
 
     #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
@@ -3302,8 +3747,201 @@ impl Page {
             jar,
             cache_namespace,
             params,
+            None,
         )
         .await
+    }
+
+    /// Streaming-extraction variant of [`Page::new_seeded`].
+    /// See [`Page::new_streaming`] for the contract.
+    ///
+    /// Currently unused — `crawl_establish` (the seeded-resource entry
+    /// point) calls [`Page::links_ssg`] which performs cross-domain
+    /// manifest fetches that the streaming handler vector does not yet
+    /// emulate.  Kept as an `pub(crate)` API so a future refactor can
+    /// land the streaming optimization there too.
+    #[allow(dead_code)]
+    #[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    pub(crate) async fn new_seeded_streaming<A>(
+        url: &str,
+        client: &Client,
+        page: &chromiumoxide::Page,
+        page_set: bool,
+        referrer: Option<String>,
+        max_page_bytes: Option<f64>,
+        cache_options: Option<CacheOptions>,
+        seeded_resource: Option<String>,
+        jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
+        cache_namespace: Option<&str>,
+        params: &crate::utils::ChromeFetchParams<'_>,
+        selectors: &RelativeSelectors,
+        external_domains_caseless: &Arc<HashSet<CaseInsensitiveString>>,
+        links: &mut HashSet<A>,
+        links_pages: &mut Option<HashSet<A>>,
+        full_resources: bool,
+        skip_links: bool,
+        ssg_enabled: bool,
+    ) -> (Self, bool)
+    where
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + ToString
+            + std::hash::Hash
+            + From<String>
+            + Into<CaseInsensitiveString>
+            + for<'a> From<&'a str>,
+    {
+        let parsed_target = Url::parse(url).ok();
+        let xml_file = url.ends_with(".xml");
+        let base_input_url = tokio::sync::OnceCell::new();
+        let ssg_cell = if ssg_enabled && !skip_links && !xml_file {
+            Some(tokio::sync::OnceCell::new())
+        } else {
+            None
+        };
+
+        let mut meta_title: Option<CompactString> = None;
+        let mut meta_description: Option<CompactString> = None;
+        let mut meta_og_image: Option<CompactString> = None;
+
+        let (page_out, mut extract_succeeded) = {
+            let handlers = build_link_extract_handlers(
+                LinkExtractCtx {
+                    selectors,
+                    external_domains_caseless,
+                    map: links,
+                    links_pages,
+                    base_input_url: &base_input_url,
+                    base: parsed_target.as_ref(),
+                    original_page: parsed_target.as_ref(),
+                    ssg_raw_src_cell: None,
+                    ssg_resolved_path_cell: ssg_cell.as_ref(),
+                    xml_file,
+                    full_resources,
+                    skip_links,
+                },
+                &mut meta_title,
+                &mut meta_description,
+                &mut meta_og_image,
+            );
+
+            let mut extract = ChromeStreamingExtractor::new(handlers, None, true);
+            let p = Self::new_base(
+                url,
+                client,
+                page,
+                page_set,
+                referrer,
+                max_page_bytes,
+                cache_options,
+                seeded_resource,
+                jar,
+                cache_namespace,
+                params,
+                Some(&mut extract),
+            )
+            .await;
+            let succeeded = extract.end();
+            (p, succeeded)
+        };
+
+        let mut p = page_out;
+
+        // See `Page::new_streaming` — same redirect-base parity guard.
+        if extract_succeeded {
+            if let Some(redirect) = p.final_redirect_destination.as_deref() {
+                if redirect != url {
+                    extract_succeeded = false;
+                }
+            }
+        }
+
+        // SSG manifest capture (post-stream).  Mirrors
+        // `Page::new_streaming` exactly.
+        if extract_succeeded && !skip_links {
+            if let Some(cell) = ssg_cell.as_ref() {
+                if let Some(build_ssg_path) = cell.get() {
+                    if !build_ssg_path.is_empty() {
+                        let build_page = Self::new_page(build_ssg_path, client).await;
+                        let parent_host = &selectors.1[0];
+                        let parent_host_scheme = &selectors.1[1];
+                        let base_input_domain = &selectors.2;
+                        let sub_matcher = &selectors.0;
+                        let ssg_base = if base_input_url.initialized() {
+                            base_input_url.get()
+                        } else {
+                            parsed_target.as_ref()
+                        };
+
+                        for cap in SSG_CAPTURE.captures_iter(build_page.get_html_bytes_u8()) {
+                            if let Some(matched) = cap.get(1) {
+                                let href =
+                                    auto_encode_bytes(matched.as_bytes()).replace(r#"\u002F"#, "/");
+                                let last_segment = crate::utils::get_last_segment(&href);
+
+                                if !(last_segment.starts_with("[") && last_segment.ends_with("]")) {
+                                    let resolved_base =
+                                        if relative_directory_url(&href) || ssg_base.is_none() {
+                                            parsed_target.as_ref()
+                                        } else {
+                                            ssg_base
+                                        };
+
+                                    push_link(
+                                        &resolved_base,
+                                        &href,
+                                        links,
+                                        sub_matcher,
+                                        parent_host,
+                                        parent_host_scheme,
+                                        base_input_domain,
+                                        sub_matcher,
+                                        external_domains_caseless,
+                                        &mut None,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // XML extraction — same logic as `Page::new_streaming`.
+        if !extract_succeeded && !skip_links && p.is_xml {
+            if let Some(html_bytes) = p.html.take() {
+                p.links_stream_xml_links_stream_base(selectors, &html_bytes, links, &None)
+                    .await;
+                p.html = Some(html_bytes);
+                extract_succeeded = true;
+            }
+        }
+
+        if extract_succeeded {
+            let valid_meta =
+                meta_title.is_some() || meta_description.is_some() || meta_og_image.is_some();
+
+            if valid_meta {
+                let mut metadata_inner = Metadata::default();
+                metadata_inner.title = meta_title;
+                metadata_inner.description = meta_description;
+                metadata_inner.image = meta_og_image;
+
+                if metadata_inner.exist() {
+                    set_metadata(&mut p.metadata, &mut metadata_inner);
+                    p.metadata.replace(Box::new(metadata_inner));
+                }
+            }
+
+            update_link_capacity_hint(links.len());
+        }
+
+        (p, extract_succeeded)
     }
 
     /// Instantiate a new page and gather the links.
@@ -4634,74 +5272,36 @@ impl Page {
                     .await;
             } else {
                 let base_input_url = tokio::sync::OnceCell::new();
-
-                let parent_host = &selectors.1[0];
-                // the host schemes
-                let parent_host_scheme = &selectors.1[1];
-                let base_input_domain = &selectors.2; // the domain after redirects
-                let sub_matcher = &selectors.0;
-
                 let base = base.as_deref();
-
-                // original domain to match local pages.
-                let original_page = {
-                    self.set_url_parsed_direct_empty();
-                    self.get_url_parsed_ref().as_ref()
-                };
-
                 let xml_file = self.get_url().ends_with(".xml");
 
-                let mut element_content_handlers =
-                    metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
+                // Snapshot self-borrows up front so the rewriter
+                // closures (which capture &self.external_domains_caseless
+                // + the parsed URL) hold one continuous immutable
+                // borrow on `self`, dropped when the rewriter ends.
+                self.set_url_parsed_direct_empty();
+                let original_page = self.get_url_parsed_ref().as_ref();
+                let external_domains_caseless = &self.external_domains_caseless;
 
-                element_content_handlers.push(element_precompiled!(
-                    compiled_base_element_selector(),
-                    |el| {
-                        if let Some(href) = el.get_attribute("href") {
-                            if let Ok(parsed_base) = Url::parse(&href) {
-                                let _ = base_input_url.set(parsed_base);
-                            }
-                        }
-
-                        Ok(())
-                    }
-                ));
-
-                element_content_handlers.push(element_precompiled!(
-                    if xml_file {
-                        compiled_xml_selector()
-                    } else {
-                        compiled_selector()
+                let element_content_handlers = build_link_extract_handlers(
+                    LinkExtractCtx {
+                        selectors,
+                        external_domains_caseless,
+                        map: &mut map,
+                        links_pages: &mut links_pages,
+                        base_input_url: &base_input_url,
+                        base,
+                        original_page,
+                        ssg_raw_src_cell: None,
+                        ssg_resolved_path_cell: None,
+                        xml_file,
+                        full_resources: false,
+                        skip_links: false,
                     },
-                    |el| {
-                        if let Some(href) = el.get_attribute("href") {
-                            let base = if relative_directory_url(&href) || base.is_none() {
-                                original_page
-                            } else {
-                                base
-                            };
-                            let base = if base_input_url.initialized() {
-                                base_input_url.get()
-                            } else {
-                                base
-                            };
-
-                            push_link(
-                                &base,
-                                &href,
-                                &mut map,
-                                &selectors.0,
-                                parent_host,
-                                parent_host_scheme,
-                                base_input_domain,
-                                sub_matcher,
-                                &self.external_domains_caseless,
-                                &mut links_pages,
-                            );
-                        }
-                        Ok(())
-                    }
-                ));
+                    &mut meta_title,
+                    &mut meta_description,
+                    &mut meta_og_image,
+                );
 
                 let rewriter_settings = lol_html::Settings {
                     element_content_handlers,
@@ -4804,71 +5404,32 @@ impl Page {
                 .await;
         } else {
             let base_input_url = tokio::sync::OnceCell::new();
-
-            let parent_host = &selectors.1[0];
-            let parent_host_scheme = &selectors.1[1];
-            let base_input_domain = &selectors.2;
-            let sub_matcher = &selectors.0;
-
             let base = base.as_deref();
-
-            let original_page = {
-                self.set_url_parsed_direct_empty();
-                self.get_url_parsed_ref().as_ref()
-            };
-
             let xml_file = self.get_url().ends_with(".xml");
 
-            let mut element_content_handlers =
-                metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
+            self.set_url_parsed_direct_empty();
+            let original_page = self.get_url_parsed_ref().as_ref();
+            let external_domains_caseless = &self.external_domains_caseless;
 
-            element_content_handlers.push(element_precompiled!(
-                compiled_base_element_selector(),
-                |el| {
-                    if let Some(href) = el.get_attribute("href") {
-                        if let Ok(parsed_base) = Url::parse(&href) {
-                            let _ = base_input_url.set(parsed_base);
-                        }
-                    }
-                    Ok(())
-                }
-            ));
-
-            element_content_handlers.push(element_precompiled!(
-                if xml_file {
-                    compiled_xml_selector()
-                } else {
-                    compiled_selector()
+            let element_content_handlers = build_link_extract_handlers(
+                LinkExtractCtx {
+                    selectors,
+                    external_domains_caseless,
+                    map: &mut map,
+                    links_pages: &mut links_pages,
+                    base_input_url: &base_input_url,
+                    base,
+                    original_page,
+                    ssg_raw_src_cell: None,
+                    ssg_resolved_path_cell: None,
+                    xml_file,
+                    full_resources: false,
+                    skip_links: false,
                 },
-                |el| {
-                    if let Some(href) = el.get_attribute("href") {
-                        let base = if relative_directory_url(&href) || base.is_none() {
-                            original_page
-                        } else {
-                            base
-                        };
-                        let base = if base_input_url.initialized() {
-                            base_input_url.get()
-                        } else {
-                            base
-                        };
-
-                        push_link(
-                            &base,
-                            &href,
-                            &mut map,
-                            &selectors.0,
-                            parent_host,
-                            parent_host_scheme,
-                            base_input_domain,
-                            sub_matcher,
-                            &self.external_domains_caseless,
-                            &mut links_pages,
-                        );
-                    }
-                    Ok(())
-                }
-            ));
+                &mut meta_title,
+                &mut meta_description,
+                &mut meta_og_image,
+            );
 
             let rewriter_settings = lol_html::Settings {
                 element_content_handlers,
@@ -4982,104 +5543,64 @@ impl Page {
             let sub_matcher = &selectors.0;
 
             let base = base.as_deref();
-
-            let original_page = {
-                self.set_url_parsed_direct_empty();
-                self.get_url_parsed_ref().as_ref()
-            };
-
             let xml_file = self.get_url().ends_with(".xml");
 
-            let mut element_content_handlers =
-                metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
+            self.set_url_parsed_direct_empty();
+            let original_page = self.get_url_parsed_ref().as_ref();
 
-            element_content_handlers.push(element_precompiled!(
-                compiled_base_element_selector(),
-                |el| {
-                    if let Some(href) = el.get_attribute("href") {
-                        if let Ok(parsed_base) = Url::parse(&href) {
-                            let _ = base_input_url.set(parsed_base);
+            {
+                // Inner scope so the helper's `&self.external_domains_caseless`
+                // borrow ends before the post-rewriter SSG block re-borrows
+                // self for `Page::new_page` and `push_link` into map_ssg.
+                let external_domains_caseless = &self.external_domains_caseless;
+                let element_content_handlers = build_link_extract_handlers(
+                    LinkExtractCtx {
+                        selectors,
+                        external_domains_caseless,
+                        map: &mut map,
+                        links_pages: &mut links_pages,
+                        base_input_url: &base_input_url,
+                        base,
+                        original_page,
+                        ssg_raw_src_cell: None,
+                        ssg_resolved_path_cell: Some(&cell),
+                        xml_file,
+                        full_resources: false,
+                        skip_links: false,
+                    },
+                    &mut meta_title,
+                    &mut meta_description,
+                    &mut meta_og_image,
+                );
+
+                let rewriter_settings = lol_html::Settings {
+                    element_content_handlers,
+                    adjust_charset_on_meta_tag: true,
+                    ..lol_html::send::Settings::new_for_handler_types()
+                };
+
+                let mut rewriter =
+                    lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
+
+                let chunk_size = *STREAMING_CHUNK_SIZE;
+                let mut wrote_error = false;
+
+                let _ = crate::utils::uring_fs::read_file_chunked(
+                    spool_path.display().to_string(),
+                    chunk_size,
+                    |chunk| {
+                        if rewriter.write(chunk).is_err() {
+                            wrote_error = true;
+                            return false;
                         }
-                    }
-                    Ok(())
+                        true
+                    },
+                )
+                .await;
+
+                if !wrote_error {
+                    let _ = rewriter.end();
                 }
-            ));
-
-            element_content_handlers.push(element_precompiled!(
-                if xml_file {
-                    compiled_xml_selector()
-                } else {
-                    compiled_selector()
-                },
-                |el| {
-                    if let Some(href) = el.get_attribute("href") {
-                        let base = if relative_directory_url(&href) || base.is_none() {
-                            original_page
-                        } else {
-                            base
-                        };
-                        let base = if base_input_url.initialized() {
-                            base_input_url.get()
-                        } else {
-                            base
-                        };
-
-                        push_link(
-                            &base,
-                            &href,
-                            &mut map,
-                            &selectors.0,
-                            parent_host,
-                            parent_host_scheme,
-                            base_input_domain,
-                            sub_matcher,
-                            &self.external_domains_caseless,
-                            &mut links_pages,
-                        );
-                    }
-                    Ok(())
-                }
-            ));
-
-            // SSG manifest detection — same as links_stream_base_ssg.
-            element_content_handlers.push(lol_html::element!("script[src]", |el| {
-                if let Some(source) = el.get_attribute("src") {
-                    if source.starts_with("/_next/static/") && source.ends_with("/_ssgManifest.js")
-                    {
-                        if let Some(build_path) = base.map(|b| convert_abs_path(b, &source)) {
-                            let _ = cell.set(build_path.to_string());
-                        }
-                    }
-                }
-                Ok(())
-            }));
-
-            let rewriter_settings = lol_html::Settings {
-                element_content_handlers,
-                adjust_charset_on_meta_tag: true,
-                ..lol_html::send::Settings::new_for_handler_types()
-            };
-
-            let mut rewriter = lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
-
-            let chunk_size = *STREAMING_CHUNK_SIZE;
-            let mut wrote_error = false;
-
-            let _ = crate::utils::uring_fs::read_file_chunked(
-                spool_path.display().to_string(),
-                chunk_size,
-                |chunk| {
-                    if rewriter.write(chunk).is_err() {
-                        wrote_error = true;
-                        return false;
-                    }
-                    true
-                },
-            )
-            .await;
-
-            if !wrote_error {
-                let _ = rewriter.end();
             }
 
             // Process SSG manifest if detected during streaming.
@@ -5222,95 +5743,59 @@ impl Page {
 
                 let xml_file = self.get_url().ends_with(".xml");
 
-                let mut element_content_handlers =
-                    metadata_handlers(&mut meta_title, &mut meta_description, &mut meta_og_image);
+                {
+                    // Inner scope so the helper's borrows on `map`,
+                    // `links_pages`, and `&self.external_domains_caseless`
+                    // are released before the post-rewriter SSG block
+                    // mutates `map_ssg` and re-reads them.
+                    let external_domains_caseless = &self.external_domains_caseless;
+                    let element_content_handlers = build_link_extract_handlers(
+                        LinkExtractCtx {
+                            selectors,
+                            external_domains_caseless,
+                            map: &mut map,
+                            links_pages: &mut links_pages,
+                            base_input_url: &base_input_url,
+                            base,
+                            original_page,
+                            ssg_raw_src_cell: None,
+                            ssg_resolved_path_cell: Some(&cell),
+                            xml_file,
+                            full_resources: false,
+                            skip_links: false,
+                        },
+                        &mut meta_title,
+                        &mut meta_description,
+                        &mut meta_og_image,
+                    );
 
-                element_content_handlers.push(element_precompiled!(
-                    compiled_base_element_selector(),
-                    |el| {
-                        if let Some(href) = el.get_attribute("href") {
-                            if let Ok(parsed_base) = Url::parse(&href) {
-                                let _ = base_input_url.set(parsed_base);
-                            }
+                    let rewriter_settings = lol_html::Settings {
+                        element_content_handlers,
+                        adjust_charset_on_meta_tag: true,
+                        ..lol_html::send::Settings::new_for_handler_types()
+                    };
+
+                    let mut rewriter =
+                        lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
+
+                    let mut wrote_error = false;
+                    let should_yield = html.len() > REWRITER_YIELD_THRESHOLD;
+
+                    for (i, chunk) in html.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
+                        if rewriter.write(chunk).is_err() {
+                            wrote_error = true;
+                            break;
                         }
-
-                        Ok(())
-                    }
-                ));
-
-                element_content_handlers.push(element_precompiled!(
-                    if xml_file {
-                        compiled_xml_selector()
-                    } else {
-                        compiled_selector()
-                    },
-                    |el| {
-                        if let Some(href) = el.get_attribute("href") {
-                            let base = if relative_directory_url(&href) || base.is_none() {
-                                original_page
-                            } else {
-                                base
-                            };
-                            let base = if base_input_url.initialized() {
-                                base_input_url.get()
-                            } else {
-                                base
-                            };
-
-                            push_link(
-                                &base,
-                                &href,
-                                &mut map,
-                                &selectors.0,
-                                parent_host,
-                                parent_host_scheme,
-                                base_input_domain,
-                                sub_matcher,
-                                &self.external_domains_caseless,
-                                &mut links_pages,
-                            );
-                        }
-                        Ok(())
-                    }
-                ));
-
-                element_content_handlers.push(lol_html::element!("script[src]", |el| {
-                    if let Some(source) = el.get_attribute("src") {
-                        if source.starts_with("/_next/static/")
-                            && source.ends_with("/_ssgManifest.js")
+                        if should_yield
+                            && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1
                         {
-                            if let Some(build_path) = base.map(|b| convert_abs_path(b, &source)) {
-                                let _ = cell.set(build_path.to_string());
-                            }
+                            tokio::task::yield_now().await;
                         }
                     }
-                    Ok(())
-                }));
 
-                let rewriter_settings = lol_html::Settings {
-                    element_content_handlers,
-                    adjust_charset_on_meta_tag: true,
-                    ..lol_html::send::Settings::new_for_handler_types()
-                };
-
-                let mut rewriter =
-                    lol_html::send::HtmlRewriter::new(rewriter_settings, |_c: &[u8]| {});
-
-                let mut wrote_error = false;
-                let should_yield = html.len() > REWRITER_YIELD_THRESHOLD;
-
-                for (i, chunk) in html.chunks(*STREAMING_CHUNK_SIZE).enumerate() {
-                    if rewriter.write(chunk).is_err() {
-                        wrote_error = true;
-                        break;
+                    if !wrote_error {
+                        let _ = rewriter.end();
                     }
-                    if should_yield && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
-                        tokio::task::yield_now().await;
-                    }
-                }
-
-                if !wrote_error {
-                    let _ = rewriter.end();
                 }
 
                 if let Some(build_ssg_path) = cell.get() {
@@ -5947,6 +6432,7 @@ impl Page {
                                     jar,
                                     configuration.cache_namespace_str(),
                                     &fetch_params,
+                                    None,
                                 )
                                 .await;
 
@@ -6441,6 +6927,7 @@ impl Page {
                                     jar,
                                     configuration.cache_namespace_str(),
                                     &fetch_params,
+                                    None,
                                 )
                                 .await;
 
@@ -6592,84 +7079,36 @@ impl Page {
 
             if let Some(html_bytes_taken) = self.html.take() {
                 {
-                    // let base_domain = &selectors.0;
-                    let parent_host = &selectors.1[0];
-                    // the host schemes
-                    let parent_host_scheme = &selectors.1[1];
-                    let base_input_domain = &selectors.2; // the domain after redirects
-                    let sub_matcher = &selectors.0;
                     let base_input_url = tokio::sync::OnceCell::new();
-
                     let base = base.as_deref();
+                    let xml_file = self.get_url().ends_with(".xml");
 
-                    // original domain to match local pages.
-                    let original_page = {
-                        self.set_url_parsed_direct_empty();
-                        self.get_url_parsed_ref().as_ref().cloned()
-                    };
-
+                    self.set_url_parsed_direct_empty();
+                    let original_page = self.get_url_parsed_ref().as_ref();
                     // Borrow the shared Arc rather than cloning — the borrow
                     // is released at the end of this block when the rewriter
                     // drops, before the outer `self.html = Some(..)` write.
                     let external_domains_caseless = &self.external_domains_caseless;
 
-                    let base_links_settings = lol_html::element!(
-                        "a[href]:not([aria-hidden=\"true\"]),script[src],link[href]",
-                        |el| {
-                            let attribute = if el.tag_name() == "script" {
-                                "src"
-                            } else {
-                                "href"
-                            };
-                            if let Some(href) = el.get_attribute(attribute) {
-                                let base = if relative_directory_url(&href) || base.is_none() {
-                                    original_page.as_ref()
-                                } else {
-                                    base
-                                };
-                                let base = if base_input_url.initialized() {
-                                    base_input_url.get()
-                                } else {
-                                    base
-                                };
-
-                                push_link(
-                                    &base,
-                                    &href,
-                                    &mut map,
-                                    &selectors.0,
-                                    parent_host,
-                                    parent_host_scheme,
-                                    base_input_domain,
-                                    sub_matcher,
-                                    external_domains_caseless,
-                                    &mut links_pages,
-                                );
-                            }
-                            Ok(())
-                        }
-                    );
-
-                    let mut element_content_handlers = metadata_handlers(
+                    let element_content_handlers = build_link_extract_handlers(
+                        LinkExtractCtx {
+                            selectors,
+                            external_domains_caseless,
+                            map: &mut map,
+                            links_pages: &mut links_pages,
+                            base_input_url: &base_input_url,
+                            base,
+                            original_page,
+                            ssg_raw_src_cell: None,
+                            ssg_resolved_path_cell: None,
+                            xml_file,
+                            full_resources: true,
+                            skip_links: false,
+                        },
                         &mut meta_title,
                         &mut meta_description,
                         &mut meta_og_image,
                     );
-
-                    element_content_handlers.push(element_precompiled!(
-                        compiled_base_element_selector(),
-                        |el| {
-                            if let Some(href) = el.get_attribute("href") {
-                                if let Ok(parsed_base) = Url::parse(&href) {
-                                    let _ = base_input_url.set(parsed_base);
-                                }
-                            }
-
-                            Ok(())
-                        }
-                    ));
-
-                    element_content_handlers.push(base_links_settings);
 
                     let settings = lol_html::send::Settings {
                         element_content_handlers,
