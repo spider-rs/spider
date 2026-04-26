@@ -530,6 +530,13 @@ pub struct PageResponse {
     /// Whether the response content was truncated due to a stream error,
     /// chunk idle timeout, or Content-Length mismatch (fewer bytes received than expected).
     pub content_truncated: bool,
+    /// Pre-computed UTF-8 validity of [`Self::content`]. Producers that
+    /// already walk the bytes (HTTP chunk streaming, Chrome CDP HTML
+    /// extraction, disk-spool path) populate this so [`crate::page::build`]
+    /// can skip a redundant full-buffer `simdutf8` scan in the build hot
+    /// path. `None` means the producer did not commit to a value and the
+    /// caller falls back to a one-shot validation.
+    pub is_valid_utf8: Option<bool>,
 }
 
 /// wait for event with timeout
@@ -4583,6 +4590,22 @@ pub async fn fetch_page_html_chrome_base(
         }
     };
 
+    // Every byte source feeding `page_response.content` on this chrome
+    // path originates as a Rust `String`/`Vec<u8>` deserialised from CDP
+    // (chromiumoxide's `outer_html_bytes`, `evaluate_function`,
+    // `content_bytes_streaming`, etc.) — chromium serialises the DOM as
+    // UTF-8 and serde rejects ill-formed strings before bytes reach us,
+    // so the contents are valid UTF-8 by construction.  Stamp the field
+    // unconditionally for non-empty content so `page::build` can skip
+    // the redundant full-buffer scan.
+    if page_response.is_valid_utf8.is_none() {
+        if let Some(bytes) = page_response.content.as_ref() {
+            if !bytes.is_empty() {
+                page_response.is_valid_utf8 = Some(true);
+            }
+        }
+    }
+
     // Treat either in-memory content or a spool handle as "has content"
     // for the downgrade / wait_guard heuristics below.
     let content_absent = page_response.content.is_none() && !has_spool;
@@ -5109,6 +5132,122 @@ pub fn get_cookies(_res: &Response) -> Option<crate::client::header::HeaderMap> 
     None
 }
 
+/// Streaming UTF-8 validator that mirrors what `simdutf8::basic::from_utf8`
+/// would produce on the full buffer, but interleaves the work with the
+/// network read so the build step never has to re-walk the bytes.
+///
+/// The 4-byte carry handles UTF-8 codepoints that straddle a chunk
+/// boundary (a single codepoint is at most 4 bytes, so carrying up to
+/// the last 3 trailing bytes is always sufficient). Once `valid` flips
+/// to `false`, every subsequent call is a no-op — the producer continues
+/// streaming bytes for response-shape detection and download accounting,
+/// but no more validation work runs.
+///
+/// Mirror of the same pattern used by
+/// [`crate::utils::html_spool::spool_write_streaming_vitals`] so the two
+/// validators stay bit-for-bit compatible across the in-memory and
+/// disk-spool paths.
+#[derive(Default)]
+pub(crate) struct Utf8StreamValidator {
+    /// `false` once a hard UTF-8 error has been observed.
+    valid: bool,
+    /// `true` once at least one byte has been fed.  Used so an empty
+    /// stream yields `None` instead of the default `Some(true)`.
+    saw_any: bool,
+    /// Trailing partial sequence carried from the previous chunk
+    /// (length in `carry_len`).  Stays at zero on ASCII / well-aligned
+    /// chunk boundaries.
+    carry: [u8; 4],
+    carry_len: usize,
+    /// Lazily-allocated stitch buffer for the carry-prefixed chunk.
+    /// Allocated at most once per stream regardless of total payload
+    /// size; ASCII payloads never pay this cost.
+    scratch: Vec<u8>,
+}
+
+impl Utf8StreamValidator {
+    /// Feed the next chunk into the validator. Cheap once `valid` is
+    /// already `false` — the SIMD pass is skipped entirely.
+    #[inline]
+    pub(crate) fn feed(&mut self, chunk: &[u8]) {
+        if !self.saw_any {
+            self.saw_any = true;
+            self.valid = true;
+        }
+
+        if !self.valid || chunk.is_empty() {
+            return;
+        }
+
+        // Zero-copy fast path when no codepoint straddled the previous
+        // chunk boundary.  The slow path stitches `carry || chunk`
+        // through a reusable scratch buffer.
+        let to_validate: &[u8] = if self.carry_len == 0 {
+            chunk
+        } else {
+            self.scratch.clear();
+            self.scratch.reserve(self.carry_len + chunk.len());
+            self.scratch
+                .extend_from_slice(&self.carry[..self.carry_len]);
+            self.scratch.extend_from_slice(chunk);
+            &self.scratch[..]
+        };
+
+        match simdutf8::compat::from_utf8(to_validate) {
+            Ok(_) => {
+                self.carry_len = 0;
+            }
+            Err(e) => {
+                if e.error_len().is_some() {
+                    self.valid = false;
+                    self.carry_len = 0;
+                    return;
+                }
+                // Incomplete trailing sequence: carry up to 3 bytes
+                // forward.  Use a stack temp before writing back into
+                // `self.carry` so we do not alias with `to_validate`
+                // (which may borrow from `self.scratch`).
+                let trailing = &to_validate[e.valid_up_to()..];
+                let keep = trailing.len().min(self.carry.len());
+                let mut tmp: [u8; 4] = [0; 4];
+                tmp[..keep].copy_from_slice(&trailing[trailing.len() - keep..]);
+                self.carry[..keep].copy_from_slice(&tmp[..keep]);
+                self.carry_len = keep;
+            }
+        }
+    }
+
+    /// Resolve the final validity verdict.  Returns:
+    /// - `None` if the body is missing or empty (caller can decide what
+    ///   "no content" means — typically treated as not-valid-UTF-8).
+    /// - `Some(false)` if any chunk failed validation, OR if a partial
+    ///   codepoint was left dangling at EOF.
+    /// - `Some(true)` only when every byte has been confirmed valid.
+    ///
+    /// `final_bytes` is a defence in depth: if a producer somehow swaps
+    /// in a different buffer at the end (e.g. truncates `data`), we
+    /// fall back to a single one-shot scan instead of vouching for
+    /// bytes we never validated.  In normal operation the streaming
+    /// state is authoritative and no second pass runs.
+    #[inline]
+    pub(crate) fn finish(mut self, final_bytes: Option<&[u8]>) -> Option<bool> {
+        match final_bytes {
+            Some(bytes) if !bytes.is_empty() => {
+                if !self.saw_any {
+                    // Producer assembled bytes via a path the validator
+                    // never saw — fall back to a single one-shot pass.
+                    return Some(simdutf8::basic::from_utf8(bytes).is_ok());
+                }
+                if self.valid && self.carry_len > 0 {
+                    self.valid = false;
+                }
+                Some(self.valid)
+            }
+            _ => None,
+        }
+    }
+}
+
 /// Block streaming
 pub(crate) fn block_streaming(res: &Response, only_html: bool) -> bool {
     let mut block_streaming = false;
@@ -5190,6 +5329,12 @@ pub async fn handle_response_bytes(
     }
 
     let mut content_truncated = false;
+    // Streaming UTF-8 validity tracker. `None` means we never observed a
+    // body (no chunks arrived); once at least one chunk lands it flips to
+    // `Some(true)` and may later flip to `Some(false)` if any chunk
+    // contains a hard UTF-8 error or a partial trailing sequence is left
+    // dangling at EOF.
+    let mut utf8_state = Utf8StreamValidator::default();
 
     if !block_streaming(&res, only_html) {
         let expected_len = res.content_length();
@@ -5252,6 +5397,10 @@ pub async fn handle_response_bytes(
                         break;
                     }
 
+                    // Validate while bytes are still hot in cache from
+                    // the network read.  Skips remaining work as soon as
+                    // a hard error is observed.
+                    utf8_state.feed(&text);
                     data.extend_from_slice(&text)
                 }
                 Err(e) => {
@@ -5294,6 +5443,7 @@ pub async fn handle_response_bytes(
         remote_addr,
         #[cfg(feature = "cookies")]
         cookies,
+        is_valid_utf8: utf8_state.finish(content.as_deref()),
         content,
         final_url: rd,
         status_code,
@@ -5332,6 +5482,7 @@ where
 
     let mut rewrite_error = false;
     let mut content_truncated = false;
+    let mut utf8_state = Utf8StreamValidator::default();
 
     if !block_streaming(&res, only_html) {
         let expected_len = res.content_length();
@@ -5379,6 +5530,10 @@ where
 
                     data_len += bytes_len;
 
+                    // Validate UTF-8 inline so the build step never has
+                    // to re-walk `collected_bytes`.
+                    utf8_state.feed(&res_bytes);
+
                     if !rewrite_error && rewriter.write(&res_bytes).is_err() {
                         rewrite_error = true;
                     }
@@ -5421,6 +5576,7 @@ where
             remote_addr,
             #[cfg(feature = "cookies")]
             cookies,
+            is_valid_utf8: utf8_state.finish(Some(&collected_bytes[..])),
             final_url,
             status_code,
             anti_bot_tech,
@@ -9898,6 +10054,92 @@ error was encountered while trying to use an ErrorDocument to handle the request
             exit_time < Duration::from_millis(50),
             "tokio::join! should complete promptly after shutdown, took {:?}",
             exit_time
+        );
+    }
+
+    /// Drives `Utf8StreamValidator` chunk-by-chunk over `bytes` (using
+    /// `chunk_size`) and asserts the final verdict matches what
+    /// `simdutf8::basic::from_utf8` would have produced on the full
+    /// buffer.  This is the contract `page::build` relies on to skip
+    /// the redundant scan.
+    fn assert_validator_parity(bytes: &[u8], chunk_size: usize) {
+        let expected = simdutf8::basic::from_utf8(bytes).is_ok();
+        let mut v = Utf8StreamValidator::default();
+        if chunk_size == 0 {
+            v.feed(bytes);
+        } else {
+            for chunk in bytes.chunks(chunk_size) {
+                v.feed(chunk);
+            }
+        }
+        let actual = v.finish(Some(bytes));
+        assert_eq!(
+            actual,
+            Some(expected),
+            "validator parity broken for chunk_size={chunk_size} bytes={:?}",
+            bytes
+        );
+    }
+
+    #[test]
+    fn utf8_stream_validator_ascii_parity() {
+        let bytes = b"<html><body>plain ascii</body></html>";
+        for chunk_size in [0, 1, 2, 4, 8, 16, 1024] {
+            assert_validator_parity(bytes, chunk_size);
+        }
+    }
+
+    #[test]
+    fn utf8_stream_validator_multibyte_split_across_chunks() {
+        // "héllo wörld" – multi-byte codepoints whose 2-byte UTF-8
+        // encodings will straddle small chunk boundaries.
+        let bytes = "héllo wörld 😀 — UTF-8".as_bytes();
+        for chunk_size in [1, 2, 3, 4, 5, 7, 16, bytes.len()] {
+            assert_validator_parity(bytes, chunk_size);
+        }
+    }
+
+    #[test]
+    fn utf8_stream_validator_invalid_bytes() {
+        // Lone continuation byte → hard error mid-stream.
+        let bytes: &[u8] = &[b'<', 0x80, b'>'];
+        for chunk_size in [1, 2, 3] {
+            assert_validator_parity(bytes, chunk_size);
+        }
+    }
+
+    #[test]
+    fn utf8_stream_validator_truncated_codepoint_at_eof() {
+        // 0xC3 starts a 2-byte sequence; on its own it is invalid UTF-8.
+        let bytes: &[u8] = &[b'a', b'b', 0xC3];
+        for chunk_size in [1, 2, 3] {
+            assert_validator_parity(bytes, chunk_size);
+        }
+    }
+
+    #[test]
+    fn utf8_stream_validator_empty_returns_none() {
+        let v = Utf8StreamValidator::default();
+        assert_eq!(v.finish(None), None);
+        let v = Utf8StreamValidator::default();
+        assert_eq!(v.finish(Some(&[][..])), None);
+    }
+
+    #[test]
+    fn utf8_stream_validator_no_feed_falls_back() {
+        // Producer assembled bytes via a path the validator never saw —
+        // finish() must perform a one-shot scan rather than vouching.
+        let v = Utf8StreamValidator::default();
+        assert_eq!(
+            v.finish(Some("héllo".as_bytes())),
+            Some(true),
+            "fallback should validate via simdutf8::basic"
+        );
+        let v = Utf8StreamValidator::default();
+        assert_eq!(
+            v.finish(Some(&[b'<', 0x80, b'>'])),
+            Some(false),
+            "fallback should reject invalid UTF-8"
         );
     }
 }

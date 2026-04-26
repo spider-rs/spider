@@ -2065,10 +2065,19 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
         .as_deref()
         .is_some_and(auto_encoder::is_binary_file);
 
-    let is_valid_utf8 = res
-        .content
-        .as_deref()
-        .is_some_and(|b| simdutf8::basic::from_utf8(b).is_ok());
+    // Hot path: the HTTP and Chrome content producers populate
+    // `res.is_valid_utf8` while the bytes are still warm in cache, so we
+    // can avoid a second cold full-buffer scan here.  When a producer
+    // didn't commit to a value (legacy paths, tests, small static
+    // fillers), fall through to a one-shot validation — those payloads
+    // are tiny and the cost is negligible.
+    let is_valid_utf8 = match res.is_valid_utf8 {
+        Some(v) => v,
+        None => res
+            .content
+            .as_deref()
+            .is_some_and(|b| simdutf8::basic::from_utf8(b).is_ok()),
+    };
 
     let is_xml = res
         .content
