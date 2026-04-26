@@ -6408,33 +6408,88 @@ impl Page {
                                 }
 
                                 let fetch_params = configuration.chrome_fetch_params();
-                                let page_resource = crate::utils::fetch_page_html_chrome_base(
-                                    &html_bytes_taken,
-                                    &new_page,
-                                    true,
-                                    true,
-                                    false,
-                                    Some(&self.url),
-                                    configuration.referer.clone(),
-                                    configuration.max_page_bytes,
-                                    configuration.get_cache_options(),
-                                    {
-                                        #[cfg(feature = "headers")]
+
+                                // Streaming-extraction setup for the chrome
+                                // upgrade. lol_html walks the rendered body
+                                // *during* the chrome chunk pump — same
+                                // single-pass shape as the recursive chrome
+                                // path. When the upgrade succeeds, we drop
+                                // `inner_map` (HTTP-extracted links from the
+                                // un-rendered body) and use chrome's links as
+                                // authoritative; on streaming failure the
+                                // legacy second-pass walk over the assembled
+                                // body still runs, preserving prior behavior.
+                                let chrome_parsed_target = original_page.clone();
+                                let chrome_xml_file = self.get_url().ends_with(".xml");
+                                let chrome_base_input_url = tokio::sync::OnceCell::new();
+                                let mut chrome_meta_title: Option<CompactString> = None;
+                                let mut chrome_meta_description: Option<CompactString> = None;
+                                let mut chrome_meta_og_image: Option<CompactString> = None;
+                                let mut chrome_extracted_links: HashSet<A> =
+                                    HashSet::with_capacity(link_set_capacity());
+                                let mut chrome_extracted_links_pages: Option<HashSet<A>> =
+                                    if links_pages.is_some() {
+                                        Some(HashSet::new())
+                                    } else {
+                                        None
+                                    };
+
+                                let (page_resource, chrome_extract_succeeded) = {
+                                    let chrome_external_domains_caseless =
+                                        &self.external_domains_caseless;
+                                    let chrome_handlers = build_link_extract_handlers(
+                                        LinkExtractCtx {
+                                            selectors,
+                                            external_domains_caseless:
+                                                chrome_external_domains_caseless,
+                                            map: &mut chrome_extracted_links,
+                                            links_pages: &mut chrome_extracted_links_pages,
+                                            base_input_url: &chrome_base_input_url,
+                                            base: chrome_parsed_target.as_ref(),
+                                            original_page: chrome_parsed_target.as_ref(),
+                                            ssg_raw_src_cell: None,
+                                            ssg_resolved_path_cell: None,
+                                            xml_file: chrome_xml_file,
+                                            full_resources: false,
+                                            skip_links: false,
+                                        },
+                                        &mut chrome_meta_title,
+                                        &mut chrome_meta_description,
+                                        &mut chrome_meta_og_image,
+                                    );
+
+                                    let mut chrome_extract =
+                                        ChromeStreamingExtractor::new(chrome_handlers, None, true);
+                                    let resource = crate::utils::fetch_page_html_chrome_base(
+                                        &html_bytes_taken,
+                                        &new_page,
+                                        true,
+                                        true,
+                                        false,
+                                        Some(&self.url),
+                                        configuration.referer.clone(),
+                                        configuration.max_page_bytes,
+                                        configuration.get_cache_options(),
                                         {
-                                            &self.headers
-                                        }
-                                        #[cfg(not(feature = "headers"))]
-                                        {
-                                            &None
-                                        }
-                                    },
-                                    &Some(&configuration.chrome_intercept),
-                                    jar,
-                                    configuration.cache_namespace_str(),
-                                    &fetch_params,
-                                    None,
-                                )
-                                .await;
+                                            #[cfg(feature = "headers")]
+                                            {
+                                                &self.headers
+                                            }
+                                            #[cfg(not(feature = "headers"))]
+                                            {
+                                                &None
+                                            }
+                                        },
+                                        &Some(&configuration.chrome_intercept),
+                                        jar,
+                                        configuration.cache_namespace_str(),
+                                        &fetch_params,
+                                        Some(&mut chrome_extract),
+                                    )
+                                    .await;
+                                    let succeeded = chrome_extract.end();
+                                    (resource, succeeded)
+                                };
 
                                 if let Some(h) = intercept_handle {
                                     let abort_handle = h.abort_handle();
@@ -6450,24 +6505,13 @@ impl Page {
                                 }
 
                                 if let Ok(resource) = page_resource {
-                                    let base = if base_input_url.initialized() {
+                                    let base = if chrome_base_input_url.initialized() {
+                                        chrome_base_input_url.get().cloned().map(Box::new)
+                                    } else if base_input_url.initialized() {
                                         base_input_url.get().cloned().map(Box::new)
                                     } else {
                                         base1.as_deref().cloned().map(Box::new)
                                     };
-
-                                    let page_resource_bytes: &[u8] = match &resource.content {
-                                        Some(h) => h,
-                                        _ => &[],
-                                    };
-
-                                    let extended_map = self
-                                        .links_stream_base::<A>(
-                                            selectors,
-                                            page_resource_bytes,
-                                            &base,
-                                        )
-                                        .await;
 
                                     bytes_transferred = resource.bytes_transferred;
 
@@ -6475,7 +6519,64 @@ impl Page {
 
                                     page_assign(self, new_page);
 
-                                    map.extend(extended_map);
+                                    if chrome_extract_succeeded {
+                                        // Reset HTTP-extracted state — the
+                                        // un-rendered body's link set is now
+                                        // stale; chrome's rendered output is
+                                        // authoritative. Mirrors the chrome
+                                        // path's single-pass behavior.
+                                        inner_map.clear();
+                                        if let Some(ref mut lp) = links_pages {
+                                            lp.clear();
+                                            if let Some(chrome_lp) =
+                                                chrome_extracted_links_pages.take()
+                                            {
+                                                lp.extend(chrome_lp);
+                                            }
+                                        }
+                                        // Override metadata captured during
+                                        // the HTTP pre-pass with chrome's
+                                        // rendered metadata when present.
+                                        if chrome_meta_title.is_some() {
+                                            meta_title = chrome_meta_title;
+                                        }
+                                        if chrome_meta_description.is_some() {
+                                            meta_description = chrome_meta_description;
+                                        }
+                                        if chrome_meta_og_image.is_some() {
+                                            meta_og_image = chrome_meta_og_image;
+                                        }
+                                        map.extend(chrome_extracted_links);
+                                    } else {
+                                        // Streaming declined (XML carve-out,
+                                        // mid-stream rewriter error, etc.) —
+                                        // run the legacy second-pass walk
+                                        // over the rendered body so the link
+                                        // set still reflects chrome. `take`
+                                        // the html bytes to release the
+                                        // immutable borrow on `self.html`
+                                        // before `links_stream_base` reborrows
+                                        // `self` mutably.
+                                        let fallback_bytes = self.html.take();
+                                        let extended_map = self
+                                            .links_stream_base::<A>(
+                                                selectors,
+                                                fallback_bytes.as_deref().unwrap_or(&[]),
+                                                &base,
+                                            )
+                                            .await;
+                                        if let Some(b) = fallback_bytes {
+                                            self.html = Some(b);
+                                        }
+                                        // Same reset rationale — chrome ran,
+                                        // so HTTP-pass links are stale even
+                                        // when the rewriter declined.
+                                        inner_map.clear();
+                                        if let Some(ref mut lp) = links_pages {
+                                            lp.clear();
+                                        }
+                                        map.extend(extended_map);
+                                    }
                                 };
                             }
                         }
@@ -6903,33 +7004,86 @@ impl Page {
                                 }
 
                                 let fetch_params = configuration.chrome_fetch_params();
-                                let page_resource = crate::utils::fetch_page_html_chrome_base(
-                                    &html_bytes_taken,
-                                    &new_page,
-                                    true,
-                                    true,
-                                    false,
-                                    Some(&self.url),
-                                    configuration.referer.clone(),
-                                    configuration.max_page_bytes,
-                                    configuration.get_cache_options(),
-                                    {
-                                        #[cfg(feature = "headers")]
+
+                                // Streaming-extraction setup for chrome
+                                // upgrade — see the non-`full_resources`
+                                // variant of `links_stream_smart` for the
+                                // full rationale. Same single-pass shape:
+                                // lol_html walks the rendered body during
+                                // chrome chunk pump; on success drop the
+                                // HTTP-pre-pass `inner_map` and use
+                                // chrome's links as authoritative.
+                                let chrome_parsed_target = original_page.clone();
+                                let chrome_xml_file = self.get_url().ends_with(".xml");
+                                let chrome_base_input_url = tokio::sync::OnceCell::new();
+                                let mut chrome_meta_title: Option<CompactString> = None;
+                                let mut chrome_meta_description: Option<CompactString> = None;
+                                let mut chrome_meta_og_image: Option<CompactString> = None;
+                                let mut chrome_extracted_links: HashSet<A> =
+                                    HashSet::with_capacity(link_set_capacity());
+                                let mut chrome_extracted_links_pages: Option<HashSet<A>> =
+                                    if links_pages.is_some() {
+                                        Some(HashSet::new())
+                                    } else {
+                                        None
+                                    };
+
+                                let (page_resource, chrome_extract_succeeded) = {
+                                    let chrome_external_domains_caseless =
+                                        &self.external_domains_caseless;
+                                    let chrome_handlers = build_link_extract_handlers(
+                                        LinkExtractCtx {
+                                            selectors,
+                                            external_domains_caseless:
+                                                chrome_external_domains_caseless,
+                                            map: &mut chrome_extracted_links,
+                                            links_pages: &mut chrome_extracted_links_pages,
+                                            base_input_url: &chrome_base_input_url,
+                                            base: chrome_parsed_target.as_ref(),
+                                            original_page: chrome_parsed_target.as_ref(),
+                                            ssg_raw_src_cell: None,
+                                            ssg_resolved_path_cell: None,
+                                            xml_file: chrome_xml_file,
+                                            full_resources: true,
+                                            skip_links: false,
+                                        },
+                                        &mut chrome_meta_title,
+                                        &mut chrome_meta_description,
+                                        &mut chrome_meta_og_image,
+                                    );
+
+                                    let mut chrome_extract =
+                                        ChromeStreamingExtractor::new(chrome_handlers, None, true);
+                                    let resource = crate::utils::fetch_page_html_chrome_base(
+                                        &html_bytes_taken,
+                                        &new_page,
+                                        true,
+                                        true,
+                                        false,
+                                        Some(&self.url),
+                                        configuration.referer.clone(),
+                                        configuration.max_page_bytes,
+                                        configuration.get_cache_options(),
                                         {
-                                            &self.headers
-                                        }
-                                        #[cfg(not(feature = "headers"))]
-                                        {
-                                            &None
-                                        }
-                                    },
-                                    &Some(&configuration.chrome_intercept),
-                                    jar,
-                                    configuration.cache_namespace_str(),
-                                    &fetch_params,
-                                    None,
-                                )
-                                .await;
+                                            #[cfg(feature = "headers")]
+                                            {
+                                                &self.headers
+                                            }
+                                            #[cfg(not(feature = "headers"))]
+                                            {
+                                                &None
+                                            }
+                                        },
+                                        &Some(&configuration.chrome_intercept),
+                                        jar,
+                                        configuration.cache_namespace_str(),
+                                        &fetch_params,
+                                        Some(&mut chrome_extract),
+                                    )
+                                    .await;
+                                    let succeeded = chrome_extract.end();
+                                    (resource, succeeded)
+                                };
 
                                 if let Some(h) = intercept_handle {
                                     let abort_handle = h.abort_handle();
@@ -6945,26 +7099,52 @@ impl Page {
                                 }
 
                                 if let Ok(v) = page_resource {
-                                    let resource_bytes: &[u8] = match &v.content {
-                                        Some(h) => h,
-                                        _ => &[],
-                                    };
-
-                                    let extended_map = self
-                                        .links_stream_base::<A>(
-                                            selectors,
-                                            resource_bytes,
-                                            &base.as_deref().cloned().map(Box::new),
-                                        )
-                                        .await;
-
                                     bytes_transferred = v.bytes_transferred;
-
                                     let new_page = build(&self.url, v);
-
                                     page_assign(self, new_page);
 
-                                    map.extend(extended_map)
+                                    if chrome_extract_succeeded {
+                                        // Reset HTTP-pre-pass state — chrome's
+                                        // rendered output is authoritative.
+                                        inner_map.clear();
+                                        if let Some(ref mut lp) = links_pages {
+                                            lp.clear();
+                                            if let Some(chrome_lp) =
+                                                chrome_extracted_links_pages.take()
+                                            {
+                                                lp.extend(chrome_lp);
+                                            }
+                                        }
+                                        if chrome_meta_title.is_some() {
+                                            meta_title = chrome_meta_title;
+                                        }
+                                        if chrome_meta_description.is_some() {
+                                            meta_description = chrome_meta_description;
+                                        }
+                                        if chrome_meta_og_image.is_some() {
+                                            meta_og_image = chrome_meta_og_image;
+                                        }
+                                        map.extend(chrome_extracted_links);
+                                    } else {
+                                        // Streaming declined — legacy second
+                                        // pass over rendered bytes.
+                                        let fallback_bytes = self.html.take();
+                                        let extended_map = self
+                                            .links_stream_base::<A>(
+                                                selectors,
+                                                fallback_bytes.as_deref().unwrap_or(&[]),
+                                                &base.as_deref().cloned().map(Box::new),
+                                            )
+                                            .await;
+                                        if let Some(b) = fallback_bytes {
+                                            self.html = Some(b);
+                                        }
+                                        inner_map.clear();
+                                        if let Some(ref mut lp) = links_pages {
+                                            lp.clear();
+                                        }
+                                        map.extend(extended_map);
+                                    }
                                 }
                             }
                         }
