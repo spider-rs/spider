@@ -6422,17 +6422,19 @@ impl Page {
                                 let chrome_parsed_target = original_page.clone();
                                 let chrome_xml_file = self.get_url().ends_with(".xml");
                                 let chrome_base_input_url = tokio::sync::OnceCell::new();
-                                let mut chrome_meta_title: Option<CompactString> = None;
-                                let mut chrome_meta_description: Option<CompactString> = None;
-                                let mut chrome_meta_og_image: Option<CompactString> = None;
+                                // Discarded sinks for metadata + page_links —
+                                // the HTTP pre-pass already wrote to the
+                                // outer `meta_*` / `links_pages`, and we
+                                // preserve that legacy behavior. These exist
+                                // only because `build_link_extract_handlers`
+                                // requires the `&mut` slots.
+                                let mut chrome_meta_title_unused: Option<CompactString> = None;
+                                let mut chrome_meta_description_unused: Option<CompactString> =
+                                    None;
+                                let mut chrome_meta_og_image_unused: Option<CompactString> = None;
+                                let mut chrome_links_pages_unused: Option<HashSet<A>> = None;
                                 let mut chrome_extracted_links: HashSet<A> =
                                     HashSet::with_capacity(link_set_capacity());
-                                let mut chrome_extracted_links_pages: Option<HashSet<A>> =
-                                    if links_pages.is_some() {
-                                        Some(HashSet::new())
-                                    } else {
-                                        None
-                                    };
 
                                 let (page_resource, chrome_extract_succeeded) = {
                                     let chrome_external_domains_caseless =
@@ -6443,7 +6445,7 @@ impl Page {
                                             external_domains_caseless:
                                                 chrome_external_domains_caseless,
                                             map: &mut chrome_extracted_links,
-                                            links_pages: &mut chrome_extracted_links_pages,
+                                            links_pages: &mut chrome_links_pages_unused,
                                             base_input_url: &chrome_base_input_url,
                                             base: chrome_parsed_target.as_ref(),
                                             original_page: chrome_parsed_target.as_ref(),
@@ -6453,9 +6455,9 @@ impl Page {
                                             full_resources: false,
                                             skip_links: false,
                                         },
-                                        &mut chrome_meta_title,
-                                        &mut chrome_meta_description,
-                                        &mut chrome_meta_og_image,
+                                        &mut chrome_meta_title_unused,
+                                        &mut chrome_meta_description_unused,
+                                        &mut chrome_meta_og_image_unused,
                                     );
 
                                     let mut chrome_extract =
@@ -6505,9 +6507,7 @@ impl Page {
                                 }
 
                                 if let Ok(resource) = page_resource {
-                                    let base = if chrome_base_input_url.initialized() {
-                                        chrome_base_input_url.get().cloned().map(Box::new)
-                                    } else if base_input_url.initialized() {
+                                    let base = if base_input_url.initialized() {
                                         base_input_url.get().cloned().map(Box::new)
                                     } else {
                                         base1.as_deref().cloned().map(Box::new)
@@ -6519,46 +6519,28 @@ impl Page {
 
                                     page_assign(self, new_page);
 
-                                    if chrome_extract_succeeded {
-                                        // Reset HTTP-extracted state — the
-                                        // un-rendered body's link set is now
-                                        // stale; chrome's rendered output is
-                                        // authoritative. Mirrors the chrome
-                                        // path's single-pass behavior.
-                                        inner_map.clear();
-                                        if let Some(ref mut lp) = links_pages {
-                                            lp.clear();
-                                            if let Some(chrome_lp) =
-                                                chrome_extracted_links_pages.take()
-                                            {
-                                                lp.extend(chrome_lp);
-                                            }
-                                        }
-                                        // Override metadata captured during
-                                        // the HTTP pre-pass with chrome's
-                                        // rendered metadata when present.
-                                        if chrome_meta_title.is_some() {
-                                            meta_title = chrome_meta_title;
-                                        }
-                                        if chrome_meta_description.is_some() {
-                                            meta_description = chrome_meta_description;
-                                        }
-                                        if chrome_meta_og_image.is_some() {
-                                            meta_og_image = chrome_meta_og_image;
-                                        }
-                                        map.extend(chrome_extracted_links);
+                                    // Behavior parity with the legacy
+                                    // `links_stream_base` second-pass over the
+                                    // rendered body. When the streaming
+                                    // extractor walked the body cleanly during
+                                    // the chunk pump we use its link set
+                                    // directly (single-pass perf win); on
+                                    // streaming decline (XML carve-out,
+                                    // mid-stream rewriter error) the second
+                                    // walk runs as before. Either way the
+                                    // outer `map.extend(inner_map)` below
+                                    // still merges the HTTP pre-pass links —
+                                    // bit-identical final link set vs prior
+                                    // releases.
+                                    let extended_map: HashSet<A> = if chrome_extract_succeeded {
+                                        chrome_extracted_links
                                     } else {
-                                        // Streaming declined (XML carve-out,
-                                        // mid-stream rewriter error, etc.) —
-                                        // run the legacy second-pass walk
-                                        // over the rendered body so the link
-                                        // set still reflects chrome. `take`
-                                        // the html bytes to release the
-                                        // immutable borrow on `self.html`
-                                        // before `links_stream_base` reborrows
-                                        // `self` mutably.
+                                        // `take` the html bytes to release
+                                        // the immutable borrow on `self.html`
+                                        // before `links_stream_base`
+                                        // reborrows `self` mutably.
                                         let fallback_bytes = self.html.take();
-                                        let extended_map = self
+                                        let m = self
                                             .links_stream_base::<A>(
                                                 selectors,
                                                 fallback_bytes.as_deref().unwrap_or(&[]),
@@ -6568,15 +6550,10 @@ impl Page {
                                         if let Some(b) = fallback_bytes {
                                             self.html = Some(b);
                                         }
-                                        // Same reset rationale — chrome ran,
-                                        // so HTTP-pass links are stale even
-                                        // when the rewriter declined.
-                                        inner_map.clear();
-                                        if let Some(ref mut lp) = links_pages {
-                                            lp.clear();
-                                        }
-                                        map.extend(extended_map);
-                                    }
+                                        m
+                                    };
+
+                                    map.extend(extended_map);
                                 };
                             }
                         }
@@ -7016,17 +6993,16 @@ impl Page {
                                 let chrome_parsed_target = original_page.clone();
                                 let chrome_xml_file = self.get_url().ends_with(".xml");
                                 let chrome_base_input_url = tokio::sync::OnceCell::new();
-                                let mut chrome_meta_title: Option<CompactString> = None;
-                                let mut chrome_meta_description: Option<CompactString> = None;
-                                let mut chrome_meta_og_image: Option<CompactString> = None;
+                                // Discarded sinks for metadata + page_links —
+                                // see the non-`full_resources` variant for
+                                // the rationale.
+                                let mut chrome_meta_title_unused: Option<CompactString> = None;
+                                let mut chrome_meta_description_unused: Option<CompactString> =
+                                    None;
+                                let mut chrome_meta_og_image_unused: Option<CompactString> = None;
+                                let mut chrome_links_pages_unused: Option<HashSet<A>> = None;
                                 let mut chrome_extracted_links: HashSet<A> =
                                     HashSet::with_capacity(link_set_capacity());
-                                let mut chrome_extracted_links_pages: Option<HashSet<A>> =
-                                    if links_pages.is_some() {
-                                        Some(HashSet::new())
-                                    } else {
-                                        None
-                                    };
 
                                 let (page_resource, chrome_extract_succeeded) = {
                                     let chrome_external_domains_caseless =
@@ -7037,7 +7013,7 @@ impl Page {
                                             external_domains_caseless:
                                                 chrome_external_domains_caseless,
                                             map: &mut chrome_extracted_links,
-                                            links_pages: &mut chrome_extracted_links_pages,
+                                            links_pages: &mut chrome_links_pages_unused,
                                             base_input_url: &chrome_base_input_url,
                                             base: chrome_parsed_target.as_ref(),
                                             original_page: chrome_parsed_target.as_ref(),
@@ -7047,9 +7023,9 @@ impl Page {
                                             full_resources: true,
                                             skip_links: false,
                                         },
-                                        &mut chrome_meta_title,
-                                        &mut chrome_meta_description,
-                                        &mut chrome_meta_og_image,
+                                        &mut chrome_meta_title_unused,
+                                        &mut chrome_meta_description_unused,
+                                        &mut chrome_meta_og_image_unused,
                                     );
 
                                     let mut chrome_extract =
@@ -7103,33 +7079,21 @@ impl Page {
                                     let new_page = build(&self.url, v);
                                     page_assign(self, new_page);
 
-                                    if chrome_extract_succeeded {
-                                        // Reset HTTP-pre-pass state — chrome's
-                                        // rendered output is authoritative.
-                                        inner_map.clear();
-                                        if let Some(ref mut lp) = links_pages {
-                                            lp.clear();
-                                            if let Some(chrome_lp) =
-                                                chrome_extracted_links_pages.take()
-                                            {
-                                                lp.extend(chrome_lp);
-                                            }
-                                        }
-                                        if chrome_meta_title.is_some() {
-                                            meta_title = chrome_meta_title;
-                                        }
-                                        if chrome_meta_description.is_some() {
-                                            meta_description = chrome_meta_description;
-                                        }
-                                        if chrome_meta_og_image.is_some() {
-                                            meta_og_image = chrome_meta_og_image;
-                                        }
-                                        map.extend(chrome_extracted_links);
+                                    // Behavior parity with the legacy
+                                    // `links_stream_base` second-pass — see
+                                    // the non-`full_resources` variant for
+                                    // the full rationale. Streaming-extracted
+                                    // links replace the post-fetch walk on
+                                    // success; legacy walk runs on decline.
+                                    // Outer `map.extend(inner_map)` still
+                                    // merges HTTP pre-pass links so the
+                                    // final link set is bit-identical with
+                                    // prior releases.
+                                    let extended_map: HashSet<A> = if chrome_extract_succeeded {
+                                        chrome_extracted_links
                                     } else {
-                                        // Streaming declined — legacy second
-                                        // pass over rendered bytes.
                                         let fallback_bytes = self.html.take();
-                                        let extended_map = self
+                                        let m = self
                                             .links_stream_base::<A>(
                                                 selectors,
                                                 fallback_bytes.as_deref().unwrap_or(&[]),
@@ -7139,12 +7103,10 @@ impl Page {
                                         if let Some(b) = fallback_bytes {
                                             self.html = Some(b);
                                         }
-                                        inner_map.clear();
-                                        if let Some(ref mut lp) = links_pages {
-                                            lp.clear();
-                                        }
-                                        map.extend(extended_map);
-                                    }
+                                        m
+                                    };
+
+                                    map.extend(extended_map);
                                 }
                             }
                         }
