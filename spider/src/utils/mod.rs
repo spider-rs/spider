@@ -1153,66 +1153,78 @@ impl ChromeHTTPReqRes {
 }
 
 #[cfg(feature = "chrome")]
-/// Is a cyper mismatch.
-fn is_cipher_mismatch(err: &chromiumoxide::error::CdpError) -> bool {
+lazy_static::lazy_static! {
+    /// Aho-Corasick automaton for `net::ERR_SSL_VERSION_OR_CIPHER_MISMATCH`
+    /// detection in CDP error messages. Single-pattern AC compiles down to
+    /// the same SIMD-accelerated memmem path as `str::contains` with
+    /// effectively zero overhead, but routes through the same matcher type
+    /// as the multi-pattern variants below for symmetry.
+    static ref CHROME_CIPHER_MISMATCH_AC: aho_corasick::AhoCorasick =
+        aho_corasick::AhoCorasick::new(["net::ERR_SSL_VERSION_OR_CIPHER_MISMATCH"])
+            .expect("valid pattern");
+
+    /// Aho-Corasick automaton for the SSL-protocol / cert-name / cert-authority
+    /// trio that the strip-www fallback responds to. Three patterns scanned in
+    /// a single SIMD-accelerated O(n) pass over the haystack — beats running
+    /// three sequential `str::contains` calls because each `contains` re-walks
+    /// the string from the start.
+    static ref CHROME_SSL_PROTOCOL_AC: aho_corasick::AhoCorasick = aho_corasick::AhoCorasick::new([
+        "net::ERR_SSL_PROTOCOL_ERROR",
+        "net::ERR_CERT_COMMON_NAME_INVALID",
+        "net::ERR_CERT_AUTHORITY_INVALID",
+    ]).expect("valid patterns");
+
+    /// Combined automaton for "any chrome SSL-class failure" — used after a
+    /// fallback retry to bucket cipher-mismatch + protocol-error + cert-name
+    /// + cert-authority into a single permanent classification. Four patterns
+    /// in one O(n) pass instead of four sequential `contains` calls.
+    static ref CHROME_SSL_ANY_AC: aho_corasick::AhoCorasick = aho_corasick::AhoCorasick::new([
+        "net::ERR_SSL_VERSION_OR_CIPHER_MISMATCH",
+        "net::ERR_SSL_PROTOCOL_ERROR",
+        "net::ERR_CERT_COMMON_NAME_INVALID",
+        "net::ERR_CERT_AUTHORITY_INVALID",
+    ]).expect("valid patterns");
+}
+
+#[cfg(feature = "chrome")]
+/// Run an Aho-Corasick automaton against a CDP error. Hot-path-aware:
+/// `ChromeMessage` borrows the message string with zero allocations; other
+/// variants materialise Display exactly once and scan that buffer.
+#[inline]
+fn cdp_error_matches(err: &chromiumoxide::error::CdpError, ac: &aho_corasick::AhoCorasick) -> bool {
     match err {
-        chromiumoxide::error::CdpError::ChromeMessage(msg) => {
-            msg.contains("net::ERR_SSL_VERSION_OR_CIPHER_MISMATCH")
-        }
-        other => other
-            .to_string()
-            .contains("net::ERR_SSL_VERSION_OR_CIPHER_MISMATCH"),
+        // Fast path: borrow the message — zero allocations.
+        chromiumoxide::error::CdpError::ChromeMessage(msg) => ac.is_match(msg.as_str()),
+        // Slow path: materialise Display once, then a single AC pass.
+        other => ac.is_match(other.to_string().as_str()),
     }
 }
 
 #[cfg(feature = "chrome")]
+/// Is a cipher mismatch.
+#[inline]
+fn is_cipher_mismatch(err: &chromiumoxide::error::CdpError) -> bool {
+    cdp_error_matches(err, &CHROME_CIPHER_MISMATCH_AC)
+}
+
+#[cfg(feature = "chrome")]
 /// Is an SSL protocol error (e.g. multi-subdomain www. cert issues).
+#[inline]
 fn is_ssl_protocol_error(err: &chromiumoxide::error::CdpError) -> bool {
-    match err {
-        chromiumoxide::error::CdpError::ChromeMessage(msg) => {
-            msg.contains("net::ERR_SSL_PROTOCOL_ERROR")
-                || msg.contains("net::ERR_CERT_COMMON_NAME_INVALID")
-                || msg.contains("net::ERR_CERT_AUTHORITY_INVALID")
-        }
-        other => {
-            let s = other.to_string();
-            s.contains("net::ERR_SSL_PROTOCOL_ERROR")
-                || s.contains("net::ERR_CERT_COMMON_NAME_INVALID")
-                || s.contains("net::ERR_CERT_AUTHORITY_INVALID")
-        }
-    }
+    cdp_error_matches(err, &CHROME_SSL_PROTOCOL_AC)
 }
 
 #[cfg(feature = "chrome")]
 /// Combined cipher-mismatch / SSL-protocol detector — used after a fallback
 /// retry already failed, where we'd otherwise call `is_cipher_mismatch` AND
-/// `is_ssl_protocol_error` back-to-back. The combined helper does at most
-/// ONE `to_string()` allocation per call (the standalone helpers each call
-/// `to_string()` independently when the error is not a `ChromeMessage`,
-/// which would double the allocation cost on the slow path). Hot-path-aware:
-/// the `ChromeMessage` fast path borrows the message string and never
-/// allocates; the slow path falls through to a single Display materialisation.
+/// `is_ssl_protocol_error` back-to-back. Single AC pass over the haystack
+/// (SIMD-accelerated via aho-corasick's `memchr`-backed prefilter) instead
+/// of two separate scans + four sequential `str::contains` calls. ChromeMessage
+/// fast path stays zero-allocation; non-ChromeMessage variants materialise
+/// Display exactly once.
 #[inline]
 fn is_chrome_ssl_failure(err: &chromiumoxide::error::CdpError) -> bool {
-    use chromiumoxide::error::CdpError;
-    match err {
-        // Fast path: borrow the message — zero allocations.
-        CdpError::ChromeMessage(msg) => {
-            msg.contains("net::ERR_SSL_VERSION_OR_CIPHER_MISMATCH")
-                || msg.contains("net::ERR_SSL_PROTOCOL_ERROR")
-                || msg.contains("net::ERR_CERT_COMMON_NAME_INVALID")
-                || msg.contains("net::ERR_CERT_AUTHORITY_INVALID")
-        }
-        // Slow path: materialise Display once, then run all four substring
-        // checks against the same buffer.
-        other => {
-            let s = other.to_string();
-            s.contains("net::ERR_SSL_VERSION_OR_CIPHER_MISMATCH")
-                || s.contains("net::ERR_SSL_PROTOCOL_ERROR")
-                || s.contains("net::ERR_CERT_COMMON_NAME_INVALID")
-                || s.contains("net::ERR_CERT_AUTHORITY_INVALID")
-        }
-    }
+    cdp_error_matches(err, &CHROME_SSL_ANY_AC)
 }
 
 #[cfg(feature = "chrome")]
