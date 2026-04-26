@@ -2402,12 +2402,30 @@ impl lol_html::OutputSink for NoopOutputSink {
     fn handle_chunk(&mut self, _: &[u8]) {}
 }
 
+/// Magic-byte sniff window — first chunk's leading bytes feed
+/// `auto_encoder::is_binary_file` to short-circuit the rewriter when
+/// chrome returns binary asset content (image, PDF, font, archive).
+/// 64 bytes is enough to cover every magic header in practice (PNG
+/// = 8, PDF = 4, JPEG = 3, GIF = 6, ZIP = 4, etc.) without flushing
+/// the L1 line.
+#[cfg(feature = "chrome")]
+const ASSET_SNIFF_BYTES: usize = 64;
+
 #[cfg(feature = "chrome")]
 #[allow(dead_code)] // wired in upcoming macro changes
 pub(crate) struct ChromeStreamingExtractor<'h> {
     rewriter: lol_html::send::HtmlRewriter<'h, NoopOutputSink>,
-    /// Tripped when a `write` returns Err (parser rejection / OOM).
+    /// Tripped when a `write` returns Err (parser rejection / OOM)
+    /// **or** when the first-chunk sniff detects binary asset bytes
+    /// (PNG, JPEG, PDF, etc.).  In the asset case the rewriter is
+    /// skipped from then on — chrome still streams the body to the
+    /// caller's accumulator, but we don't waste CPU pushing binary
+    /// bytes through `lol_html`.
     write_failed: bool,
+    /// `false` until the first chunk arrives.  We sniff up to
+    /// [`ASSET_SNIFF_BYTES`] of that chunk for binary magic bytes and
+    /// set `write_failed` accordingly, then refuse the rewriter.
+    sniffed: bool,
     /// Set by [`mark_streamed`] when the chrome chunk pump confirms it
     /// fed every chunk through to completion.  Without this flag,
     /// `end()` defaults to `false` so callers fall back to the legacy
@@ -2442,16 +2460,37 @@ impl<'h> ChromeStreamingExtractor<'h> {
         Self {
             rewriter: lol_html::send::HtmlRewriter::new(settings, NoopOutputSink),
             write_failed: false,
+            sniffed: false,
             streamed_through: false,
         }
     }
 
     /// Feed a chunk to the rewriter.  Idempotent on prior failure —
     /// further writes are silently ignored after the first error so
-    /// the chunk-pump stays cheap.
+    /// the chunk-pump stays cheap.  On the first chunk we sniff up to
+    /// [`ASSET_SNIFF_BYTES`] of leading bytes via
+    /// `auto_encoder::is_binary_file`; binary content (images, PDFs,
+    /// fonts, archives) flips `write_failed` so `lol_html` is bypassed
+    /// — the rewriter would just produce noise on non-text bytes.
     #[inline]
     pub(crate) fn write(&mut self, chunk: &[u8]) {
-        if !self.write_failed && self.rewriter.write(chunk).is_err() {
+        if self.write_failed {
+            return;
+        }
+        if !self.sniffed {
+            self.sniffed = true;
+            if !chunk.is_empty() {
+                let head_len = chunk.len().min(ASSET_SNIFF_BYTES);
+                if auto_encoder::is_binary_file(&chunk[..head_len]) {
+                    // Asset detected mid-stream — invalidate the
+                    // rewriter. Caller's `Vec<u8>` accumulator still
+                    // captures the bytes for downstream consumers.
+                    self.write_failed = true;
+                    return;
+                }
+            }
+        }
+        if self.rewriter.write(chunk).is_err() {
             self.write_failed = true;
         }
     }
@@ -3555,7 +3594,16 @@ impl Page {
         let parsed_target = Url::parse(url).ok();
         let xml_file = url.ends_with(".xml");
         let base_input_url = tokio::sync::OnceCell::new();
-        let ssg_cell = if ssg_enabled && !skip_links && !xml_file {
+        // Pre-bytes asset gate: URLs ending in known binary extensions
+        // (.png/.jpg/.pdf/.zip/etc.) skip the streaming pump entirely.
+        // The chrome fetch still runs because callers (e.g.
+        // `chrome_page_post_process!`) need the bytes for headers /
+        // anti-bot / signature, but `lol_html` doesn't see them and
+        // `extract_succeeded` stays false so the post-process layer's
+        // `is_binary_spool_aware` check returns Default for the link
+        // set — same as the legacy second-pass behavior.
+        let asset_url = is_asset_url(url);
+        let ssg_cell = if ssg_enabled && !skip_links && !xml_file && !asset_url {
             Some(tokio::sync::OnceCell::new())
         } else {
             None
@@ -3565,7 +3613,27 @@ impl Page {
         let mut meta_description: Option<CompactString> = None;
         let mut meta_og_image: Option<CompactString> = None;
 
-        let (page_out, mut extract_succeeded) = {
+        let (page_out, mut extract_succeeded) = if asset_url {
+            // Skip the rewriter setup entirely. `new_base` still runs
+            // the chrome fetch but with `extract = None`, so no
+            // streaming work happens.
+            let p = Self::new_base(
+                url,
+                client,
+                page,
+                page_set,
+                referrer,
+                max_page_bytes,
+                cache_options,
+                None,
+                None,
+                cache_namespace,
+                params,
+                None,
+            )
+            .await;
+            (p, false)
+        } else {
             let handlers = build_link_extract_handlers(
                 LinkExtractCtx {
                     selectors,
@@ -3799,7 +3867,9 @@ impl Page {
         let parsed_target = Url::parse(url).ok();
         let xml_file = url.ends_with(".xml");
         let base_input_url = tokio::sync::OnceCell::new();
-        let ssg_cell = if ssg_enabled && !skip_links && !xml_file {
+        // Pre-bytes asset gate — see `Page::new_streaming` for rationale.
+        let asset_url = is_asset_url(url);
+        let ssg_cell = if ssg_enabled && !skip_links && !xml_file && !asset_url {
             Some(tokio::sync::OnceCell::new())
         } else {
             None
@@ -3809,7 +3879,25 @@ impl Page {
         let mut meta_description: Option<CompactString> = None;
         let mut meta_og_image: Option<CompactString> = None;
 
-        let (page_out, mut extract_succeeded) = {
+        let (page_out, mut extract_succeeded) = if asset_url {
+            // Skip the rewriter setup entirely — see `Page::new_streaming`.
+            let p = Self::new_base(
+                url,
+                client,
+                page,
+                page_set,
+                referrer,
+                max_page_bytes,
+                cache_options,
+                seeded_resource,
+                jar,
+                cache_namespace,
+                params,
+                None,
+            )
+            .await;
+            (p, false)
+        } else {
             let handlers = build_link_extract_handlers(
                 LinkExtractCtx {
                     selectors,
