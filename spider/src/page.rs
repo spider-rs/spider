@@ -1911,8 +1911,32 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
         };
     }
 
+    // Empty / shell body but success status — upstream returned 200 with
+    // no usable payload (proxy edge-blocked, backend hiccup, blank shell).
+    // Reclassify to 504 GATEWAY_TIMEOUT so downstream consumers see
+    // failure on `status_code` instead of having to gate on
+    // `should_retry` + `is_empty()` separately. Mirrors the chrome_error
+    // pattern above; truncated bodies are preserved (a partial body is
+    // real data, not a silent failure). Under the `balance` feature
+    // bytes can live on disk via `content_spool` while `res.content` is
+    // `None`; that is real data, so the reclassification is suppressed
+    // when a spool handle is present. `validate_empty` is computed once
+    // here and reused by `resource_found` below to keep the perf cost
+    // identical to the original single call.
+    let success_initial = res.status_code.is_success() || res.status_code == StatusCode::NOT_FOUND;
+    let resource_found_initial = validate_empty(&res.content, success_initial);
+    let empty_success_eligible = !chrome_error
+        && res.status_code.is_success()
+        && !res.content_truncated
+        && !resource_found_initial;
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+    let empty_success_eligible = empty_success_eligible && res.content_spool.is_none();
+    if empty_success_eligible {
+        res.status_code = StatusCode::GATEWAY_TIMEOUT;
+    }
+
     let success = res.status_code.is_success() || res.status_code == StatusCode::NOT_FOUND;
-    let resource_found = validate_empty(&res.content, success);
+    let resource_found = resource_found_initial;
 
     let status = res.status_code;
 
@@ -10486,5 +10510,142 @@ impl crate::traits::PageChromeExt for Page {
     #[inline]
     fn screenshot_bytes(&self) -> Option<&[u8]> {
         self.screenshot_bytes.as_deref()
+    }
+}
+
+// ============================================================================
+// Empty-success reclassification tests
+// ============================================================================
+
+#[cfg(all(test, not(feature = "decentralized")))]
+mod empty_success_tests {
+    use super::*;
+    use crate::utils::PageResponse;
+
+    fn pr(status: u16, content: Option<Vec<u8>>) -> PageResponse {
+        PageResponse {
+            status_code: StatusCode::from_u16(status).unwrap(),
+            content,
+            ..Default::default()
+        }
+    }
+
+    /// 200 OK with `content: None` (e.g. proxy edge-blocked → spider's
+    /// chrome-fallback HTTP path constructs `PageResponse { content: None,
+    /// status_code: 200 }`) must surface as failure to consumers.
+    #[test]
+    fn empty_success_none_content_reclassified_to_504() {
+        let page = build("https://example.com", pr(200, None));
+        assert_eq!(page.status_code.as_u16(), 504);
+        assert!(page.should_retry, "must flag for retry strategy");
+    }
+
+    /// 200 OK with an empty Vec body — same failure mode, surfaced via
+    /// the chrome stream-success path that wrote zero bytes.
+    #[test]
+    fn empty_success_empty_vec_reclassified_to_504() {
+        let page = build("https://example.com", pr(200, Some(Vec::new())));
+        assert_eq!(page.status_code.as_u16(), 504);
+        assert!(page.should_retry);
+    }
+
+    /// 200 OK with a Chrome empty-shell body — production sees this when
+    /// CDP gives back the bare `<html><head></head><body></body></html>`
+    /// template instead of real content.
+    #[test]
+    fn empty_success_shell_html_reclassified_to_504() {
+        let page = build(
+            "https://example.com",
+            pr(
+                200,
+                Some(b"<html><head></head><body></body></html>".to_vec()),
+            ),
+        );
+        assert_eq!(page.status_code.as_u16(), 504);
+        assert!(page.should_retry);
+    }
+
+    /// Real 200 with real content must not be reclassified — guard
+    /// against false-positive regressions on the happy path.
+    #[test]
+    fn real_success_preserves_status_200() {
+        let html = b"<html><head><title>x</title></head><body><h1>hi</h1></body></html>";
+        let page = build("https://example.com", pr(200, Some(html.to_vec())));
+        assert_eq!(page.status_code.as_u16(), 200);
+    }
+
+    /// 404 with empty body must keep its 404 — `validate_empty(_, true)`
+    /// already treats 404 as a permitted "success" (NotFound carries
+    /// useful semantics), and we should not promote it to 504.
+    #[test]
+    fn not_found_empty_body_keeps_404() {
+        let page = build("https://example.com", pr(404, None));
+        assert_eq!(page.status_code.as_u16(), 404);
+    }
+
+    /// Truncated bodies preserve the original 200 — a partial body is
+    /// real data the caller may want to inspect, not a silent failure.
+    #[test]
+    fn truncated_success_preserves_status() {
+        let mut res = pr(200, Some(b"<html><body><p>partial".to_vec()));
+        res.content_truncated = true;
+        let page = build("https://example.com", res);
+        assert_eq!(page.status_code.as_u16(), 200);
+    }
+
+    /// Pre-existing chrome-error reclassification (599 / 525 / 526) must
+    /// still take precedence; the new empty-success branch is gated on
+    /// `!chrome_error` to avoid double-rewriting.
+    #[test]
+    fn chrome_error_page_reclassified_to_599_not_504() {
+        // Minimal chrome error fingerprint — content ends with the
+        // chrome-error tail `};</script></html>` (no `</body>`).
+        let body = b"<html><head></head><body><div id=\"main-frame-error\"></div></body><script>loadTimeDataRaw = {\"errorCode\":\"net::ERR_GENERIC\"};</script></html>";
+        let page = build("https://example.com", pr(200, Some(body.to_vec())));
+        // 599 is the spider-internal chrome error code. We just want to
+        // confirm it is *not* 504 — the chrome_error branch handled it.
+        assert_ne!(page.status_code.as_u16(), 504);
+    }
+
+    /// 5xx server errors retain their original status and should_retry=true.
+    #[test]
+    fn server_error_preserves_status() {
+        let page = build("https://example.com", pr(503, None));
+        assert_eq!(page.status_code.as_u16(), 503);
+        assert!(page.should_retry);
+    }
+
+    /// Under the `balance` feature, a real page with bytes spooled to
+    /// disk arrives with `res.content = None` while `res.content_spool`
+    /// holds the on-disk handle. `validate_empty` only inspects
+    /// `res.content`, so without the spool guard we would mis-classify
+    /// the page as empty and downgrade its status to 504. Verify the
+    /// guard preserves 200 OK on the spooled path.
+    #[cfg(feature = "balance")]
+    #[test]
+    fn balance_spooled_content_preserves_status_200() {
+        use crate::utils::html_spool::{SpoolVitals, SpooledContent};
+        use std::path::PathBuf;
+
+        let mut response = pr(200, None);
+        // Synthetic SpooledContent — the build() spool branch consumes
+        // it and returns early; we just need a non-None spool to
+        // exercise the guard against the empty-success reclassification.
+        response.content_spool = Some(SpooledContent {
+            path: PathBuf::from("/tmp/spider-test-spooled-page.html"),
+            vitals: SpoolVitals {
+                byte_len: 70_000,
+                is_valid_utf8: true,
+                is_xml: false,
+                binary_file: false,
+            },
+            ..Default::default()
+        });
+        let page = build("https://example.com", response);
+        assert_eq!(
+            page.status_code.as_u16(),
+            200,
+            "spooled content must keep its 200 status — bytes are on disk, not empty"
+        );
     }
 }
