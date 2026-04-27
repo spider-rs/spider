@@ -5272,9 +5272,17 @@ fn set_page_response_headers_raw(
         if let Some(obj) = chrome_headers.inner().as_object() {
             for (index, (key, value)) in obj.iter().enumerate() {
                 use std::str::FromStr;
+                // CDP encodes header values as JSON strings; `to_string()`
+                // would re-quote them (e.g. `"image/svg+xml"` → `"\"image/svg+xml\""`)
+                // and replay tools like replayweb.page would reject them.
+                let raw = match value {
+                    serde_json::Value::String(s) => std::borrow::Cow::Borrowed(s.as_str()),
+                    serde_json::Value::Null => continue,
+                    other => std::borrow::Cow::Owned(other.to_string()),
+                };
                 if let (Ok(header_name), Ok(header_value)) = (
                     reqwest::header::HeaderName::from_str(key),
-                    reqwest::header::HeaderValue::from_str(&value.to_string()),
+                    reqwest::header::HeaderValue::from_str(&raw),
                 ) {
                     header_map.insert(header_name, header_value);
                 }
@@ -9054,6 +9062,41 @@ mod tests {
         let old = resolve_old_source_str(bad);
         assert_eq!(target, old);
         assert_eq!(target, "");
+    }
+
+    #[cfg(all(feature = "chrome", feature = "headers"))]
+    #[test]
+    fn chrome_response_headers_strip_json_quotes() {
+        // CDP delivers `Network.responseReceived.response.headers` as a JSON
+        // object whose values are JSON strings. Earlier code called
+        // `serde_json::Value::to_string()` on each value, which re-encoded
+        // strings WITH their surrounding quotes — so a real header
+        //   content-type: image/svg+xml
+        // got serialized into the WARC HTTP payload as
+        //   content-type: "image/svg+xml"
+        // and replay tools (replayweb.page, pywb) refused the record.
+        let raw = serde_json::json!({
+            "content-type": "image/svg+xml",
+            "content-length": "340",
+            "etag": "\"22c-641f9d036a3fc-gzip\"",
+        });
+        let mut headers = Some(chromiumoxide::cdp::browser_protocol::network::Headers::new(
+            raw,
+        ));
+        let mut page_response = PageResponse::default();
+        set_page_response_headers_raw(&mut headers, &mut page_response);
+        let map = page_response.headers.expect("headers should be populated");
+        assert_eq!(
+            map.get("content-type").unwrap().to_str().unwrap(),
+            "image/svg+xml",
+            "value must not be JSON-quoted"
+        );
+        assert_eq!(map.get("content-length").unwrap().to_str().unwrap(), "340",);
+        // Origin-quoted etag values must round-trip exactly once.
+        assert_eq!(
+            map.get("etag").unwrap().to_str().unwrap(),
+            "\"22c-641f9d036a3fc-gzip\"",
+        );
     }
 
     #[test]
