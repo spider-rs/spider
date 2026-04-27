@@ -539,6 +539,40 @@ pub struct PageResponse {
     pub is_valid_utf8: Option<bool>,
 }
 
+impl PageResponse {
+    /// Total content byte count, mirroring [`crate::page::Page::size`].
+    /// Prefers the precomputed spool vitals (zero I/O — the writer
+    /// counted bytes inline with the disk flush) when bytes live on
+    /// disk under the `balance` feature; otherwise returns the length
+    /// of the in-memory `content` buffer. Returns `0` for an empty or
+    /// missing response. Inline + branch-free in the common
+    /// no-balance build.
+    #[inline]
+    pub fn content_size(&self) -> usize {
+        #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+        if let Some(ref spool) = self.content_spool {
+            return spool.vitals.byte_len;
+        }
+        self.content.as_ref().map_or(0, |c| c.len())
+    }
+
+    /// Whether the response carries any content bytes (in memory or
+    /// spooled to disk). Cheaper than `content_size() > 0` when the
+    /// caller only needs presence — avoids the `vitals.byte_len` field
+    /// load and the `Vec::len()` call. Used by the empty-success
+    /// reclassification branch in [`crate::page::build`] to suppress
+    /// the rewrite when bytes exist on disk that `validate_empty`
+    /// cannot see.
+    #[inline]
+    pub fn has_content_bytes(&self) -> bool {
+        #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+        if self.content_spool.is_some() {
+            return true;
+        }
+        self.content.as_ref().is_some_and(|c| !c.is_empty())
+    }
+}
+
 /// wait for event with timeout
 #[cfg(feature = "chrome")]
 pub async fn wait_for_event<T>(page: &chromiumoxide::Page, timeout: Option<core::time::Duration>)

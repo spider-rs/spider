@@ -1917,21 +1917,32 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
     // failure on `status_code` instead of having to gate on
     // `should_retry` + `is_empty()` separately. Mirrors the chrome_error
     // pattern above; truncated bodies are preserved (a partial body is
-    // real data, not a silent failure). Under the `balance` feature
-    // bytes can live on disk via `content_spool` while `res.content` is
-    // `None`; that is real data, so the reclassification is suppressed
-    // when a spool handle is present. `validate_empty` is computed once
-    // here and reused by `resource_found` below to keep the perf cost
-    // identical to the original single call.
+    // real data, not a silent failure).
+    //
+    // **Metadata-first short-circuit**: under `balance` the spool writer
+    // (`spool_html_to_disk`, since v2.51.66) refuses empty / shell HTML,
+    // so a present `content_spool` is proof that real bytes exist on
+    // disk. Treat that as `resource_found = true` *without* calling
+    // `validate_empty` — never re-scan or re-read what the writer
+    // already counted. As a side-benefit this fixes a latent issue
+    // where spooled pages inherited `should_retry = true` via
+    // `should_retry_empty_success` because `validate_empty` only saw
+    // `res.content = None`.
     let success_initial = res.status_code.is_success() || res.status_code == StatusCode::NOT_FOUND;
+    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+    let resource_found_initial = if res.content_spool.is_some() {
+        true
+    } else {
+        validate_empty(&res.content, success_initial)
+    };
+    #[cfg(not(all(feature = "balance", not(feature = "decentralized"))))]
     let resource_found_initial = validate_empty(&res.content, success_initial);
-    let empty_success_eligible = !chrome_error
+
+    if !chrome_error
         && res.status_code.is_success()
         && !res.content_truncated
-        && !resource_found_initial;
-    #[cfg(all(feature = "balance", not(feature = "decentralized")))]
-    let empty_success_eligible = empty_success_eligible && res.content_spool.is_none();
-    if empty_success_eligible {
+        && !resource_found_initial
+    {
         res.status_code = StatusCode::GATEWAY_TIMEOUT;
     }
 
@@ -10628,9 +10639,6 @@ mod empty_success_tests {
         use std::path::PathBuf;
 
         let mut response = pr(200, None);
-        // Synthetic SpooledContent — the build() spool branch consumes
-        // it and returns early; we just need a non-None spool to
-        // exercise the guard against the empty-success reclassification.
         response.content_spool = Some(SpooledContent {
             path: PathBuf::from("/tmp/spider-test-spooled-page.html"),
             vitals: SpoolVitals {
@@ -10646,6 +10654,132 @@ mod empty_success_tests {
             page.status_code.as_u16(),
             200,
             "spooled content must keep its 200 status — bytes are on disk, not empty"
+        );
+    }
+
+    /// `PageResponse::content_size` mirrors `Page::size`: spool vitals
+    /// take precedence over the in-memory buffer length, and missing /
+    /// empty content yields 0. Critical perf invariant — the spool file
+    /// is never re-read; we copy the writer's inline counter.
+    #[test]
+    fn content_size_empty_response_returns_zero() {
+        assert_eq!(pr(200, None).content_size(), 0);
+    }
+
+    #[test]
+    fn content_size_in_memory_returns_buffer_len() {
+        let body = b"<html><body>hello</body></html>".to_vec();
+        let expected = body.len();
+        assert_eq!(pr(200, Some(body)).content_size(), expected);
+    }
+
+    #[cfg(feature = "balance")]
+    #[test]
+    fn content_size_spool_returns_vitals_byte_len() {
+        use crate::utils::html_spool::{SpoolVitals, SpooledContent};
+        use std::path::PathBuf;
+        let mut response = pr(200, None);
+        response.content_spool = Some(SpooledContent {
+            path: PathBuf::from("/tmp/spider-test-spool-size.html"),
+            vitals: SpoolVitals {
+                byte_len: 4_096,
+                is_valid_utf8: true,
+                is_xml: false,
+                binary_file: false,
+            },
+            ..Default::default()
+        });
+        assert_eq!(response.content_size(), 4_096);
+    }
+
+    /// `has_content_bytes` is the cheaper presence check used by the
+    /// empty-success guard. Returns true for spooled bytes (under
+    /// balance) and for any non-empty in-memory content.
+    #[test]
+    fn has_content_bytes_empty_response_returns_false() {
+        assert!(!pr(200, None).has_content_bytes());
+        assert!(!pr(200, Some(Vec::new())).has_content_bytes());
+    }
+
+    #[test]
+    fn has_content_bytes_in_memory_returns_true() {
+        assert!(pr(200, Some(b"x".to_vec())).has_content_bytes());
+    }
+
+    #[cfg(feature = "balance")]
+    #[test]
+    fn has_content_bytes_spool_returns_true_even_with_empty_content() {
+        use crate::utils::html_spool::{SpoolVitals, SpooledContent};
+        use std::path::PathBuf;
+        let mut response = pr(200, None);
+        response.content_spool = Some(SpooledContent {
+            path: PathBuf::from("/tmp/spider-test-spool-presence.html"),
+            vitals: SpoolVitals {
+                byte_len: 100,
+                is_valid_utf8: true,
+                is_xml: false,
+                binary_file: false,
+            },
+            ..Default::default()
+        });
+        assert!(response.has_content_bytes());
+    }
+
+    /// Spooled pages on a 200 success path must NOT inherit
+    /// `should_retry=true` from `should_retry_empty_success`. Before the
+    /// metadata short-circuit `validate_empty(&res.content=None, _)` flagged
+    /// every spooled page as "empty" → spurious retry flag on real
+    /// content. Locks in the fix.
+    #[cfg(feature = "balance")]
+    #[test]
+    fn balance_spooled_content_does_not_set_should_retry() {
+        use crate::utils::html_spool::{SpoolVitals, SpooledContent};
+        use std::path::PathBuf;
+        let mut response = pr(200, None);
+        response.content_spool = Some(SpooledContent {
+            path: PathBuf::from("/tmp/spider-test-spool-no-retry.html"),
+            vitals: SpoolVitals {
+                byte_len: 50_000,
+                is_valid_utf8: true,
+                is_xml: false,
+                binary_file: false,
+            },
+            ..Default::default()
+        });
+        let page = build("https://example.com", response);
+        assert!(
+            !page.should_retry,
+            "spooled real content on 2xx must not be flagged for retry"
+        );
+    }
+
+    /// Spool path surfaces the disk-bound byte count via `content_byte_len`
+    /// (a balance-feature field separate from `bytes_transferred`, which is
+    /// the chrome network-IO counter). The byte count is populated from
+    /// the precomputed `vitals.byte_len` — the spool file is *never*
+    /// re-read; we copy the counter the writer set inline with the disk
+    /// flush.
+    #[cfg(feature = "balance")]
+    #[test]
+    fn balance_spool_populates_content_byte_len_from_vitals() {
+        use crate::utils::html_spool::{SpoolVitals, SpooledContent};
+        use std::path::PathBuf;
+
+        let mut response = pr(200, None);
+        response.content_spool = Some(SpooledContent {
+            path: PathBuf::from("/tmp/spider-test-spooled-page-vitals.html"),
+            vitals: SpoolVitals {
+                byte_len: 12_345,
+                is_valid_utf8: true,
+                is_xml: false,
+                binary_file: false,
+            },
+            ..Default::default()
+        });
+        let page = build("https://example.com", response);
+        assert_eq!(
+            page.content_byte_len, 12_345,
+            "content_byte_len must come from spool vitals — never re-read disk"
         );
     }
 }
