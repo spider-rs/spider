@@ -201,12 +201,19 @@ lazy_static! {
     /// Empty html.
     pub static ref EMPTY_HTML_BASIC: &'static [u8; 13] = b"<html></html>";
 
-    /// Scan for error anti-bot pages (24 patterns).
+    /// Scan for error anti-bot pages (25 patterns).
+    ///
+    /// Pattern 13 (`px-captcha`) is intentionally a 10-byte substring so it
+    /// covers the meta tag (`content="px-captcha"`), the wrapper div
+    /// (`class="px-captcha-wrapper"`), and the inner placeholder
+    /// (`id="px-captcha"`) without separate patterns. Avoid adding redundant
+    /// PX patterns that share this substring — they bloat the AC automaton
+    /// without raising the hit rate.
     static ref AC_BODY_SCAN: AhoCorasick = AhoCorasick::builder()
         .match_kind(aho_corasick::MatchKind::LeftmostFirst)
         .build([
             "cf-error-code",                                     // 0  → Cloudflare
-            "Access to this page has been denied",               // 1  → Cloudflare
+            "Access to this page has been denied",               // 1  → PerimeterX (canonical block-page title)
             "data-translate=\"block_headline\"",                 // 2  → Cloudflare WAF hard block
             "DataDome",                                          // 3  → DataDome
             "perimeterx",                                        // 4  → PerimeterX
@@ -218,7 +225,7 @@ lazy_static! {
             "challenge-platform",                                // 10 → Cloudflare
             "cf-challenge",                                      // 11 → Cloudflare
             "ddos-guard",                                        // 12 → DDoS-Guard (lowercase)
-            "px-captcha",                                        // 13 → PerimeterX
+            "px-captcha",                                        // 13 → PerimeterX (matches meta/wrapper/placeholder)
             "verify you are human",                              // 14 → Generic anti-bot
             "prove you're not a robot",                          // 15 → Generic anti-bot
             "Sucuri Website Firewall",                           // 16 → Sucuri
@@ -229,6 +236,7 @@ lazy_static! {
             "Attention Required! | Cloudflare",                  // 21 → Cloudflare block page
             "aws-waf-token",                                     // 22 → AWS WAF
             "DDoS-Guard",                                        // 23 → DDoS-Guard (capitalized)
+            "/captcha/captcha.js?a=c",                           // 24 → PerimeterX (challenge script under dynamic path prefix)
         ])
         .unwrap();
 
@@ -951,9 +959,9 @@ pub fn detect_anti_bot_from_body(body: &[u8]) -> Option<AntiBotTech> {
     {
         if let Some(mat) = AC_BODY_SCAN.find(scan) {
             let tech = match mat.pattern().as_usize() {
-                0..=2 | 10 | 11 | 21 => AntiBotTech::Cloudflare,
+                0 | 2 | 10 | 11 | 21 => AntiBotTech::Cloudflare,
                 3 => AntiBotTech::DataDome,
-                4 | 13 => AntiBotTech::PerimeterX,
+                1 | 4 | 13 | 24 => AntiBotTech::PerimeterX,
                 5 => AntiBotTech::ArkoseLabs,
                 6 | 18 => AntiBotTech::Imperva,
                 7 | 8 => AntiBotTech::AlibabaTMD,
@@ -9224,10 +9232,10 @@ error was encountered while trying to use an ErrorDocument to handle the request
             detect_anti_bot_from_body(&b"<span class=\"cf-error-code\">1020</span>".to_vec()),
             Some(AntiBotTech::Cloudflare)
         );
-        // Pattern 1: Access to this page has been denied → Cloudflare
+        // Pattern 1: Access to this page has been denied → PerimeterX (canonical PX block-page title)
         assert_eq!(
             detect_anti_bot_from_body(&b"<h1>Access to this page has been denied</h1>".to_vec()),
-            Some(AntiBotTech::Cloudflare)
+            Some(AntiBotTech::PerimeterX)
         );
         // Pattern 2: DataDome
         assert_eq!(
@@ -9348,6 +9356,110 @@ error was encountered while trying to use an ErrorDocument to handle the request
         assert_eq!(
             detect_anti_bot_from_body(&b"<p>DDoS protection by DDoS-Guard</p>".to_vec()),
             Some(AntiBotTech::DDoSGuard)
+        );
+        // Meta description content="px-captcha" → PerimeterX (covered by pattern 13 substring)
+        assert_eq!(
+            detect_anti_bot_from_body(
+                &br#"<meta name="description" content="px-captcha">"#.to_vec()
+            ),
+            Some(AntiBotTech::PerimeterX)
+        );
+        // Wrapper div class="px-captcha-wrapper" → PerimeterX (covered by pattern 13 substring)
+        assert_eq!(
+            detect_anti_bot_from_body(&br#"<div class="px-captcha-wrapper"></div>"#.to_vec()),
+            Some(AntiBotTech::PerimeterX)
+        );
+        // Pattern 24: /captcha/captcha.js?a=c with dynamic path prefix → PerimeterX
+        assert_eq!(
+            detect_anti_bot_from_body(
+                &br#"<script src="/K6S8okp3/captcha/captcha.js?a=c&amp;u=2e6bfe61-42fc-11f1-a3a4-d8d25296bad6&amp;v=79bc9b66-42f7-11f1-b8c4-917fbe7614a3&amp;m=0&amp;h=R0VU"></script>"#.to_vec()
+            ),
+            Some(AntiBotTech::PerimeterX)
+        );
+    }
+
+    #[test]
+    fn detect_perimeterx_full_block_page() {
+        // Realistic PX block page: title + meta description + dynamic-prefixed
+        // captcha.js script tag + wrapper div. Asserts the head is classified
+        // as PerimeterX, not Cloudflare (regression guard for prior
+        // misclassification of "Access to this page has been denied").
+        let body = br#"<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Access to this page has been denied.</title><meta name="description" content="px-captcha"><meta name="viewport" content="width=device-width, initial-scale=1"><script src="/K6S8okp3/captcha/captcha.js?a=c&amp;u=2e6bfe61-42fc-11f1-a3a4-d8d25296bad6&amp;v=79bc9b66-42f7-11f1-b8c4-917fbe7614a3&amp;m=0&amp;h=R0VU"></script></head><body><div class="px-captcha-wrapper"><div id="px-captcha"></div></div></body></html>"#;
+        assert_eq!(
+            detect_anti_bot_from_body(&body.to_vec()),
+            Some(AntiBotTech::PerimeterX)
+        );
+    }
+
+    #[test]
+    fn detect_anti_bot_from_body_scan_window_bounded() {
+        // Hard guarantee: scan window stays bounded at 30KB. Pad past the
+        // limit, then place a clear PX signal at the tail — must NOT be
+        // detected. This guards against accidentally widening the scan
+        // (which would make multi-MB pages O(n) on every fetch).
+        let mut body = vec![b' '; 30_001];
+        body.extend_from_slice(b"<title>Access to this page has been denied.</title>");
+        body.extend_from_slice(b"<div id=\"px-captcha\"></div>");
+        assert_eq!(detect_anti_bot_from_body(&body), None);
+
+        // Same signal moved into the window → must be detected. Confirms
+        // the boundary is exactly at 30KB and not narrower.
+        let mut in_window = vec![b' '; 29_000];
+        in_window.extend_from_slice(b"<div id=\"px-captcha\"></div>");
+        assert_eq!(
+            detect_anti_bot_from_body(&in_window),
+            Some(AntiBotTech::PerimeterX)
+        );
+    }
+
+    #[test]
+    fn detect_perimeterx_title_only() {
+        // Title-only signal must classify as PerimeterX (the canonical owner
+        // of this exact phrase). Prior to v2.51.139 this returned Cloudflare.
+        let body = br#"<html><head><title>Access to this page has been denied.</title></head><body></body></html>"#;
+        assert_eq!(
+            detect_anti_bot_from_body(&body.to_vec()),
+            Some(AntiBotTech::PerimeterX)
+        );
+    }
+
+    #[test]
+    fn detect_perimeterx_dynamic_captcha_script_amp_encoded() {
+        // PX script reference with HTML-escaped &amp; query separators.
+        let body = br#"<html><body><script src="/Xy12ABcd/captcha/captcha.js?a=c&amp;u=abc"></script></body></html>"#;
+        assert_eq!(
+            detect_anti_bot_from_body(&body.to_vec()),
+            Some(AntiBotTech::PerimeterX)
+        );
+    }
+
+    #[test]
+    fn detect_perimeterx_dynamic_captcha_script_raw_amp() {
+        // Same script reference but raw '&' (some renderers emit unescaped).
+        let body = br#"<html><body><script src="/Xy12ABcd/captcha/captcha.js?a=c&u=abc"></script></body></html>"#;
+        assert_eq!(
+            detect_anti_bot_from_body(&body.to_vec()),
+            Some(AntiBotTech::PerimeterX)
+        );
+    }
+
+    #[test]
+    fn cloudflare_classification_unchanged() {
+        // Regression guard: pure Cloudflare markers must still classify as
+        // Cloudflare after the PerimeterX reclassification of pattern 1.
+        assert_eq!(
+            detect_anti_bot_from_body(&b"<span class=\"cf-error-code\">1020</span>".to_vec()),
+            Some(AntiBotTech::Cloudflare)
+        );
+        assert_eq!(
+            detect_anti_bot_from_body(&b"<title>Attention Required! | Cloudflare</title>".to_vec()),
+            Some(AntiBotTech::Cloudflare)
+        );
+        assert_eq!(
+            detect_anti_bot_from_body(
+                &b"<script src=\"/cdn-cgi/challenge-platform/scripts/abc\"></script>".to_vec()
+            ),
+            Some(AntiBotTech::Cloudflare)
         );
     }
 
