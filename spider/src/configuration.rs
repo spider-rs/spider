@@ -470,6 +470,19 @@ pub struct Configuration {
     /// from the HTTP path. Default `false` is a no-op.
     #[cfg(feature = "chrome_remote_cache")]
     pub remote_cache_skip_browser: bool,
+    /// Restrict chrome remote-cache dumps to the **main (initial)
+    /// document only**. When enabled, `cache_chrome_response` continues
+    /// to publish the navigated document body for each request
+    /// (whatever MIME type — HTML, JSON, XML, plain text, …), but the
+    /// per-response CDP listener (`spawn_cache_listener`) runs in
+    /// `dump_readonly` mode — populating the local + per-session cache
+    /// for sub-resources (CSS/JS/manifests) without uploading them to
+    /// the remote server. Orthogonal to `chrome_remote_cache_read_only`:
+    /// read-only suppresses *all* chrome dumps, this knob only
+    /// suppresses the asset/sub-resource path. Default `false`
+    /// preserves the existing dump-everything behavior.
+    #[cfg(feature = "chrome_remote_cache")]
+    pub chrome_remote_cache_main_doc_only: bool,
     #[cfg(feature = "chrome")]
     /// Enable or disable service workers. Enabled by default.
     pub service_worker_enabled: bool,
@@ -1509,6 +1522,43 @@ impl Configuration {
         }
     }
 
+    /// Restrict chrome remote-cache dumps to the main (initial)
+    /// document only. When `true`, the per-response listener runs in
+    /// `dump_readonly` mode (local + per-session cache only) so
+    /// CSS/JS/manifests are **not** uploaded to the remote
+    /// `hybrid_cache_server`; the navigated document body — whatever
+    /// MIME type it is — still goes through `cache_chrome_response`.
+    /// Has no observable effect without the `chrome_remote_cache`
+    /// feature.
+    #[cfg(feature = "chrome_remote_cache")]
+    pub fn with_chrome_remote_cache_main_doc_only(&mut self, enabled: bool) -> &mut Self {
+        self.chrome_remote_cache_main_doc_only = enabled;
+        self
+    }
+
+    /// Restrict chrome remote-cache dumps to the main document only.
+    /// This method does nothing without the `chrome_remote_cache`
+    /// feature.
+    #[cfg(not(feature = "chrome_remote_cache"))]
+    pub fn with_chrome_remote_cache_main_doc_only(&mut self, _enabled: bool) -> &mut Self {
+        self
+    }
+
+    /// Whether chrome remote-cache dumps should be restricted to the
+    /// main document. Always `false` without the `chrome_remote_cache`
+    /// feature.
+    #[inline]
+    pub(crate) fn chrome_remote_cache_main_doc_only_enabled(&self) -> bool {
+        #[cfg(feature = "chrome_remote_cache")]
+        {
+            self.chrome_remote_cache_main_doc_only
+        }
+        #[cfg(not(feature = "chrome_remote_cache"))]
+        {
+            false
+        }
+    }
+
     #[cfg(feature = "chrome")]
     /// Enable or disable Service Workers. This method does nothing if the `chrome` feature is not enabled.
     pub fn with_service_worker_enabled(&mut self, enabled: bool) -> &mut Self {
@@ -2056,6 +2106,7 @@ impl Configuration {
             cache_policy: &self.cache_policy,
             remote_multimodal: &self.remote_multimodal,
             remote_cache_read_only: self.chrome_remote_cache_read_only_enabled(),
+            remote_cache_main_doc_only: self.chrome_remote_cache_main_doc_only_enabled(),
         }
     }
 

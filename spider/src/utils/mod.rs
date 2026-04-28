@@ -2770,6 +2770,7 @@ async fn set_document_content_if_requested_cached(
     chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
     namespace: Option<&str>,
     remote_cache_read_only: bool,
+    remote_cache_main_doc_only: bool,
 ) {
     let auth_opt = cache_auth_token(cache_options);
     let cache_policy = chrome_cache_policy(cache_policy);
@@ -2779,7 +2780,12 @@ async fn set_document_content_if_requested_cached(
     // server. Suppress `dump_remote` so chromey's listener caches locally
     // only; reads via `seed_cache` / `get_cache_site` still hit the remote
     // endpoint explicitly below.
-    let remote: Option<&str> = if remote_cache_read_only {
+    //
+    // `main_doc_only` flips the same suppression on the listener path
+    // *without* touching `cache_chrome_response`, so the main HTML body
+    // continues to be published while CSS/JS/manifests stay local.
+    let listener_dump_readonly = remote_cache_read_only || remote_cache_main_doc_only;
+    let remote: Option<&str> = if listener_dump_readonly {
         None
     } else {
         Some("true")
@@ -2814,11 +2820,13 @@ async fn set_document_content_if_requested_cached(
     ensure_remote_cache_client();
 
     // Eagerly init the remote cache worker before the listener starts so
-    // all uploads hit the fast try_enqueue path. Skip entirely in read-only
-    // mode — no dumps will be enqueued, so spinning up the uploader would
-    // waste a task.
+    // all uploads hit the fast try_enqueue path. Skip entirely when the
+    // listener is in dump-readonly mode — no listener-driven dumps will
+    // be enqueued. `cache_chrome_response` still inits the worker on its
+    // own enqueue path when `remote_cache_read_only == false`, so the
+    // main-doc dump path keeps working under `main_doc_only`.
     #[cfg(feature = "chrome_remote_cache")]
-    if remote.is_some() && !remote_cache_read_only {
+    if remote.is_some() && !listener_dump_readonly {
         spider_remote_cache::init_default_worker().await;
     }
 
@@ -2834,7 +2842,7 @@ async fn set_document_content_if_requested_cached(
             auth_opt.map(|f| f.into()),
             cache_strategy,
             remote.map(|f| f.into()),
-            remote_cache_read_only,
+            listener_dump_readonly,
             namespace,
         ),
         page.seed_cache(target_url, auth_opt, seed_remote, namespace),
@@ -2943,6 +2951,7 @@ pub async fn run_navigate_or_content_set_core(
     chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
     _namespace: Option<&str>,
     _remote_cache_read_only: bool,
+    _remote_cache_main_doc_only: bool,
 ) -> Result<(), chromiumoxide::error::CdpError> {
     if page_set {
         return Ok(());
@@ -3000,6 +3009,7 @@ pub async fn run_navigate_or_content_set_core(
     chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
     namespace: Option<&str>,
     remote_cache_read_only: bool,
+    remote_cache_main_doc_only: bool,
 ) -> Result<(), chromiumoxide::error::CdpError> {
     if page_set {
         return Ok(());
@@ -3025,6 +3035,7 @@ pub async fn run_navigate_or_content_set_core(
                 chrome_intercept,
                 namespace,
                 remote_cache_read_only,
+                remote_cache_main_doc_only,
             )
             .await;
         } else {
@@ -3629,6 +3640,16 @@ pub struct ChromeFetchParams<'a> {
     /// under other feature combinations). Always present so callers don't
     /// have to cfg-gate the field at construction sites.
     pub remote_cache_read_only: bool,
+    /// When `true`, only the main (initial) document is published to
+    /// the remote chrome cache. The per-response listener still
+    /// populates the local + per-session cache for sub-resources
+    /// (CSS/JS/manifests) but never uploads them.
+    /// `cache_chrome_response` continues to publish the navigated
+    /// document body — whatever MIME type it is. Orthogonal to
+    /// `remote_cache_read_only`: read-only suppresses everything, this
+    /// flag only suppresses the asset path. Only meaningful when
+    /// `chrome_remote_cache` is enabled; ignored otherwise.
+    pub remote_cache_main_doc_only: bool,
 }
 
 #[cfg(feature = "chrome")]
@@ -3675,6 +3696,8 @@ pub async fn fetch_page_html_chrome_base<'h>(
     let remote_multimodal = params.remote_multimodal;
     #[cfg(any(feature = "cache_request", feature = "chrome_remote_cache"))]
     let remote_cache_read_only = params.remote_cache_read_only;
+    #[cfg(any(feature = "cache_request", feature = "chrome_remote_cache"))]
+    let remote_cache_main_doc_only = params.remote_cache_main_doc_only;
     use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES, UNKNOWN_STATUS_ERROR};
     use chromiumoxide::{
         cdp::browser_protocol::network::{
@@ -4120,6 +4143,16 @@ pub async fn fetch_page_html_chrome_base<'h>(
                 #[cfg(any(feature = "cache_request", feature = "chrome_remote_cache"))]
                 {
                     remote_cache_read_only
+                }
+                #[cfg(not(any(feature = "cache_request", feature = "chrome_remote_cache")))]
+                {
+                    false
+                }
+            },
+            {
+                #[cfg(any(feature = "cache_request", feature = "chrome_remote_cache"))]
+                {
+                    remote_cache_main_doc_only
                 }
                 #[cfg(not(any(feature = "cache_request", feature = "chrome_remote_cache")))]
                 {
