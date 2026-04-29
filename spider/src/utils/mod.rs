@@ -4827,10 +4827,7 @@ pub async fn fetch_page_html_chrome_base<'h>(
                 // extended fetches past the caller's budget, contradicting
                 // the documented contract that `request_timeout` "caps
                 // chrome wall time."
-                let results = tokio::time::timeout(
-                    base_timeout,
-                    fetch_chrome_html_adaptive(page),
-                );
+                let results = tokio::time::timeout(base_timeout, fetch_chrome_html_adaptive(page));
 
                 match results.await {
                     Ok(v) => v.unwrap_or_default(),
