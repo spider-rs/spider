@@ -578,8 +578,12 @@ pub async fn spool_write_streaming_vitals(
     // ── O(1) header vitals ────────────────────────────────────────────
     // Both checks look at only the first few bytes, independent of the
     // page size.  `auto_encoder::is_binary_file` is a magic-number lookup
-    // table; `is_xml` is a 5-byte `starts_with`.
-    let head = &data[..data.len().min(16)];
+    // table; `is_xml` is a 5-byte `starts_with`.  Whitespace-padded HTML
+    // (`\n\n\n\n<!doctype...`) is common enough on legacy stacks that we
+    // expand the window to 32 bytes and trim leading whitespace before
+    // sniffing.
+    let head_full = &data[..data.len().min(32)];
+    let head = crate::utils::skip_leading_ascii_whitespace(head_full);
     let binary_file = auto_encoder::is_binary_file(head);
     let is_xml = head.starts_with(b"<?xml");
 
@@ -843,9 +847,12 @@ impl StreamingVitalsSpoolWriter {
         self.byte_len = projected;
 
         // ── Header-only vitals (fire exactly once) ────────────────────
+        // Trim leading whitespace + use a 32-byte window so a server-padded
+        // HTML body (`\n\n\n\n\n<!doctype...`) doesn't slip past sniffing.
         if !self.header_seen {
-            let head_sample_len = chunk.len().min(16);
-            let head_sample = &chunk[..head_sample_len];
+            let head_sample_len = chunk.len().min(32);
+            let head_full = &chunk[..head_sample_len];
+            let head_sample = crate::utils::skip_leading_ascii_whitespace(head_full);
             self.binary_file = auto_encoder::is_binary_file(head_sample);
             self.is_xml = head_sample.starts_with(b"<?xml");
             self.header_seen = true;

@@ -2098,7 +2098,7 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
     let binary_file = res
         .content
         .as_deref()
-        .is_some_and(auto_encoder::is_binary_file);
+        .is_some_and(crate::utils::is_binary_body);
 
     // Hot path: the HTTP and Chrome content producers populate
     // `res.is_valid_utf8` while the bytes are still warm in cache, so we
@@ -2515,13 +2515,23 @@ impl<'h> ChromeStreamingExtractor<'h> {
         if !self.sniffed {
             self.sniffed = true;
             if !chunk.is_empty() {
-                let head_len = chunk.len().min(ASSET_SNIFF_BYTES);
-                if auto_encoder::is_binary_file(&chunk[..head_len]) {
-                    // Asset detected mid-stream — invalidate the
-                    // rewriter. Caller's `Vec<u8>` accumulator still
-                    // captures the bytes for downstream consumers.
-                    self.write_failed = true;
-                    return;
+                // Trim leading ASCII whitespace so a server-padded HTML
+                // body (`\n\n\n\n<!doctype...`) isn't sniffed against the
+                // wrong window.  When the chunk is whitespace-only, leave
+                // the sniff for the next chunk.
+                let trimmed = crate::utils::skip_leading_ascii_whitespace(chunk);
+                if !trimmed.is_empty() {
+                    let head_len = trimmed.len().min(ASSET_SNIFF_BYTES);
+                    if auto_encoder::is_binary_file(&trimmed[..head_len]) {
+                        // Asset detected mid-stream — invalidate the
+                        // rewriter. Caller's `Vec<u8>` accumulator still
+                        // captures the bytes for downstream consumers.
+                        self.write_failed = true;
+                        return;
+                    }
+                } else {
+                    // Whitespace-only chunk: re-sniff on the next call.
+                    self.sniffed = false;
                 }
             }
         }
@@ -4408,7 +4418,7 @@ impl Page {
         self.binary_file = self
             .html
             .as_deref()
-            .is_some_and(auto_encoder::is_binary_file);
+            .is_some_and(crate::utils::is_binary_body);
         self.is_valid_utf8 = self
             .html
             .as_deref()
@@ -4634,7 +4644,7 @@ impl Page {
             return true;
         }
         match self.html.as_deref() {
-            Some(bytes) => auto_encoder::is_binary_file(bytes),
+            Some(bytes) => crate::utils::is_binary_body(bytes),
             None => false,
         }
     }

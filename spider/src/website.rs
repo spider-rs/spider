@@ -3578,7 +3578,7 @@ impl Website {
                 if !page_links_settings.skip_links {
                     let skip = {
                         let html_bytes = seeded_page.get_html_bytes_u8();
-                        html_bytes.is_empty() || auto_encoder::is_binary_file(html_bytes)
+                        html_bytes.is_empty() || crate::utils::is_binary_body(html_bytes)
                     };
                     if !skip {
                         if let Some(html_bytes) = seeded_page.html.take() {

@@ -244,7 +244,10 @@ pub fn html_quality_score(
 
         // Byte-level binary check picks up extension-less assets
         // (e.g. `/download`, `/file/abc123`) that `is_asset_url` misses.
-        let is_asset = url_is_asset || (len > 0 && auto_encoder::is_binary_file(body));
+        // Whitespace-padded HTML (some Aestiva/HTML-OS sites send
+        // `\n\n\n\n<!doctype...`) gets trimmed first so it doesn't get
+        // scored as an asset.
+        let is_asset = url_is_asset || (len > 0 && crate::utils::is_binary_body(body));
 
         if is_asset {
             // Asset bodies are binary — the `<body` scan and HTML-shell

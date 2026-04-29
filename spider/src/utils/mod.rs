@@ -95,7 +95,6 @@ use crate::{
 };
 use abs::parse_absolute_url;
 use aho_corasick::AhoCorasick;
-use auto_encoder::is_binary_file;
 use case_insensitive_string::CaseInsensitiveString;
 
 #[cfg(feature = "chrome")]
@@ -324,6 +323,32 @@ lazy_static! {
         wait_for.idle_network = crate::features::chrome_common::WaitForIdleNetwork::new(core::time::Duration::from_secs(8).into()).into();
         wait_for
     };
+}
+
+/// Skip ASCII whitespace at the start of a byte slice.
+///
+/// Some servers prefix the HTML body with newlines (seen in the wild on
+/// Aestiva/HTML/OS responses, e.g. `\n\n\n\n\n\n\n\n\n<!doctype html>`).
+/// Magic-byte sniffers like [`auto_encoder::is_binary_file`] only look at
+/// the leading bytes, so without this trim a whitespace-prefixed body can
+/// dodge the wrapper that callers actually want — or, worse, eventually
+/// match an unlucky single-byte signature in the table.  Returns the
+/// original slice unchanged when there is no leading whitespace.
+#[inline(always)]
+pub fn skip_leading_ascii_whitespace(body: &[u8]) -> &[u8] {
+    let mut i = 0;
+    while i < body.len() && body[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    &body[i..]
+}
+
+/// Like [`auto_encoder::is_binary_file`] but skips leading ASCII whitespace
+/// first.  Use this on response bodies (HTTP or chrome) where the server may
+/// pad the document with blank lines before `<!doctype>`.
+#[inline]
+pub fn is_binary_body(body: &[u8]) -> bool {
+    auto_encoder::is_binary_file(skip_leading_ascii_whitespace(body))
 }
 
 /// Detect if apache hard 403 is forbidden and should not retry.
@@ -5825,7 +5850,7 @@ pub async fn handle_response_bytes(
                 Ok(text) => {
                     if only_html && first_bytes {
                         first_bytes = false;
-                        if is_binary_file(&text) {
+                        if is_binary_body(&text) {
                             break;
                         }
                     }
@@ -5954,7 +5979,7 @@ where
                 Ok(res_bytes) => {
                     if only_html && first_bytes {
                         first_bytes = false;
-                        if is_binary_file(&res_bytes) {
+                        if is_binary_body(&res_bytes) {
                             break;
                         }
                     }
@@ -7009,7 +7034,7 @@ impl BasicCachePolicy {
 ))]
 #[inline]
 fn decode_cached_html_bytes(body: &[u8], accept_lang: Option<&str>) -> Option<String> {
-    if is_binary_file(body) || is_cacheable_body_empty(body) {
+    if is_binary_body(body) || is_cacheable_body_empty(body) {
         return None;
     }
 
@@ -9960,6 +9985,27 @@ error was encountered while trying to use an ErrorDocument to handle the request
         assert!(is_html_content_check(b"<html><body>"));
         assert!(!is_html_content_check(b"{ \"json\": true }"));
         assert!(!is_html_content_check(b"plain text content"));
+    }
+
+    #[test]
+    fn test_is_binary_body_skips_leading_whitespace() {
+        // Aestiva/HTML-OS-style padded HTML (real shape from
+        // seeleylake.com): nine leading newlines then `<!doctype html>`.
+        // Must not be classified binary.
+        let padded = b"\n\n\n\n\n\n\n\n\n<!doctype html>\n<html lang=\"en\">\n<head></head></html>";
+        assert!(!is_binary_body(padded));
+
+        // PNG with whitespace prefix is still binary.
+        let mut png = Vec::from(&b"   "[..]);
+        png.extend_from_slice(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        assert!(is_binary_body(&png));
+
+        // Empty / whitespace-only inputs aren't binary.
+        assert!(!is_binary_body(b""));
+        assert!(!is_binary_body(b"   \t\n\r"));
+
+        // Sanity: a bare HTML body (no padding) still works.
+        assert!(!is_binary_body(b"<!doctype html><html></html>"));
     }
 
     #[test]
