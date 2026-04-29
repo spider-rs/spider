@@ -2442,10 +2442,6 @@ pub(crate) const FIVE_MINUTES: u32 = 300_000;
 #[cfg(feature = "chrome")]
 const MAX_PAGE_TIMEOUT: tokio::time::Duration =
     tokio::time::Duration::from_millis(FIVE_MINUTES as u64);
-/// Half of the max timeout
-#[cfg(feature = "chrome")]
-const HALF_MAX_PAGE_TIMEOUT: tokio::time::Duration =
-    tokio::time::Duration::from_millis(FIVE_MINUTES as u64 / 2);
 
 #[cfg(all(feature = "chrome", feature = "headers"))]
 /// Store the page headers. This does nothing without the 'headers' flag enabled.
@@ -4341,7 +4337,7 @@ pub async fn fetch_page_html_chrome_base<'h>(
                 feature = "chrome",
                 not(feature = "decentralized")
             ))]
-            let (spooled_response, spool_attempted): (Option<PageResponse>, bool) = {
+            let spooled_response: Option<PageResponse> = {
                 let prefer_direct_spool = !xml_target
                     && !waf_check
                     && anti_bot_tech == AntiBotTech::None
@@ -4353,10 +4349,11 @@ pub async fn fetch_page_html_chrome_base<'h>(
                 if prefer_direct_spool {
                     // Use at most half the remaining budget so the legacy
                     // fallback below still has runway if the spool attempt
-                    // fails partway through.  Without this split, spool +
-                    // fallback could each consume up to
-                    // `HALF_MAX_PAGE_TIMEOUT` (2.5 min) and blow past the
-                    // caller's `request_timeout` on the failure path.
+                    // fails partway through.  Without this split, a spool
+                    // failure on a tight `request_timeout` could leave the
+                    // fallback with zero budget; halving the remainder
+                    // guarantees both branches share whatever time is
+                    // left fairly.
                     let spool_budget = (base_timeout / 2).max(Duration::from_secs(10));
                     // When `extract` is `Some`, fold link extraction
                     // into the chunk pump so the second-pass walk that
@@ -4397,7 +4394,7 @@ pub async fn fetch_page_html_chrome_base<'h>(
                             if ok {
                                 pr.content_spool = Some(spool);
                             }
-                            (Some(pr), true)
+                            Some(pr)
                         }
                         _ => {
                             // Spool failure: the extractor may have
@@ -4412,11 +4409,11 @@ pub async fn fetch_page_html_chrome_base<'h>(
                             if let Some(ext) = extract.as_deref_mut() {
                                 ext.invalidate();
                             }
-                            (None, true)
+                            None
                         }
                     }
                 } else {
-                    (None, false)
+                    None
                 }
             };
 
@@ -4425,7 +4422,7 @@ pub async fn fetch_page_html_chrome_base<'h>(
                 feature = "chrome",
                 not(feature = "decentralized")
             )))]
-            let (spooled_response, spool_attempted): (Option<PageResponse>, bool) = (None, false);
+            let spooled_response: Option<PageResponse> = None;
 
             // Recompute `base_timeout` so the fallback clock reflects the
             // time already burned by the spool attempt (when it ran).  The
@@ -4436,17 +4433,19 @@ pub async fn fetch_page_html_chrome_base<'h>(
             let mut page_response = if let Some(pr) = spooled_response {
                 pr
             } else {
-                // When we fell through from a failed spool attempt, use
-                // only the remaining budget (no `HALF_MAX_PAGE_TIMEOUT`
-                // floor) so the total wall time never exceeds the
-                // caller's `request_timeout`.  When the gate was closed
-                // (no spool attempt), preserve the original floor so
-                // behaviour matches pre-spool releases exactly.
-                let fallback_budget = if spool_attempted {
-                    base_timeout
-                } else {
-                    base_timeout.max(HALF_MAX_PAGE_TIMEOUT)
-                };
+                // Honour the caller's `request_timeout` as a hard wall-clock
+                // cap regardless of whether the spool gate was open. The
+                // doc string on `ChromeFetchParams::request_timeout`
+                // promises that the field "caps chrome wall time" —
+                // applying a 150 s floor here on the no-spool path silently
+                // extended fetches past the caller's budget for any page
+                // below the spool size threshold
+                // (`TURNSTILE_WALL_PAGE_SIZE = 512 KiB`), which is the
+                // common case for static pages. Using `base_timeout`
+                // directly matches the documented contract, the strict-
+                // budget spool branch above, and the behaviour of every
+                // other post-navigate phase in this function.
+                let fallback_budget = base_timeout;
 
                 // When `extract` is `Some`, fold link extraction into the
                 // chrome chunk pump.  XML pages bypass the rewriter
@@ -4822,8 +4821,14 @@ pub async fn fetch_page_html_chrome_base<'h>(
             }
 
             let res = if !block_bytes {
+                // Honour the caller's `request_timeout` as a hard wall-clock
+                // cap. See the matching comment in the `if run_events` arm
+                // above: a `HALF_MAX_PAGE_TIMEOUT` floor here silently
+                // extended fetches past the caller's budget, contradicting
+                // the documented contract that `request_timeout` "caps
+                // chrome wall time."
                 let results = tokio::time::timeout(
-                    base_timeout.max(HALF_MAX_PAGE_TIMEOUT),
+                    base_timeout,
                     fetch_chrome_html_adaptive(page),
                 );
 
