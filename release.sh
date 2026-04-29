@@ -20,6 +20,17 @@ rm -f spider_agent_html/Cargo.toml.bak spider_agent/Cargo.toml.bak
 
 echo "Internal deps synced to v${VERSION}"
 
+# ── Commit + push the sync before publishing ──
+# `cargo publish` (without --no-verify) refuses to package a crate whose
+# Cargo.toml has uncommitted changes. Stage only the two files we just
+# sed'd so unrelated working-tree changes don't get pulled into the sync
+# commit.
+if ! git diff --quiet -- spider_agent_html/Cargo.toml spider_agent/Cargo.toml; then
+  git add spider_agent_html/Cargo.toml spider_agent/Cargo.toml
+  git commit -m "chore(release): sync internal cross-crate deps to v${VERSION}"
+  git push
+fi
+
 # ── Publish in dependency order ──
 cd spider_agent_types && cargo publish; cd ../
 cd spider_agent_html && cargo publish; cd ../
