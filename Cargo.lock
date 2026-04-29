@@ -1094,8 +1094,8 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.51.142",
- "spider_utils 2.51.142",
+ "spider 2.51.143",
+ "spider_utils 2.51.143",
 ]
 
 [[package]]
@@ -2933,9 +2933,9 @@ dependencies = [
  "log",
  "phf 0.11.3",
  "phf_codegen 0.11.3",
- "string_cache",
- "string_cache_codegen",
- "tendril",
+ "string_cache 0.8.9",
+ "string_cache_codegen 0.5.4",
+ "tendril 0.4.3",
 ]
 
 [[package]]
@@ -3662,7 +3662,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "http 1.4.0",
- "indexmap 2.14.0",
+ "indexmap",
  "slab",
  "tokio",
  "tokio-util",
@@ -3683,12 +3683,6 @@ dependencies = [
  "rand_distr 0.5.1",
  "zerocopy",
 ]
-
-[[package]]
-name = "hashbrown"
-version = "0.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
 
 [[package]]
 name = "hashbrown"
@@ -3986,7 +3980,7 @@ dependencies = [
  "cpu-time",
  "env_logger",
  "hashbrown 0.15.5",
- "indexmap 2.14.0",
+ "indexmap",
  "lazy_static",
  "log",
  "mmap-rs",
@@ -4009,16 +4003,12 @@ dependencies = [
 
 [[package]]
 name = "html5ever"
-version = "0.27.0"
+version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c13771afe0e6e846f1e67d038d4cb29998a6779f93c809212e4e9c32efd244d4"
+checksum = "46a1761807faccc9a19e86944bbf40610014066306f96edcdedc2fb714bcb7b8"
 dependencies = [
  "log",
- "mac",
- "markup5ever 0.12.1",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
+ "markup5ever",
 ]
 
 [[package]]
@@ -4173,7 +4163,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "http 1.4.0",
- "indexmap 2.14.0",
+ "indexmap",
  "slab",
  "tokio",
  "tokio-util",
@@ -4515,17 +4505,6 @@ name = "imgref"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40fac9d56ed6437b198fddba683305e8e2d651aa42647f00f5ae542e7f5c94a2"
-
-[[package]]
-name = "indexmap"
-version = "1.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd070e393353796e801d209ad339e89596eb4c8d430d18ede6a1cced8fafbd99"
-dependencies = [
- "autocfg",
- "hashbrown 0.12.3",
- "serde",
-]
 
 [[package]]
 name = "indexmap"
@@ -4950,15 +4929,15 @@ checksum = "fa4b488a8028ab4b33644805455ab11af459f9f7eeffeb6caa50b328c03899b7"
 
 [[package]]
 name = "llm_readability"
-version = "0.0.13"
+version = "0.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2dd03f1473eaaf56fe7dccef40ad64626b98f4dba23af0ab7fcfc7d2d6b6845c"
+checksum = "f1f301bf85b7a157f91e56c0bdd76ebfe60d36e50690d89937bf74ac35567a5d"
 dependencies = [
  "auto_encoder 0.2.3",
  "html5ever",
- "markup5ever 0.13.0",
- "markup5ever_rcdom",
+ "markup5ever",
  "regex",
+ "tendril 0.5.0",
  "url",
 ]
 
@@ -5018,7 +4997,7 @@ dependencies = [
  "ecb",
  "encoding_rs",
  "flate2",
- "indexmap 2.14.0",
+ "indexmap",
  "itoa",
  "jiff",
  "log",
@@ -5098,42 +5077,13 @@ dependencies = [
 
 [[package]]
 name = "markup5ever"
-version = "0.12.1"
+version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16ce3abbeba692c8b8441d036ef91aea6df8da2c6b6e21c7e14d3c18e526be45"
+checksum = "7122d987ec5f704ee56f6e5b41a7d93722e9aae27ae07cafa4036c4d3f9757de"
 dependencies = [
  "log",
- "phf 0.11.3",
- "phf_codegen 0.11.3",
- "string_cache",
- "string_cache_codegen",
- "tendril",
-]
-
-[[package]]
-name = "markup5ever"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d581ff8be69d08a2efa23a959d81aa22b739073f749f067348bd4f4ba4b69195"
-dependencies = [
- "log",
- "phf 0.11.3",
- "phf_codegen 0.11.3",
- "string_cache",
- "string_cache_codegen",
- "tendril",
-]
-
-[[package]]
-name = "markup5ever_rcdom"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edaa21ab3701bfee5099ade5f7e1f84553fd19228cf332f13cd6e964bf59be18"
-dependencies = [
- "html5ever",
- "markup5ever 0.12.1",
- "tendril",
- "xml5ever",
+ "tendril 0.5.0",
+ "web_atoms",
 ]
 
 [[package]]
@@ -7172,7 +7122,7 @@ checksum = "73389e0c99e664f919275ab5b5b0471391fe9a8de61e1dff9b1eaf56a90f16e3"
 dependencies = [
  "bytes",
  "hashbrown 0.17.0",
- "indexmap 2.14.0",
+ "indexmap",
  "munge",
  "ptr_meta",
  "rancor",
@@ -7646,7 +7596,7 @@ version = "1.0.149"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
 dependencies = [
- "indexmap 2.14.0",
+ "indexmap",
  "itoa",
  "memchr",
  "serde",
@@ -8002,9 +7952,9 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.51.141"
+version = "2.51.142"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5c1e5519c93b5330532c70737358a388592f2afa38bbf18da3cb2a3d9dc23ca"
+checksum = "259c65a0e7276d0893fc1711c8f466fe82b28388fbcc7522623b5e6520e2dfd6"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -8030,7 +7980,7 @@ dependencies = [
  "serde_regex",
  "simdutf8",
  "smallvec",
- "spider_agent_types 2.51.141",
+ "spider_agent_types 2.51.142",
  "spider_fingerprint",
  "string-interner",
  "string_concat",
@@ -8043,7 +7993,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.51.142"
+version = "2.51.143"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -8103,7 +8053,7 @@ dependencies = [
  "smallvec",
  "sonic-rs",
  "spider_agent",
- "spider_agent_types 2.51.142",
+ "spider_agent_types 2.51.143",
  "spider_fingerprint",
  "spider_firewall",
  "spider_network_blocker",
@@ -8132,7 +8082,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent"
-version = "2.51.142"
+version = "2.51.143"
 dependencies = [
  "aho-corasick",
  "async-openai 0.35.0",
@@ -8155,7 +8105,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spider_agent_html",
- "spider_agent_types 2.51.142",
+ "spider_agent_types 2.51.143",
  "spider_skills",
  "tempfile",
  "thirtyfour",
@@ -8166,20 +8116,20 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_html"
-version = "2.51.142"
+version = "2.51.143"
 dependencies = [
  "aho-corasick",
  "lol_html",
  "serde",
  "serde_json",
- "spider_agent_types 2.51.142",
+ "spider_agent_types 2.51.143",
 ]
 
 [[package]]
 name = "spider_agent_types"
-version = "2.51.141"
+version = "2.51.142"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9afcd9357a450d264b724337e6e6931d2f7854cf7ff254d57702424aac36cd2b"
+checksum = "d8c9014746540f8fbdbac393056a523fb05e960a9a5717bbc9e421bee6cdc3c0"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8190,7 +8140,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.51.142"
+version = "2.51.143"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8240,7 +8190,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.51.142"
+version = "2.51.143"
 dependencies = [
  "clap",
  "env_logger",
@@ -8249,7 +8199,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.51.142",
+ "spider 2.51.143",
  "spider_transformations",
  "tikv-jemallocator",
  "tokio",
@@ -8266,9 +8216,9 @@ dependencies = [
  "flexbuffers",
  "htr",
  "serde_json",
- "spider 2.51.142",
+ "spider 2.51.143",
  "spider_transformations",
- "spider_utils 2.51.141",
+ "spider_utils 2.51.142",
 ]
 
 [[package]]
@@ -8307,7 +8257,7 @@ dependencies = [
 
 [[package]]
 name = "spider_mcp"
-version = "2.51.142"
+version = "2.51.143"
 dependencies = [
  "clap",
  "dashmap",
@@ -8316,7 +8266,7 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
- "spider 2.51.142",
+ "spider 2.51.143",
  "spider_transformations",
  "tokio",
  "uuid",
@@ -8387,7 +8337,7 @@ dependencies = [
  "selectors 0.25.0",
  "serde",
  "smallvec",
- "tendril",
+ "tendril 0.4.3",
 ]
 
 [[package]]
@@ -8403,35 +8353,35 @@ dependencies = [
 
 [[package]]
 name = "spider_transformations"
-version = "2.39.5"
+version = "2.39.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87ebae26762a03a1bf90d1119c95bd4c033962d6fb04d6e224d8c8e9e1831fc9"
+checksum = "cfb31a67444dad9c428cc693e61df4e523953589212c55b7c132278774119a19"
 dependencies = [
  "aho-corasick",
- "auto_encoder 0.1.10",
+ "auto_encoder 0.2.3",
  "fast_html2md",
  "html5ever",
- "indexmap 1.9.3",
+ "indexmap",
  "llm_readability",
  "lol_html",
- "markup5ever 0.12.1",
- "phf 0.11.3",
- "phf_codegen 0.11.3",
+ "markup5ever",
+ "phf 0.13.1",
+ "phf_codegen 0.13.1",
  "regex",
  "serde",
- "spider 2.51.141",
+ "spider 2.51.142",
  "spider_scraper",
- "tendril",
- "thiserror 1.0.69",
+ "tendril 0.5.0",
+ "thiserror 2.0.18",
  "unicode-width 0.2.2",
  "url",
 ]
 
 [[package]]
 name = "spider_utils"
-version = "2.51.141"
+version = "2.51.142"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7874e3d24adbbe0ca73aac5074c7b1d6dff5ab2f47d57adf860a0aecce1982d0"
+checksum = "e8950fe86848124e05832452b74cc24f4d0e0ea00145d8989fa6907815babfc1"
 dependencies = [
  "hashbrown 0.17.0",
  "lazy_static",
@@ -8443,10 +8393,10 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.51.142"
+version = "2.51.143"
 dependencies = [
  "hashbrown 0.17.0",
- "indexmap 2.14.0",
+ "indexmap",
  "lazy_static",
  "log",
  "serde",
@@ -8458,14 +8408,14 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.51.142"
+version = "2.51.143"
 dependencies = [
  "env_logger",
  "hyper",
  "hyper-util",
  "lazy_static",
  "rustls-pemfile",
- "spider 2.51.142",
+ "spider 2.51.143",
  "tokio-rustls",
  "warp",
 ]
@@ -8542,7 +8492,7 @@ dependencies = [
  "futures-util",
  "hashbrown 0.15.5",
  "hashlink 0.10.0",
- "indexmap 2.14.0",
+ "indexmap",
  "log",
  "memchr",
  "native-tls",
@@ -8780,6 +8730,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "string_cache"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a18596f8c785a729f2819c0f6a7eae6ebeebdfffbfe4214ae6b087f690e31901"
+dependencies = [
+ "new_debug_unreachable",
+ "parking_lot",
+ "phf_shared 0.13.1",
+ "precomputed-hash",
+]
+
+[[package]]
 name = "string_cache_codegen"
 version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8787,6 +8749,18 @@ checksum = "c711928715f1fe0fe509c53b43e993a9a557babc2d0a3567d0a3006f1ac931a0"
 dependencies = [
  "phf_generator 0.11.3",
  "phf_shared 0.11.3",
+ "proc-macro2",
+ "quote",
+]
+
+[[package]]
+name = "string_cache_codegen"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "585635e46db231059f76c5849798146164652513eb9e8ab2685939dd90f29b69"
+dependencies = [
+ "phf_generator 0.13.1",
+ "phf_shared 0.13.1",
  "proc-macro2",
  "quote",
 ]
@@ -9051,6 +9025,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tendril"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4790fc369d5a530f4b544b094e31388b9b3a37c0f4652ade4505945f5660d24"
+dependencies = [
+ "new_debug_unreachable",
+ "utf-8",
+]
+
+[[package]]
 name = "thirtyfour"
 version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9064,7 +9048,7 @@ dependencies = [
  "const_format",
  "futures-util",
  "http 1.4.0",
- "indexmap 2.14.0",
+ "indexmap",
  "pastey 0.2.2",
  "reqwest 0.13.3",
  "serde",
@@ -9401,7 +9385,7 @@ version = "0.9.12+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf92845e79fc2e2def6a5d828f0801e29a2f8acc037becc5ab08595c7d5e9863"
 dependencies = [
- "indexmap 2.14.0",
+ "indexmap",
  "serde_core",
  "serde_spanned",
  "toml_datetime 0.7.5+spec-1.1.0",
@@ -9440,7 +9424,7 @@ version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
- "indexmap 2.14.0",
+ "indexmap",
  "toml_datetime 0.6.11",
  "winnow 0.5.40",
 ]
@@ -9451,7 +9435,7 @@ version = "0.25.11+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b59c4d22ed448339746c59b905d24568fcbb3ab65a500494f7b8c3e97739f2b"
 dependencies = [
- "indexmap 2.14.0",
+ "indexmap",
  "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
  "winnow 1.0.2",
@@ -9520,7 +9504,7 @@ checksum = "ebe5ef63511595f1344e2d5cfa636d973292adc0eec1f0ad45fae9f0851ab1d4"
 dependencies = [
  "futures-core",
  "futures-util",
- "indexmap 2.14.0",
+ "indexmap",
  "pin-project-lite",
  "slab",
  "sync_wrapper",
@@ -10063,7 +10047,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bb0e353e6a2fbdc176932bbaab493762eb1255a7900fe0fea1a2f96c296cc909"
 dependencies = [
  "anyhow",
- "indexmap 2.14.0",
+ "indexmap",
  "wasm-encoder",
  "wasmparser",
 ]
@@ -10102,7 +10086,7 @@ checksum = "47b807c72e1bac69382b3a6fb3dbe8ea4c0ed87ff5629b8685ae6b9a611028fe"
 dependencies = [
  "bitflags 2.11.1",
  "hashbrown 0.15.5",
- "indexmap 2.14.0",
+ "indexmap",
  "semver",
 ]
 
@@ -10124,6 +10108,18 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "web_atoms"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7cff6eef815df1834fd250e3a2ff436044d82a9f1bc1980ca1dbdf07effc538"
+dependencies = [
+ "phf 0.13.1",
+ "phf_codegen 0.13.1",
+ "string_cache 0.9.0",
+ "string_cache_codegen 0.6.1",
 ]
 
 [[package]]
@@ -10701,7 +10697,7 @@ checksum = "b7c566e0f4b284dd6561c786d9cb0142da491f46a9fbed79ea69cdad5db17f21"
 dependencies = [
  "anyhow",
  "heck 0.5.0",
- "indexmap 2.14.0",
+ "indexmap",
  "prettyplease",
  "syn 2.0.117",
  "wasm-metadata",
@@ -10732,7 +10728,7 @@ checksum = "9d66ea20e9553b30172b5e831994e35fbde2d165325bec84fc43dbf6f4eb9cb2"
 dependencies = [
  "anyhow",
  "bitflags 2.11.1",
- "indexmap 2.14.0",
+ "indexmap",
  "log",
  "serde",
  "serde_derive",
@@ -10751,7 +10747,7 @@ checksum = "ecc8ac4bc1dc3381b7f59c34f00b67e18f910c2c0f50015669dde7def656a736"
 dependencies = [
  "anyhow",
  "id-arena",
- "indexmap 2.14.0",
+ "indexmap",
  "log",
  "semver",
  "serde",
@@ -10837,17 +10833,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3a56132a0d6ecbe77352edc10232f788fc4ceefefff4cab784a98e0e16b6b51"
 dependencies = [
  "xml",
-]
-
-[[package]]
-name = "xml5ever"
-version = "0.18.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bbb26405d8e919bc1547a5aa9abc95cbfa438f04844f5fdd9dc7596b748bf69"
-dependencies = [
- "log",
- "mac",
- "markup5ever 0.12.1",
 ]
 
 [[package]]
@@ -11005,7 +10990,7 @@ dependencies = [
  "crc32fast",
  "crossbeam-utils",
  "displaydoc",
- "indexmap 2.14.0",
+ "indexmap",
  "num_enum 0.7.6",
  "thiserror 1.0.69",
 ]
