@@ -2145,6 +2145,17 @@ impl Configuration {
             remote_cache_main_doc_only: self.chrome_remote_cache_main_doc_only_enabled(),
             first_byte_timeout: &self.chrome_first_byte_timeout,
             browser_dead: None,
+            chrome_failover: Some(&self.chrome_failover),
+            // Auto-populate the endpoint URL for every chrome / smart
+            // crawl path so the first-byte watchdog can mark the right
+            // backend bad without each call site having to thread a
+            // `BrowserController` through its signature. Multi-URL
+            // failover wins (the most recent successful URL); single-URL
+            // config is the fallback. `None` for local launches.
+            chrome_endpoint_url: self
+                .chrome_failover
+                .last_connected_url()
+                .or(self.chrome_connection_url.as_deref()),
         }
     }
 

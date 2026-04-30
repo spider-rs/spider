@@ -136,7 +136,8 @@ macro_rules! chrome_page_fetch {
                     &$shared
                         .6
                         .chrome_fetch_params()
-                        .with_browser_dead(&$shared.11),
+                        .with_browser_dead(&$shared.11)
+                        .with_chrome_endpoint($shared.12.as_deref()),
                     &$shared.1,
                     &$shared.3,
                     &mut links,
@@ -251,9 +252,10 @@ macro_rules! chrome_page_fetch {
                                 $shared.6.get_cache_options(),
                                 $shared.6.cache_namespace_str(),
                                 &$shared
-                        .6
-                        .chrome_fetch_params()
-                        .with_browser_dead(&$shared.11),
+                                    .6
+                                    .chrome_fetch_params()
+                                    .with_browser_dead(&$shared.11)
+                                    .with_chrome_endpoint($shared.12.as_deref()),
                                 &$shared.1,
                                 &$shared.3,
                                 &mut links,
@@ -382,7 +384,8 @@ macro_rules! chrome_page_fetch_on {
                     &$shared
                         .6
                         .chrome_fetch_params()
-                        .with_browser_dead(&$shared.11),
+                        .with_browser_dead(&$shared.11)
+                        .with_chrome_endpoint($shared.12.as_deref()),
                     &$shared.1,
                     &$shared.3,
                     &mut links,
@@ -7664,6 +7667,7 @@ impl Website {
                                 self.domain_parsed.clone(),
                                 self.on_link_find_callback.clone(),
                                 b.browser_dead.clone(),
+                                b.connected_url.clone(),
                             ));
 
                             let add_external = !shared.3.is_empty();
@@ -8948,6 +8952,7 @@ impl Website {
                                 self.domain_parsed.clone(),
                                 self.on_link_find_callback.clone(),
                                 b.browser_dead.clone(),
+                                b.connected_url.clone(),
                             ));
 
                             let add_external = !shared.3.is_empty();
@@ -11466,13 +11471,14 @@ impl Website {
         jar: Option<&Arc<crate::client::cookie::Jar>>,
     ) -> Option<crate::features::chrome::BrowserController> {
         match crate::features::chrome::launch_browser_cookies(config, url_parsed, jar).await {
-            Some((browser, browser_handle, context_id, browser_dead)) => {
+            Some((browser, browser_handle, context_id, browser_dead, connected_url)) => {
                 let browser: Arc<chromiumoxide::Browser> = Arc::new(browser);
                 let b = (browser, Some(browser_handle), context_id);
 
                 Some(crate::features::chrome::BrowserController::new(
                     b,
                     browser_dead,
+                    connected_url,
                 ))
             }
             _ => None,

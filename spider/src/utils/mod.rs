@@ -23,7 +23,7 @@ pub mod bloom;
 pub mod coalesce;
 #[cfg(feature = "chrome")]
 pub(crate) mod detect_chrome;
-#[cfg(any(feature = "balance", feature = "disk"))]
+#[cfg(any(feature = "balance", feature = "disk", feature = "parallel_backends"))]
 /// CPU and Memory detection to balance limitations.
 pub mod detect_system;
 #[cfg(feature = "dns_cache")]
@@ -3683,6 +3683,20 @@ pub struct ChromeFetchParams<'a> {
     /// avoid Arc clone overhead at construction; the watchdog clones the
     /// inner Arc once if it needs to outlive a spawned future.
     pub browser_dead: Option<&'a std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Optional handle to the lazy chrome failover. When `Some` together
+    /// with `chrome_endpoint_url`, the first-byte watchdog calls
+    /// `mark_url_bad` on the failover so subsequent
+    /// `setup_browser_configuration` calls skip the dead URL during the
+    /// cooldown. Wired automatically from `Configuration::chrome_fetch_params`
+    /// — when no multi-endpoint failover is configured the borrowed
+    /// `LazyChromeFailover` is empty (uninit `OnceLock`) and `mark_url_bad`
+    /// is a no-op.
+    pub chrome_failover: Option<&'a crate::features::chrome::LazyChromeFailover>,
+    /// Optional connected chrome endpoint URL. Set by macros / call sites
+    /// that have access to a `BrowserController.connected_url`. The
+    /// first-byte watchdog passes this URL to
+    /// `LazyChromeFailover::mark_url_bad` on timeout.
+    pub chrome_endpoint_url: Option<&'a str>,
 }
 
 #[cfg(feature = "chrome")]
@@ -3696,6 +3710,15 @@ impl<'a> ChromeFetchParams<'a> {
         dead: &'a std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
         self.browser_dead = Some(dead);
+        self
+    }
+
+    /// Attach the connected chrome endpoint URL so the first-byte
+    /// watchdog can mark it bad on timeout. Pass `None` to leave it
+    /// unset (default). Builder-style.
+    #[inline]
+    pub fn with_chrome_endpoint(mut self, url: Option<&'a str>) -> Self {
+        self.chrome_endpoint_url = url;
         self
     }
 }
@@ -3859,8 +3882,26 @@ pub async fn fetch_page_html_chrome_base<'h>(
     // wakeup. Built only when a timeout is configured — `None` keeps the
     // hot path identical to prior behavior.
     let first_byte_timeout: Option<Duration> = *params.first_byte_timeout;
+    // All watchdog state is gated on `first_byte_timeout.is_some()` so
+    // the default-config hot path pays zero extra atomics, allocations,
+    // or Arc clones. When disarmed every binding below is `None`.
     let browser_dead_arc: Option<std::sync::Arc<std::sync::atomic::AtomicBool>> =
-        params.browser_dead.cloned();
+        if first_byte_timeout.is_some() {
+            params.browser_dead.cloned()
+        } else {
+            None
+        };
+    let chrome_failover_for_watchdog: Option<crate::features::chrome::LazyChromeFailover> =
+        if first_byte_timeout.is_some() {
+            params.chrome_failover.cloned()
+        } else {
+            None
+        };
+    let chrome_endpoint_for_watchdog: Option<String> = if first_byte_timeout.is_some() {
+        params.chrome_endpoint_url.map(|s| s.to_string())
+    } else {
+        None
+    };
     let first_byte_signal: Option<
         std::sync::Arc<(std::sync::atomic::AtomicBool, tokio::sync::Notify)>,
     > = first_byte_timeout.map(|_| {
@@ -4320,6 +4361,21 @@ pub async fn fetch_page_html_chrome_base<'h>(
                         let _ = page.force_stop_all().await;
                         if let Some(ref dead) = browser_dead_arc {
                             dead.store(true, std::sync::atomic::Ordering::Release);
+                        }
+                        // Mark the chrome endpoint bad on the failover so
+                        // the next setup_browser_configuration call rotates
+                        // away from it. Cooldown matches the timeout (or
+                        // 30s, whichever is longer) so the dead endpoint
+                        // gets at least the watchdog's worth of recovery
+                        // time before being retried.
+                        if let (Some(ref failover), Some(ref endpoint_url)) =
+                            (&chrome_failover_for_watchdog, &chrome_endpoint_for_watchdog)
+                        {
+                            let cooldown_ms = std::cmp::max(
+                                timeout.as_millis().min(u128::from(u64::MAX)) as u64,
+                                30_000,
+                            );
+                            failover.mark_url_bad(endpoint_url, cooldown_ms);
                         }
                     }
                 }

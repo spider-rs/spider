@@ -460,6 +460,19 @@ pub struct ChromeConnectionFailover {
     urls: Vec<String>,
     /// Per-endpoint consecutive error count.
     errors: Vec<std::sync::atomic::AtomicU32>,
+    /// Per-endpoint cooldown deadline as Unix milliseconds. `0` means
+    /// not in cooldown — the endpoint is considered healthy. A non-zero
+    /// value means "skip this endpoint while `now < dead_until[i]`".
+    /// Set by `mark_url_bad`; consulted by `connect()`. Lock-free —
+    /// stale reads are harmless (a recently-marked endpoint may be
+    /// retried once before the AtomicU64 settles, or a recovered
+    /// endpoint may be skipped one extra time).
+    dead_until: Vec<std::sync::atomic::AtomicU64>,
+    /// Index of the most recently-successful endpoint, or `usize::MAX`
+    /// if no successful connection has happened yet. Lock-free — last
+    /// writer wins under concurrent connects, which is acceptable since
+    /// we only consult this for "best-effort" URL lookup.
+    last_idx: std::sync::atomic::AtomicUsize,
     /// Max retries per endpoint before moving to the next.
     max_retries: u32,
 }
@@ -506,6 +519,24 @@ impl LazyChromeFailover {
             std::sync::Arc::new(ChromeConnectionFailover::new(urls.to_vec(), max_retries))
         })
     }
+
+    /// Mark a URL as dead on the inner failover (no-op if the cell hasn't
+    /// been initialized yet, or the URL isn't part of the failover list).
+    /// Lock-free: a single atomic store on the matching slot.
+    #[inline]
+    pub fn mark_url_bad(&self, url: &str, cooldown_millis: u64) {
+        if let Some(failover) = self.inner.get() {
+            failover.mark_url_bad(url, cooldown_millis);
+        }
+    }
+
+    /// Borrowed URL of the most recently-successful endpoint, or `None`
+    /// when the cell hasn't initialized or no successful connect has
+    /// happened yet. Lock-free: one atomic load + one slice lookup.
+    #[inline]
+    pub fn last_connected_url(&self) -> Option<&str> {
+        self.inner.get().and_then(|f| f.last_connected_url())
+    }
 }
 
 impl ChromeConnectionFailover {
@@ -515,10 +546,69 @@ impl ChromeConnectionFailover {
             .iter()
             .map(|_| std::sync::atomic::AtomicU32::new(0))
             .collect();
+        let dead_until = urls
+            .iter()
+            .map(|_| std::sync::atomic::AtomicU64::new(0))
+            .collect();
         Self {
             urls,
             errors,
+            dead_until,
+            last_idx: std::sync::atomic::AtomicUsize::new(usize::MAX),
             max_retries,
+        }
+    }
+
+    /// Borrowed URL of the most recently-successful endpoint, or `None`
+    /// if nothing has connected yet (or the stored index has been
+    /// invalidated). Used by `Configuration::chrome_fetch_params` to
+    /// auto-populate the chrome endpoint URL on every chrome fetch path
+    /// without forcing call sites to thread `BrowserController` through
+    /// their signatures.
+    #[inline]
+    pub fn last_connected_url(&self) -> Option<&str> {
+        let idx = self.last_idx.load(std::sync::atomic::Ordering::Acquire);
+        self.urls.get(idx).map(|s| s.as_str())
+    }
+
+    /// Current Unix time in milliseconds. Saturates to 0 on a clock skew
+    /// far enough into the past to underflow `Duration` (effectively
+    /// impossible on a sane host). Never panics.
+    #[inline]
+    fn now_millis() -> u64 {
+        match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            Ok(d) => {
+                let m = d.as_millis();
+                if m > u128::from(u64::MAX) {
+                    u64::MAX
+                } else {
+                    m as u64
+                }
+            }
+            Err(_) => 0,
+        }
+    }
+
+    /// Mark a URL as dead for `cooldown_millis`. Subsequent `connect()`
+    /// calls skip the matching endpoint until the cooldown elapses.
+    /// Unknown URLs are ignored (no panic, no allocation). Lock-free:
+    /// a single atomic store on the matching slot.
+    pub fn mark_url_bad(&self, url: &str, cooldown_millis: u64) {
+        if cooldown_millis == 0 {
+            return;
+        }
+        let until = Self::now_millis().saturating_add(cooldown_millis);
+        for (i, u) in self.urls.iter().enumerate() {
+            if u == url {
+                self.dead_until[i].store(until, std::sync::atomic::Ordering::Release);
+                log::warn!(
+                    "[chrome-failover] endpoint {} ({}) marked dead for {}ms",
+                    i,
+                    url,
+                    cooldown_millis
+                );
+                return;
+            }
         }
     }
 
@@ -526,54 +616,97 @@ impl ChromeConnectionFailover {
     ///
     /// For each endpoint: retry up to `max_retries` times with backoff.
     /// If all retries fail, move to the next endpoint. Returns the first
-    /// successful connection or `None` if all endpoints are exhausted.
+    /// successful connection (paired with the URL it succeeded on) or
+    /// `None` if all endpoints are exhausted.
+    ///
+    /// Endpoints whose `dead_until` cooldown has not yet elapsed are
+    /// skipped without a connection attempt. If every endpoint is in
+    /// cooldown the function falls through to a second pass that ignores
+    /// the cooldown — preserving the prior "always-try-something"
+    /// contract so callers don't see a sudden None return when they
+    /// would have seen a slow recovery attempt before.
     pub async fn connect(
         &self,
         config: &Configuration,
-    ) -> Option<(Browser, chromiumoxide::Handler)> {
+    ) -> Option<(Browser, chromiumoxide::Handler, String)> {
         let handler_config_base = create_handler_config(config);
 
-        for (idx, url) in self.urls.iter().enumerate() {
-            let err_count = &self.errors[idx];
+        for pass in 0u8..2 {
+            // Pass 0 honors cooldowns; pass 1 ignores them so we never
+            // return None solely because every endpoint is in cooldown.
+            let now = if pass == 0 { Self::now_millis() } else { 0 };
+            let mut all_cooled_down = true;
 
-            for attempt in 0..=self.max_retries {
-                match Browser::connect_with_config(url.as_str(), handler_config_base.clone()).await
-                {
-                    Ok(pair) => {
-                        // Reset error count on success.
-                        err_count.store(0, std::sync::atomic::Ordering::Relaxed);
-                        if idx > 0 {
-                            log::info!(
-                                "[chrome-failover] connected to endpoint {} ({}) after skipping {}",
-                                idx,
-                                url,
-                                idx
-                            );
-                        }
-                        return Some(pair);
-                    }
-                    Err(e) => {
-                        let n = err_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                        log::warn!(
-                            "[chrome-failover] endpoint {} ({}) attempt {}/{} failed: {:?}",
+            for (idx, url) in self.urls.iter().enumerate() {
+                if pass == 0 {
+                    let until = self.dead_until[idx].load(std::sync::atomic::Ordering::Acquire);
+                    if until > now {
+                        log::debug!(
+                            "[chrome-failover] endpoint {} ({}) skipped (cooldown {}ms remaining)",
                             idx,
                             url,
-                            attempt + 1,
-                            self.max_retries + 1,
-                            e
+                            until.saturating_sub(now)
                         );
-                        if attempt < self.max_retries {
-                            let backoff = crate::utils::backoff::backoff_delay(attempt, 100, 5_000);
-                            tokio::time::sleep(backoff).await;
-                        } else {
+                        continue;
+                    }
+                }
+                all_cooled_down = false;
+                let err_count = &self.errors[idx];
+
+                for attempt in 0..=self.max_retries {
+                    match Browser::connect_with_config(url.as_str(), handler_config_base.clone())
+                        .await
+                    {
+                        Ok((browser, handler)) => {
+                            // Reset error count and clear any cooldown on success.
+                            err_count.store(0, std::sync::atomic::Ordering::Relaxed);
+                            self.dead_until[idx].store(0, std::sync::atomic::Ordering::Release);
+                            // Record the successful endpoint for later URL
+                            // lookup (e.g. auto-populating chrome_endpoint_url
+                            // on subsequent chrome_fetch_params() calls).
+                            self.last_idx
+                                .store(idx, std::sync::atomic::Ordering::Release);
+                            if idx > 0 {
+                                log::info!(
+                                    "[chrome-failover] connected to endpoint {} ({}) after skipping {}",
+                                    idx,
+                                    url,
+                                    idx
+                                );
+                            }
+                            return Some((browser, handler, url.clone()));
+                        }
+                        Err(e) => {
+                            let n =
+                                err_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                             log::warn!(
-                                "[chrome-failover] endpoint {} exhausted ({} errors), trying next",
+                                "[chrome-failover] endpoint {} ({}) attempt {}/{} failed: {:?}",
                                 idx,
-                                n
+                                url,
+                                attempt + 1,
+                                self.max_retries + 1,
+                                e
                             );
+                            if attempt < self.max_retries {
+                                let backoff =
+                                    crate::utils::backoff::backoff_delay(attempt, 100, 5_000);
+                                tokio::time::sleep(backoff).await;
+                            } else {
+                                log::warn!(
+                                    "[chrome-failover] endpoint {} exhausted ({} errors), trying next",
+                                    idx,
+                                    n
+                                );
+                            }
                         }
                     }
                 }
+            }
+
+            // Nothing was actually attempted this pass — every endpoint
+            // was in cooldown. Fall through to pass 1 (ignore cooldowns).
+            if !all_cooled_down {
+                break;
             }
         }
 
@@ -625,16 +758,25 @@ pub fn cleanup_invalid_headers(hm: &mut std::collections::HashMap<String, String
 }
 
 /// Setup the browser configuration.
+///
+/// Returns `Option<(Browser, Handler, Option<String>)>` where the third
+/// element is the connected endpoint URL when one was used. The URL is
+/// `Some(..)` for the multi-endpoint failover and single-remote paths
+/// (so callers can later mark it bad on the failover) and `None` for
+/// the local-launch path.
 pub async fn setup_browser_configuration(
     config: &Configuration,
-) -> Option<(Browser, chromiumoxide::Handler)> {
+) -> Option<(Browser, chromiumoxide::Handler, Option<String>)> {
     let proxies = &config.proxies;
 
     // ── Multi-endpoint failover path (priority) ──
     if let Some(ref urls) = config.chrome_connection_urls {
         if !urls.is_empty() {
             let failover = config.chrome_failover.get_or_init(urls, 3);
-            return failover.connect(config).await;
+            return failover
+                .connect(config)
+                .await
+                .map(|(b, h, u)| (b, h, Some(u)));
         }
     }
 
@@ -673,7 +815,7 @@ pub async fn setup_browser_configuration(
                 }
             }
 
-            browser
+            browser.map(|(b, h)| (b, h, Some(v.clone())))
         }
         _ => match get_browser_config(
             proxies,
@@ -724,7 +866,7 @@ pub async fn setup_browser_configuration(
                 browser_config.only_html = config.only_html && !config.full_resources;
 
                 match Browser::launch(browser_config).await {
-                    Ok(browser) => Some(browser),
+                    Ok((browser, handler)) => Some((browser, handler, None)),
                     Err(e) => {
                         log::error!("Browser::launch() failed: {:?}", e);
                         None
@@ -737,6 +879,10 @@ pub async fn setup_browser_configuration(
 }
 
 /// Launch a chromium browser with configurations and wait until the instance is up.
+///
+/// The fifth tuple element is the connected endpoint URL when one was
+/// used (multi-endpoint failover or single remote endpoint) and `None`
+/// when the browser was launched locally.
 pub async fn launch_browser_base(
     config: &Configuration,
     url_parsed: &Option<Box<Url>>,
@@ -746,6 +892,7 @@ pub async fn launch_browser_base(
     tokio::task::JoinHandle<()>,
     Option<BrowserContextId>,
     std::sync::Arc<std::sync::atomic::AtomicBool>,
+    Option<String>,
 )> {
     use chromiumoxide::{
         cdp::browser_protocol::target::CreateBrowserContextParams, error::CdpError,
@@ -755,7 +902,7 @@ pub async fn launch_browser_base(
 
     match browser_configuration {
         Some(c) => {
-            let (mut browser, mut handler) = c;
+            let (mut browser, mut handler, connected_url) = c;
             let mut context_id = None;
 
             let browser_dead = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -843,7 +990,7 @@ pub async fn launch_browser_base(
                 handle.abort();
             }
 
-            Some((browser, handle, context_id, browser_dead))
+            Some((browser, handle, context_id, browser_dead, connected_url))
         }
         _ => None,
     }
@@ -858,6 +1005,7 @@ pub async fn launch_browser(
     tokio::task::JoinHandle<()>,
     Option<BrowserContextId>,
     std::sync::Arc<std::sync::atomic::AtomicBool>,
+    Option<String>,
 )> {
     launch_browser_base(config, url_parsed, None).await
 }
@@ -872,6 +1020,7 @@ pub async fn launch_browser_cookies(
     tokio::task::JoinHandle<()>,
     Option<BrowserContextId>,
     std::sync::Arc<std::sync::atomic::AtomicBool>,
+    Option<String>,
 )> {
     launch_browser_base(config, url_parsed, jar).await
 }
@@ -1313,6 +1462,12 @@ pub struct BrowserController {
     /// WebSocket disconnects. Spawned page-fetch tasks should check this
     /// before creating new tabs to avoid wasting work on a dead browser.
     pub browser_dead: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The endpoint URL this browser was connected to (multi-endpoint
+    /// failover or single-remote path) or `None` for a local launch.
+    /// Used by callers to mark the URL bad on the failover when the
+    /// first-byte watchdog (or another health check) determines the
+    /// backend has gone dark.
+    pub connected_url: Option<String>,
 }
 
 impl BrowserController {
@@ -1320,11 +1475,13 @@ impl BrowserController {
     pub(crate) fn new(
         browser: BrowserControl,
         browser_dead: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        connected_url: Option<String>,
     ) -> Self {
         BrowserController {
             browser,
             closed: false,
             browser_dead,
+            connected_url,
         }
     }
     /// Dispose the browser context and join handler.
@@ -1783,15 +1940,15 @@ mod tests {
     fn test_with_chrome_connections_resets_lazy_failover() {
         let mut cfg = Configuration::default();
         cfg.with_chrome_connections(vec!["ws://a".into(), "ws://b".into()]);
-        let first = std::sync::Arc::clone(cfg.chrome_failover.get_or_init(
-            cfg.chrome_connection_urls.as_deref().unwrap(),
-            3,
-        ));
+        let first = std::sync::Arc::clone(
+            cfg.chrome_failover
+                .get_or_init(cfg.chrome_connection_urls.as_deref().unwrap(), 3),
+        );
         cfg.with_chrome_connections(vec!["ws://c".into(), "ws://d".into()]);
-        let second = std::sync::Arc::clone(cfg.chrome_failover.get_or_init(
-            cfg.chrome_connection_urls.as_deref().unwrap(),
-            3,
-        ));
+        let second = std::sync::Arc::clone(
+            cfg.chrome_failover
+                .get_or_init(cfg.chrome_connection_urls.as_deref().unwrap(), 3),
+        );
         assert!(
             !std::sync::Arc::ptr_eq(&first, &second),
             "URL change must replace the cell — fresh failover required"
@@ -1818,7 +1975,10 @@ mod tests {
         let mut cfg = Configuration::default();
         cfg.with_chrome_first_byte_timeout(Some(std::time::Duration::from_secs(5)));
         let params = cfg.chrome_fetch_params();
-        assert_eq!(*params.first_byte_timeout, Some(std::time::Duration::from_secs(5)));
+        assert_eq!(
+            *params.first_byte_timeout,
+            Some(std::time::Duration::from_secs(5))
+        );
     }
 
     #[test]
@@ -1828,5 +1988,142 @@ mod tests {
         let params = cfg.chrome_fetch_params().with_browser_dead(&dead);
         assert!(params.browser_dead.is_some());
         assert!(std::sync::Arc::ptr_eq(params.browser_dead.unwrap(), &dead));
+    }
+
+    #[test]
+    fn test_chrome_fetch_params_with_chrome_endpoint_attaches_url() {
+        let cfg = Configuration::default();
+        let url = "ws://b".to_string();
+        let params = cfg.chrome_fetch_params().with_chrome_endpoint(Some(&url));
+        assert_eq!(params.chrome_endpoint_url, Some("ws://b"));
+    }
+
+    #[test]
+    fn test_chrome_failover_mark_url_bad_records_cooldown() {
+        let urls = vec!["ws://a".to_string(), "ws://b".to_string()];
+        let failover = ChromeConnectionFailover::new(urls, 3);
+        // Pre-condition: both endpoints healthy.
+        assert_eq!(
+            failover.dead_until[0].load(std::sync::atomic::Ordering::Acquire),
+            0
+        );
+        assert_eq!(
+            failover.dead_until[1].load(std::sync::atomic::Ordering::Acquire),
+            0
+        );
+
+        failover.mark_url_bad("ws://b", 30_000);
+        assert_eq!(
+            failover.dead_until[0].load(std::sync::atomic::Ordering::Acquire),
+            0
+        );
+        let until_b = failover.dead_until[1].load(std::sync::atomic::Ordering::Acquire);
+        assert!(until_b > 0, "ws://b should have a cooldown set");
+        let now = ChromeConnectionFailover::now_millis();
+        assert!(
+            until_b > now,
+            "cooldown deadline ({}) must be in the future relative to now ({})",
+            until_b,
+            now
+        );
+    }
+
+    #[test]
+    fn test_chrome_failover_mark_url_bad_unknown_url_no_op() {
+        let urls = vec!["ws://a".to_string()];
+        let failover = ChromeConnectionFailover::new(urls, 3);
+        // Should not panic, should not modify any slot.
+        failover.mark_url_bad("ws://does-not-exist", 30_000);
+        assert_eq!(
+            failover.dead_until[0].load(std::sync::atomic::Ordering::Acquire),
+            0
+        );
+    }
+
+    #[test]
+    fn test_chrome_failover_mark_url_bad_zero_cooldown_no_op() {
+        let urls = vec!["ws://a".to_string()];
+        let failover = ChromeConnectionFailover::new(urls, 3);
+        failover.mark_url_bad("ws://a", 0);
+        assert_eq!(
+            failover.dead_until[0].load(std::sync::atomic::Ordering::Acquire),
+            0
+        );
+    }
+
+    #[test]
+    fn test_lazy_chrome_failover_mark_url_bad_no_op_when_uninit() {
+        // Cell hasn't been initialized — mark_url_bad must be a no-op
+        // (no panic, no allocation).
+        let cell = LazyChromeFailover::default();
+        cell.mark_url_bad("ws://a", 30_000);
+    }
+
+    #[test]
+    fn test_lazy_chrome_failover_mark_url_bad_propagates_after_init() {
+        let cell = LazyChromeFailover::default();
+        let urls = vec!["ws://a".to_string(), "ws://b".to_string()];
+        let failover = std::sync::Arc::clone(cell.get_or_init(&urls, 3));
+        cell.mark_url_bad("ws://a", 30_000);
+        let until_a = failover.dead_until[0].load(std::sync::atomic::Ordering::Acquire);
+        assert!(
+            until_a > 0,
+            "mark via the cell must propagate to the inner failover"
+        );
+    }
+
+    #[test]
+    fn test_chrome_failover_last_connected_url_starts_none() {
+        let urls = vec!["ws://a".to_string(), "ws://b".to_string()];
+        let failover = ChromeConnectionFailover::new(urls, 3);
+        assert!(
+            failover.last_connected_url().is_none(),
+            "no connect attempted yet — must report None"
+        );
+    }
+
+    #[test]
+    fn test_chrome_failover_last_connected_url_records_idx() {
+        let urls = vec!["ws://a".to_string(), "ws://b".to_string()];
+        let failover = ChromeConnectionFailover::new(urls, 3);
+        // Simulate a successful connect at idx 1.
+        failover
+            .last_idx
+            .store(1, std::sync::atomic::Ordering::Release);
+        assert_eq!(failover.last_connected_url(), Some("ws://b"));
+    }
+
+    #[test]
+    fn test_chrome_fetch_params_auto_populates_endpoint_from_single_url() {
+        let mut cfg = Configuration::default();
+        cfg.with_chrome_connection(Some("ws://lone".to_string()));
+        let params = cfg.chrome_fetch_params();
+        assert_eq!(params.chrome_endpoint_url, Some("ws://lone"));
+    }
+
+    #[test]
+    fn test_chrome_fetch_params_auto_populates_endpoint_from_failover() {
+        let mut cfg = Configuration::default();
+        cfg.with_chrome_connections(vec!["ws://a".into(), "ws://b".into()]);
+        // Force-init the failover and mark idx 1 as last-successful.
+        let failover = std::sync::Arc::clone(
+            cfg.chrome_failover
+                .get_or_init(cfg.chrome_connection_urls.as_deref().unwrap(), 3),
+        );
+        failover
+            .last_idx
+            .store(1, std::sync::atomic::Ordering::Release);
+        let params = cfg.chrome_fetch_params();
+        assert_eq!(params.chrome_endpoint_url, Some("ws://b"));
+    }
+
+    #[test]
+    fn test_chrome_fetch_params_endpoint_none_when_no_chrome_remote() {
+        let cfg = Configuration::default();
+        let params = cfg.chrome_fetch_params();
+        assert!(
+            params.chrome_endpoint_url.is_none(),
+            "no remote URL configured — must be None"
+        );
     }
 }

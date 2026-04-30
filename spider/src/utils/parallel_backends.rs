@@ -788,7 +788,7 @@ impl Clone for ProxyRotator {
 /// Fresh CDP connection per fetch with the **same handler config** as the
 /// primary Chrome path — network interception, resource blocking, viewport,
 /// timeouts all pass through transparently via `connect_with_config()`.
-#[cfg(feature = "chrome")]
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 pub async fn fetch_cdp(
     url: &str,
     endpoint: &str,
@@ -1242,7 +1242,7 @@ pub fn build_backend_futures(
         let sem = semaphore.clone();
 
         match proto {
-            #[cfg(feature = "chrome")]
+            #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
             BackendProtocol::Cdp => {
                 let url = url.to_string();
                 let cfg = crawl_config.clone(); // Arc clone — cheap
