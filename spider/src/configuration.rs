@@ -519,6 +519,12 @@ pub struct Configuration {
     /// fails after retries, the next URL is tried automatically. Requires the
     /// `chrome` feature. When set, takes priority over `chrome_connection_url`.
     pub chrome_connection_urls: Option<Vec<String>>,
+    #[cfg(feature = "chrome")]
+    #[cfg_attr(feature = "serde", serde(skip))]
+    /// Lazy, lock-free chrome failover instance reused across every
+    /// `setup_browser_configuration` call. Built on first use, reset by
+    /// `with_chrome_connections`. Internal cache; not part of public API.
+    pub(crate) chrome_failover: crate::features::chrome::LazyChromeFailover,
     /// Scripts to execute for individual pages, the full path of the url is required for an exact match. This is useful for running one off JS on pages like performing custom login actions.
     #[cfg(feature = "chrome")]
     pub execution_scripts: Option<ExecutionScripts>,
@@ -1854,6 +1860,10 @@ impl Configuration {
                 self.chrome_connection_urls = Some(urls);
             }
         }
+        // Drop any previously-built failover so the next setup call reflects
+        // the new URL list. Outstanding readers keep the old Arc alive until
+        // they release it; no leak.
+        self.chrome_failover = crate::features::chrome::LazyChromeFailover::default();
         self
     }
 

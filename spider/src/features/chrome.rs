@@ -455,12 +455,57 @@ lazy_static! {
 /// Once all endpoints have been exhausted, returns `None`.
 ///
 /// Zero overhead when only one endpoint is configured (inline fast-path).
+#[derive(Debug)]
 pub struct ChromeConnectionFailover {
     urls: Vec<String>,
     /// Per-endpoint consecutive error count.
     errors: Vec<std::sync::atomic::AtomicU32>,
     /// Max retries per endpoint before moving to the next.
     max_retries: u32,
+}
+
+/// Lazy, lock-free, leak-free holder for a `ChromeConnectionFailover`.
+///
+/// Constructed lazily on first call to `get_or_init`, then reused across
+/// every subsequent `setup_browser_configuration` invocation. After init,
+/// access is a single atomic load — no parking, no awaits, no mutexes.
+///
+/// Reset (via `with_chrome_connections`) replaces the cell with a fresh
+/// empty one; the previous `Arc<ChromeConnectionFailover>` drops cleanly
+/// once the last in-flight reader releases it.
+#[derive(Debug, Default)]
+pub struct LazyChromeFailover {
+    inner: std::sync::Arc<std::sync::OnceLock<std::sync::Arc<ChromeConnectionFailover>>>,
+}
+
+impl Clone for LazyChromeFailover {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl PartialEq for LazyChromeFailover {
+    fn eq(&self, _other: &Self) -> bool {
+        // Runtime-only cache; not part of configuration identity.
+        true
+    }
+}
+
+impl LazyChromeFailover {
+    /// Borrow the failover, lazily initializing it on first call.
+    /// The closure runs exactly once for the lifetime of this cell.
+    #[inline]
+    pub fn get_or_init(
+        &self,
+        urls: &[String],
+        max_retries: u32,
+    ) -> &std::sync::Arc<ChromeConnectionFailover> {
+        self.inner.get_or_init(|| {
+            std::sync::Arc::new(ChromeConnectionFailover::new(urls.to_vec(), max_retries))
+        })
+    }
 }
 
 impl ChromeConnectionFailover {
@@ -588,7 +633,7 @@ pub async fn setup_browser_configuration(
     // ── Multi-endpoint failover path (priority) ──
     if let Some(ref urls) = config.chrome_connection_urls {
         if !urls.is_empty() {
-            let failover = ChromeConnectionFailover::new(urls.clone(), 3);
+            let failover = config.chrome_failover.get_or_init(urls, 3);
             return failover.connect(config).await;
         }
     }
@@ -1707,5 +1752,49 @@ mod tests {
         cfg.with_max_main_frame_navigations(Some(20));
         let hc = create_handler_config(&cfg);
         assert_eq!(hc.max_main_frame_navigations, Some(20));
+    }
+
+    #[test]
+    fn test_lazy_chrome_failover_is_init_once_per_cell() {
+        let cell = LazyChromeFailover::default();
+        let urls = vec!["ws://a".to_string(), "ws://b".to_string()];
+        let a = std::sync::Arc::clone(cell.get_or_init(&urls, 3));
+        let b = std::sync::Arc::clone(cell.get_or_init(&urls, 3));
+        assert!(
+            std::sync::Arc::ptr_eq(&a, &b),
+            "second get_or_init must return the same Arc — closure ran twice"
+        );
+    }
+
+    #[test]
+    fn test_lazy_chrome_failover_clone_shares_state() {
+        let cell = LazyChromeFailover::default();
+        let clone = cell.clone();
+        let urls = vec!["ws://a".to_string(), "ws://b".to_string()];
+        let from_orig = std::sync::Arc::clone(cell.get_or_init(&urls, 3));
+        let from_clone = std::sync::Arc::clone(clone.get_or_init(&urls, 3));
+        assert!(
+            std::sync::Arc::ptr_eq(&from_orig, &from_clone),
+            "clones share the OnceLock — second init must observe the first's value"
+        );
+    }
+
+    #[test]
+    fn test_with_chrome_connections_resets_lazy_failover() {
+        let mut cfg = Configuration::default();
+        cfg.with_chrome_connections(vec!["ws://a".into(), "ws://b".into()]);
+        let first = std::sync::Arc::clone(cfg.chrome_failover.get_or_init(
+            cfg.chrome_connection_urls.as_deref().unwrap(),
+            3,
+        ));
+        cfg.with_chrome_connections(vec!["ws://c".into(), "ws://d".into()]);
+        let second = std::sync::Arc::clone(cfg.chrome_failover.get_or_init(
+            cfg.chrome_connection_urls.as_deref().unwrap(),
+            3,
+        ));
+        assert!(
+            !std::sync::Arc::ptr_eq(&first, &second),
+            "URL change must replace the cell — fresh failover required"
+        );
     }
 }
