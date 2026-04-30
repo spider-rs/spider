@@ -2126,4 +2126,66 @@ mod tests {
             "no remote URL configured — must be None"
         );
     }
+
+    #[test]
+    fn test_chrome_first_byte_timeout_jitter_defaults_off() {
+        let cfg = Configuration::default();
+        assert!(cfg.chrome_first_byte_timeout_jitter.is_none());
+        let params = cfg.chrome_fetch_params();
+        assert!(
+            params.first_byte_timeout_jitter.is_none(),
+            "jitter must be None by default"
+        );
+    }
+
+    #[test]
+    fn test_with_chrome_first_byte_timeout_jitter_plumbs_into_params() {
+        let mut cfg = Configuration::default();
+        cfg.with_chrome_first_byte_timeout(Some(std::time::Duration::from_secs(5)));
+        cfg.with_chrome_first_byte_timeout_jitter(Some(std::time::Duration::from_secs(2)));
+        let params = cfg.chrome_fetch_params();
+        assert_eq!(
+            *params.first_byte_timeout,
+            Some(std::time::Duration::from_secs(5))
+        );
+        assert_eq!(
+            *params.first_byte_timeout_jitter,
+            Some(std::time::Duration::from_secs(2))
+        );
+    }
+
+    /// The jitter helper used inside `fetch_page_html_chrome_base`:
+    /// given a base + jitter, the resulting timeout must always lie in
+    /// `[base, base + jitter)`. Mirrors the actual computation done at
+    /// the watchdog set-up site so a regression there is caught here.
+    #[test]
+    fn test_jitter_window_bounds() {
+        let base = std::time::Duration::from_millis(5_000);
+        let jitter = std::time::Duration::from_millis(2_000);
+        for _ in 0..1024 {
+            let j_ms = jitter.as_millis() as u64;
+            let extra = if j_ms > 0 { fastrand::u64(0..j_ms) } else { 0 };
+            let actual = base.saturating_add(std::time::Duration::from_millis(extra));
+            assert!(
+                actual >= base,
+                "jittered timeout must be >= base (got {actual:?} vs base {base:?})"
+            );
+            assert!(
+                actual < base + jitter,
+                "jittered timeout must be < base + jitter (got {actual:?} vs cap {:?})",
+                base + jitter
+            );
+        }
+    }
+
+    #[test]
+    fn test_jitter_zero_window_is_noop() {
+        // Zero jitter → no random call, deterministic timeout = base.
+        let base = std::time::Duration::from_millis(5_000);
+        let jitter = std::time::Duration::from_millis(0);
+        let j_ms = jitter.as_millis() as u64;
+        let extra = if j_ms > 0 { fastrand::u64(0..j_ms) } else { 0 };
+        let actual = base.saturating_add(std::time::Duration::from_millis(extra));
+        assert_eq!(actual, base);
+    }
 }

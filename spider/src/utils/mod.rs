@@ -3676,6 +3676,11 @@ pub struct ChromeFetchParams<'a> {
     /// timeout still applies. `Some(d)` arms the watchdog inside the
     /// chrome event-listener block.
     pub first_byte_timeout: &'a Option<std::time::Duration>,
+    /// Per-fetch jitter window for the first-byte watchdog — borrowed
+    /// from `Configuration`. `None` = no jitter; `Some(j)` adds a
+    /// uniform random offset in `[0, j)` per fetch. Ignored when
+    /// `first_byte_timeout` is `None`.
+    pub first_byte_timeout_jitter: &'a Option<std::time::Duration>,
     /// Optional `browser_dead` signal flipped on first-byte timeout.
     /// `None` (default) means "detect and force-stop only" — the watchdog
     /// still fires but the AtomicBool is not set. Plumbed through by call
@@ -3881,7 +3886,22 @@ pub async fn fetch_page_html_chrome_base<'h>(
     // Lock-free: AtomicBool for the steady-state fast path, Notify for
     // wakeup. Built only when a timeout is configured — `None` keeps the
     // hot path identical to prior behavior.
-    let first_byte_timeout: Option<Duration> = *params.first_byte_timeout;
+    // Compute the watchdog timeout, applying optional jitter. Jitter
+    // randomizes per-fetch deadlines so concurrent crawls don't all
+    // expire at the same wall-clock instant — avoids thundering-herd
+    // backend rotation when an upstream goes dark. `None` jitter (the
+    // default) keeps every fetch on the configured base timeout.
+    let first_byte_timeout: Option<Duration> = match *params.first_byte_timeout {
+        Some(base) => match *params.first_byte_timeout_jitter {
+            Some(j) if !j.is_zero() => {
+                let j_ms = j.as_millis().min(u128::from(u64::MAX)) as u64;
+                let extra_ms = if j_ms > 0 { fastrand::u64(0..j_ms) } else { 0 };
+                Some(base.saturating_add(Duration::from_millis(extra_ms)))
+            }
+            _ => Some(base),
+        },
+        None => None,
+    };
     // All watchdog state is gated on `first_byte_timeout.is_some()` so
     // the default-config hot path pays zero extra atomics, allocations,
     // or Arc clones. When disarmed every binding below is `None`.

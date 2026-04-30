@@ -535,6 +535,15 @@ pub struct Configuration {
     /// the legacy chunk-idle timeout (`SPIDER_CHUNK_IDLE_TIMEOUT_SECS`,
     /// default 30s) is the only stall guard.
     pub chrome_first_byte_timeout: Option<Duration>,
+    #[cfg(feature = "chrome")]
+    /// Per-fetch jitter window applied on top of `chrome_first_byte_timeout`.
+    /// When `Some(j)`, each fetch picks `actual_timeout = base + rand(0..j)`
+    /// so concurrent fetches don't all expire at exactly the same moment
+    /// (avoids thundering-herd backend rotation when a backend goes dark).
+    /// `None` (default) means no jitter — every fetch uses the configured
+    /// base timeout exactly. Ignored when `chrome_first_byte_timeout` is
+    /// `None` (no watchdog to jitter).
+    pub chrome_first_byte_timeout_jitter: Option<Duration>,
     /// Scripts to execute for individual pages, the full path of the url is required for an exact match. This is useful for running one off JS on pages like performing custom login actions.
     #[cfg(feature = "chrome")]
     pub execution_scripts: Option<ExecutionScripts>,
@@ -1899,6 +1908,24 @@ impl Configuration {
         self
     }
 
+    #[cfg(feature = "chrome")]
+    /// Set the per-fetch jitter window for the first-byte watchdog. `None`
+    /// disables jitter; `Some(j)` randomizes each fetch's timeout uniformly
+    /// in `[base, base + j)`. Ignored when the base timeout is `None`.
+    pub fn with_chrome_first_byte_timeout_jitter(&mut self, jitter: Option<Duration>) -> &mut Self {
+        self.chrome_first_byte_timeout_jitter = jitter;
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Set the first-byte watchdog jitter window. This method does nothing if the `chrome` is not enabled.
+    pub fn with_chrome_first_byte_timeout_jitter(
+        &mut self,
+        _jitter: Option<Duration>,
+    ) -> &mut Self {
+        self
+    }
+
     #[cfg(not(feature = "chrome"))]
     /// Set JS to run on certain pages. This method does nothing if the `chrome` is not enabled.
     pub fn with_execution_scripts(
@@ -2144,6 +2171,7 @@ impl Configuration {
             remote_cache_read_only: self.chrome_remote_cache_read_only_enabled(),
             remote_cache_main_doc_only: self.chrome_remote_cache_main_doc_only_enabled(),
             first_byte_timeout: &self.chrome_first_byte_timeout,
+            first_byte_timeout_jitter: &self.chrome_first_byte_timeout_jitter,
             browser_dead: None,
             chrome_failover: Some(&self.chrome_failover),
             // Auto-populate the endpoint URL for every chrome / smart
