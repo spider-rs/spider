@@ -3671,6 +3671,33 @@ pub struct ChromeFetchParams<'a> {
     /// flag only suppresses the asset path. Only meaningful when
     /// `chrome_remote_cache` is enabled; ignored otherwise.
     pub remote_cache_main_doc_only: bool,
+    /// First-byte watchdog timeout — borrowed from `Configuration`.
+    /// `None` (default) disables the watchdog; the legacy chunk-idle
+    /// timeout still applies. `Some(d)` arms the watchdog inside the
+    /// chrome event-listener block.
+    pub first_byte_timeout: &'a Option<std::time::Duration>,
+    /// Optional `browser_dead` signal flipped on first-byte timeout.
+    /// `None` (default) means "detect and force-stop only" — the watchdog
+    /// still fires but the AtomicBool is not set. Plumbed through by call
+    /// sites that have access to a `BrowserController`. Borrowed pointer to
+    /// avoid Arc clone overhead at construction; the watchdog clones the
+    /// inner Arc once if it needs to outlive a spawned future.
+    pub browser_dead: Option<&'a std::sync::Arc<std::sync::atomic::AtomicBool>>,
+}
+
+#[cfg(feature = "chrome")]
+impl<'a> ChromeFetchParams<'a> {
+    /// Attach a borrowed `browser_dead` flag so a first-byte timeout can
+    /// signal the website-level retry loop to rotate the chrome backend.
+    /// Builder-style: returns the params with the field overridden.
+    #[inline]
+    pub fn with_browser_dead(
+        mut self,
+        dead: &'a std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
+        self.browser_dead = Some(dead);
+        self
+    }
 }
 
 #[cfg(feature = "chrome")]
@@ -3798,7 +3825,9 @@ pub async fn fetch_page_html_chrome_base<'h>(
         },
         async {
             let chunk_idle = chunk_idle_timeout();
-            if should_block || chunk_idle.is_some() {
+            // Also create the listener when the first-byte watchdog is
+            // armed so the data-arrival hook can flip the signal.
+            if should_block || chunk_idle.is_some() || params.first_byte_timeout.is_some() {
                 page.event_listener::<EventDataReceived>().await
             } else {
                 Err(CdpError::NotFound)
@@ -3823,7 +3852,27 @@ pub async fn fetch_page_html_chrome_base<'h>(
     };
 
     let chunk_idle = chunk_idle_timeout();
-    let page_clone = if should_block || chunk_idle.is_some() {
+    // First-byte watchdog signal. `Arc<(AtomicBool, Notify)>` is shared
+    // between the event listeners (f3 + f5 set it on first arrival) and
+    // the outer watchdog future (waits for either notify or timeout).
+    // Lock-free: AtomicBool for the steady-state fast path, Notify for
+    // wakeup. Built only when a timeout is configured — `None` keeps the
+    // hot path identical to prior behavior.
+    let first_byte_timeout: Option<Duration> = *params.first_byte_timeout;
+    let browser_dead_arc: Option<std::sync::Arc<std::sync::atomic::AtomicBool>> =
+        params.browser_dead.cloned();
+    let first_byte_signal: Option<
+        std::sync::Arc<(std::sync::atomic::AtomicBool, tokio::sync::Notify)>,
+    > = first_byte_timeout.map(|_| {
+        std::sync::Arc::new((
+            std::sync::atomic::AtomicBool::new(false),
+            tokio::sync::Notify::new(),
+        ))
+    });
+    // Gate page_clone on first-byte-watchdog too so f5 actually runs and
+    // can flip the data-arrival flag. The clone is cheap (chromey wraps
+    // the Page in an internal Arc).
+    let page_clone = if should_block || chunk_idle.is_some() || first_byte_timeout.is_some() {
         Some(page.clone())
     } else {
         None
@@ -3842,7 +3891,9 @@ pub async fn fetch_page_html_chrome_base<'h>(
 
     // Listen for network events to track data transfer.
     // Spawning is always required here to collect network metrics in real-time.
+    let first_byte_signal_for_spawn = first_byte_signal.clone();
     let bytes_collected_handle = tokio::spawn(async move {
+        let first_byte_signal = first_byte_signal_for_spawn;
         let finished_media: Option<OnceCell<RequestId>> =
             if asset { Some(OnceCell::new()) } else { None };
 
@@ -3961,6 +4012,14 @@ pub async fn fetch_page_html_chrome_base<'h>(
                             None => break,
                         },
                     };
+                    // First-byte signal: any responseReceived event proves
+                    // the chrome backend is alive. `swap` returns the prior
+                    // value; only the first arrival notifies waiters.
+                    if let Some(ref signal) = first_byte_signal {
+                        if !signal.0.swap(true, std::sync::atomic::Ordering::AcqRel) {
+                            signal.1.notify_waiters();
+                        }
+                    }
                     let document = event.r#type == ResourceType::Document;
 
                     if !intial_request && document {
@@ -4129,6 +4188,14 @@ pub async fn fetch_page_html_chrome_base<'h>(
                             }
                         };
 
+                        // First-byte signal: any dataReceived event proves
+                        // the chrome backend is producing bytes. Idempotent
+                        // after first call (swap returns prior value).
+                        if let Some(ref signal) = first_byte_signal {
+                            if !signal.0.swap(true, std::sync::atomic::Ordering::AcqRel) {
+                                signal.1.notify_waiters();
+                            }
+                        }
                         let encoded = event.encoded_data_length.max(0) as u64;
                         total_bytes = total_bytes.saturating_add(encoded);
                         if check_max && total_bytes > total_max {
@@ -4223,6 +4290,46 @@ pub async fn fetch_page_html_chrome_base<'h>(
         }
     };
 
+    // First-byte watchdog. Resolves only when the configured timeout
+    // expires AND no `responseReceived` / `dataReceived` event arrived
+    // first. On a successful first-byte arrival the future stays pending
+    // (`std::future::pending`) so the outer select keeps waiting for the
+    // navigation arm. When disarmed (`None`) the future stays pending
+    // forever — same effect as omitting the arm.
+    let first_byte_watchdog = async {
+        match (first_byte_timeout, &first_byte_signal) {
+            (Some(timeout), Some(signal)) => {
+                let notified = signal.1.notified();
+                tokio::pin!(notified);
+
+                if signal.0.load(std::sync::atomic::Ordering::Acquire) {
+                    std::future::pending::<()>().await;
+                    return;
+                }
+
+                tokio::select! {
+                    biased;
+                    _ = &mut notified => {
+                        std::future::pending::<()>().await;
+                    }
+                    _ = tokio::time::sleep(timeout) => {
+                        log::warn!(
+                            "chrome first-byte timeout ({:?}), force-stopping page",
+                            timeout
+                        );
+                        let _ = page.force_stop_all().await;
+                        if let Some(ref dead) = browser_dead_arc {
+                            dead.store(true, std::sync::atomic::Ordering::Release);
+                        }
+                    }
+                }
+            }
+            _ => {
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+
     tokio::select! {
         v = tokio::time::timeout(base_timeout + Duration::from_millis(50), page_navigate) => {
             if v.is_err() {
@@ -4233,6 +4340,12 @@ pub async fn fetch_page_html_chrome_base<'h>(
             if let Ok(v) = v {
                 request_cancelled = !v;
             }
+        }
+        _ = first_byte_watchdog => {
+            // Watchdog fired before any first-byte event — page already
+            // force-stopped above and `browser_dead` (if plumbed) flipped
+            // so the website-level retry loop can rotate the backend.
+            request_cancelled = true;
         }
     };
 

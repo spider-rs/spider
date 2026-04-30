@@ -133,7 +133,10 @@ macro_rules! chrome_page_fetch {
                     $shared.6.max_page_bytes,
                     $shared.6.get_cache_options(),
                     $shared.6.cache_namespace_str(),
-                    &$shared.6.chrome_fetch_params(),
+                    &$shared
+                        .6
+                        .chrome_fetch_params()
+                        .with_browser_dead(&$shared.11),
                     &$shared.1,
                     &$shared.3,
                     &mut links,
@@ -247,7 +250,10 @@ macro_rules! chrome_page_fetch {
                                 $shared.6.max_page_bytes,
                                 $shared.6.get_cache_options(),
                                 $shared.6.cache_namespace_str(),
-                                &$shared.6.chrome_fetch_params(),
+                                &$shared
+                        .6
+                        .chrome_fetch_params()
+                        .with_browser_dead(&$shared.11),
                                 &$shared.1,
                                 &$shared.3,
                                 &mut links,
@@ -373,7 +379,10 @@ macro_rules! chrome_page_fetch_on {
                     $shared.6.max_page_bytes,
                     $shared.6.get_cache_options(),
                     $shared.6.cache_namespace_str(),
-                    &$shared.6.chrome_fetch_params(),
+                    &$shared
+                        .6
+                        .chrome_fetch_params()
+                        .with_browser_dead(&$shared.11),
                     &$shared.1,
                     &$shared.3,
                     &mut links,

@@ -1797,4 +1797,36 @@ mod tests {
             "URL change must replace the cell — fresh failover required"
         );
     }
+
+    #[test]
+    fn test_chrome_first_byte_timeout_defaults_off() {
+        let cfg = Configuration::default();
+        assert!(
+            cfg.chrome_first_byte_timeout.is_none(),
+            "watchdog must be off by default to keep behavior identical"
+        );
+        let params = cfg.chrome_fetch_params();
+        assert!(params.first_byte_timeout.is_none());
+        assert!(
+            params.browser_dead.is_none(),
+            "no browser_dead should be plumbed through Configuration::chrome_fetch_params"
+        );
+    }
+
+    #[test]
+    fn test_with_chrome_first_byte_timeout_plumbs_into_params() {
+        let mut cfg = Configuration::default();
+        cfg.with_chrome_first_byte_timeout(Some(std::time::Duration::from_secs(5)));
+        let params = cfg.chrome_fetch_params();
+        assert_eq!(*params.first_byte_timeout, Some(std::time::Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn test_chrome_fetch_params_with_browser_dead_attaches_signal() {
+        let cfg = Configuration::default();
+        let dead = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let params = cfg.chrome_fetch_params().with_browser_dead(&dead);
+        assert!(params.browser_dead.is_some());
+        assert!(std::sync::Arc::ptr_eq(params.browser_dead.unwrap(), &dead));
+    }
 }

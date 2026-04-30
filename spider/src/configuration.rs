@@ -525,6 +525,16 @@ pub struct Configuration {
     /// `setup_browser_configuration` call. Built on first use, reset by
     /// `with_chrome_connections`. Internal cache; not part of public API.
     pub(crate) chrome_failover: crate::features::chrome::LazyChromeFailover,
+    #[cfg(feature = "chrome")]
+    /// First-byte watchdog for Chrome navigations. When set, fires if no
+    /// `Network.dataReceived` (or `Network.responseReceived`) event arrives
+    /// within this duration after the listener attaches. On fire the page
+    /// is force-stopped and (when a `browser_dead` flag is plumbed through
+    /// `ChromeFetchParams`) it is flipped so the website-level retry loop
+    /// can rotate the backend. `None` (default) disables the watchdog and
+    /// the legacy chunk-idle timeout (`SPIDER_CHUNK_IDLE_TIMEOUT_SECS`,
+    /// default 30s) is the only stall guard.
+    pub chrome_first_byte_timeout: Option<Duration>,
     /// Scripts to execute for individual pages, the full path of the url is required for an exact match. This is useful for running one off JS on pages like performing custom login actions.
     #[cfg(feature = "chrome")]
     pub execution_scripts: Option<ExecutionScripts>,
@@ -1873,6 +1883,22 @@ impl Configuration {
         self
     }
 
+    #[cfg(feature = "chrome")]
+    /// Set the first-byte watchdog timeout for Chrome navigations. `None`
+    /// disables it; `Some(d)` fires after `d` of silence on both
+    /// `Network.responseReceived` and `Network.dataReceived` and force-stops
+    /// the page so the caller can rotate to a different Chrome backend.
+    pub fn with_chrome_first_byte_timeout(&mut self, timeout: Option<Duration>) -> &mut Self {
+        self.chrome_first_byte_timeout = timeout;
+        self
+    }
+
+    #[cfg(not(feature = "chrome"))]
+    /// Set the first-byte watchdog timeout for Chrome navigations. This method does nothing if the `chrome` is not enabled.
+    pub fn with_chrome_first_byte_timeout(&mut self, _timeout: Option<Duration>) -> &mut Self {
+        self
+    }
+
     #[cfg(not(feature = "chrome"))]
     /// Set JS to run on certain pages. This method does nothing if the `chrome` is not enabled.
     pub fn with_execution_scripts(
@@ -2117,6 +2143,8 @@ impl Configuration {
             remote_multimodal: &self.remote_multimodal,
             remote_cache_read_only: self.chrome_remote_cache_read_only_enabled(),
             remote_cache_main_doc_only: self.chrome_remote_cache_main_doc_only_enabled(),
+            first_byte_timeout: &self.chrome_first_byte_timeout,
+            browser_dead: None,
         }
     }
 
