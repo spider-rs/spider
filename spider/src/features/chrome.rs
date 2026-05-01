@@ -2188,4 +2188,61 @@ mod tests {
         let actual = base.saturating_add(std::time::Duration::from_millis(extra));
         assert_eq!(actual, base);
     }
+
+    /// Repeated `mark_url_bad` on the same URL must update the deadline
+    /// (last write wins), not stack — otherwise an aggressive caller
+    /// could drift the cooldown past `u64::MAX`.
+    #[test]
+    fn test_mark_url_bad_repeated_updates_deadline() {
+        let urls = vec!["ws://a".to_string()];
+        let failover = ChromeConnectionFailover::new(urls, 3);
+
+        failover.mark_url_bad("ws://a", 1_000);
+        let after_first = failover.dead_until[0].load(std::sync::atomic::Ordering::Acquire);
+        assert!(after_first > 0);
+
+        // Mark again with a much longer cooldown — should overwrite.
+        failover.mark_url_bad("ws://a", 60_000);
+        let after_second = failover.dead_until[0].load(std::sync::atomic::Ordering::Acquire);
+        assert!(
+            after_second > after_first,
+            "second mark_url_bad with longer cooldown must extend the deadline (got {} → {})",
+            after_first,
+            after_second
+        );
+
+        // And shorter — should overwrite (last write wins).
+        failover.mark_url_bad("ws://a", 100);
+        let after_third = failover.dead_until[0].load(std::sync::atomic::Ordering::Acquire);
+        assert!(
+            after_third < after_second,
+            "shorter mark_url_bad must overwrite the deadline (no stacking) — got {} → {}",
+            after_second,
+            after_third
+        );
+    }
+
+    /// After a real cooldown elapses, `dead_until` is "in the past" so
+    /// `connect()`'s pass-0 cooldown check (`until > now`) lets the
+    /// endpoint through. Validates the deadline math actually expires.
+    #[test]
+    fn test_cooldown_deadline_elapses_in_real_time() {
+        let urls = vec!["ws://a".to_string()];
+        let failover = ChromeConnectionFailover::new(urls, 3);
+        // 50ms cooldown — short enough to elapse during the test.
+        failover.mark_url_bad("ws://a", 50);
+        let until = failover.dead_until[0].load(std::sync::atomic::Ordering::Acquire);
+        let before = ChromeConnectionFailover::now_millis();
+        assert!(
+            until > before,
+            "deadline must be in the future immediately after mark"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        let after = ChromeConnectionFailover::now_millis();
+        assert!(
+            until < after,
+            "after sleeping past the cooldown, deadline must be in the past — \
+             until={until}ms, now_after_sleep={after}ms"
+        );
+    }
 }
