@@ -709,29 +709,42 @@ impl core::fmt::Display for WebAutomation {
 /// - All `document.images` are `complete` (gated by
 ///   `require_images_complete`).
 /// - Target element is visible (gated by `require_visible`).
+/// - **Hybrid quiet-period guard**: once *any* mutation has been
+///   observed, additionally require `quiet_ms` ms since the last
+///   mutation before the stable-frames counter may advance. This
+///   catches bursty SPA content-injection patterns (Intuit-class
+///   docs sites that inject in 5–10 mutation bursts with ~30–90ms
+///   gaps) without regressing the fast path: pages that never mutate
+///   bypass the guard entirely (`lastMutTs < 0`) and still settle in
+///   ~33 ms. Decorative CSS/Web Animations on otherwise-static
+///   elements don't trigger the MutationObserver, so they don't
+///   activate the guard either — pages with perpetual background
+///   animations (spider.cloud-class) still settle fast.
 ///
-/// On a truly idle page this resolves in ~33 ms (2 RAF frames at 60fps)
-/// — vs the legacy "wait `quiet_ms` of no mutations" approach which had
-/// a hard floor of `quiet_ms` even when the page was already settled.
-/// The `quiet_ms` parameter is now **ignored** (kept for caller
-/// signature stability); pacing is dictated entirely by RAF + signal
-/// alignment, so callers can pass any value without affecting timing.
+/// Note: `document.getAnimations()` is **deliberately not** part of
+/// the signal stack. Both strict-zero and count-stability variants
+/// were evaluated against real pages and both produce false positives
+/// — the API doesn't expose enough state to distinguish "decorative
+/// perpetual loop" from "loading-state spinner that hasn't unmounted
+/// yet." The MutationObserver + quiet-period guard already catches
+/// every load-state transition that matters without the false-positive
+/// risk.
 ///
-/// Mutation tracking uses a "dirty" flag set by the observer's
-/// microtask callback and read+reset on each RAF tick: any mutation
-/// between two ticks causes the next tick to reset the stable-frames
-/// counter to zero. No fixed quiet-period timer; the only wallclock
-/// upper bound is the outer `timeout_ms` safety cap.
+/// On a truly idle page this still resolves in ~33 ms (2 RAF frames
+/// at 60fps). The hybrid guard only activates after a mutation has
+/// been seen, so it cannot regress the fast path.
 pub(crate) fn generate_wait_for_dom_js_v2(
     timeout_ms: u32,
     selector: &str,
-    _quiet_ms: u32,
+    quiet_ms: u32,
     stable_frames: u32,
     require_visible: bool,
     require_images_complete: bool,
 ) -> String {
     let t = timeout_ms.min(crate::utils::FIVE_MINUTES);
     let f = stable_frames.max(1).min(10);
+    // Cap quiet_ms at the outer timeout. Common values: 200–500ms.
+    let q = quiet_ms.min(timeout_ms);
     let s = if selector.is_empty() {
         "body"
     } else {
@@ -739,9 +752,10 @@ pub(crate) fn generate_wait_for_dom_js_v2(
     };
 
     format!(
-        r###"(()=>new Promise(R=>{{const S={s:?},T={t},F={f},V={vis},I={img},P=["#__next","#__nuxt","#app","#root","main","body"],N=()=>performance.now(),W=e=>{{if(!e)return!1;const t=getComputedStyle(e);if("none"===t.display||"hidden"===t.visibility||"0"===t.opacity)return!1;const r=e.getBoundingClientRect();return r.width>0&&r.height>0}},M=()=>{{if(!I)return!0;const t=document.images;for(let i=0;i<t.length;i++){{const r=t[i];if(!r.complete)return!1;if(0===r.naturalWidth&&0===r.naturalHeight&&r.currentSrc)return!1}}return!0}},k=()=>{{let e=document.querySelector(S);if(e)return e;for(let t=0;t<P.length;t++){{if(e=document.querySelector(P[t]))return e}}return null}},s=N();let e=null,ob=null,dirty=!1,frames=0;const arm=el=>{{ob&&ob.disconnect();ob=new MutationObserver(()=>{{dirty=!0}});ob.observe(el,{{subtree:!0,childList:!0,attributes:!0,characterData:!0}})}};const begin=()=>{{e=k();if(!e){{requestAnimationFrame(begin);return}}arm(e);const tick=()=>{{const n=N();if(n-s>=T){{ob&&ob.disconnect();return R(!1)}}if(!document.contains(e)){{e=k();if(!e){{requestAnimationFrame(tick);return}}arm(e);frames=0;dirty=!1}}const wasMut=dirty;dirty=!1;if(wasMut){{frames=0;requestAnimationFrame(tick);return}}const docReady="complete"===document.readyState;const fontsReady=!document.fonts||"loaded"===document.fonts.status;const imagesReady=M();const vis=!V||W(e);if(docReady&&fontsReady&&imagesReady&&vis){{frames++;if(frames>=F){{ob.disconnect();return R(!0)}}}}else{{frames=0}}requestAnimationFrame(tick)}};requestAnimationFrame(tick)}};if("complete"===document.readyState)begin();else addEventListener("load",begin,{{once:!0}})}}))()"###,
+        r###"(()=>new Promise(R=>{{const S={s:?},T={t},F={f},Q={q},V={vis},I={img},P=["#__next","#__nuxt","#app","#root","main","body"],N=()=>performance.now(),W=e=>{{if(!e)return!1;const t=getComputedStyle(e);if("none"===t.display||"hidden"===t.visibility||"0"===t.opacity)return!1;const r=e.getBoundingClientRect();return r.width>0&&r.height>0}},M=()=>{{if(!I)return!0;const t=document.images;for(let i=0;i<t.length;i++){{const r=t[i];if(!r.complete)return!1;if(0===r.naturalWidth&&0===r.naturalHeight&&r.currentSrc)return!1}}return!0}},k=()=>{{let e=document.querySelector(S);if(e)return e;for(let t=0;t<P.length;t++){{if(e=document.querySelector(P[t]))return e}}return null}},s=N();let e=null,ob=null,dirty=!1,frames=0,lt=-1;const arm=el=>{{ob&&ob.disconnect();ob=new MutationObserver(()=>{{dirty=!0;lt=N()}});ob.observe(el,{{subtree:!0,childList:!0,attributes:!0,characterData:!0}})}};const begin=()=>{{e=k();if(!e){{requestAnimationFrame(begin);return}}arm(e);const tick=()=>{{const n=N();if(n-s>=T){{ob&&ob.disconnect();return R(!1)}}if(!document.contains(e)){{e=k();if(!e){{requestAnimationFrame(tick);return}}arm(e);frames=0;dirty=!1}}const wasMut=dirty;dirty=!1;if(wasMut){{frames=0;requestAnimationFrame(tick);return}}const docReady="complete"===document.readyState;const fontsReady=!document.fonts||"loaded"===document.fonts.status;const imagesReady=M();const vis=!V||W(e);const qOk=lt<0||(n-lt)>=Q;if(docReady&&fontsReady&&imagesReady&&vis&&qOk){{frames++;if(frames>=F){{ob.disconnect();return R(!0)}}}}else{{frames=0}}requestAnimationFrame(tick)}};requestAnimationFrame(tick)}};if("complete"===document.readyState)begin();else addEventListener("load",begin,{{once:!0}})}}))()"###,
         t = t,
         f = f,
+        q = q,
         vis = if require_visible { "true" } else { "false" },
         img = if require_images_complete {
             "true"
