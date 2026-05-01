@@ -42,14 +42,39 @@ fn run_live_tests() -> bool {
 /// URLs to probe. Mix of fast static, JS-heavy, and intentionally slow
 /// targets so the percentile spread reflects real-world variance.
 const TARGETS: &[&str] = &[
+    // ── Static / fast ──
     "https://example.com/",
+    "https://www.iana.org/",
     "https://www.crawler-test.com/",
     "https://www.crawler-test.com/javascript/render_only_after_js",
-    "https://www.crawler-test.com/redirects/redirect_301",
     "https://www.crawler-test.com/status_codes/status_200",
-    "https://en.wikipedia.org/wiki/Web_crawler",
+    // ── Docs / dev ──
     "https://www.rust-lang.org/",
     "https://docs.rs/spider",
+    "https://github.com/",
+    "https://stackoverflow.com/",
+    // ── News / heavy CDN ──
+    "https://www.bbc.com/",
+    "https://www.nytimes.com/",
+    "https://www.cnn.com/",
+    "https://www.reddit.com/",
+    // ── E-commerce (anti-bot likely) ──
+    "https://www.amazon.com/",
+    "https://www.ebay.com/",
+    "https://www.shopify.com/",
+    // ── SPAs ──
+    "https://twitter.com/",
+    "https://www.linkedin.com/",
+    // ── International ──
+    "https://www.bbc.co.uk/",
+    "https://www.spiegel.de/",
+    "https://www.lemonde.fr/",
+    // ── Anti-bot / Cloudflare-fronted ──
+    "https://www.cloudflare.com/",
+    "https://www.discord.com/",
+    // ── Wikipedia (high-volume reference) ──
+    "https://en.wikipedia.org/wiki/Web_crawler",
+    "https://en.wikipedia.org/wiki/HTTP",
 ];
 
 #[derive(Default)]
