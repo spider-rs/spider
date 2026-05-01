@@ -3626,6 +3626,7 @@ impl Website {
                     &domain_parsed, // original domain
                     &mut self.domain_parsed,
                     &mut links_pages,
+                    self.configuration.auto_http_first_byte_args(),
                 )
                 .await
             };
@@ -3719,6 +3720,7 @@ impl Website {
                             &domain_parsed,
                             &mut domain_parsed_clone,
                             &mut links_pages,
+                            (None, None),
                         )
                         .await;
                     })
@@ -3745,6 +3747,7 @@ impl Website {
                         &domain_parsed,
                         &mut self.domain_parsed,
                         &mut links_pages,
+                        self.configuration.auto_http_first_byte_args(),
                     )
                     .await;
                 }
@@ -5258,6 +5261,7 @@ impl Website {
                     &domain_parsed, // original domain
                     &mut self.domain_parsed,
                     &mut links_pages,
+                    self.configuration.auto_http_first_byte_args(),
                 )
                 .await;
 
@@ -5343,6 +5347,7 @@ impl Website {
                                 &domain_parsed,
                                 &mut domain_parsed_clone,
                                 &mut links_pages,
+                                (None, None),
                             )
                             .await;
                         })
@@ -5367,6 +5372,7 @@ impl Website {
                             &domain_parsed,
                             &mut self.domain_parsed,
                             &mut links_pages,
+                            self.configuration.auto_http_first_byte_args(),
                         )
                         .await;
                     }
@@ -7005,7 +7011,7 @@ impl Website {
                                                         target_url, primary_client, only_html,
                                                         &mut selectors, external_domains_caseless,
                                                         &r_settings, &mut links, None, &shared.8,
-                                                        &mut domain_parsed, &mut links_pages).await;
+                                                        &mut domain_parsed, &mut links_pages, (None, None)).await;
                                                     (page, links, links_pages)
                                                 };
 
@@ -7031,7 +7037,7 @@ impl Website {
                                                                 target_url, hedge_client, only_html,
                                                                 &mut selectors, external_domains_caseless,
                                                                 &r_settings, &mut links, None, &shared.8,
-                                                                &mut domain_parsed, &mut links_pages).await;
+                                                                &mut domain_parsed, &mut links_pages, (None, None)).await;
                                                             (page, links, links_pages)
                                                         };
 
@@ -7071,7 +7077,7 @@ impl Website {
                                                     target_url, primary_client, only_html,
                                                     &mut selectors, external_domains_caseless,
                                                     &r_settings, &mut links, None, &shared.8,
-                                                    &mut domain_parsed, &mut links_pages).await;
+                                                    &mut domain_parsed, &mut links_pages, (None, None)).await;
                                                 hedge_trk.record(fetch_start.elapsed());
                                                 if page.status_code.is_server_error() {
                                                     hedge_trk.record_error();
@@ -7096,7 +7102,7 @@ impl Website {
                                                 target_url, client, only_html,
                                                 &mut selectors, external_domains_caseless,
                                                 &r_settings, &mut links, None, &shared.8,
-                                                &mut domain_parsed, &mut links_pages).await;
+                                                &mut domain_parsed, &mut links_pages, (None, None)).await;
                                             hedge_trk.record(fetch_start.elapsed());
                                             if page.status_code.is_server_error() {
                                                 hedge_trk.record_error();
@@ -7144,7 +7150,7 @@ impl Website {
                                                         target_url, client, only_html,
                                                         &mut selectors, external_domains_caseless,
                                                         &r_settings, &mut links, None, &shared.8,
-                                                        &mut domain_parsed, &mut links_pages).await;
+                                                        &mut domain_parsed, &mut links_pages, (None, None)).await;
                                                     (page, links, links_pages)
                                                 };
                                                 tokio::pin!(primary_fut);
@@ -7227,7 +7233,7 @@ impl Website {
                                                 None,
                                                 &shared.8,
                                                 &mut domain_parsed,
-                                                &mut links_pages).await;
+                                                &mut links_pages, (None, None)).await;
                                             (page, links, links_pages)
                                         }
                                     };
@@ -7297,7 +7303,7 @@ impl Website {
                                                     None,
                                                     &shared.8,
                                                     &mut domain_parsed,
-                                                    &mut links_pages).await;
+                                                    &mut links_pages, (None, None)).await;
 
                                                 page = next_page;
 
@@ -7321,7 +7327,7 @@ impl Website {
                                                 None,
                                                 &shared.8,
                                                 &mut domain_parsed,
-                                                &mut links_pages).await;
+                                                &mut links_pages, (None, None)).await;
                                         }
 
                                         // Stamp profile key from strategy.
@@ -8540,7 +8546,7 @@ impl Website {
                                                         target_url, primary_client, only_html,
                                                         &mut selectors, external_domains_caseless,
                                                         &r_settings, &mut links, None, &shared.8,
-                                                        &mut domain_parsed, &mut links_pages).await;
+                                                        &mut domain_parsed, &mut links_pages, (None, None)).await;
                                                     (page, links, links_pages)
                                                 };
 
@@ -8566,7 +8572,7 @@ impl Website {
                                                                 target_url, hedge_client, only_html,
                                                                 &mut selectors, external_domains_caseless,
                                                                 &r_settings, &mut links, None, &shared.8,
-                                                                &mut domain_parsed, &mut links_pages).await;
+                                                                &mut domain_parsed, &mut links_pages, (None, None)).await;
                                                             (page, links, links_pages)
                                                         };
 
@@ -8606,7 +8612,7 @@ impl Website {
                                                     target_url, primary_client, only_html,
                                                     &mut selectors, external_domains_caseless,
                                                     &r_settings, &mut links, None, &shared.8,
-                                                    &mut domain_parsed, &mut links_pages).await;
+                                                    &mut domain_parsed, &mut links_pages, (None, None)).await;
                                                 hedge_trk.record(fetch_start.elapsed());
                                                 if page.status_code.is_server_error() {
                                                     hedge_trk.record_error();
@@ -8631,7 +8637,7 @@ impl Website {
                                                 target_url, client, only_html,
                                                 &mut selectors, external_domains_caseless,
                                                 &r_settings, &mut links, None, &shared.8,
-                                                &mut domain_parsed, &mut links_pages).await;
+                                                &mut domain_parsed, &mut links_pages, (None, None)).await;
                                             hedge_trk.record(fetch_start.elapsed());
                                             if page.status_code.is_server_error() {
                                                 hedge_trk.record_error();
@@ -8668,7 +8674,7 @@ impl Website {
                                             None,
                                             &shared.8,
                                             &mut domain_parsed,
-                                            &mut links_pages).await;
+                                            &mut links_pages, (None, None)).await;
                                         (page, links, links_pages)
                                     };
 
@@ -8737,7 +8743,7 @@ impl Website {
                                                     None,
                                                     &shared.8,
                                                     &mut domain_parsed,
-                                                    &mut links_pages).await;
+                                                    &mut links_pages, (None, None)).await;
 
                                                 page = next_page;
 
@@ -8761,7 +8767,7 @@ impl Website {
                                                 None,
                                                 &shared.8,
                                                 &mut domain_parsed,
-                                                &mut links_pages).await;
+                                                &mut links_pages, (None, None)).await;
                                         }
 
                                         // Stamp profile key from strategy.

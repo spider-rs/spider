@@ -3078,7 +3078,17 @@ impl Page {
         }
     }
 
-    /// New page with rewriter
+    /// New page with rewriter.
+    ///
+    /// `http_first_byte_timeout` + `http_first_byte_timeout_jitter`: when
+    /// both `Some`, the underlying `req.send()` is wrapped in a first-byte
+    /// watchdog (`tokio::time::timeout(base + rand(0..jitter))`); on
+    /// timeout the in-flight connect / header future is dropped and a
+    /// synthetic `524 GATEWAY_TIMEOUT` response is returned so the retry
+    /// path rotates the proxy. Both `None` is byte-identical to the
+    /// pre-watchdog code path. Callers typically pass
+    /// `Configuration::auto_http_first_byte_args()` so the watchdog only
+    /// arms when there are ≥ 2 HTTP-eligible proxies under `balance`.
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn new_page_streaming<
         A: PartialEq
@@ -3102,7 +3112,9 @@ impl Page {
         prior_domain: &Option<Box<Url>>,
         domain_parsed: &mut Option<Box<Url>>,
         links_pages: &mut Option<hashbrown::HashSet<A>>,
+        http_first_byte_args: (Option<std::time::Duration>, Option<std::time::Duration>),
     ) -> Self {
+        let (http_first_byte_timeout, http_first_byte_timeout_jitter) = http_first_byte_args;
         use crate::utils::{
             handle_response_bytes, handle_response_bytes_writer, modify_selectors,
             AllowedDomainTypes,
@@ -3122,172 +3134,195 @@ impl Page {
         #[cfg(feature = "balance")]
         crate::utils::vitals::request_start();
 
-        let mut page_response: PageResponse = match client.get(url).send().await {
-            Ok(res)
-                if crate::utils::valid_parsing_status(&res)
-                    && !crate::utils::block_streaming(&res, only_html) =>
-            {
-                let cell = if r_settings.ssg_build {
-                    Some(tokio::sync::OnceCell::new())
-                } else {
-                    None
-                };
-
-                let base_input_url = tokio::sync::OnceCell::new();
-
-                let (encoding, adjust_charset_on_meta_tag) =
-                    match get_charset_from_content_type(res.headers()) {
-                        Some(h) => (h, false),
-                        _ => (AsciiCompatibleEncoding::utf_8(), true),
+        // Wrap the request future in the optional first-byte watchdog.
+        // When both args are `None` (default), this is byte-identical to
+        // the prior `client.get(url).send().await` — `timeout_first_byte`
+        // returns `Ok(fut.await)` without any timer arming. On timeout we
+        // synthesize the same `524 GATEWAY_TIMEOUT` PageResponse the
+        // primary HTTP fetch path produces (`build_first_byte_timeout_page_response`)
+        // so the caller's retry code rotates the proxy.
+        let send_outcome = crate::utils::timeout_first_byte(
+            client.get(url).send(),
+            http_first_byte_timeout,
+            http_first_byte_timeout_jitter,
+        )
+        .await;
+        let mut page_response: PageResponse = match send_outcome {
+            crate::utils::HttpSendOutcome::FirstByteTimeout(_) => {
+                return build(
+                    url,
+                    crate::utils::build_first_byte_timeout_page_response(url),
+                );
+            }
+            crate::utils::HttpSendOutcome::Ok(send_result) => match send_result {
+                Ok(res)
+                    if crate::utils::valid_parsing_status(&res)
+                        && !crate::utils::block_streaming(&res, only_html) =>
+                {
+                    let cell = if r_settings.ssg_build {
+                        Some(tokio::sync::OnceCell::new())
+                    } else {
+                        None
                     };
 
-                let target_url = res.url().as_str();
+                    let base_input_url = tokio::sync::OnceCell::new();
 
-                // handle initial redirects
-                if ssg_map.is_some() && url != target_url && !exact_url_match(url, target_url) {
-                    let mut url = Box::new(CaseInsensitiveString::new(&url));
+                    let (encoding, adjust_charset_on_meta_tag) =
+                        match get_charset_from_content_type(res.headers()) {
+                            Some(h) => (h, false),
+                            _ => (AsciiCompatibleEncoding::utf_8(), true),
+                        };
 
-                    modify_selectors(
-                        prior_domain,
-                        target_url,
-                        domain_parsed,
-                        &mut url,
-                        selectors,
-                        AllowedDomainTypes::new(r_settings.subdomains, r_settings.tld),
-                    );
-                };
+                    let target_url = res.url().as_str();
 
-                let base = if domain_parsed.is_none() {
-                    prior_domain
-                } else {
-                    domain_parsed
-                };
+                    // handle initial redirects
+                    if ssg_map.is_some() && url != target_url && !exact_url_match(url, target_url) {
+                        let mut url = Box::new(CaseInsensitiveString::new(&url));
 
-                let original_page = Url::parse(url).ok();
-                let xml_file = target_url.ends_with(".xml");
+                        modify_selectors(
+                            prior_domain,
+                            target_url,
+                            domain_parsed,
+                            &mut url,
+                            selectors,
+                            AllowedDomainTypes::new(r_settings.subdomains, r_settings.tld),
+                        );
+                    };
 
-                // Locals used by the post-rewriter SSG block below for
-                // its own `push_link` calls — kept around even after the
-                // helper consumes its own copy of the same projections.
-                let parent_host = &selectors.1[0];
-                let parent_host_scheme = &selectors.1[1];
-                let base_input_domain = &selectors.2;
-                let sub_matcher = &selectors.0;
+                    let base = if domain_parsed.is_none() {
+                        prior_domain
+                    } else {
+                        domain_parsed
+                    };
 
-                let element_content_handlers = build_link_extract_handlers(
-                    LinkExtractCtx {
-                        selectors,
-                        external_domains_caseless,
-                        map,
-                        links_pages,
-                        base_input_url: &base_input_url,
-                        base: base.as_deref(),
-                        original_page: original_page.as_ref(),
-                        ssg_raw_src_cell: if r_settings.ssg_build && !r_settings.skip_links {
-                            cell.as_ref()
-                        } else {
-                            None
+                    let original_page = Url::parse(url).ok();
+                    let xml_file = target_url.ends_with(".xml");
+
+                    // Locals used by the post-rewriter SSG block below for
+                    // its own `push_link` calls — kept around even after the
+                    // helper consumes its own copy of the same projections.
+                    let parent_host = &selectors.1[0];
+                    let parent_host_scheme = &selectors.1[1];
+                    let base_input_domain = &selectors.2;
+                    let sub_matcher = &selectors.0;
+
+                    let element_content_handlers = build_link_extract_handlers(
+                        LinkExtractCtx {
+                            selectors,
+                            external_domains_caseless,
+                            map,
+                            links_pages,
+                            base_input_url: &base_input_url,
+                            base: base.as_deref(),
+                            original_page: original_page.as_ref(),
+                            ssg_raw_src_cell: if r_settings.ssg_build && !r_settings.skip_links {
+                                cell.as_ref()
+                            } else {
+                                None
+                            },
+                            ssg_resolved_path_cell: None,
+                            xml_file,
+                            full_resources: r_settings.full_resources,
+                            skip_links: r_settings.skip_links,
                         },
-                        ssg_resolved_path_cell: None,
-                        xml_file,
-                        full_resources: r_settings.full_resources,
-                        skip_links: r_settings.skip_links,
-                    },
-                    &mut meta_title,
-                    &mut meta_description,
-                    &mut meta_og_image,
-                );
+                        &mut meta_title,
+                        &mut meta_description,
+                        &mut meta_og_image,
+                    );
 
-                let settings = lol_html::send::Settings {
-                    element_content_handlers,
-                    adjust_charset_on_meta_tag,
-                    encoding,
-                    ..lol_html::send::Settings::new_for_handler_types()
-                };
+                    let settings = lol_html::send::Settings {
+                        element_content_handlers,
+                        adjust_charset_on_meta_tag,
+                        encoding,
+                        ..lol_html::send::Settings::new_for_handler_types()
+                    };
 
-                let mut rewriter = lol_html::send::HtmlRewriter::new(settings, |_c: &[u8]| {});
+                    let mut rewriter = lol_html::send::HtmlRewriter::new(settings, |_c: &[u8]| {});
 
-                let mut collected_bytes = match res.content_length() {
-                    Some(cap) if cap > MAX_CONTENT_LENGTH => {
-                        log::warn!("{url} Content-Length {cap} exceeds 2 GB limit, rejecting");
-                        Vec::new()
+                    let mut collected_bytes = match res.content_length() {
+                        Some(cap) if cap > MAX_CONTENT_LENGTH => {
+                            log::warn!("{url} Content-Length {cap} exceeds 2 GB limit, rejecting");
+                            Vec::new()
+                        }
+                        Some(cap) if cap > 0 => {
+                            Vec::with_capacity((cap as usize).min(MAX_PREALLOC))
+                        }
+                        _ => Vec::with_capacity(MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE),
+                    };
+
+                    let mut response = handle_response_bytes_writer(
+                        res,
+                        url,
+                        only_html,
+                        &mut rewriter,
+                        &mut collected_bytes,
+                    )
+                    .await;
+
+                    let rewrite_error = response.1;
+
+                    if !rewrite_error {
+                        let _ = rewriter.end();
                     }
-                    Some(cap) if cap > 0 => Vec::with_capacity((cap as usize).min(MAX_PREALLOC)),
-                    _ => Vec::with_capacity(MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE),
-                };
 
-                let mut response = handle_response_bytes_writer(
-                    res,
-                    url,
-                    only_html,
-                    &mut rewriter,
-                    &mut collected_bytes,
-                )
-                .await;
+                    if r_settings.normalize {
+                        response.0.signature = Some(hash_html(&collected_bytes).await);
+                    }
 
-                let rewrite_error = response.1;
+                    response.0.content = if collected_bytes.is_empty() {
+                        None
+                    } else {
+                        Some(collected_bytes)
+                    };
 
-                if !rewrite_error {
-                    let _ = rewriter.end();
-                }
+                    if r_settings.ssg_build {
+                        if let Some(ssg_map) = ssg_map {
+                            if let Some(cell) = &cell {
+                                if let Some(source) = cell.get() {
+                                    if let Some(url_base) = &base {
+                                        let build_ssg_path = convert_abs_path(url_base, source);
+                                        let build_page =
+                                            Page::new_page(build_ssg_path.as_str(), client).await;
 
-                if r_settings.normalize {
-                    response.0.signature = Some(hash_html(&collected_bytes).await);
-                }
+                                        for cap in SSG_CAPTURE
+                                            .captures_iter(build_page.get_html_bytes_u8())
+                                        {
+                                            if let Some(matched) = cap.get(1) {
+                                                let href = auto_encode_bytes(matched.as_bytes())
+                                                    .replace(r#"\u002F"#, "/");
 
-                response.0.content = if collected_bytes.is_empty() {
-                    None
-                } else {
-                    Some(collected_bytes)
-                };
+                                                let last_segment =
+                                                    crate::utils::get_last_segment(&href);
 
-                if r_settings.ssg_build {
-                    if let Some(ssg_map) = ssg_map {
-                        if let Some(cell) = &cell {
-                            if let Some(source) = cell.get() {
-                                if let Some(url_base) = &base {
-                                    let build_ssg_path = convert_abs_path(url_base, source);
-                                    let build_page =
-                                        Page::new_page(build_ssg_path.as_str(), client).await;
-
-                                    for cap in
-                                        SSG_CAPTURE.captures_iter(build_page.get_html_bytes_u8())
-                                    {
-                                        if let Some(matched) = cap.get(1) {
-                                            let href = auto_encode_bytes(matched.as_bytes())
-                                                .replace(r#"\u002F"#, "/");
-
-                                            let last_segment =
-                                                crate::utils::get_last_segment(&href);
-
-                                            // we can pass in a static map of the dynamic SSG routes pre-hand, custom API endpoint to seed, or etc later.
-                                            if !(last_segment.starts_with("[")
-                                                && last_segment.ends_with("]"))
-                                            {
-                                                let base = if relative_directory_url(&href)
-                                                    || base.is_none()
+                                                // we can pass in a static map of the dynamic SSG routes pre-hand, custom API endpoint to seed, or etc later.
+                                                if !(last_segment.starts_with("[")
+                                                    && last_segment.ends_with("]"))
                                                 {
-                                                    original_page.as_ref()
-                                                } else {
-                                                    base.as_deref()
-                                                };
-                                                let base = if base_input_url.initialized() {
-                                                    base_input_url.get()
-                                                } else {
-                                                    base
-                                                };
-                                                push_link(
-                                                    &base,
-                                                    &href,
-                                                    ssg_map,
-                                                    &selectors.0,
-                                                    parent_host,
-                                                    parent_host_scheme,
-                                                    base_input_domain,
-                                                    sub_matcher,
-                                                    external_domains_caseless,
-                                                    &mut None,
-                                                );
+                                                    let base = if relative_directory_url(&href)
+                                                        || base.is_none()
+                                                    {
+                                                        original_page.as_ref()
+                                                    } else {
+                                                        base.as_deref()
+                                                    };
+                                                    let base = if base_input_url.initialized() {
+                                                        base_input_url.get()
+                                                    } else {
+                                                        base
+                                                    };
+                                                    push_link(
+                                                        &base,
+                                                        &href,
+                                                        ssg_map,
+                                                        &selectors.0,
+                                                        parent_host,
+                                                        parent_host_scheme,
+                                                        base_input_domain,
+                                                        sub_matcher,
+                                                        external_domains_caseless,
+                                                        &mut None,
+                                                    );
+                                                }
                                             }
                                         }
                                     }
@@ -3295,40 +3330,40 @@ impl Page {
                             }
                         }
                     }
-                }
 
-                response.0
-            }
-            Ok(res) => {
-                let pr = handle_response_bytes(res, url, only_html).await;
-                if pr.content_truncated {
-                    log::warn!("Response truncated for {url}, retrying once");
-                    match client.get(url).send().await {
-                        Ok(res2) => handle_response_bytes(res2, url, only_html).await,
-                        Err(_) => pr,
+                    response.0
+                }
+                Ok(res) => {
+                    let pr = handle_response_bytes(res, url, only_html).await;
+                    if pr.content_truncated {
+                        log::warn!("Response truncated for {url}, retrying once");
+                        match client.get(url).send().await {
+                            Ok(res2) => handle_response_bytes(res2, url, only_html).await,
+                            Err(_) => pr,
+                        }
+                    } else {
+                        pr
                     }
-                } else {
-                    pr
                 }
-            }
-            Err(err) => {
-                log::info!("error fetching {}", url);
+                Err(err) => {
+                    log::info!("error fetching {}", url);
 
-                let mut page_response = PageResponse::default();
+                    let mut page_response = PageResponse::default();
 
-                if let Some(status_code) = err.status() {
-                    page_response.status_code = status_code;
-                } else {
-                    page_response.status_code = crate::page::get_error_http_status_code(&err);
+                    if let Some(status_code) = err.status() {
+                        page_response.status_code = status_code;
+                    } else {
+                        page_response.status_code = crate::page::get_error_http_status_code(&err);
+                    }
+
+                    page_response.error_for_status = Some(Err(err));
+
+                    #[cfg(feature = "balance")]
+                    crate::utils::vitals::request_error();
+
+                    page_response
                 }
-
-                page_response.error_for_status = Some(Err(err));
-
-                #[cfg(feature = "balance")]
-                crate::utils::vitals::request_error();
-
-                page_response
-            }
+            },
         };
 
         #[cfg(feature = "balance")]
