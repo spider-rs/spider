@@ -2885,6 +2885,28 @@ impl Page {
         build(url, page_resource)
     }
 
+    /// Auto-armed variant: consults `Configuration::auto_http_first_byte_args`
+    /// and arms the watchdog only when the gate fires:
+    ///
+    /// * `balance` feature enabled, AND
+    /// * `config.proxies` has ≥ 2 entries usable for HTTP
+    ///   (`ignore != ProxyIgnore::Http`).
+    ///
+    /// Without those conditions, behavior is identical to
+    /// [`new_page`] — no point arming the watchdog when there's no
+    /// alternate proxy to rotate to. The configured
+    /// `http_first_byte_timeout` + `_jitter` on `Configuration` are
+    /// only consumed when the gate fires.
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    pub async fn new_page_auto_watchdog(
+        url: &str,
+        client: &Client,
+        config: &crate::configuration::Configuration,
+    ) -> Self {
+        let (base, jitter) = config.auto_http_first_byte_args();
+        Self::new_page_with_watchdog(url, client, base, jitter).await
+    }
+
     /// Instantiate a new page using cache options when available.
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn new_page_with_cache(

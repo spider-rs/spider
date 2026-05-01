@@ -2317,4 +2317,128 @@ mod tests {
         assert_eq!(pr.status_code, reqwest::StatusCode::GATEWAY_TIMEOUT);
         assert_eq!(pr.final_url, Some("https://x.example/".to_string()));
     }
+
+    /// Auto-arm gate: no proxies → never auto-arms.
+    #[test]
+    fn test_auto_http_first_byte_args_no_proxies() {
+        let mut cfg = Configuration::default();
+        cfg.with_http_first_byte_timeout(Some(std::time::Duration::from_secs(12)));
+        cfg.with_http_first_byte_timeout_jitter(Some(std::time::Duration::from_secs(3)));
+        let (base, jitter) = cfg.auto_http_first_byte_args();
+        assert_eq!(base, None, "no proxies → must not auto-arm");
+        assert_eq!(jitter, None);
+    }
+
+    /// Auto-arm gate: single HTTP-eligible proxy is not enough.
+    #[test]
+    fn test_auto_http_first_byte_args_single_proxy() {
+        use crate::configuration::{ProxyIgnore, RequestProxy};
+        let mut cfg = Configuration::default();
+        cfg.with_http_first_byte_timeout(Some(std::time::Duration::from_secs(12)));
+        cfg.with_http_first_byte_timeout_jitter(Some(std::time::Duration::from_secs(3)));
+        cfg.proxies = Some(vec![RequestProxy {
+            addr: "http://proxy-a".into(),
+            ignore: ProxyIgnore::No,
+        }]);
+        let (base, _) = cfg.auto_http_first_byte_args();
+        assert_eq!(
+            base, None,
+            "single proxy → no rotation target, must not auto-arm"
+        );
+    }
+
+    /// Auto-arm gate: two HTTP-eligible proxies fire (under `balance`).
+    #[cfg(feature = "balance")]
+    #[test]
+    fn test_auto_http_first_byte_args_two_http_proxies_arm() {
+        use crate::configuration::{ProxyIgnore, RequestProxy};
+        let mut cfg = Configuration::default();
+        cfg.with_http_first_byte_timeout(Some(std::time::Duration::from_secs(12)));
+        cfg.with_http_first_byte_timeout_jitter(Some(std::time::Duration::from_secs(3)));
+        cfg.proxies = Some(vec![
+            RequestProxy {
+                addr: "http://proxy-a".into(),
+                ignore: ProxyIgnore::No,
+            },
+            RequestProxy {
+                addr: "http://proxy-b".into(),
+                ignore: ProxyIgnore::No,
+            },
+        ]);
+        let (base, jitter) = cfg.auto_http_first_byte_args();
+        assert_eq!(base, Some(std::time::Duration::from_secs(12)));
+        assert_eq!(jitter, Some(std::time::Duration::from_secs(3)));
+    }
+
+    /// Auto-arm gate: chrome-only proxies (`ignore = Http`) don't count.
+    #[cfg(feature = "balance")]
+    #[test]
+    fn test_auto_http_first_byte_args_chrome_only_proxies_ignored() {
+        use crate::configuration::{ProxyIgnore, RequestProxy};
+        let mut cfg = Configuration::default();
+        cfg.with_http_first_byte_timeout(Some(std::time::Duration::from_secs(12)));
+        cfg.proxies = Some(vec![
+            RequestProxy {
+                addr: "http://proxy-a".into(),
+                ignore: ProxyIgnore::Http,
+            },
+            RequestProxy {
+                addr: "http://proxy-b".into(),
+                ignore: ProxyIgnore::Http,
+            },
+        ]);
+        let (base, _) = cfg.auto_http_first_byte_args();
+        assert_eq!(
+            base, None,
+            "both proxies marked HTTP-ignore → no HTTP-eligible rotation target, must not auto-arm"
+        );
+    }
+
+    /// Auto-arm gate: mixed list (one HTTP-only, one chrome-only) — only 1 HTTP-eligible.
+    #[cfg(feature = "balance")]
+    #[test]
+    fn test_auto_http_first_byte_args_mixed_one_eligible() {
+        use crate::configuration::{ProxyIgnore, RequestProxy};
+        let mut cfg = Configuration::default();
+        cfg.with_http_first_byte_timeout(Some(std::time::Duration::from_secs(12)));
+        cfg.proxies = Some(vec![
+            RequestProxy {
+                addr: "http://proxy-a".into(),
+                ignore: ProxyIgnore::No,
+            },
+            RequestProxy {
+                addr: "http://proxy-b".into(),
+                ignore: ProxyIgnore::Http,
+            },
+        ]);
+        let (base, _) = cfg.auto_http_first_byte_args();
+        assert_eq!(
+            base, None,
+            "only 1 HTTP-eligible proxy → must not auto-arm"
+        );
+    }
+
+    /// Auto-arm gate: without `balance` feature, never arms regardless of proxy count.
+    #[cfg(not(feature = "balance"))]
+    #[test]
+    fn test_auto_http_first_byte_args_no_balance_feature() {
+        use crate::configuration::{ProxyIgnore, RequestProxy};
+        let mut cfg = Configuration::default();
+        cfg.with_http_first_byte_timeout(Some(std::time::Duration::from_secs(12)));
+        cfg.proxies = Some(vec![
+            RequestProxy {
+                addr: "http://proxy-a".into(),
+                ignore: ProxyIgnore::No,
+            },
+            RequestProxy {
+                addr: "http://proxy-b".into(),
+                ignore: ProxyIgnore::No,
+            },
+        ]);
+        let (base, _) = cfg.auto_http_first_byte_args();
+        assert_eq!(
+            base, None,
+            "without balance feature → must not auto-arm"
+        );
+    }
 }

@@ -2190,6 +2190,44 @@ impl Configuration {
         self
     }
 
+    /// Resolve the HTTP first-byte watchdog args, gated on auto-arm
+    /// conditions:
+    ///
+    /// * `balance` feature enabled, AND
+    /// * `self.proxies` has ≥ 2 entries whose `ignore != ProxyIgnore::Http`
+    ///   (i.e., proxies usable for HTTP — chrome-only proxies are
+    ///   excluded since they can't help the HTTP retry path rotate).
+    ///
+    /// When both conditions hold, returns the configured
+    /// `http_first_byte_timeout` + `_jitter` so callers can pass them
+    /// straight into `fetch_page_html_raw_with_watchdog` /
+    /// `Page::new_page_with_watchdog`. Otherwise returns
+    /// `(None, None)` — no rotation target exists, so the watchdog
+    /// would fire but retries would just hit the same proxy.
+    ///
+    /// When the `balance` feature is off, always returns `(None, None)`.
+    /// Callers that want unconditional arming should read the fields
+    /// directly off `Configuration` instead.
+    #[inline]
+    pub fn auto_http_first_byte_args(
+        &self,
+    ) -> (Option<Duration>, Option<Duration>) {
+        #[cfg(feature = "balance")]
+        {
+            let http_eligible = match &self.proxies {
+                Some(p) => p
+                    .iter()
+                    .filter(|rp| rp.ignore != ProxyIgnore::Http)
+                    .count(),
+                None => 0,
+            };
+            if http_eligible >= 2 {
+                return (self.http_first_byte_timeout, self.http_first_byte_timeout_jitter);
+            }
+        }
+        (None, None)
+    }
+
     /// Build the borrowed chrome fetch parameter bundle.
     ///
     /// Zero-copy: all fields borrow directly from `self`. Build once at
