@@ -1591,8 +1591,7 @@ impl HedgeBrowser {
             }
         };
 
-        let browser_dead =
-            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let browser_dead = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let browser_dead_signal = browser_dead.clone();
 
         // Spawn handler — lightweight, just polls CDP messages.
@@ -1607,8 +1606,7 @@ impl HedgeBrowser {
                         | CdpError::LaunchExit(_, _)
                         | CdpError::LaunchTimeout(_)
                         | CdpError::LaunchIo(_, _) => {
-                            browser_dead_signal
-                                .store(true, std::sync::atomic::Ordering::Release);
+                            browser_dead_signal.store(true, std::sync::atomic::Ordering::Release);
                             break;
                         }
                         _ => continue,
