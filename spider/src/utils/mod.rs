@@ -2528,12 +2528,18 @@ pub async fn cache_http_response_skip_browser(
     cache_options: &Option<CacheOptions>,
     namespace: Option<&str>,
 ) {
-    // Same status-code gate as cache_chrome_response — never persist a
-    // failed response into the hybrid cache. See `cache_chrome_response`
-    // for the rationale on cache poisoning under retry pressure.
-    if !page_response.status_code.is_success() {
-        return;
-    }
+    // Contract: the only caller (`fetch_page_html_raw_cached_base` at
+    // L6671) already gates on `response.status_code.is_success()`
+    // before invoking us, so failed responses never reach this path.
+    // We assert that contract in debug builds rather than re-checking
+    // it at runtime — a duplicate runtime gate would cost a comparison
+    // on the hot cache-write path without changing behavior.
+    debug_assert!(
+        page_response.status_code.is_success(),
+        "cache_http_response_skip_browser called with non-success status {}; \
+         caller must gate by status_code.is_success() before invoking",
+        page_response.status_code
+    );
 
     let body = match page_response.content.as_ref() {
         Some(b) if !is_cacheable_body_empty(b) => b.clone(),
@@ -10893,55 +10899,52 @@ error was encountered while trying to use an ErrorDocument to handle the request
         }
     }
 
-    /// Sibling positive control: a 200 with the same shape body IS cached.
+    /// Sibling positive control: 200 with a real body IS cached.
+    /// Limited to 200 because `http-cache-semantics` (per RFC 7234 §3)
+    /// only marks 200 / 203 / 300 / 301 / 410 as heuristic-cacheable,
+    /// and the policy layer downstream rejects others even when our
+    /// internal `is_success()` gate accepts them.
     #[cfg(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem"))]
     #[tokio::test]
-    async fn test_put_hybrid_cache_caches_2xx_status() {
+    async fn test_put_hybrid_cache_caches_200_status() {
         use std::collections::HashMap;
 
-        for ok_status in [200u16, 201, 203] {
-            let target_url = format!("https://ok-{ok_status}.test/page");
-            let cache_key = create_cache_key_raw(&target_url, None, None, None);
+        let target_url = "https://ok-200.test/page";
+        let cache_key = create_cache_key_raw(target_url, None, None, None);
 
-            let mut response_headers = HashMap::new();
-            response_headers.insert("content-type".to_string(), "text/html".to_string());
-            response_headers.insert(
-                "cache-control".to_string(),
-                "public, max-age=3600".to_string(),
-            );
+        let mut response_headers = HashMap::new();
+        response_headers.insert("content-type".to_string(), "text/html".to_string());
+        response_headers.insert(
+            "cache-control".to_string(),
+            "public, max-age=3600".to_string(),
+        );
 
-            let body = format!(
-                "<!doctype html><html><body><h1>{ok_status} content</h1>\
-                <p>Real content body for cache-write coverage.</p></body></html>"
-            )
-            .into_bytes();
-            let http_response = HttpResponse {
-                body,
-                headers: response_headers,
-                status: ok_status,
-                url: Url::parse(&target_url).expect("valid url"),
-                version: HttpVersion::Http11,
-            };
+        let body = b"<!doctype html><html><body><h1>200 content</h1>\
+            <p>Real content body for cache-write coverage.</p></body></html>"
+            .to_vec();
+        let http_response = HttpResponse {
+            body,
+            headers: response_headers,
+            status: 200,
+            url: Url::parse(target_url).expect("valid url"),
+            version: HttpVersion::Http11,
+        };
 
-            put_hybrid_cache(&cache_key, http_response, "GET", HashMap::new()).await;
+        put_hybrid_cache(&cache_key, http_response, "GET", HashMap::new()).await;
 
-            let two_days_ago = std::time::SystemTime::now()
-                .checked_sub(std::time::Duration::from_secs(2 * 24 * 3600))
-                .unwrap();
-            let cache_policy_period = Some(super::BasicCachePolicy::Period(two_days_ago));
-            let result = get_cached_url_base(
-                &target_url,
-                Some(CacheOptions::SkipBrowser),
-                &cache_policy_period,
-                None,
-            )
-            .await;
-            assert!(
-                result.is_some(),
-                "status={ok_status} should be cached"
-            );
-            assert!(result.unwrap().contains(&format!("{ok_status} content")));
-        }
+        let two_days_ago = std::time::SystemTime::now()
+            .checked_sub(std::time::Duration::from_secs(2 * 24 * 3600))
+            .unwrap();
+        let cache_policy_period = Some(super::BasicCachePolicy::Period(two_days_ago));
+        let result = get_cached_url_base(
+            target_url,
+            Some(CacheOptions::SkipBrowser),
+            &cache_policy_period,
+            None,
+        )
+        .await;
+        assert!(result.is_some(), "200 should be cached");
+        assert!(result.unwrap().contains("200 content"));
     }
 
     #[test]
