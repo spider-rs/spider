@@ -27,4 +27,8 @@ ignore = [
     "RUSTSEC-2026-0099",
     # rand unsound with custom logger — transitive, rand::rng() not used with custom loggers
     "RUSTSEC-2026-0097",
+    # hickory-proto 0.25.2 NSEC3 unbounded loop — transitive via reqwest 0.13.3 + wreq 5.3.0 (no fixed upgrade in 0.25.x line; both upstream still pin hickory-resolver = "0.25")
+    "RUSTSEC-2026-0118",
+    # hickory-proto 0.25.2 O(n²) name compression CPU exhaustion — same transitive path; fix is in 0.26.1 but reqwest/wreq 5.x not yet bumped
+    "RUSTSEC-2026-0119",
 ]
