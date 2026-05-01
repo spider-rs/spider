@@ -2272,4 +2272,49 @@ mod tests {
              until={until}ms, now_after_sleep={after}ms"
         );
     }
+
+    /// HTTP first-byte deadline: with no base timeout, returns None.
+    #[test]
+    fn test_http_first_byte_deadline_none_when_base_unset() {
+        let d =
+            crate::utils::first_byte_deadline(None, Some(std::time::Duration::from_secs(5)));
+        assert_eq!(d, None);
+    }
+
+    /// HTTP first-byte deadline: with base + zero/None jitter, returns base.
+    #[test]
+    fn test_http_first_byte_deadline_base_only_returns_base() {
+        let base = std::time::Duration::from_secs(8);
+        let d = crate::utils::first_byte_deadline(Some(base), None);
+        assert_eq!(d, Some(base));
+        let d2 = crate::utils::first_byte_deadline(
+            Some(base),
+            Some(std::time::Duration::from_secs(0)),
+        );
+        assert_eq!(d2, Some(base));
+    }
+
+    /// HTTP first-byte deadline: with base + jitter, must lie in
+    /// `[base, base + jitter)`.
+    #[test]
+    fn test_http_first_byte_deadline_jitter_window_bounds() {
+        let base = std::time::Duration::from_secs(8);
+        let jitter = std::time::Duration::from_secs(2);
+        for _ in 0..1024 {
+            let d = crate::utils::first_byte_deadline(Some(base), Some(jitter)).unwrap();
+            assert!(d >= base, "jittered deadline must be >= base");
+            assert!(
+                d < base + jitter,
+                "jittered deadline must be < base + jitter"
+            );
+        }
+    }
+
+    /// HTTP first-byte page response builder must produce a 524.
+    #[test]
+    fn test_http_build_first_byte_timeout_page_response_status_524() {
+        let pr = crate::utils::build_first_byte_timeout_page_response("https://x.example/");
+        assert_eq!(pr.status_code, reqwest::StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(pr.final_url, Some("https://x.example/".to_string()));
+    }
 }

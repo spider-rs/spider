@@ -2860,6 +2860,31 @@ impl Page {
         build(url, page_resource)
     }
 
+    /// Same as [`new_page`] but arms the HTTP first-byte watchdog. When
+    /// `first_byte_timeout` is `Some`, each `req.send()` is wrapped in
+    /// `tokio::time::timeout(base + rand(0..jitter))`. On timeout the
+    /// in-flight connect / header future is dropped and a synthetic
+    /// `524 GATEWAY_TIMEOUT` PageResponse is built so the caller's
+    /// retry path rotates the proxy. Pass `(None, None)` for behavior
+    /// identical to `new_page`.
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    pub async fn new_page_with_watchdog(
+        url: &str,
+        client: &Client,
+        first_byte_timeout: Option<std::time::Duration>,
+        first_byte_jitter: Option<std::time::Duration>,
+    ) -> Self {
+        let page_resource: PageResponse = crate::utils::fetch_page_html_raw_with_watchdog(
+            url,
+            client,
+            first_byte_timeout,
+            first_byte_jitter,
+        )
+        .await;
+
+        build(url, page_resource)
+    }
+
     /// Instantiate a new page using cache options when available.
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn new_page_with_cache(

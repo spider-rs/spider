@@ -485,6 +485,108 @@ pub fn chunk_idle_timeout() -> Option<Duration> {
     }
 }
 
+/// Compute a jittered first-byte deadline. Returns `None` when the
+/// watchdog is disarmed, so callers can branch on `None` to pick the
+/// untimed path. Lock-free: at most one PRNG call.
+///
+/// Jitter requires `fastrand`, which is only enabled by a subset of
+/// features (`chrome`, `real_browser`, `spoof`, `dns_cache`). When
+/// none of those is active, `jitter` is silently ignored and the base
+/// deadline is used as-is — preserves the no-thundering-herd intent on
+/// best-effort terms without forcing every minimal build to take a
+/// randomness dep.
+#[inline]
+pub fn first_byte_deadline(base: Option<Duration>, jitter: Option<Duration>) -> Option<Duration> {
+    let b = base?;
+    #[cfg(any(
+        feature = "chrome",
+        feature = "real_browser",
+        feature = "spoof",
+        feature = "dns_cache"
+    ))]
+    {
+        if let Some(j) = jitter {
+            if !j.is_zero() {
+                let j_ms = j.as_millis().min(u128::from(u64::MAX)) as u64;
+                if j_ms > 0 {
+                    let extra = fastrand::u64(0..j_ms);
+                    return Some(b.saturating_add(Duration::from_millis(extra)));
+                }
+            }
+        }
+    }
+    #[cfg(not(any(
+        feature = "chrome",
+        feature = "real_browser",
+        feature = "spoof",
+        feature = "dns_cache"
+    )))]
+    let _ = jitter; // explicitly consume to silence unused-variable.
+    Some(b)
+}
+
+/// Outcome of a future wrapped by the HTTP first-byte watchdog. The
+/// `T` carries the future's natural `Output` (typically a
+/// `Result<Response, Error>`) so this stays generic across the
+/// reqwest / `wreq` / `reqwest_middleware` client variants spider
+/// supports.
+#[derive(Debug)]
+pub enum HttpSendOutcome<T> {
+    /// Future resolved within the budget — pass `T` through.
+    Ok(T),
+    /// First-byte watchdog fired; the future was dropped, cancelling
+    /// the in-flight connect / header read. Carries the jittered
+    /// deadline that elapsed for diagnostics. Caller emits a synthetic
+    /// `524 GATEWAY_TIMEOUT` PageResponse via
+    /// [`build_first_byte_timeout_page_response`] so the retry path
+    /// rotates the proxy.
+    FirstByteTimeout(Duration),
+}
+
+/// Wrap an arbitrary `Future` in an optional first-byte watchdog.
+/// Generic over the future's `Output` so it works for raw `reqwest`,
+/// `wreq`, and `reqwest_middleware` request builders alike. When `base`
+/// is `None`, this is a pure passthrough — zero overhead.
+///
+/// On timeout the in-flight future is dropped; the underlying
+/// connect / header read is cancelled cleanly by the runtime. No locks
+/// held, no resources leaked beyond the dropped future itself.
+#[inline]
+pub async fn timeout_first_byte<F>(
+    fut: F,
+    base: Option<Duration>,
+    jitter: Option<Duration>,
+) -> HttpSendOutcome<F::Output>
+where
+    F: std::future::Future,
+{
+    match first_byte_deadline(base, jitter) {
+        Some(actual) => match tokio::time::timeout(actual, fut).await {
+            Ok(v) => HttpSendOutcome::Ok(v),
+            Err(_) => {
+                log::warn!(
+                    "http first-byte timeout ({actual:?}) — dropping request future"
+                );
+                HttpSendOutcome::FirstByteTimeout(actual)
+            }
+        },
+        None => HttpSendOutcome::Ok(fut.await),
+    }
+}
+
+/// Build a synthetic `524 GATEWAY_TIMEOUT` PageResponse for an HTTP
+/// fetch that exceeded its first-byte budget. Mirrors the chrome-side
+/// timeout handling so the caller's retry path (`should_retry =
+/// false`-aware code) continues to rotate the proxy on the next
+/// attempt.
+#[inline]
+pub fn build_first_byte_timeout_page_response(target_url: &str) -> PageResponse {
+    let mut resp = PageResponse::default();
+    resp.status_code = reqwest::StatusCode::GATEWAY_TIMEOUT;
+    resp.final_url = Some(target_url.to_string());
+    resp
+}
+
 /// The response of a web page.
 #[derive(Debug, Default)]
 pub struct PageResponse {
@@ -6292,14 +6394,34 @@ async fn fetch_page_html_raw_base(
     target_url: &str,
     client: &Client,
     only_html: bool,
+    first_byte_timeout: Option<Duration>,
+    first_byte_jitter: Option<Duration>,
 ) -> PageResponse {
     async fn attempt_once(
         url: &str,
         client: &Client,
         only_html: bool,
+        first_byte_timeout: Option<Duration>,
+        first_byte_jitter: Option<Duration>,
     ) -> Result<PageResponse, RequestError> {
-        let res = client.get(url).send().await?;
-        Ok(handle_response_bytes(res, url, only_html).await)
+        // Generic future-wrapper — works across reqwest / wreq /
+        // reqwest_middleware backends because the inner `?` propagates
+        // each variant's own `RequestError` type alias.
+        match timeout_first_byte(
+            client.get(url).send(),
+            first_byte_timeout,
+            first_byte_jitter,
+        )
+        .await
+        {
+            HttpSendOutcome::Ok(send_result) => {
+                let res = send_result?;
+                Ok(handle_response_bytes(res, url, only_html).await)
+            }
+            HttpSendOutcome::FirstByteTimeout(_) => {
+                Ok(build_first_byte_timeout_page_response(url))
+            }
+        }
     }
 
     let duration = if cfg!(feature = "time") {
@@ -6308,12 +6430,28 @@ async fn fetch_page_html_raw_base(
         None
     };
 
-    let mut page_response = match attempt_once(target_url, client, only_html).await {
+    let mut page_response = match attempt_once(
+        target_url,
+        client,
+        only_html,
+        first_byte_timeout,
+        first_byte_jitter,
+    )
+    .await
+    {
         Ok(pr) => {
             // Retry once if the response was truncated (stream error or Content-Length mismatch)
             if pr.content_truncated {
                 log::warn!("Response truncated for {target_url}, retrying once");
-                match attempt_once(target_url, client, only_html).await {
+                match attempt_once(
+                    target_url,
+                    client,
+                    only_html,
+                    first_byte_timeout,
+                    first_byte_jitter,
+                )
+                .await
+                {
                     Ok(pr2) => pr2,
                     Err(_) => pr, // fall back to original truncated response
                 }
@@ -6330,7 +6468,15 @@ async fn fetch_page_html_raw_base(
                         target_url,
                         flipped
                     );
-                    match attempt_once(&flipped, client, only_html).await {
+                    match attempt_once(
+                        &flipped,
+                        client,
+                        only_html,
+                        first_byte_timeout,
+                        first_byte_jitter,
+                    )
+                    .await
+                    {
                         Ok(pr2) => pr2,
                         Err(err2) => build_error_page_response(&flipped, err2),
                     }
@@ -6340,7 +6486,15 @@ async fn fetch_page_html_raw_base(
                         target_url,
                         no_www
                     );
-                    match attempt_once(&no_www, client, only_html).await {
+                    match attempt_once(
+                        &no_www,
+                        client,
+                        only_html,
+                        first_byte_timeout,
+                        first_byte_jitter,
+                    )
+                    .await
+                    {
                         Ok(pr2) => pr2,
                         Err(err2) => build_error_page_response(&no_www, err2),
                     }
@@ -6359,7 +6513,25 @@ async fn fetch_page_html_raw_base(
 
 /// Perform a network request to a resource extracting all content streaming.
 pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageResponse {
-    fetch_page_html_raw_base(target_url, client, false).await
+    fetch_page_html_raw_base(target_url, client, false, None, None).await
+}
+
+/// Same as [`fetch_page_html_raw`] but arms the HTTP first-byte
+/// watchdog: each `req.send()` is wrapped in
+/// `tokio::time::timeout(base + rand(0..jitter))`. On timeout the
+/// in-flight connect / header future is dropped (cancels the request)
+/// and a synthetic `524 GATEWAY_TIMEOUT` PageResponse is returned so
+/// the caller's retry path rotates the proxy. Pass `None` for either
+/// to disable that aspect — `(None, None)` is identical to
+/// `fetch_page_html_raw`.
+pub async fn fetch_page_html_raw_with_watchdog(
+    target_url: &str,
+    client: &Client,
+    first_byte_timeout: Option<Duration>,
+    first_byte_jitter: Option<Duration>,
+) -> PageResponse {
+    fetch_page_html_raw_base(target_url, client, false, first_byte_timeout, first_byte_jitter)
+        .await
 }
 
 #[cfg(feature = "etag_cache")]
@@ -6456,7 +6628,7 @@ pub async fn fetch_page_html_raw_cached(
         return response;
     }
 
-    let response = fetch_page_html_raw_base(target_url, client, false).await;
+    let response = fetch_page_html_raw_base(target_url, client, false, None, None).await;
 
     // On a cache miss, publish the fresh HTTP response to the shared
     // remote cache worker when the runtime flag is on. Best-effort —
@@ -6479,7 +6651,7 @@ pub async fn fetch_page_html_raw_cached(
 
 /// Perform a network request to a resource extracting all content streaming.
 pub async fn fetch_page_html_raw_only_html(target_url: &str, client: &Client) -> PageResponse {
-    fetch_page_html_raw_base(target_url, client, false).await
+    fetch_page_html_raw_base(target_url, client, false, None, None).await
 }
 
 /// Fetch a single page via the spider.cloud REST API.
@@ -6658,7 +6830,7 @@ pub async fn fetch_page_html_with_fallback(
     spider_cloud: &crate::configuration::SpiderCloudConfig,
     only_html: bool,
 ) -> PageResponse {
-    let resp = fetch_page_html_raw_base(target_url, client, only_html).await;
+    let resp = fetch_page_html_raw_base(target_url, client, only_html, None, None).await;
 
     let body_bytes = resp.content.as_deref();
     let should_fallback = spider_cloud.should_fallback(resp.status_code.as_u16(), body_bytes);

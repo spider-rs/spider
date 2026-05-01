@@ -544,6 +544,23 @@ pub struct Configuration {
     /// base timeout exactly. Ignored when `chrome_first_byte_timeout` is
     /// `None` (no watchdog to jitter).
     pub chrome_first_byte_timeout_jitter: Option<Duration>,
+    /// First-byte watchdog for HTTP fetches. When `Some(d)`, each
+    /// `client.get(url).send().await` is wrapped in
+    /// `tokio::time::timeout(base + rand(0..jitter))`. On timeout the
+    /// in-flight connect / TLS / header future is dropped (cancels the
+    /// request) and a synthetic `524 GATEWAY_TIMEOUT` response is built
+    /// so the existing retry path rotates to the next proxy. Covers the
+    /// gap between `connect_timeout` (TCP/TLS handshake) and
+    /// `chunk_idle_timeout` (per-chunk idle while streaming) where a
+    /// proxy can accept the connection but never produce headers.
+    /// `None` (default) disables the watchdog — `request_timeout` and
+    /// `chunk_idle_timeout` remain the only stall guards.
+    pub http_first_byte_timeout: Option<Duration>,
+    /// Per-fetch jitter window applied on top of
+    /// `http_first_byte_timeout`. Same semantics as
+    /// `chrome_first_byte_timeout_jitter`. `None` (default) means no
+    /// jitter; ignored when the base is `None`.
+    pub http_first_byte_timeout_jitter: Option<Duration>,
     /// Scripts to execute for individual pages, the full path of the url is required for an exact match. This is useful for running one off JS on pages like performing custom login actions.
     #[cfg(feature = "chrome")]
     pub execution_scripts: Option<ExecutionScripts>,
@@ -1923,6 +1940,30 @@ impl Configuration {
         &mut self,
         _jitter: Option<Duration>,
     ) -> &mut Self {
+        self
+    }
+
+    /// Set the first-byte watchdog timeout for HTTP fetches. `None`
+    /// disables it; `Some(d)` wraps each `client.get(url).send()` in
+    /// `tokio::time::timeout(d + rand(0..jitter))` and returns a
+    /// synthetic `524 GATEWAY_TIMEOUT` response on fire so the retry
+    /// path rotates the proxy. Covers stalls between TCP connect and
+    /// the first byte of the response — distinct from
+    /// `connect_timeout` (handshake-only) and `chunk_idle_timeout`
+    /// (body-streaming idle).
+    pub fn with_http_first_byte_timeout(&mut self, timeout: Option<Duration>) -> &mut Self {
+        self.http_first_byte_timeout = timeout;
+        self
+    }
+
+    /// Set the per-fetch jitter window for the HTTP first-byte
+    /// watchdog. Same semantics as
+    /// `with_chrome_first_byte_timeout_jitter`.
+    pub fn with_http_first_byte_timeout_jitter(
+        &mut self,
+        jitter: Option<Duration>,
+    ) -> &mut Self {
+        self.http_first_byte_timeout_jitter = jitter;
         self
     }
 
