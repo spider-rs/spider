@@ -1,6 +1,6 @@
 [package]
 name = "spider_agent_html"
-version = "2.51.151"
+version = "2.51.152"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "HTML processing utilities for spider_agent — cleaning, content analysis, and diffing."
 repository = "https://github.com/spider-rs/spider"

@@ -3149,6 +3149,15 @@ impl Page {
         .await;
         let mut page_response: PageResponse = match send_outcome {
             crate::utils::HttpSendOutcome::FirstByteTimeout(_) => {
+                // Balance the `vitals::request_start` counter that
+                // fires above before any early return — otherwise
+                // `REQUESTS_IN_FLIGHT` leaks indefinitely on every
+                // first-byte timeout, breaking the scaler's signal.
+                #[cfg(feature = "balance")]
+                {
+                    crate::utils::vitals::request_error();
+                    crate::utils::vitals::request_end();
+                }
                 return build(
                     url,
                     crate::utils::build_first_byte_timeout_page_response(url),

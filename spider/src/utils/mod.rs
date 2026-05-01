@@ -2135,6 +2135,20 @@ pub async fn put_hybrid_cache(
         return;
     }
 
+    // Never cache non-success responses. Empty stubs are already filtered
+    // above, but a 4xx/5xx with a non-empty body (e.g. an upstream
+    // proxy's 504 Gateway Timeout HTML, an origin's nginx 502 error
+    // page, a 403 challenge wall, etc.) used to be stored here and then
+    // returned from cache for the same URL within the next retry —
+    // poisoning the entire crawl after a single bad attempt. The cache
+    // exists for successful responses only; failures should re-fetch
+    // through the live retry/proxy/backend rotation.
+    let cache_status =
+        StatusCode::from_u16(http_response.status).unwrap_or(StatusCode::EXPECTATION_FAILED);
+    if !cache_status.is_success() {
+        return;
+    }
+
     if let Ok(u) = http_response.url.as_str().parse::<http::uri::Uri>() {
         let req = HttpRequestLike {
             uri: u,
@@ -2348,6 +2362,16 @@ pub async fn cache_chrome_response(
     namespace: Option<&str>,
     remote_cache_read_only: bool,
 ) {
+    // Skip caching non-success responses. A 4xx / 5xx — including
+    // upstream-proxy 504/502 with a non-empty error page body — used to
+    // be cached and then served from the local hybrid cache for the same
+    // URL on the very next retry, locking the entire crawl into a stale
+    // failure. Cache reads are for successful responses; failed requests
+    // re-fetch through the live retry / proxy / backend rotation.
+    if !page_response.status_code.is_success() {
+        return;
+    }
+
     // Skip caching empty content.
     let body = match page_response.content.as_ref() {
         Some(b) if !is_cacheable_body_empty(b) => b.to_vec(),
@@ -2504,6 +2528,13 @@ pub async fn cache_http_response_skip_browser(
     cache_options: &Option<CacheOptions>,
     namespace: Option<&str>,
 ) {
+    // Same status-code gate as cache_chrome_response — never persist a
+    // failed response into the hybrid cache. See `cache_chrome_response`
+    // for the rationale on cache poisoning under retry pressure.
+    if !page_response.status_code.is_success() {
+        return;
+    }
+
     let body = match page_response.content.as_ref() {
         Some(b) if !is_cacheable_body_empty(b) => b.clone(),
         _ => return,
@@ -10802,6 +10833,115 @@ error was encountered while trying to use an ErrorDocument to handle the request
             "Set-Cookie should not block caching with shared=false"
         );
         assert!(result.unwrap().contains("set-cookie-cached"));
+    }
+
+    /// Regression: a 504 / 502 / 503 response with a non-empty body
+    /// (e.g. an upstream proxy's "Gateway Timeout" HTML error page)
+    /// must NOT be persisted into the hybrid cache. Pre-fix, the only
+    /// gate was `is_cacheable_body_empty`; failed responses with a
+    /// real error-page body would land in the cache and re-serve the
+    /// same failure for every retry within a crawl, locking the URL
+    /// into a stale failure state.
+    #[cfg(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem"))]
+    #[tokio::test]
+    async fn test_put_hybrid_cache_skips_non_success_status() {
+        use std::collections::HashMap;
+
+        for failed_status in [400u16, 403, 404, 429, 500, 502, 503, 504] {
+            let target_url = format!("https://failed-{failed_status}.test/page");
+            let cache_key = create_cache_key_raw(&target_url, None, None, None);
+
+            let mut response_headers = HashMap::new();
+            response_headers.insert("content-type".to_string(), "text/html".to_string());
+            response_headers.insert(
+                "cache-control".to_string(),
+                "public, max-age=3600".to_string(),
+            );
+
+            // Substantial body — the empty-body gate must NOT be why
+            // the cache write is rejected. Status code is the gate.
+            let body = format!(
+                "<!doctype html><html><body><h1>{failed_status} Error</h1>\
+                <p>Upstream proxy returned a non-empty error page body.</p></body></html>"
+            )
+            .into_bytes();
+            let http_response = HttpResponse {
+                body,
+                headers: response_headers,
+                status: failed_status,
+                url: Url::parse(&target_url).expect("valid url"),
+                version: HttpVersion::Http11,
+            };
+
+            put_hybrid_cache(&cache_key, http_response, "GET", HashMap::new()).await;
+
+            let two_days_ago = std::time::SystemTime::now()
+                .checked_sub(std::time::Duration::from_secs(2 * 24 * 3600))
+                .unwrap();
+            let cache_policy_period = Some(super::BasicCachePolicy::Period(two_days_ago));
+            let result = get_cached_url_base(
+                &target_url,
+                Some(CacheOptions::SkipBrowser),
+                &cache_policy_period,
+                None,
+            )
+            .await;
+            assert!(
+                result.is_none(),
+                "status={failed_status} response with non-empty body must NOT be cached"
+            );
+        }
+    }
+
+    /// Sibling positive control: a 200 with the same shape body IS cached.
+    #[cfg(any(feature = "cache_chrome_hybrid", feature = "cache_chrome_hybrid_mem"))]
+    #[tokio::test]
+    async fn test_put_hybrid_cache_caches_2xx_status() {
+        use std::collections::HashMap;
+
+        for ok_status in [200u16, 201, 203] {
+            let target_url = format!("https://ok-{ok_status}.test/page");
+            let cache_key = create_cache_key_raw(&target_url, None, None, None);
+
+            let mut response_headers = HashMap::new();
+            response_headers.insert("content-type".to_string(), "text/html".to_string());
+            response_headers.insert(
+                "cache-control".to_string(),
+                "public, max-age=3600".to_string(),
+            );
+
+            let body = format!(
+                "<!doctype html><html><body><h1>{ok_status} content</h1>\
+                <p>Real content body for cache-write coverage.</p></body></html>"
+            )
+            .into_bytes();
+            let http_response = HttpResponse {
+                body,
+                headers: response_headers,
+                status: ok_status,
+                url: Url::parse(&target_url).expect("valid url"),
+                version: HttpVersion::Http11,
+            };
+
+            put_hybrid_cache(&cache_key, http_response, "GET", HashMap::new()).await;
+
+            let two_days_ago = std::time::SystemTime::now()
+                .checked_sub(std::time::Duration::from_secs(2 * 24 * 3600))
+                .unwrap();
+            let cache_policy_period = Some(super::BasicCachePolicy::Period(two_days_ago));
+            let result = get_cached_url_base(
+                &target_url,
+                Some(CacheOptions::SkipBrowser),
+                &cache_policy_period,
+                None,
+            )
+            .await;
+            assert!(
+                result.is_some(),
+                "status={ok_status} should be cached"
+            );
+            assert!(result.unwrap().contains(&format!("{ok_status} content")));
+        }
     }
 
     #[test]
