@@ -1959,10 +1959,7 @@ impl Configuration {
     /// Set the per-fetch jitter window for the HTTP first-byte
     /// watchdog. Same semantics as
     /// `with_chrome_first_byte_timeout_jitter`.
-    pub fn with_http_first_byte_timeout_jitter(
-        &mut self,
-        jitter: Option<Duration>,
-    ) -> &mut Self {
+    pub fn with_http_first_byte_timeout_jitter(&mut self, jitter: Option<Duration>) -> &mut Self {
         self.http_first_byte_timeout_jitter = jitter;
         self
     }
@@ -2209,20 +2206,18 @@ impl Configuration {
     /// Callers that want unconditional arming should read the fields
     /// directly off `Configuration` instead.
     #[inline]
-    pub fn auto_http_first_byte_args(
-        &self,
-    ) -> (Option<Duration>, Option<Duration>) {
+    pub fn auto_http_first_byte_args(&self) -> (Option<Duration>, Option<Duration>) {
         #[cfg(feature = "balance")]
         {
             let http_eligible = match &self.proxies {
-                Some(p) => p
-                    .iter()
-                    .filter(|rp| rp.ignore != ProxyIgnore::Http)
-                    .count(),
+                Some(p) => p.iter().filter(|rp| rp.ignore != ProxyIgnore::Http).count(),
                 None => 0,
             };
             if http_eligible >= 2 {
-                return (self.http_first_byte_timeout, self.http_first_byte_timeout_jitter);
+                return (
+                    self.http_first_byte_timeout,
+                    self.http_first_byte_timeout_jitter,
+                );
             }
         }
         (None, None)

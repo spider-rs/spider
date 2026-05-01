@@ -74,7 +74,7 @@ pub(crate) static CHROME_ARGS: [&str; 24] = [
 // One of the configs below is detected by CF bots. We need to take a look at the optimal args 03/25/24.
 #[cfg(all(not(feature = "chrome_cpu"), not(feature = "real_browser")))]
 /// static chrome arguments to start application ref [https://github.com/a11ywatch/chrome/blob/main/src/main.rs#L13]
-pub(crate) static CHROME_ARGS: [&'static str; 60] = [
+pub(crate) static CHROME_ARGS: [&str; 60] = [
     if cfg!(feature = "chrome_headless_new") { "--headless=new" } else { "--headless" },
     "--no-sandbox",
     "--no-first-run",

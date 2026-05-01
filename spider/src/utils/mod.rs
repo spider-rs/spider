@@ -564,9 +564,7 @@ where
         Some(actual) => match tokio::time::timeout(actual, fut).await {
             Ok(v) => HttpSendOutcome::Ok(v),
             Err(_) => {
-                log::warn!(
-                    "http first-byte timeout ({actual:?}) — dropping request future"
-                );
+                log::warn!("http first-byte timeout ({actual:?}) — dropping request future");
                 HttpSendOutcome::FirstByteTimeout(actual)
             }
         },
@@ -6418,9 +6416,7 @@ async fn fetch_page_html_raw_base(
                 let res = send_result?;
                 Ok(handle_response_bytes(res, url, only_html).await)
             }
-            HttpSendOutcome::FirstByteTimeout(_) => {
-                Ok(build_first_byte_timeout_page_response(url))
-            }
+            HttpSendOutcome::FirstByteTimeout(_) => Ok(build_first_byte_timeout_page_response(url)),
         }
     }
 
@@ -6530,8 +6526,14 @@ pub async fn fetch_page_html_raw_with_watchdog(
     first_byte_timeout: Option<Duration>,
     first_byte_jitter: Option<Duration>,
 ) -> PageResponse {
-    fetch_page_html_raw_base(target_url, client, false, first_byte_timeout, first_byte_jitter)
-        .await
+    fetch_page_html_raw_base(
+        target_url,
+        client,
+        false,
+        first_byte_timeout,
+        first_byte_jitter,
+    )
+    .await
 }
 
 #[cfg(feature = "etag_cache")]

@@ -2276,8 +2276,7 @@ mod tests {
     /// HTTP first-byte deadline: with no base timeout, returns None.
     #[test]
     fn test_http_first_byte_deadline_none_when_base_unset() {
-        let d =
-            crate::utils::first_byte_deadline(None, Some(std::time::Duration::from_secs(5)));
+        let d = crate::utils::first_byte_deadline(None, Some(std::time::Duration::from_secs(5)));
         assert_eq!(d, None);
     }
 
@@ -2287,10 +2286,8 @@ mod tests {
         let base = std::time::Duration::from_secs(8);
         let d = crate::utils::first_byte_deadline(Some(base), None);
         assert_eq!(d, Some(base));
-        let d2 = crate::utils::first_byte_deadline(
-            Some(base),
-            Some(std::time::Duration::from_secs(0)),
-        );
+        let d2 =
+            crate::utils::first_byte_deadline(Some(base), Some(std::time::Duration::from_secs(0)));
         assert_eq!(d2, Some(base));
     }
 
@@ -2412,10 +2409,7 @@ mod tests {
             },
         ]);
         let (base, _) = cfg.auto_http_first_byte_args();
-        assert_eq!(
-            base, None,
-            "only 1 HTTP-eligible proxy → must not auto-arm"
-        );
+        assert_eq!(base, None, "only 1 HTTP-eligible proxy → must not auto-arm");
     }
 
     /// Auto-arm gate: without `balance` feature, never arms regardless of proxy count.
@@ -2436,9 +2430,6 @@ mod tests {
             },
         ]);
         let (base, _) = cfg.auto_http_first_byte_args();
-        assert_eq!(
-            base, None,
-            "without balance feature → must not auto-arm"
-        );
+        assert_eq!(base, None, "without balance feature → must not auto-arm");
     }
 }
