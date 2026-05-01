@@ -47,6 +47,9 @@ jobs:
       - name: Run Benchmark Compare OSS
         if: steps.server.outputs.status == 'ok'
         run: cargo bench --bench crawl
+      - name: Install spider_worker (decentralized bench prereq)
+        if: steps.server.outputs.status == 'ok'
+        run: cargo install --path spider_worker --locked --debug
       - name: Run Benchmark Compare OSS - Features[decentralized]
         if: steps.server.outputs.status == 'ok'
         run: cargo bench --bench crawl --features decentralized
