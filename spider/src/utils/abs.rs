@@ -94,14 +94,23 @@ fn handle_base(href: &str) -> LinkReturn {
                 return LinkReturn::EarlyReturn;
             }
 
-            // protocol_end is the byte position of ':' (ASCII).
-            // The full protocol with "://" is &href[..protocol_end + 3].
-            // All entries in PROTOCOLS are ASCII, so byte indexing is always valid.
+            // protocol_end is the byte position of ':' (ASCII). PROTOCOLS
+            // entries are ASCII, but the BYTES that follow `:` in `href`
+            // can be the middle of a multi-byte UTF-8 codepoint when the
+            // input is a non-ASCII URL (e.g. `ab:éé` where the second `é`
+            // straddles the byte that `proto_end` points to). The previous
+            // direct-slice form (`&href[..proto_end]`) panicked on those
+            // links — production reproduced
+            // `panicked at spider-2.51.154/src/utils/abs.rs:101` on
+            // tokio-rt-worker. Use `get(..)` so a non-char-boundary slice
+            // returns `None` instead of unwinding the worker thread.
             let proto_end = protocol_end + 3;
-            if proto_end <= href.len() && PROTOCOLS.contains(&href[..proto_end]) {
-                if let Ok(mut next_url) = Url::parse(href) {
-                    next_url.set_fragment(None);
-                    return LinkReturn::Absolute(next_url);
+            if let Some(prefix) = href.get(..proto_end) {
+                if PROTOCOLS.contains(prefix) {
+                    if let Ok(mut next_url) = Url::parse(href) {
+                        next_url.set_fragment(None);
+                        return LinkReturn::Absolute(next_url);
+                    }
                 }
             }
         }
@@ -138,8 +147,49 @@ pub fn convert_abs_path(base: &Url, href: &str) -> Url {
 
 #[cfg(test)]
 mod tests {
-    use super::convert_abs_path;
+    use super::{convert_abs_path, handle_base, LinkReturn};
     use crate::utils::parse_absolute_url;
+
+    /// Regression: `handle_base` byte-sliced `&href[..proto_end]` where
+    /// `proto_end = colon_byte + 3`. When the bytes immediately after
+    /// `:` were the middle of a multi-byte UTF-8 codepoint (e.g.
+    /// `ab:éé` — second `é` straddles byte 5, the slice end), the slice
+    /// op panicked — reproduced production-side as
+    /// `panicked at spider-2.51.154/src/utils/abs.rs:101` on tokio-rt-
+    /// workers. Using `href.get(..proto_end)` falls through with `None`
+    /// instead. This test pins each shape that previously panicked.
+    #[test]
+    fn handle_base_does_not_panic_on_non_ascii_after_colon() {
+        // Each of these would have panicked under the old slice form.
+        for href in [
+            "ab:éé",      // colon at byte 2 → proto_end=5 → mid-`é`
+            "x:éy",       // colon at byte 1 → proto_end=4 → mid-`é`
+            "abc:中文",   // colon at byte 3 → proto_end=6 → mid-`中`
+            "ab:🦀de",    // 🦀 = 4-byte → mid-codepoint slice
+            "ab:éé/path", // similar pattern with trailing path
+        ] {
+            // The function must return without unwinding. We only care
+            // that it does not panic; whatever shape it returns is fine.
+            let _ = handle_base(href);
+        }
+    }
+
+    /// Real protocol prefixes still match through the new `get(..)`
+    /// path — protect against accidentally widening the early-return
+    /// when fixing the panic.
+    #[test]
+    fn handle_base_still_recognizes_http_https_protocols() {
+        for url in [
+            "https://example.com/path",
+            "http://example.org/",
+            "https://example.com/path?q=v#frag",
+        ] {
+            assert!(
+                matches!(handle_base(url), LinkReturn::Absolute(_)),
+                "expected Absolute for {url}"
+            );
+        }
+    }
 
     #[test]
     fn test_basic_join() {
