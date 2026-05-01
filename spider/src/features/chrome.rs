@@ -1508,6 +1508,15 @@ pub(crate) struct HedgeBrowser {
     pub browser: Browser,
     pub context_id: Option<BrowserContextId>,
     handler: Option<JoinHandle<()>>,
+    /// The endpoint URL this hedge connected to. Used by the first-byte
+    /// watchdog inside `chrome_page_fetch_on!` so a hedge timeout marks
+    /// the *hedge's* URL bad on the failover, not the primary's.
+    pub connected_url: Option<String>,
+    /// Per-hedge `browser_dead` AtomicBool. Flipped by the hedge's own
+    /// CDP handler on fatal WS / launch errors, mirroring the primary's
+    /// `BrowserController.browser_dead` plumbing. Lets a hedge-specific
+    /// failure surface independently of the primary.
+    pub browser_dead: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[cfg(feature = "hedge")]
@@ -1546,6 +1555,12 @@ impl HedgeBrowser {
     /// URL so the load balancer can route to a **different** backend
     /// instance.  Falls back to `chrome_connection_url` (re-enters the LB),
     /// then to the primary browser's direct websocket address.
+    ///
+    /// Captures the chosen URL on `connected_url` and creates a fresh
+    /// `browser_dead` AtomicBool wired into the handler task — so when
+    /// the first-byte watchdog fires inside a hedge fetch it marks the
+    /// hedge's URL bad on the failover (not the primary's) and signals
+    /// the hedge's own death flag (not the primary's).
     pub async fn connect(primary: &Browser, config: &Configuration) -> Option<Self> {
         let ws_url = config
             .chrome_connection_urls
@@ -1558,7 +1573,7 @@ impl HedgeBrowser {
 
         let (mut browser, mut handler) = match tokio::time::timeout(
             Duration::from_secs(10),
-            Browser::connect_with_config(ws_url, handler_config),
+            Browser::connect_with_config(ws_url.clone(), handler_config),
         )
         .await
         {
@@ -1576,7 +1591,14 @@ impl HedgeBrowser {
             }
         };
 
+        let browser_dead =
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let browser_dead_signal = browser_dead.clone();
+
         // Spawn handler — lightweight, just polls CDP messages.
+        // Mirrors the primary's `launch_browser_base` handler pattern:
+        // fatal CDP errors flip `browser_dead`; non-fatal continue. On
+        // stream end, also flips dead since the WS is gone.
         let handle = tokio::task::spawn(async move {
             while let Some(k) = handler.next().await {
                 if let Err(e) = k {
@@ -1584,11 +1606,16 @@ impl HedgeBrowser {
                         CdpError::Ws(_)
                         | CdpError::LaunchExit(_, _)
                         | CdpError::LaunchTimeout(_)
-                        | CdpError::LaunchIo(_, _) => break,
+                        | CdpError::LaunchIo(_, _) => {
+                            browser_dead_signal
+                                .store(true, std::sync::atomic::Ordering::Release);
+                            break;
+                        }
                         _ => continue,
                     }
                 }
             }
+            browser_dead_signal.store(true, std::sync::atomic::Ordering::Release);
         });
 
         // Create an isolated browser context so tabs don't collide with primary.
@@ -1614,6 +1641,8 @@ impl HedgeBrowser {
             browser,
             context_id,
             handler: Some(handle),
+            connected_url: Some(ws_url),
+            browser_dead,
         })
     }
 

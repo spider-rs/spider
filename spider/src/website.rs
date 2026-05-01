@@ -336,15 +336,20 @@ macro_rules! chrome_page_fetch {
 /// Falls back to the primary browser if the hedge browser is `None`.
 ///
 /// Tab is wrapped in a [`TabCloseGuard`] for cancellation safety.
+///
+/// `$hedge` is the `&HedgeBrowser` whose `browser_dead` + `connected_url`
+/// the first-byte watchdog uses — so a hedge timeout marks the *hedge's*
+/// URL bad on the failover (not the primary's) and signals the hedge's
+/// own death flag (not the primary's).
 #[cfg(all(feature = "hedge", feature = "chrome", not(feature = "decentralized")))]
 macro_rules! chrome_page_fetch_on {
-    ($shared:expr, $target_url:expr, $browser:expr, $context_id:expr,
+    ($shared:expr, $target_url:expr, $hedge:expr,
      $full_resources:expr, $return_page_links:expr, $skip_links:expr) => {{
         match crate::features::chrome::attempt_navigation(
             "about:blank",
-            $browser,
+            &$hedge.browser,
             &$shared.6.request_timeout,
-            $context_id,
+            &$hedge.context_id,
             &$shared.6.viewport,
         )
         .await
@@ -384,8 +389,8 @@ macro_rules! chrome_page_fetch_on {
                     &$shared
                         .6
                         .chrome_fetch_params()
-                        .with_browser_dead(&$shared.11)
-                        .with_chrome_endpoint($shared.12.as_deref()),
+                        .with_browser_dead(&$hedge.browser_dead)
+                        .with_chrome_endpoint($hedge.connected_url.as_deref()),
                     &$shared.1,
                     &$shared.3,
                     &mut links,
@@ -7943,7 +7948,7 @@ impl Website {
                                                                             match &hedge_browser {
                                                                                 Some(hb) => {
                                                                                     log::info!("[hedge-chrome] using new WS connection url={}", target_url);
-                                                                                    chrome_page_fetch_on!(shared, target_url, &hb.browser, &hb.context_id, full_resources, return_page_links, skip_links)
+                                                                                    chrome_page_fetch_on!(shared, target_url, hb, full_resources, return_page_links, skip_links)
                                                                                 }
                                                                                 None => {
                                                                                     chrome_page_fetch!(shared, target_url, retry_strategy_ref, full_resources, return_page_links, skip_links)
@@ -9108,7 +9113,7 @@ impl Website {
                                                                             match &hedge_browser {
                                                                                 Some(hb) => {
                                                                                     log::info!("[hedge-chrome] using new WS connection url={}", target_url);
-                                                                                    chrome_page_fetch_on!(shared, target_url, &hb.browser, &hb.context_id, full_resources, return_page_links, skip_links)
+                                                                                    chrome_page_fetch_on!(shared, target_url, hb, full_resources, return_page_links, skip_links)
                                                                                 }
                                                                                 None => {
                                                                                     chrome_page_fetch!(shared, target_url, retry_strategy_ref, full_resources, return_page_links, skip_links)
