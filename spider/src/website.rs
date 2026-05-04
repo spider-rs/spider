@@ -1017,6 +1017,28 @@ pub struct Website {
     /// Custom retry strategy that controls retry behavior per attempt.
     /// When set, this takes precedence over the simple `Configuration::retry` counter.
     pub retry_strategy: Option<crate::retry_strategy::SharedRetryStrategy>,
+    /// Optional per-request proxy routing strategy.
+    ///
+    /// When set together with [`crate::configuration::Configuration::proxies_by_kind`],
+    /// callers can route specific requests through a kind-specific
+    /// proxy list via [`Self::secondary_http_client_for`]. Default
+    /// `None` keeps every existing call site identical to today — no
+    /// behavior change.
+    pub proxy_strategy: Option<crate::proxy_strategy::SharedProxyStrategy>,
+    /// Lazy, refcount-dropped secondary HTTP client used when a
+    /// [`crate::proxy_strategy::ProxyStrategy`] routes a request to
+    /// [`crate::configuration::ProxyKind::MediaAsset`].
+    ///
+    /// Built on first need from
+    /// `configuration.proxies_by_kind[&ProxyKind::MediaAsset]`; dropped
+    /// automatically when no in-flight request still holds a clone.
+    /// Other kinds (`Default` and `Custom`) are not auto-wired in this
+    /// version — consumers route them manually if needed.
+    ///
+    /// Wrapped in `Arc` so cloned [`Website`]s share the same lazy
+    /// cache (matches how [`Self::retry_strategy`] is shared). Default
+    /// is one tiny allocation for the empty `LazyArc`.
+    secondary_media_client: std::sync::Arc<crate::utils::lazy_arc::LazyArc<Client>>,
     /// Set the crawl ID to track. This allows explicit targeting for shutdown, pause, and etc.
     pub crawl_id: Box<String>,
     #[cfg(feature = "extra_information")]
@@ -2903,6 +2925,116 @@ impl Website {
         let client = self.configure_http_client_builder();
         // should unwrap using native-tls-alpn
         unsafe { client.build().unwrap_unchecked() }
+    }
+
+    /// Build an HTTP client whose proxy set comes from a parameter
+    /// rather than [`crate::configuration::Configuration::proxies`].
+    ///
+    /// Mirrors the proxy-attachment logic in
+    /// [`Self::configure_http_client_builder`] (linux plain-socks
+    /// rewrite, [`crate::configuration::ProxyIgnore`] filter, etc.) so
+    /// the secondary client matches the primary's networking semantics
+    /// — only the proxy list is different. Used internally to back
+    /// [`Self::secondary_http_client_for`].
+    ///
+    /// Currently available only on the no-cache, non-decentralized
+    /// build configuration. On `cache_request` / `decentralized`,
+    /// callers should leave
+    /// [`crate::configuration::Configuration::proxies_by_kind`] unset
+    /// or accept that secondary routing falls back to primary.
+    #[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
+    fn build_http_client_with_proxies(
+        &self,
+        proxies: &[crate::configuration::RequestProxy],
+    ) -> Client {
+        let client = self.configure_base_client();
+        let mut client = match &self.configuration.request_timeout {
+            Some(t) => client.timeout(*t),
+            _ => client,
+        };
+        let linux = cfg!(target_os = "linux");
+        let ignore_plain_socks = proxies.len() >= 2 && linux;
+        let replace_plain_socks = proxies.len() == 1 && linux;
+
+        for p in proxies {
+            if p.ignore == crate::configuration::ProxyIgnore::Http {
+                continue;
+            }
+            let socks = p.addr.starts_with("socks://");
+            if ignore_plain_socks && socks {
+                continue;
+            }
+            if replace_plain_socks && socks {
+                if let Ok(proxy) =
+                    crate::client::Proxy::all(p.addr.replacen("socks://", "http://", 1))
+                {
+                    client = client.proxy(proxy);
+                }
+            } else if let Ok(proxy) = crate::client::Proxy::all(&p.addr) {
+                client = client.proxy(proxy);
+            }
+        }
+
+        let client = self.configure_http_client_cookies(client);
+        // matches `configure_http_client` for this cfg
+        unsafe { client.build().unwrap_unchecked() }
+    }
+
+    /// Return a lazily-built secondary HTTP client for the given
+    /// [`crate::configuration::ProxyKind`], or `None` when no secondary
+    /// is configured / not supported on this feature build.
+    ///
+    /// **V1 wiring scope:** only [`crate::configuration::ProxyKind::MediaAsset`]
+    /// is auto-built. [`crate::configuration::ProxyKind::Default`] always
+    /// returns `None` (caller uses the primary client). Other variants
+    /// also return `None` in V1; callers may wire them at the
+    /// application layer.
+    ///
+    /// **Lifecycle:** the returned `Arc<Client>` keeps the underlying
+    /// reqwest connection pool alive only while at least one clone is
+    /// in-flight. When the last clone is dropped, the client (and its
+    /// pool) is freed automatically. The next call to this method
+    /// rebuilds it on-demand. No mutex, no idle timer, no GC.
+    ///
+    /// Returns `None` when:
+    /// * `proxy_strategy` is not set on this `Website`, or
+    /// * `Configuration::proxies_by_kind` has no entry for `kind`, or
+    /// * the requested kind is not auto-routed in this version
+    ///   ([`ProxyKind::Default`], [`ProxyKind::Custom`]), or
+    /// * the build configuration disables the secondary path
+    ///   (`cache_request` / `decentralized`).
+    #[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
+    pub fn secondary_http_client_for(
+        &self,
+        kind: &crate::configuration::ProxyKind,
+    ) -> Option<std::sync::Arc<Client>> {
+        if self.proxy_strategy.is_none() {
+            return None;
+        }
+        let map = self.configuration.proxies_by_kind.as_ref()?;
+        let proxies = map.get(kind)?;
+        match kind {
+            crate::configuration::ProxyKind::MediaAsset => {
+                let proxies = proxies.clone();
+                Some(self.secondary_media_client.get_or_build(|| {
+                    self.build_http_client_with_proxies(&proxies)
+                }))
+            }
+            // V1: Default always uses primary; Custom is consumer-routed.
+            _ => None,
+        }
+    }
+
+    /// Stub for non-default feature builds. Always returns `None` so
+    /// callers fall back to the primary client. See
+    /// [`Self::secondary_http_client_for`] documentation for the
+    /// supported configuration.
+    #[cfg(any(feature = "decentralized", feature = "cache_request"))]
+    pub fn secondary_http_client_for(
+        &self,
+        _kind: &crate::configuration::ProxyKind,
+    ) -> Option<std::sync::Arc<Client>> {
+        None
     }
 
     /// Configure http client.
@@ -11859,6 +11991,21 @@ impl Website {
         self
     }
 
+    /// Set a per-request [`crate::proxy_strategy::ProxyStrategy`].
+    ///
+    /// When set together with kind-specific proxy lists configured via
+    /// [`crate::configuration::Configuration::with_proxies_for_kind`],
+    /// callers can route specific requests through a non-default proxy
+    /// list using [`Self::secondary_http_client_for`]. Default `None`
+    /// keeps every existing call site identical to today.
+    pub fn with_proxy_strategy(
+        &mut self,
+        strategy: crate::proxy_strategy::SharedProxyStrategy,
+    ) -> &mut Self {
+        self.proxy_strategy = Some(strategy);
+        self
+    }
+
     /// Cookie string to use in request. This does nothing without the `cookies` flag enabled.
     pub fn with_cookies(&mut self, cookie_str: &str) -> &mut Self {
         self.configuration.with_cookies(cookie_str);
@@ -14127,6 +14274,181 @@ mod tests {
             received[0].get_url().contains("example.com"),
             "received page url must match target"
         );
+    }
+
+    // =========================================================
+    // ProxyStrategy / proxies_by_kind / lazy secondary client.
+    // =========================================================
+
+    #[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
+    #[test]
+    fn proxy_strategy_default_none_secondary_returns_none() {
+        // No strategy, no kind map → secondary returns None for any kind.
+        let website = crate::website::Website::new("http://example.com");
+        assert!(
+            website
+                .secondary_http_client_for(&crate::configuration::ProxyKind::MediaAsset)
+                .is_none()
+        );
+        assert!(
+            website
+                .secondary_http_client_for(&crate::configuration::ProxyKind::Default)
+                .is_none()
+        );
+    }
+
+    #[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
+    #[test]
+    fn proxy_strategy_no_kind_map_returns_none() {
+        // Strategy is set but proxies_by_kind isn't — still None.
+        use crate::configuration::ProxyKind;
+        use crate::proxy_strategy::{ProxyRouteContext, ProxyStrategy, SharedProxyStrategy};
+        struct AlwaysMedia;
+        impl ProxyStrategy for AlwaysMedia {
+            fn route(&self, _: &ProxyRouteContext) -> ProxyKind {
+                ProxyKind::MediaAsset
+            }
+        }
+
+        let mut website = crate::website::Website::new("http://example.com");
+        let strategy: SharedProxyStrategy = std::sync::Arc::new(AlwaysMedia);
+        website.with_proxy_strategy(strategy);
+        assert!(
+            website
+                .secondary_http_client_for(&ProxyKind::MediaAsset)
+                .is_none()
+        );
+    }
+
+    #[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
+    #[test]
+    fn proxy_strategy_lazy_builds_media_client_and_reuses() {
+        use crate::configuration::{ProxyKind, RequestProxy};
+        use crate::proxy_strategy::{ProxyRouteContext, ProxyStrategy};
+
+        struct AlwaysMedia;
+        impl ProxyStrategy for AlwaysMedia {
+            fn route(&self, _: &ProxyRouteContext) -> ProxyKind {
+                ProxyKind::MediaAsset
+            }
+        }
+
+        let mut website = crate::website::Website::new("http://example.com");
+        website.configuration.with_proxies_for_kind(
+            ProxyKind::MediaAsset,
+            Some(vec![RequestProxy {
+                addr: "http://media-proxy.example:8080".into(),
+                ..Default::default()
+            }]),
+        );
+        website.with_proxy_strategy(std::sync::Arc::new(AlwaysMedia));
+
+        let a = website
+            .secondary_http_client_for(&ProxyKind::MediaAsset)
+            .expect("secondary client built");
+        let b = website
+            .secondary_http_client_for(&ProxyKind::MediaAsset)
+            .expect("secondary client cached");
+        assert!(
+            std::sync::Arc::ptr_eq(&a, &b),
+            "second call must reuse the same lazy Arc<Client>"
+        );
+    }
+
+    #[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
+    #[test]
+    fn proxy_strategy_default_kind_returns_none_v1() {
+        // Kind::Default never produces a secondary — primary is canonical.
+        use crate::configuration::{ProxyKind, RequestProxy};
+        let mut website = crate::website::Website::new("http://example.com");
+        website.configuration.with_proxies_for_kind(
+            ProxyKind::Default,
+            Some(vec![RequestProxy {
+                addr: "http://primary.example:8080".into(),
+                ..Default::default()
+            }]),
+        );
+        assert!(
+            website
+                .secondary_http_client_for(&ProxyKind::Default)
+                .is_none()
+        );
+    }
+
+    #[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
+    #[test]
+    fn proxy_strategy_custom_kind_returns_none_v1() {
+        // Custom kinds are not auto-routed in V1.
+        use crate::compact_str::CompactString;
+        use crate::configuration::{ProxyKind, RequestProxy};
+        use crate::proxy_strategy::{ProxyRouteContext, ProxyStrategy};
+
+        struct AlwaysCustom;
+        impl ProxyStrategy for AlwaysCustom {
+            fn route(&self, _: &ProxyRouteContext) -> ProxyKind {
+                ProxyKind::Custom(CompactString::new("tier-a"))
+            }
+        }
+
+        let mut website = crate::website::Website::new("http://example.com");
+        let kind = ProxyKind::Custom(CompactString::new("tier-a"));
+        website.configuration.with_proxies_for_kind(
+            kind.clone(),
+            Some(vec![RequestProxy {
+                addr: "http://tier-a.example:8080".into(),
+                ..Default::default()
+            }]),
+        );
+        website.with_proxy_strategy(std::sync::Arc::new(AlwaysCustom));
+        assert!(
+            website.secondary_http_client_for(&kind).is_none(),
+            "Custom kind not auto-wired in V1 — should fall back to primary"
+        );
+    }
+
+    #[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
+    #[test]
+    fn proxy_strategy_secondary_drops_when_idle() {
+        // After the last Arc<Client> clone is dropped, the lazy slot
+        // should report dead and rebuild on the next access.
+        use crate::configuration::{ProxyKind, RequestProxy};
+        use crate::proxy_strategy::{ProxyRouteContext, ProxyStrategy};
+
+        struct AlwaysMedia;
+        impl ProxyStrategy for AlwaysMedia {
+            fn route(&self, _: &ProxyRouteContext) -> ProxyKind {
+                ProxyKind::MediaAsset
+            }
+        }
+
+        let mut website = crate::website::Website::new("http://example.com");
+        website.configuration.with_proxies_for_kind(
+            ProxyKind::MediaAsset,
+            Some(vec![RequestProxy {
+                addr: "http://media.example:8080".into(),
+                ..Default::default()
+            }]),
+        );
+        website.with_proxy_strategy(std::sync::Arc::new(AlwaysMedia));
+
+        // Build, hold a clone, drop it.
+        {
+            let _live = website
+                .secondary_http_client_for(&ProxyKind::MediaAsset)
+                .expect("built");
+            assert!(website.secondary_media_client.is_live());
+        }
+        assert!(
+            !website.secondary_media_client.is_live(),
+            "slot must be dead after the last clone drops"
+        );
+
+        // Next access rebuilds — different ptr, still functional.
+        let after = website
+            .secondary_http_client_for(&ProxyKind::MediaAsset)
+            .expect("rebuilt");
+        assert!(website.secondary_media_client.is_live());
+        drop(after);
     }
 }
 

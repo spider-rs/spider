@@ -396,6 +396,8 @@ pub mod features;
 pub mod packages;
 /// A page scraped.
 pub mod page;
+/// Per-request proxy routing strategy.
+pub mod proxy_strategy;
 /// Configurable retry strategy for advanced retry logic.
 pub mod retry_strategy;
 /// Trait abstractions for core types.
