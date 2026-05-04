@@ -136,9 +136,15 @@ mod tests {
     #[test]
     fn constant_returns_kind() {
         let s = Constant(ProxyKind::MediaAsset);
-        assert_eq!(s.route(&ctx("https://example.com/page")), ProxyKind::MediaAsset);
+        assert_eq!(
+            s.route(&ctx("https://example.com/page")),
+            ProxyKind::MediaAsset
+        );
         let s = Constant(ProxyKind::Default);
-        assert_eq!(s.route(&ctx("https://example.com/page")), ProxyKind::Default);
+        assert_eq!(
+            s.route(&ctx("https://example.com/page")),
+            ProxyKind::Default
+        );
         let s = Constant(ProxyKind::Custom(CompactString::new("tier-a")));
         match s.route(&ctx("https://example.com/page")) {
             ProxyKind::Custom(s) => assert_eq!(&*s, "tier-a"),

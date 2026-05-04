@@ -3016,9 +3016,10 @@ impl Website {
         match kind {
             crate::configuration::ProxyKind::MediaAsset => {
                 let proxies = proxies.clone();
-                Some(self.secondary_media_client.get_or_build(|| {
-                    self.build_http_client_with_proxies(&proxies)
-                }))
+                Some(
+                    self.secondary_media_client
+                        .get_or_build(|| self.build_http_client_with_proxies(&proxies)),
+                )
             }
             // V1: Default always uses primary; Custom is consumer-routed.
             _ => None,
@@ -14285,16 +14286,12 @@ mod tests {
     fn proxy_strategy_default_none_secondary_returns_none() {
         // No strategy, no kind map → secondary returns None for any kind.
         let website = crate::website::Website::new("http://example.com");
-        assert!(
-            website
-                .secondary_http_client_for(&crate::configuration::ProxyKind::MediaAsset)
-                .is_none()
-        );
-        assert!(
-            website
-                .secondary_http_client_for(&crate::configuration::ProxyKind::Default)
-                .is_none()
-        );
+        assert!(website
+            .secondary_http_client_for(&crate::configuration::ProxyKind::MediaAsset)
+            .is_none());
+        assert!(website
+            .secondary_http_client_for(&crate::configuration::ProxyKind::Default)
+            .is_none());
     }
 
     #[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
@@ -14313,11 +14310,9 @@ mod tests {
         let mut website = crate::website::Website::new("http://example.com");
         let strategy: SharedProxyStrategy = std::sync::Arc::new(AlwaysMedia);
         website.with_proxy_strategy(strategy);
-        assert!(
-            website
-                .secondary_http_client_for(&ProxyKind::MediaAsset)
-                .is_none()
-        );
+        assert!(website
+            .secondary_http_client_for(&ProxyKind::MediaAsset)
+            .is_none());
     }
 
     #[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
@@ -14368,11 +14363,9 @@ mod tests {
                 ..Default::default()
             }]),
         );
-        assert!(
-            website
-                .secondary_http_client_for(&ProxyKind::Default)
-                .is_none()
-        );
+        assert!(website
+            .secondary_http_client_for(&ProxyKind::Default)
+            .is_none());
     }
 
     #[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]

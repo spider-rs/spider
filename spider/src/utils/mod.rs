@@ -4887,10 +4887,7 @@ pub async fn fetch_page_html_chrome_base<'h>(
                                 cf_match
                             );
                             if cf_match {
-                                log::debug!(
-                                    "[solver_gate] ENTERING cf_handle url={}",
-                                    target_url
-                                );
+                                log::debug!("[solver_gate] ENTERING cf_handle url={}", target_url);
                                 if let Err(_e) = tokio::time::timeout(base_timeout, async {
                                     if let Ok(success) = crate::features::solvers::cf_handle(
                                         &mut res, page, target_url, viewport,
@@ -4908,11 +4905,10 @@ pub async fn fetch_page_html_chrome_base<'h>(
                                 }
                             }
                         } else if anti_bot_tech == AntiBotTech::Imperva {
-                            let imperva_match =
-                                crate::features::solvers::looks_like_imperva_verify(
-                                    res.len(),
-                                    &res,
-                                );
+                            let imperva_match = crate::features::solvers::looks_like_imperva_verify(
+                                res.len(),
+                                &res,
+                            );
                             log::debug!(
                                 "[solver_gate] imperva path considered url={} imperva_verify_match={}",
                                 target_url,
