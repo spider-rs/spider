@@ -128,6 +128,13 @@ lazy_static! {
             ("<h1>403 forbidden</h1>", PatKind::TaggedBlock(Lang::En)),
             ("<title>access denied</title>", PatKind::TaggedBlock(Lang::En)),
             ("<h1>access denied</h1>", PatKind::TaggedBlock(Lang::En)),
+            // PerimeterX canonical block-page title — long form, both
+            // period and no-period variants observed in the wild
+            // (see v2.51.139 PX reclassification notes). Strict full-title
+            // wrapper keeps this PerimeterX-only; no legitimate page uses
+            // this exact phrase as its <title>.
+            ("<title>access to this page has been denied</title>", PatKind::TaggedBlock(Lang::En)),
+            ("<title>access to this page has been denied.</title>", PatKind::TaggedBlock(Lang::En)),
 
             // ES
             ("<title>403 prohibido</title>", PatKind::TaggedBlock(Lang::Es)),
@@ -363,5 +370,20 @@ mod tests {
         let mut v = vec![b'a'; PREFIX_SCAN + 128];
         v.extend_from_slice(b"<html><head><title>403 Forbidden</title></head></html>");
         assert!(!is_false_403(Some(&v), None));
+    }
+
+    #[test]
+    fn detects_perimeterx_long_form_title_no_period() {
+        // PerimeterX canonical block-page title — no period.
+        // Wine-searcher.com sample uses this exact form.
+        let html = br#"<html lang="en"><head><meta charset="utf-8"><title>Access to this page has been denied</title><meta name="description" content="px-captcha"></head><body></body></html>"#;
+        assert!(is_false_403(Some(html), None));
+    }
+
+    #[test]
+    fn detects_perimeterx_long_form_title_with_period() {
+        // PerimeterX canonical block-page title — period variant.
+        let html = br#"<html lang="en"><head><meta charset="utf-8"><title>Access to this page has been denied.</title><meta name="description" content="px-captcha"></head><body></body></html>"#;
+        assert!(is_false_403(Some(html), None));
     }
 }

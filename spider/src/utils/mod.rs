@@ -2315,29 +2315,15 @@ pub async fn perform_smart_mouse_movement(
     viewport: &Option<crate::configuration::Viewport>,
 ) {
     use chromiumoxide::layout::Point;
-    use fastrand::Rng;
     use spider_fingerprint::spoof_mouse_movement::GaussianMouse;
-    use tokio::time::{sleep, Duration};
 
     let (viewport_width, viewport_height) = match viewport {
         Some(vp) => (vp.width as f64, vp.height as f64),
         None => (800.0, 600.0),
     };
 
-    let mut rng = Rng::new();
-
     for (x, y) in GaussianMouse::generate_random_coordinates(viewport_width, viewport_height) {
-        let _ = page.move_mouse(Point::new(x, y)).await;
-
-        // Occasionally introduce a short pause (~25%)
-        if rng.f32() < 0.25 {
-            let delay_micros = if rng.f32() < 0.9 {
-                rng.u64(300..=1200) // 0.3–1.2 ms
-            } else {
-                rng.u64(2000..=8000) // rare 2–8 ms (real hesitation)
-            };
-            sleep(Duration::from_micros(delay_micros)).await;
-        }
+        let _ = page.move_mouse_smooth(Point::new(x, y)).await;
     }
 }
 
@@ -5624,6 +5610,37 @@ pub async fn fetch_page_html_chrome_base<'h>(
             }
 
             page_response.bytes_transferred = Some(transferred);
+        }
+    }
+
+    // Fallback body classification — parity with HTTP path
+    // (`handle_response_bytes`).  The block at 5550 only runs when CDP
+    // populated `response_map`; when that arm is empty (no
+    // `chrome_intercept`, events arriving after page close, or
+    // `chrome_store_page=ON` skipping the close+collect path entirely)
+    // body anti-bot detection never fires.  Without it, the downstream
+    // `should_retry_antibot_false_403` gate in `page::build` (which
+    // requires `anti_bot_tech != None`) lets PerimeterX / DataDome /
+    // Cloudflare 200-status block pages through with
+    // `should_retry = false` even though `is_false_403` would say true.
+    // Guarded on `anti_bot_tech == None` so populated responses skip the
+    // scan — zero overhead on the happy path.
+    if anti_bot_tech == AntiBotTech::None {
+        if let (Some(h), Some(c)) = (&page_response.headers, &page_response.content) {
+            if !c.is_empty() {
+                let final_url = match &page_response.final_url {
+                    Some(f)
+                        if !f.is_empty()
+                            && !f.starts_with("about:blank")
+                            && !f.starts_with("chrome-error://chromewebdata") =>
+                    {
+                        f.as_str()
+                    }
+                    _ => target_url,
+                };
+                anti_bot_tech =
+                    detect_anti_bot_tech_response(final_url, &HeaderSource::HeaderMap(h), c, None);
+            }
         }
     }
 
