@@ -107,7 +107,7 @@ impl BrowserContext {
     /// Click an element by selector.
     pub async fn click(&self, selector: &str) -> Result<(), CdpError> {
         let element = self.page.find_element(selector).await?;
-        element.click().await?;
+        element.click_smooth().await?;
         Ok(())
     }
 
@@ -117,7 +117,7 @@ impl BrowserContext {
         let elements = self.page.find_elements(selector).await?;
         let count = elements.len();
         for element in elements {
-            let _ = element.click().await;
+            let _ = element.click_smooth().await;
         }
         Ok(count)
     }
@@ -242,7 +242,7 @@ impl BrowserContext {
     /// Type text into an element.
     pub async fn type_text(&self, selector: &str, text: &str) -> Result<(), CdpError> {
         let element = self.page.find_element(selector).await?;
-        element.click().await?;
+        element.click_smooth().await?;
         element.type_str(text).await?;
         Ok(())
     }
@@ -315,7 +315,7 @@ impl BrowserContext {
     /// Wait for element then click it.
     pub async fn wait_and_click(&self, selector: &str) -> Result<(), CdpError> {
         let element = self.page.find_element(selector).await?;
-        element.click().await?;
+        element.click_smooth().await?;
         Ok(())
     }
 

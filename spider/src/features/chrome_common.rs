@@ -830,7 +830,7 @@ impl WebAutomation {
             }
             WebAutomation::Click(selector) => {
                 if let Ok(ele) = page.find_element(selector).await {
-                    valid = ele.click().await.is_ok();
+                    valid = ele.click_smooth().await.is_ok();
                 }
             }
 
@@ -862,7 +862,7 @@ impl WebAutomation {
             WebAutomation::ClickAll(selector) => {
                 if let Ok(eles) = page.find_elements(selector).await {
                     for ele in eles {
-                        valid = ele.click().await.is_ok();
+                        valid = ele.click_smooth().await.is_ok();
                     }
                 }
             }
@@ -909,7 +909,7 @@ impl WebAutomation {
             WebAutomation::ClickAllClickable() => {
                 if let Ok(eles) = page.find_elements(CLICKABLE_SELECTOR).await {
                     for ele in eles {
-                        valid = ele.click().await.is_ok();
+                        valid = ele.click_smooth().await.is_ok();
                     }
                 }
             }
@@ -955,7 +955,7 @@ impl WebAutomation {
             WebAutomation::WaitForAndClick(selector) => {
                 valid = wait_for_selector(page, Some(Duration::from_secs(60)), selector).await;
                 if let Ok(ele) = page.find_element(selector).await {
-                    valid = ele.click().await.is_ok();
+                    valid = ele.click_smooth().await.is_ok();
                 }
             }
             WebAutomation::ScrollX(px) => {
@@ -972,7 +972,7 @@ impl WebAutomation {
             }
             WebAutomation::Fill { selector, value } => {
                 if let Ok(ele) = page.find_element(selector).await {
-                    if let Ok(el) = ele.click().await {
+                    if let Ok(el) = ele.click_smooth().await {
                         valid = el.type_str(value).await.is_ok();
                     }
                 }

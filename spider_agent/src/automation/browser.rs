@@ -3846,7 +3846,7 @@ return await s.prompt(msg);
                 if let Some(selector) = value.as_str() {
                     match page.find_element(selector).await {
                         Ok(elem) => {
-                            if elem.click().await.is_ok() {
+                            if elem.click_smooth().await.is_ok() {
                                 return ActionOutcome::ok("Click");
                             }
                             return ActionOutcome::fail("Click", "click event failed");
@@ -3866,7 +3866,7 @@ return await s.prompt(msg);
                     match page.find_elements(selector).await {
                         Ok(elements) => {
                             for elem in elements {
-                                let _ = elem.click().await;
+                                let _ = elem.click_smooth().await;
                             }
                             return ActionOutcome::ok("ClickAll");
                         }
@@ -4020,7 +4020,7 @@ return await s.prompt(msg);
                     .await
                 {
                     for elem in elements {
-                        let _ = elem.click().await;
+                        let _ = elem.click_smooth().await;
                     }
                     ActionOutcome::ok("ClickAllClickable")
                 } else {
@@ -4071,7 +4071,7 @@ return await s.prompt(msg);
                 if let (Some(sel), Some(txt)) = (selector, text) {
                     match page.find_element(sel).await {
                         Ok(elem) => {
-                            let _ = elem.click().await;
+                            let _ = elem.click_smooth().await;
                             // Clear existing value before typing
                             if let Err(e) = eval_with_timeout(
                                 page,
@@ -4302,7 +4302,7 @@ return await s.prompt(msg);
                 if let Some(selector) = value.as_str() {
                     for _ in 0..50 {
                         if let Ok(elem) = page.find_element(selector).await {
-                            if elem.click().await.is_ok() {
+                            if elem.click_smooth().await.is_ok() {
                                 return ActionOutcome::ok("WaitForAndClick");
                             }
                             return ActionOutcome::fail(

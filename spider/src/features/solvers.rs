@@ -433,8 +433,8 @@ pub async fn cf_handle(
                 for el in els {
                     let f = async {
                         match el.clickable_point().await {
-                            Ok(pt) => page.click_smooth(pt).await.is_ok() || el.click().await.is_ok(),
-                            Err(_) => el.click().await.is_ok(),
+                            Ok(pt) => page.click_smooth(pt).await.is_ok() || el.click_smooth().await.is_ok(),
+                            Err(_) => el.click_smooth().await.is_ok(),
                         }
                     };
 
@@ -627,8 +627,11 @@ fire(at(tx,ty)||el0,'mouseup',tx,ty);return true;}})()"#,
                     if let Some(cb_el) = boxes.into_iter().next() {
                         // Click the checkbox – prefer the clickable point.
                         let clicked = match cb_el.clickable_point().await {
-                            Ok(p) => page.click_smooth(p).await.is_ok() || cb_el.click().await.is_ok(),
-                            Err(_) => cb_el.click().await.is_ok(),
+                            Ok(p) => {
+                                page.click_smooth(p).await.is_ok()
+                                    || cb_el.click_smooth().await.is_ok()
+                            }
+                            Err(_) => cb_el.click_smooth().await.is_ok(),
                         };
 
                         if clicked {
@@ -1259,8 +1262,11 @@ pub async fn recaptcha_handle(
                     if let Ok(els) = page.find_elements_pierced(r#"#recaptcha-anchor"#).await {
                         if let Some(el) = els.into_iter().next() {
                             return match el.clickable_point().await {
-                                Ok(p) => page.click_smooth(p).await.is_ok() || el.click().await.is_ok(),
-                                Err(_) => el.click().await.is_ok(),
+                                Ok(p) => {
+                                    page.click_smooth(p).await.is_ok()
+                                        || el.click_smooth().await.is_ok()
+                                }
+                                Err(_) => el.click_smooth().await.is_ok(),
                             };
                         }
                     }
@@ -1270,8 +1276,11 @@ pub async fn recaptcha_handle(
                     {
                         if let Some(el) = els.into_iter().next() {
                             return match el.clickable_point().await {
-                                Ok(p) => page.click_smooth(p).await.is_ok() || el.click().await.is_ok(),
-                                Err(_) => el.click().await.is_ok(),
+                                Ok(p) => {
+                                    page.click_smooth(p).await.is_ok()
+                                        || el.click_smooth().await.is_ok()
+                                }
+                                Err(_) => el.click_smooth().await.is_ok(),
                             };
                         }
                     }
@@ -1339,7 +1348,7 @@ pub async fn recaptcha_handle(
                         let selector = format!(r#"img[src="{}"]"#, tile.img_src);
                         if let Ok(els) = page.find_elements_pierced(&selector).await {
                             if let Some(el) = els.into_iter().next() {
-                                let _ = el.click().await; // ignore possible errors
+                                let _ = el.click_smooth().await; // ignore possible errors
                             }
                         }
                     }
@@ -1356,7 +1365,7 @@ pub async fn recaptcha_handle(
                         .await
                     {
                         if let Some(btn) = btns.into_iter().next() {
-                            let _ = btn.click().await;
+                            let _ = btn.click_smooth().await;
                         }
                     }
                 }
@@ -1425,8 +1434,10 @@ pub async fn recaptcha_handle(
             if let Ok(els) = page.find_elements_pierced(r#"#recaptcha-anchor"#).await {
                 if let Some(el) = els.into_iter().next() {
                     clicked = match el.clickable_point().await {
-                        Ok(p) => page.click_smooth(p).await.is_ok() || el.click().await.is_ok(),
-                        Err(_) => el.click().await.is_ok(),
+                        Ok(p) => {
+                            page.click_smooth(p).await.is_ok() || el.click_smooth().await.is_ok()
+                        }
+                        Err(_) => el.click_smooth().await.is_ok(),
                     };
                 }
             }
@@ -1437,8 +1448,11 @@ pub async fn recaptcha_handle(
                 {
                     if let Some(el) = els.into_iter().next() {
                         clicked = match el.clickable_point().await {
-                            Ok(p) => page.click_smooth(p).await.is_ok() || el.click().await.is_ok(),
-                            Err(_) => el.click().await.is_ok(),
+                            Ok(p) => {
+                                page.click_smooth(p).await.is_ok()
+                                    || el.click_smooth().await.is_ok()
+                            }
+                            Err(_) => el.click_smooth().await.is_ok(),
                         };
                     }
                 }
@@ -1711,8 +1725,8 @@ pub async fn lemin_handle(
             {
                 if let Some(cb) = checkboxes.into_iter().next() {
                     let clicked = match cb.clickable_point().await {
-                        Ok(p) => page.click_smooth(p).await.is_ok() || cb.click().await.is_ok(),
-                        Err(_) => cb.click().await.is_ok(),
+                        Ok(p) => page.click_smooth(p).await.is_ok() || cb.click_smooth().await.is_ok(),
+                        Err(_) => cb.click_smooth().await.is_ok(),
                     };
                     if clicked {
                         let mut wait_for = CF_WAIT_FOR.clone();
@@ -1852,7 +1866,7 @@ pub async fn lemin_handle(
                 .await
             {
                 if let Some(btn) = btns.into_iter().next() {
-                    let _ = btn.click().await;
+                    let _ = btn.click_smooth().await;
                 }
             }
 
@@ -2369,8 +2383,10 @@ pub async fn geetest_handle(
             if let Ok(els) = page.find_elements_pierced(r#".geetest_radar"#).await {
                 if let Some(el) = els.into_iter().next() {
                     clicked = match el.clickable_point().await {
-                        Ok(p) => page.click_smooth(p).await.is_ok() || el.click().await.is_ok(),
-                        Err(_) => el.click().await.is_ok(),
+                        Ok(p) => {
+                            page.click_smooth(p).await.is_ok() || el.click_smooth().await.is_ok()
+                        }
+                        Err(_) => el.click_smooth().await.is_ok(),
                     };
                 }
             }
@@ -2382,8 +2398,11 @@ pub async fn geetest_handle(
                 {
                     if let Some(el) = els.into_iter().next() {
                         clicked = match el.clickable_point().await {
-                            Ok(p) => page.click_smooth(p).await.is_ok() || el.click().await.is_ok(),
-                            Err(_) => el.click().await.is_ok(),
+                            Ok(p) => {
+                                page.click_smooth(p).await.is_ok()
+                                    || el.click_smooth().await.is_ok()
+                            }
+                            Err(_) => el.click_smooth().await.is_ok(),
                         };
                     }
                 }
