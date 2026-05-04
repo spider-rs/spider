@@ -875,8 +875,11 @@ impl WebAutomation {
                         to_el.clickable_point().await,
                     ) {
                         valid = match modifier {
-                            Some(m) => page.click_and_drag_with_modifier(p1, p2, *m).await.is_ok(),
-                            None => page.click_and_drag(p1, p2).await.is_ok(),
+                            Some(m) => page
+                                .click_and_drag_smooth_with_modifier(p1, p2, *m)
+                                .await
+                                .is_ok(),
+                            None => page.click_and_drag_smooth(p1, p2).await.is_ok(),
                         };
                     }
                 }
@@ -896,8 +899,11 @@ impl WebAutomation {
                 let p2 = chromiumoxide::layout::Point { x: *to_x, y: *to_y };
 
                 valid = match modifier {
-                    Some(m) => page.click_and_drag_with_modifier(p1, p2, *m).await.is_ok(),
-                    None => page.click_and_drag(p1, p2).await.is_ok(),
+                    Some(m) => page
+                        .click_and_drag_smooth_with_modifier(p1, p2, *m)
+                        .await
+                        .is_ok(),
+                    None => page.click_and_drag_smooth(p1, p2).await.is_ok(),
                 };
             }
             WebAutomation::ClickAllClickable() => {
@@ -909,7 +915,7 @@ impl WebAutomation {
             }
             WebAutomation::ClickPoint { x, y } => {
                 valid = page
-                    .click(chromiumoxide::layout::Point { x: *x, y: *y })
+                    .click_smooth(chromiumoxide::layout::Point { x: *x, y: *y })
                     .await
                     .is_ok();
             }

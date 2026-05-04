@@ -1587,9 +1587,9 @@ dependencies = [
 
 [[package]]
 name = "chromey"
-version = "2.47.1"
+version = "2.47.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "822af5073c90b0898a9f8b692830feea28ee9bfc41cd5caca82dd129df651cc4"
+checksum = "169d29adc9c512c0a8dfbd6015b63065e3bc8e86150e12013862019b10338b9f"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -2509,9 +2509,9 @@ dependencies = [
 
 [[package]]
 name = "digest"
-version = "0.11.2"
+version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4850db49bf08e663084f7fb5c87d202ef91a3907271aff24a94eb97ff039153c"
+checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
  "block-buffer 0.12.0",
  "const-oid 0.10.2",
@@ -4008,7 +4008,7 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6303bc9732ae41b04cb554b844a762b4115a61bfaa81e3e83050991eeb56863f"
 dependencies = [
- "digest 0.11.2",
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -4528,9 +4528,9 @@ dependencies = [
 
 [[package]]
 name = "imageproc"
-version = "0.25.0"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2393fb7808960751a52e8a154f67e7dd3f8a2ef9bd80d1553078a7b4e8ed3f0d"
+checksum = "602b4e8a4cc3e98372b766cd184ab532999bc0e839b7469e759511ccabc65d77"
 dependencies = [
  "ab_glyph",
  "approx",
@@ -4967,9 +4967,9 @@ dependencies = [
 
 [[package]]
 name = "llm_models_spider"
-version = "0.1.91"
+version = "0.1.94"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b8f6b2bc51fc14200515e70d4111ecd83c38724bf84d21e56962c4b90a618fa"
+checksum = "1c397574861019deb22d7386fd8e7acd4645d2776055f56add47b9e012354a23"
 
 [[package]]
 name = "llm_readability"
@@ -5845,15 +5845,14 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "openssl"
-version = "0.10.78"
+version = "0.10.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f38c4372413cdaaf3cc79dd92d29d7d9f5ab09b51b10dded508fb90bb70b9222"
+checksum = "bf0b434746ee2832f4f0baf10137e1cabb18cbe6912c69e2e33263c45250f542"
 dependencies = [
  "bitflags 2.11.1",
  "cfg-if",
  "foreign-types 0.3.2",
  "libc",
- "once_cell",
  "openssl-macros",
  "openssl-sys",
 ]
@@ -5886,9 +5885,9 @@ dependencies = [
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.114"
+version = "0.9.115"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13ce1245cd07fcc4cfdb438f7507b0c7e4f3849a69fd84d52374c66d83741bb6"
+checksum = "158fe5b292746440aa6e7a7e690e55aeb72d41505e2804c23c6973ad0e9c9781"
 dependencies = [
  "cc",
  "libc",
@@ -6164,7 +6163,7 @@ version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67eabc2ef2a60eb7faa00097bd1ffdb5bd28e62bf39990626a582201b7a754e5"
 dependencies = [
- "siphasher 1.0.2",
+ "siphasher 1.0.3",
 ]
 
 [[package]]
@@ -6173,7 +6172,7 @@ version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e57fef6bc5981e38c2ce2d63bfa546861309f875b8a75f092d1d54ae2d64f266"
 dependencies = [
- "siphasher 1.0.2",
+ "siphasher 1.0.3",
 ]
 
 [[package]]
@@ -6363,9 +6362,9 @@ checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
 
 [[package]]
 name = "prefix-trie"
-version = "0.8.2"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23370be78b7e5bcbb0cab4a02047eb040279a693c78daad04c2c5f1c24a83503"
+checksum = "90f561214012d3fc240a1f9c817cc4d57f5310910d066069c1b093f766bb5966"
 dependencies = [
  "either",
  "ipnet",
@@ -6412,18 +6411,18 @@ dependencies = [
 
 [[package]]
 name = "profiling"
-version = "1.0.17"
+version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3eb8486b569e12e2c32ad3e204dbaba5e4b5b216e9367044f25f1dba42341773"
+checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
 dependencies = [
  "profiling-procmacros",
 ]
 
 [[package]]
 name = "profiling-procmacros"
-version = "1.0.17"
+version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52717f9a02b6965224f95ca2a81e2e0c5c43baacd28ca057577988930b6c3d5b"
+checksum = "4488a4a36b9a4ba6b9334a32a39971f77c1436ec82c38707bce707699cc3bbcb"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -7201,9 +7200,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "1.5.0"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67d69668de0b0ccd9cc435f700f3b39a7861863cf37a15e1f304ea78688a4826"
+checksum = "e12ca9067b5ebfbd5b3fcdc4acfceb81aa7d5ab2a879dff7cb75d22434276aad"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -7223,9 +7222,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp-macros"
-version = "1.5.0"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48fdc01c81097b0aed18633e676e269fefa3a78ec1df56b4fe597c1241b92025"
+checksum = "7caa6743cc0888e433105fe1bc551a7f607940b126a37bc97b478e86064627eb"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
@@ -7781,7 +7780,7 @@ checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.0",
- "digest 0.11.2",
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -7894,9 +7893,9 @@ checksum = "38b58827f4464d87d377d175e90bf58eb00fd8716ff0a62f80356b5e61555d0d"
 
 [[package]]
 name = "siphasher"
-version = "1.0.2"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
+checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
 
 [[package]]
 name = "sitemap"
@@ -7941,7 +7940,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -8004,47 +8003,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f99e664ecd2d85a68c87e3c7a3cfe691f647ea9e835de984aba4d54a41f817d4"
 dependencies = [
  "cfg-if",
-]
-
-[[package]]
-name = "spider"
-version = "2.51.146"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f013bf807e105fb9779dfb12ab6e955bdd4790195c1455af5007007a68a51c61"
-dependencies = [
- "ahash",
- "aho-corasick",
- "auto_encoder 0.2.4",
- "bytes",
- "case_insensitive_string",
- "h2",
- "hashbrown 0.17.0",
- "lazy_static",
- "libc",
- "log",
- "lol_html",
- "memchr",
- "num_cpus",
- "percent-encoding",
- "phf 0.13.1",
- "pin-project-lite",
- "quick-xml",
- "regex",
- "reqwest 0.13.3",
- "serde",
- "serde_json",
- "serde_regex",
- "simdutf8",
- "smallvec",
- "spider_agent_types 2.51.146",
- "spider_fingerprint",
- "string-interner",
- "string_concat",
- "strum 0.28.0",
- "tokio",
- "tokio-stream",
- "tower",
- "url",
 ]
 
 [[package]]
@@ -8137,6 +8095,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "spider"
+version = "2.51.155"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "def3478bfe4603de6e2519f07b09af53d1f5bd0d346bd6b9e6872da141686b78"
+dependencies = [
+ "ahash",
+ "aho-corasick",
+ "auto_encoder 0.2.4",
+ "bytes",
+ "case_insensitive_string",
+ "h2",
+ "hashbrown 0.17.0",
+ "lazy_static",
+ "libc",
+ "log",
+ "lol_html",
+ "memchr",
+ "num_cpus",
+ "percent-encoding",
+ "phf 0.13.1",
+ "pin-project-lite",
+ "quick-xml",
+ "regex",
+ "reqwest 0.13.3",
+ "serde",
+ "serde_json",
+ "serde_regex",
+ "simdutf8",
+ "smallvec",
+ "spider_agent_types 2.51.155 (registry+https://github.com/rust-lang/crates.io-index)",
+ "spider_fingerprint",
+ "string-interner",
+ "string_concat",
+ "strum 0.28.0",
+ "tokio",
+ "tokio-stream",
+ "tower",
+ "url",
+]
+
+[[package]]
 name = "spider-html5ever"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8214,9 +8213,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.51.146"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d22451e4d61b9b9fd237c3589b54679a727697209248ad596e0d654bf493762"
+version = "2.51.155"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8228,6 +8225,8 @@ dependencies = [
 [[package]]
 name = "spider_agent_types"
 version = "2.51.155"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eafa2a94f408bf7199935fc94ed28363498f186fcb7d76aebf11914d62697a6c"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8305,7 +8304,7 @@ dependencies = [
  "serde_json",
  "spider 2.51.155",
  "spider_transformations",
- "spider_utils 2.51.146",
+ "spider_utils 2.51.155 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -8329,9 +8328,9 @@ dependencies = [
 
 [[package]]
 name = "spider_firewall"
-version = "2.35.11"
+version = "2.35.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5be233dff1920a67b80224ce51b1349194b4a159f02c8e7aa7d3821472119290"
+checksum = "87441a144a1b7679cd788d155e7ac8c3763faf8a4874c9a5d71c68c96d30d440"
 dependencies = [
  "fst",
  "hashbrown 0.15.5",
@@ -8361,9 +8360,9 @@ dependencies = [
 
 [[package]]
 name = "spider_network_blocker"
-version = "0.0.83"
+version = "0.0.84"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f681aa5665a44c0c6de41aab2dc84e8e4b0048abc0b7f52ed74e150c330eadf"
+checksum = "1514ab768f272740d4c53a87df99198bce96bae360d1c478a62fd362b45d4a5b"
 dependencies = [
  "arc-swap",
  "convert_case 0.11.0",
@@ -8456,26 +8455,12 @@ dependencies = [
  "phf_codegen 0.13.1",
  "regex",
  "serde",
- "spider 2.51.146",
+ "spider 2.51.155 (registry+https://github.com/rust-lang/crates.io-index)",
  "spider_scraper",
  "tendril 0.5.0",
  "thiserror 2.0.18",
  "unicode-width 0.2.2",
  "url",
-]
-
-[[package]]
-name = "spider_utils"
-version = "2.51.146"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c808728dfa94a2227d6084f0ae2f61f566a8910e9b606b3f31143207ee19eca8"
-dependencies = [
- "hashbrown 0.17.0",
- "lazy_static",
- "log",
- "spider_scraper",
- "sxd-document",
- "sxd-xpath",
 ]
 
 [[package]]
@@ -8491,6 +8476,20 @@ dependencies = [
  "sxd-document",
  "sxd-xpath",
  "tokio",
+]
+
+[[package]]
+name = "spider_utils"
+version = "2.51.155"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "606f36f1289b1cadf2c66d05569e1f5976199da78cdd5fdb59eec96313311cfe"
+dependencies = [
+ "hashbrown 0.17.0",
+ "lazy_static",
+ "log",
+ "spider_scraper",
+ "sxd-document",
+ "sxd-xpath",
 ]
 
 [[package]]
@@ -9779,9 +9778,9 @@ checksum = "40ce102ab67701b8526c123c1bab5cbe42d7040ccfd0f64af1a385808d2f43de"
 
 [[package]]
 name = "ua_generator"
-version = "0.5.59"
+version = "0.5.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8a43d3b119bc7643f8140475625cba3c46e4f3d81cfd9ed6ec601a428d8a297"
+checksum = "c8e450fb92905fa516d47380c2664b7f896733a3bd3bdd2e9dd0df552f0aae54"
 dependencies = [
  "dotenvy",
  "fastrand",

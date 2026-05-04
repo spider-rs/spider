@@ -433,7 +433,7 @@ pub async fn cf_handle(
                 for el in els {
                     let f = async {
                         match el.clickable_point().await {
-                            Ok(pt) => page.click(pt).await.is_ok() || el.click().await.is_ok(),
+                            Ok(pt) => page.click_smooth(pt).await.is_ok() || el.click().await.is_ok(),
                             Err(_) => el.click().await.is_ok(),
                         }
                     };
@@ -627,7 +627,7 @@ fire(at(tx,ty)||el0,'mouseup',tx,ty);return true;}})()"#,
                     if let Some(cb_el) = boxes.into_iter().next() {
                         // Click the checkbox – prefer the clickable point.
                         let clicked = match cb_el.clickable_point().await {
-                            Ok(p) => page.click(p).await.is_ok() || cb_el.click().await.is_ok(),
+                            Ok(p) => page.click_smooth(p).await.is_ok() || cb_el.click().await.is_ok(),
                             Err(_) => cb_el.click().await.is_ok(),
                         };
 
@@ -787,11 +787,11 @@ fire(at(tx,ty)||el0,'mouseup',tx,ty);return true;}})()"#,
                                     let _ = tokio::join!(
                                         perform_smart_mouse_movement(page, viewport),
                                         async {
-                                            let _ = page.move_mouse(from).await;
+                                            let _ = page.move_mouse_smooth(from).await;
                                         }
                                     );
 
-                                    if page.click_and_drag(from, to).await.is_ok() {
+                                    if page.click_and_drag_smooth(from, to).await.is_ok() {
                                         did_drag = true;
                                     }
                                 }
@@ -1259,7 +1259,7 @@ pub async fn recaptcha_handle(
                     if let Ok(els) = page.find_elements_pierced(r#"#recaptcha-anchor"#).await {
                         if let Some(el) = els.into_iter().next() {
                             return match el.clickable_point().await {
-                                Ok(p) => page.click(p).await.is_ok() || el.click().await.is_ok(),
+                                Ok(p) => page.click_smooth(p).await.is_ok() || el.click().await.is_ok(),
                                 Err(_) => el.click().await.is_ok(),
                             };
                         }
@@ -1270,7 +1270,7 @@ pub async fn recaptcha_handle(
                     {
                         if let Some(el) = els.into_iter().next() {
                             return match el.clickable_point().await {
-                                Ok(p) => page.click(p).await.is_ok() || el.click().await.is_ok(),
+                                Ok(p) => page.click_smooth(p).await.is_ok() || el.click().await.is_ok(),
                                 Err(_) => el.click().await.is_ok(),
                             };
                         }
@@ -1425,7 +1425,7 @@ pub async fn recaptcha_handle(
             if let Ok(els) = page.find_elements_pierced(r#"#recaptcha-anchor"#).await {
                 if let Some(el) = els.into_iter().next() {
                     clicked = match el.clickable_point().await {
-                        Ok(p) => page.click(p).await.is_ok() || el.click().await.is_ok(),
+                        Ok(p) => page.click_smooth(p).await.is_ok() || el.click().await.is_ok(),
                         Err(_) => el.click().await.is_ok(),
                     };
                 }
@@ -1437,7 +1437,7 @@ pub async fn recaptcha_handle(
                 {
                     if let Some(el) = els.into_iter().next() {
                         clicked = match el.clickable_point().await {
-                            Ok(p) => page.click(p).await.is_ok() || el.click().await.is_ok(),
+                            Ok(p) => page.click_smooth(p).await.is_ok() || el.click().await.is_ok(),
                             Err(_) => el.click().await.is_ok(),
                         };
                     }
@@ -1711,7 +1711,7 @@ pub async fn lemin_handle(
             {
                 if let Some(cb) = checkboxes.into_iter().next() {
                     let clicked = match cb.clickable_point().await {
-                        Ok(p) => page.click(p).await.is_ok() || cb.click().await.is_ok(),
+                        Ok(p) => page.click_smooth(p).await.is_ok() || cb.click().await.is_ok(),
                         Err(_) => cb.click().await.is_ok(),
                     };
                     if clicked {
@@ -1842,7 +1842,7 @@ pub async fn lemin_handle(
                 x: page_target_x,
                 y: page_target_y,
             };
-            let _ = page.click_and_drag(from, to).await;
+            let _ = page.click_and_drag_smooth(from, to).await;
 
             // ---------------------------------------------------------
             // i) Click the **Verify** button (if present).
@@ -2369,7 +2369,7 @@ pub async fn geetest_handle(
             if let Ok(els) = page.find_elements_pierced(r#".geetest_radar"#).await {
                 if let Some(el) = els.into_iter().next() {
                     clicked = match el.clickable_point().await {
-                        Ok(p) => page.click(p).await.is_ok() || el.click().await.is_ok(),
+                        Ok(p) => page.click_smooth(p).await.is_ok() || el.click().await.is_ok(),
                         Err(_) => el.click().await.is_ok(),
                     };
                 }
@@ -2382,7 +2382,7 @@ pub async fn geetest_handle(
                 {
                     if let Some(el) = els.into_iter().next() {
                         clicked = match el.clickable_point().await {
-                            Ok(p) => page.click(p).await.is_ok() || el.click().await.is_ok(),
+                            Ok(p) => page.click_smooth(p).await.is_ok() || el.click().await.is_ok(),
                             Err(_) => el.click().await.is_ok(),
                         };
                     }
@@ -2542,7 +2542,7 @@ pub async fn geetest_handle(
                     // -------------------------------------------------
                     // 7️⃣  Perform the drag.
                     // -------------------------------------------------
-                    let _ = page.click_and_drag(from, to).await;
+                    let _ = page.click_and_drag_smooth(from, to).await;
 
                     // -------------------------------------------------
                     // 8️⃣  Wait a little, then verify whether the widget vanished.

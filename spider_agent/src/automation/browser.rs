@@ -3883,10 +3883,11 @@ return await s.prompt(msg);
             "ClickPoint" => {
                 let x = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let y = value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                // Move mouse first to set hover target, then click
+                // click_smooth already runs move_mouse_smooth internally,
+                // so a separate pre-move would just emit a duplicate
+                // bezier path before the click.
                 let point = Point::new(x, y);
-                let _ = page.move_mouse_smooth(point).await;
-                match page.click(point).await {
+                match page.click_smooth(point).await {
                     Ok(_) => ActionOutcome::ok("ClickPoint"),
                     Err(_) => {
                         ActionOutcome::fail("ClickPoint", format!("CDP click failed at ({x}, {y})"))
