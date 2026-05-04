@@ -8074,6 +8074,7 @@ version = "2.51.156"
 dependencies = [
  "ahash",
  "aho-corasick",
+ "arc-swap",
  "async-openai 0.35.0",
  "async-trait",
  "async_job",

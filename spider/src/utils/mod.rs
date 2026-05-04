@@ -48,6 +48,10 @@ pub mod hedge;
 pub mod html_spool;
 /// String interner.
 pub mod interner;
+/// Lock-free, lazy, refcount-dropped Arc primitive.
+pub mod lazy_arc;
+/// Media-asset URL classification (no policy / no business semantics).
+pub mod media_asset;
 #[cfg(feature = "numa")]
 /// NUMA-aware thread pinning for multi-socket servers.
 pub mod numa;
