@@ -4857,8 +4857,36 @@ pub async fn fetch_page_html_chrome_base<'h>(
                         if let Some(ext) = extract.as_deref_mut() {
                             ext.invalidate();
                         }
+                        // Diagnostic: log the gate inputs so we can tell
+                        // which downstream branch (cf/imperva/recaptcha/
+                        // geetest/lemin) the page falls into and on what
+                        // signal. Sites that aren't actually challenged
+                        // but match a body byte-pattern by coincidence
+                        // produce mouse-jitter regressions on otherwise-
+                        // healthy pages. Only fires under `real_browser`,
+                        // runs exactly once per fetch.
+                        log::debug!(
+                            "[solver_gate] inputs url={} res_len={} anti_bot_tech={:?} waf_check={} forbidden={}",
+                            target_url,
+                            res.len(),
+                            anti_bot_tech,
+                            waf_check,
+                            forbidden
+                        );
                         if anti_bot_tech == AntiBotTech::Cloudflare || waf_check {
-                            if crate::features::solvers::detect_cf_turnstyle(&res) {
+                            let cf_match = crate::features::solvers::detect_cf_turnstyle(&res);
+                            log::debug!(
+                                "[solver_gate] cf path considered url={} anti_bot_tech={:?} waf_check={} cf_turnstyle_match={}",
+                                target_url,
+                                anti_bot_tech,
+                                waf_check,
+                                cf_match
+                            );
+                            if cf_match {
+                                log::debug!(
+                                    "[solver_gate] ENTERING cf_handle url={}",
+                                    target_url
+                                );
                                 if let Err(_e) = tokio::time::timeout(base_timeout, async {
                                     if let Ok(success) = crate::features::solvers::cf_handle(
                                         &mut res, page, target_url, viewport,
@@ -4876,8 +4904,21 @@ pub async fn fetch_page_html_chrome_base<'h>(
                                 }
                             }
                         } else if anti_bot_tech == AntiBotTech::Imperva {
-                            if crate::features::solvers::looks_like_imperva_verify(res.len(), &res)
-                            {
+                            let imperva_match =
+                                crate::features::solvers::looks_like_imperva_verify(
+                                    res.len(),
+                                    &res,
+                                );
+                            log::debug!(
+                                "[solver_gate] imperva path considered url={} imperva_verify_match={}",
+                                target_url,
+                                imperva_match
+                            );
+                            if imperva_match {
+                                log::debug!(
+                                    "[solver_gate] ENTERING imperva_handle url={}",
+                                    target_url
+                                );
                                 if let Err(_e) = tokio::time::timeout(base_timeout, async {
                                     if let Ok(success) = crate::features::solvers::imperva_handle(
                                         &mut res, page, target_url, viewport,
@@ -4895,6 +4936,10 @@ pub async fn fetch_page_html_chrome_base<'h>(
                                 }
                             }
                         } else if crate::features::solvers::detect_recaptcha(&res) {
+                            log::debug!(
+                                "[solver_gate] ENTERING recaptcha_handle url={} (detect_recaptcha matched)",
+                                target_url
+                            );
                             if let Err(_e) = tokio::time::timeout(base_timeout, async {
                                 if let Ok(solved) = crate::features::solvers::recaptcha_handle(
                                     &mut res, page, viewport,
@@ -4911,6 +4956,10 @@ pub async fn fetch_page_html_chrome_base<'h>(
                                 validate_cf = true;
                             }
                         } else if crate::features::solvers::detect_geetest(&res) {
+                            log::debug!(
+                                "[solver_gate] ENTERING geetest_handle url={} (detect_geetest matched)",
+                                target_url
+                            );
                             if let Err(_e) = tokio::time::timeout(base_timeout, async {
                                 if let Ok(solved) = crate::features::solvers::geetest_handle(
                                     &mut res, page, viewport,
@@ -4927,6 +4976,10 @@ pub async fn fetch_page_html_chrome_base<'h>(
                                 validate_cf = true;
                             }
                         } else if crate::features::solvers::detect_lemin(&res) {
+                            log::debug!(
+                                "[solver_gate] ENTERING lemin_handle url={} (detect_lemin matched)",
+                                target_url
+                            );
                             if let Err(_e) = tokio::time::timeout(base_timeout, async {
                                 if let Ok(solved) =
                                     crate::features::solvers::lemin_handle(&mut res, page, viewport)
@@ -4941,7 +4994,19 @@ pub async fn fetch_page_html_chrome_base<'h>(
                             {
                                 validate_cf = true;
                             }
+                        } else {
+                            log::debug!(
+                                "[solver_gate] no solver matched url={} — page passed through clean",
+                                target_url
+                            );
                         }
+                    } else {
+                        log::debug!(
+                            "[solver_gate] skipped url={} (res_len={} > wall_size={})",
+                            target_url,
+                            res.len(),
+                            crate::page::TURNSTILE_WALL_PAGE_SIZE
+                        );
                     }
                 }
 
