@@ -138,6 +138,45 @@ pub struct RequestProxy {
     pub ignore: ProxyIgnore,
 }
 
+/// Categorical "kind" a request can be routed under.
+///
+/// Carries no policy and no business semantics — what each kind *means*
+/// (when to route there, what proxies it should use) is entirely up to
+/// the consumer. Spider only stores the mapping and uses the kind as a
+/// lookup key.
+///
+/// Used in two places:
+/// * [`Configuration::proxies_by_kind`] — the optional sidecar map of
+///   `kind → Vec<RequestProxy>`, attached to the configuration without
+///   touching `RequestProxy` itself.
+/// * [`crate::proxy_strategy::ProxyStrategy::route`] — the per-request
+///   decision a strategy returns to pick which proxy list to use.
+///
+/// Returning [`ProxyKind::Default`] (or any kind not present in the
+/// sidecar map) keeps the existing fast path — no secondary client is
+/// built, no allocation, no behavior change.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ProxyKind {
+    /// The default kind. Routes through the primary proxy list
+    /// ([`Configuration::proxies`]).
+    Default,
+    /// Media-asset request (image, video, audio, font, archive,
+    /// document). Pure technical classification — see
+    /// [`crate::utils::media_asset::is_media_asset_url`] for the helper
+    /// most strategies will pair with this kind.
+    MediaAsset,
+    /// Free-form, consumer-defined kind. Opaque to spider.
+    Custom(CompactString),
+}
+
+impl Default for ProxyKind {
+    #[inline]
+    fn default() -> Self {
+        ProxyKind::Default
+    }
+}
+
 /// The protocol used to communicate with a backend.
 #[cfg(feature = "parallel_backends")]
 #[derive(Debug, Clone, PartialEq)]
@@ -330,6 +369,21 @@ pub struct Configuration {
     pub http2_prior_knowledge: bool,
     /// Use proxy list for performing network request.
     pub proxies: Option<Vec<RequestProxy>>,
+    /// Optional sidecar map of alternative proxy lists keyed by
+    /// [`ProxyKind`].
+    ///
+    /// Lets a [`crate::proxy_strategy::ProxyStrategy`] route a request
+    /// through a non-default proxy set without touching `proxies` or
+    /// `RequestProxy` itself. When `None` (the default) or when the
+    /// strategy returns a kind that has no entry here, requests fall
+    /// through to `proxies` and the existing fast path — no behavior
+    /// change.
+    ///
+    /// Lookup is by enum equality / hash; the [`ProxyKind::Custom`]
+    /// variant lets consumers introduce their own kinds without an
+    /// upstream change. Spider never writes to this map after
+    /// configuration; runtime lazy state lives on the `Website`.
+    pub proxies_by_kind: Option<hashbrown::HashMap<ProxyKind, Vec<RequestProxy>>>,
     /// Headers to include with request.
     pub headers: Option<Box<SerializableHeaderMap>>,
     #[cfg(feature = "sitemap")]
@@ -1260,6 +1314,42 @@ impl Configuration {
     /// Use proxies for request with control between chrome and http.
     pub fn with_proxies_direct(&mut self, proxies: Option<Vec<RequestProxy>>) -> &mut Self {
         self.proxies = proxies;
+        self
+    }
+
+    /// Set the proxy override list for a specific [`ProxyKind`].
+    ///
+    /// Lazily registers a sidecar mapping that a
+    /// [`crate::proxy_strategy::ProxyStrategy`] can route requests
+    /// through. Pass `None` for `proxies` to remove a previously-set
+    /// kind. Setting a kind to `Some(empty_vec)` is allowed and means
+    /// "route here but with no proxy" — the secondary client built for
+    /// this kind will be unproxied.
+    ///
+    /// Has no effect on the primary [`Configuration::proxies`] list or
+    /// on requests that route to [`ProxyKind::Default`].
+    pub fn with_proxies_for_kind(
+        &mut self,
+        kind: ProxyKind,
+        proxies: Option<Vec<RequestProxy>>,
+    ) -> &mut Self {
+        match (proxies, self.proxies_by_kind.as_mut()) {
+            (Some(p), Some(map)) => {
+                map.insert(kind, p);
+            }
+            (Some(p), None) => {
+                let mut map = hashbrown::HashMap::new();
+                map.insert(kind, p);
+                self.proxies_by_kind = Some(map);
+            }
+            (None, Some(map)) => {
+                map.remove(&kind);
+                if map.is_empty() {
+                    self.proxies_by_kind = None;
+                }
+            }
+            (None, None) => {}
+        }
         self
     }
 
