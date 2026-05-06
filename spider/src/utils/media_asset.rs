@@ -104,7 +104,7 @@ pub fn is_media_asset_url(url: &str) -> bool {
         None => return false,
     };
     let path = path_and_rest
-        .split_once(|c| c == '?' || c == '#')
+        .split_once(['?', '#'])
         .map(|(p, _)| p)
         .unwrap_or(path_and_rest);
     is_media_asset_path(path)

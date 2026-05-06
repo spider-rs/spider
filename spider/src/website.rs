@@ -3008,9 +3008,7 @@ impl Website {
         &self,
         kind: &crate::configuration::ProxyKind,
     ) -> Option<std::sync::Arc<Client>> {
-        if self.proxy_strategy.is_none() {
-            return None;
-        }
+        self.proxy_strategy.as_ref()?;
         let map = self.configuration.proxies_by_kind.as_ref()?;
         let proxies = map.get(kind)?;
         match kind {
