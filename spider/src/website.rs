@@ -12488,6 +12488,59 @@ impl Website {
         self
     }
 
+    /// When `block_stylesheets` is on, allow first-party CSS through.
+    /// Default `true` so SPAs that load their own stylesheets via dynamic
+    /// imports (React, Next.js, AppFabric, requirejs-style loaders) still
+    /// hydrate. Set `false` for strict block-all-CSS bandwidth crawls.
+    /// First-party means the request URL's registrable domain matches the
+    /// page's primary frame.
+    pub fn with_allow_first_party_stylesheets(&mut self, allow: bool) -> &mut Self {
+        self.configuration
+            .chrome_intercept
+            .set_allow_first_party_stylesheets(allow);
+        self
+    }
+
+    /// Allow first-party JS through downstream blockers (intercept manager,
+    /// adblock, blocklists). Default `true` so SPA bootloaders are not
+    /// collateral damage from third-party tracker rules. Set `false` to
+    /// strictly enforce all blocklists, even on first-party scripts.
+    pub fn with_allow_first_party_javascript(&mut self, allow: bool) -> &mut Self {
+        self.configuration
+            .chrome_intercept
+            .set_allow_first_party_javascript(allow);
+        self
+    }
+
+    /// When `block_visuals` is on, allow first-party images/media/fonts
+    /// through. Default `true`. Set `false` for strictly bandwidth-minimal
+    /// crawls that drop ALL visuals regardless of origin.
+    pub fn with_allow_first_party_visuals(&mut self, allow: bool) -> &mut Self {
+        self.configuration
+            .chrome_intercept
+            .set_allow_first_party_visuals(allow);
+        self
+    }
+
+    /// Set all three first-party allow flags at once.
+    ///
+    /// Defaults are `(true, true, true)` — first-party stylesheets / JS /
+    /// visuals all bypass the corresponding `block_*` flag. Pass
+    /// `(false, false, false)` for a strictly bandwidth-minimal HTML-only
+    /// crawl that blocks every non-document subresource regardless of
+    /// origin.
+    pub fn with_allow_first_party(
+        &mut self,
+        stylesheets: bool,
+        javascript: bool,
+        visuals: bool,
+    ) -> &mut Self {
+        self.configuration
+            .chrome_intercept
+            .set_allow_first_party(stylesheets, javascript, visuals);
+        self
+    }
+
     /// Normalize the content de-duplicating trailing slash pages and other pages that can be duplicated. This may initially show the link in your links_visited or subscription calls but, the following links will not be crawled.
     pub fn with_normalize(&mut self, normalize: bool) -> &mut Self {
         self.configuration.with_normalize(normalize);

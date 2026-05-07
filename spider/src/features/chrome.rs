@@ -405,6 +405,9 @@ pub fn create_handler_config(config: &Configuration) -> HandlerConfig {
         ignore_javascript: config.chrome_intercept.block_javascript,
         ignore_analytics: config.chrome_intercept.block_analytics,
         ignore_stylesheets: config.chrome_intercept.block_stylesheets,
+        allow_first_party_stylesheets: config.chrome_intercept.allow_first_party_stylesheets,
+        allow_first_party_javascript: config.chrome_intercept.allow_first_party_javascript,
+        allow_first_party_visuals: config.chrome_intercept.allow_first_party_visuals,
         extra_headers: match &config.headers {
             Some(headers) => {
                 let mut hm = crate::utils::header_utils::header_map_to_hash_map(headers.inner());
@@ -844,6 +847,12 @@ pub async fn setup_browser_configuration(
                     config.chrome_intercept.blacklist_patterns.clone();
                 browser_config.ignore_stylesheets = config.chrome_intercept.block_stylesheets;
                 browser_config.ignore_analytics = config.chrome_intercept.block_analytics;
+                browser_config.allow_first_party_stylesheets =
+                    config.chrome_intercept.allow_first_party_stylesheets;
+                browser_config.allow_first_party_javascript =
+                    config.chrome_intercept.allow_first_party_javascript;
+                browser_config.allow_first_party_visuals =
+                    config.chrome_intercept.allow_first_party_visuals;
                 browser_config.extra_headers = match &config.headers {
                     Some(headers) => {
                         let mut hm =

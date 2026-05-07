@@ -1028,7 +1028,7 @@ pub type ExecutionScripts = Trie<String>;
 /// Automation scripts to run on the page when using chrome by url.
 pub type AutomationScripts = Trie<Vec<WebAutomation>>;
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 /// Chrome request interception configurations.
 pub struct RequestInterceptConfiguration {
@@ -1044,12 +1044,46 @@ pub struct RequestInterceptConfiguration {
     pub block_analytics: bool,
     /// Block ads. Requires the `adblock` feature flag.
     pub block_ads: bool,
+    /// When `block_stylesheets` would skip a stylesheet, allow it through if
+    /// the request URL is first-party (registrable domain matches the page's
+    /// primary frame). Default `true` so SPAs that load their own CSS via
+    /// dynamic imports still hydrate. Set `false` for strict block-all-CSS.
+    pub allow_first_party_stylesheets: bool,
+    /// When a downstream blocker (intercept manager / adblock / blocklists)
+    /// would skip a script, allow it through if first-party. Default `true`.
+    pub allow_first_party_javascript: bool,
+    /// When `block_visuals` would skip an image/media/font, allow it through
+    /// if first-party. Default `true`. Set `false` for strict bandwidth-
+    /// minimal crawls that drop ALL visuals.
+    pub allow_first_party_visuals: bool,
     /// Intercept Manager
     pub intercept_manager: NetworkInterceptManager,
     /// Whitelist patterns.
     pub whitelist_patterns: Option<Vec<String>>,
     /// Blacklist patterns.
     pub blacklist_patterns: Option<Vec<String>>,
+}
+
+impl Default for RequestInterceptConfiguration {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            block_visuals: false,
+            block_stylesheets: false,
+            block_javascript: false,
+            block_analytics: false,
+            block_ads: false,
+            // Match chromey's NetworkManager defaults so first-party
+            // resources are not collateral damage from coarse "block all"
+            // bandwidth optimizations.
+            allow_first_party_stylesheets: true,
+            allow_first_party_javascript: true,
+            allow_first_party_visuals: true,
+            intercept_manager: NetworkInterceptManager::default(),
+            whitelist_patterns: None,
+            blacklist_patterns: None,
+        }
+    }
 }
 
 impl RequestInterceptConfiguration {
@@ -1103,6 +1137,51 @@ impl RequestInterceptConfiguration {
         self.block_stylesheets = true;
         self.block_visuals = true;
         self.block_ads = true;
+        self
+    }
+
+    /// Allow first-party stylesheets through when `block_stylesheets` is on.
+    /// Default `true`. Set `false` for strict block-all-CSS semantics.
+    pub fn set_allow_first_party_stylesheets(&mut self, allow: bool) -> &mut Self {
+        self.allow_first_party_stylesheets = allow;
+        self
+    }
+
+    /// Allow first-party scripts through downstream blockers (intercept
+    /// manager / adblock / blocklists). Default `true`.
+    pub fn set_allow_first_party_javascript(&mut self, allow: bool) -> &mut Self {
+        self.allow_first_party_javascript = allow;
+        self
+    }
+
+    /// Allow first-party images/media/fonts through when `block_visuals` is
+    /// on. Default `true`. Set `false` for strictly bandwidth-minimal crawls
+    /// that drop ALL visuals.
+    pub fn set_allow_first_party_visuals(&mut self, allow: bool) -> &mut Self {
+        self.allow_first_party_visuals = allow;
+        self
+    }
+
+    /// Set all three first-party allow flags at once.
+    pub fn set_allow_first_party(
+        &mut self,
+        stylesheets: bool,
+        javascript: bool,
+        visuals: bool,
+    ) -> &mut Self {
+        self.allow_first_party_stylesheets = stylesheets;
+        self.allow_first_party_javascript = javascript;
+        self.allow_first_party_visuals = visuals;
+        self
+    }
+
+    /// Strict mode: block ALL of every resource type, no first-party
+    /// rescue. Equivalent to setting all three flags to `false`. Useful
+    /// for strictly bandwidth-minimal HTML-only crawls.
+    pub fn deny_first_party_all(&mut self) -> &mut Self {
+        self.allow_first_party_stylesheets = false;
+        self.allow_first_party_javascript = false;
+        self.allow_first_party_visuals = false;
         self
     }
 }
