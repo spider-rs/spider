@@ -197,6 +197,26 @@ lazy_static! {
     ]).expect("valid patterns");
 }
 
+#[cfg(feature = "cache_request")]
+lazy_static! {
+    /// Aho-Corasick automaton for detecting `http-cache-reqwest`-wrapped
+    /// transport errors. The middleware stringifies the underlying
+    /// error via `BoxError::to_string()` and wraps it as
+    /// `HttpCacheError::Cache(String)` — Display rendered as
+    /// `"Cache error: <inner>"`. Reqwest's transport-error Display is
+    /// consistently `"error sending request"` (DNS, connection
+    /// refused/reset, timeouts, TLS handshake all share that prefix),
+    /// so a single conjunction match is a near-zero false-positive
+    /// signal that the original error was transport-level and therefore
+    /// non-retryable through the same client. Used by
+    /// `get_error_http_status_code` only when `err.is_middleware()` is
+    /// true so legitimate higher-level cache errors (which would have a
+    /// different Display prefix) keep their existing classification.
+    static ref CACHE_WRAPPED_TRANSPORT_AC: aho_corasick::AhoCorasick =
+        aho_corasick::AhoCorasick::new(["Cache error: error sending request"])
+            .expect("valid patterns");
+}
+
 /// Check if a connect error is a DNS resolution failure.
 /// Zero-alloc fast path via `downcast_ref`, single-alloc fallback via Aho-Corasick O(n) scan.
 /// Only called when `err.is_connect()` is already true.
@@ -299,11 +319,43 @@ pub(crate) fn get_error_http_status_code(err: &crate::client::Error) -> StatusCo
         return status;
     }
 
+    // DNS resolution failure check — runs BEFORE `is_connect()` so a
+    // middleware-wrapped error (e.g. `reqwest_middleware::Error::Middleware`,
+    // emitted by `http-cache-reqwest` when `cache_request`/`cache_mem` is
+    // active) is still classified as 525. The middleware variant short-
+    // circuits `is_connect()` to `false`, which previously hid permanent
+    // DNS failures behind the catch-all 599 and re-enabled retries.
+    // `is_dns_error` walks the underlying source chain, so non-DNS errors
+    // remain unaffected (it returns `false` and we fall through to the
+    // existing branches).
+    if is_dns_error(err) {
+        return *DNS_RESOLVE_ERROR;
+    }
+
+    // `http-cache-reqwest` (the middleware spider attaches when
+    // `cache_request` / `cache_mem` is active and `cache=true` — the
+    // chrome-feature default) stringifies any underlying transport
+    // error via `BoxError::to_string()` before wrapping it as
+    // `HttpCacheError::Cache(String)`. The full source chain is
+    // discarded at that point, so neither `is_connect()`, `is_dns_error`,
+    // nor any other typed inspector can recover the original classification.
+    //
+    // The Display of the wrap is `"Cache error: error sending request for url (…)"`.
+    // We can't tell DNS / refused / reset / timeout apart anymore, but we
+    // *can* tell this is a transport-level failure that the caller cannot
+    // resolve by retrying through the same client. Bucket it with 526
+    // (`ADDRESS_UNREACHABLE_ERROR`, "permanent for this destination via
+    // this client") so `is_retryable_status` returns false and the retry
+    // loop halts — matching the SSL-handshake bucket. Without this guard
+    // the catch-all at the bottom of this function returns 599 →
+    // retryable → the loop burns the full retry budget on every fetch
+    // (observed as a 9-20s hang in `cache_mem + chrome` builds).
+    #[cfg(feature = "cache_request")]
+    if err.is_middleware() && CACHE_WRAPPED_TRANSPORT_AC.is_match(&err.to_string()) {
+        return *ADDRESS_UNREACHABLE_ERROR;
+    }
+
     if err.is_connect() {
-        // DNS resolution failure — never retried
-        if is_dns_error(err) {
-            return *DNS_RESOLVE_ERROR;
-        }
         if let Some(io_err) = err.source().and_then(|e| e.downcast_ref::<io::Error>()) {
             match io_err.kind() {
                 io::ErrorKind::ConnectionRefused => return *CONNECTION_REFUSED_ERROR,
