@@ -12493,7 +12493,8 @@ impl Website {
     /// imports (React, Next.js, AppFabric, requirejs-style loaders) still
     /// hydrate. Set `false` for strict block-all-CSS bandwidth crawls.
     /// First-party means the request URL's registrable domain matches the
-    /// page's primary frame.
+    /// page's primary frame. No-op without the `chrome` feature.
+    #[cfg(feature = "chrome")]
     pub fn with_allow_first_party_stylesheets(&mut self, allow: bool) -> &mut Self {
         self.configuration
             .chrome_intercept
@@ -12501,10 +12502,18 @@ impl Website {
         self
     }
 
+    /// No-op stub when `chrome` is disabled.
+    #[cfg(not(feature = "chrome"))]
+    pub fn with_allow_first_party_stylesheets(&mut self, _allow: bool) -> &mut Self {
+        self
+    }
+
     /// Allow first-party JS through downstream blockers (intercept manager,
     /// adblock, blocklists). Default `true` so SPA bootloaders are not
     /// collateral damage from third-party tracker rules. Set `false` to
-    /// strictly enforce all blocklists, even on first-party scripts.
+    /// strictly enforce all blocklists, even on first-party scripts. No-op
+    /// without the `chrome` feature.
+    #[cfg(feature = "chrome")]
     pub fn with_allow_first_party_javascript(&mut self, allow: bool) -> &mut Self {
         self.configuration
             .chrome_intercept
@@ -12512,13 +12521,27 @@ impl Website {
         self
     }
 
+    /// No-op stub when `chrome` is disabled.
+    #[cfg(not(feature = "chrome"))]
+    pub fn with_allow_first_party_javascript(&mut self, _allow: bool) -> &mut Self {
+        self
+    }
+
     /// When `block_visuals` is on, allow first-party images/media/fonts
     /// through. Default `true`. Set `false` for strictly bandwidth-minimal
-    /// crawls that drop ALL visuals regardless of origin.
+    /// crawls that drop ALL visuals regardless of origin. No-op without
+    /// the `chrome` feature.
+    #[cfg(feature = "chrome")]
     pub fn with_allow_first_party_visuals(&mut self, allow: bool) -> &mut Self {
         self.configuration
             .chrome_intercept
             .set_allow_first_party_visuals(allow);
+        self
+    }
+
+    /// No-op stub when `chrome` is disabled.
+    #[cfg(not(feature = "chrome"))]
+    pub fn with_allow_first_party_visuals(&mut self, _allow: bool) -> &mut Self {
         self
     }
 
@@ -12528,7 +12551,8 @@ impl Website {
     /// visuals all bypass the corresponding `block_*` flag. Pass
     /// `(false, false, false)` for a strictly bandwidth-minimal HTML-only
     /// crawl that blocks every non-document subresource regardless of
-    /// origin.
+    /// origin. No-op without the `chrome` feature.
+    #[cfg(feature = "chrome")]
     pub fn with_allow_first_party(
         &mut self,
         stylesheets: bool,
@@ -12538,6 +12562,17 @@ impl Website {
         self.configuration
             .chrome_intercept
             .set_allow_first_party(stylesheets, javascript, visuals);
+        self
+    }
+
+    /// No-op stub when `chrome` is disabled.
+    #[cfg(not(feature = "chrome"))]
+    pub fn with_allow_first_party(
+        &mut self,
+        _stylesheets: bool,
+        _javascript: bool,
+        _visuals: bool,
+    ) -> &mut Self {
         self
     }
 
