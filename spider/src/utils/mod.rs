@@ -5971,7 +5971,18 @@ pub async fn get_last_redirect(
             }
         }
     }
-    page.url().await.ok()?
+    // Fallback: chromiumoxide didn't report a redirect chain (common when
+    // the smart upgrade fulfills the navigation via Fetch.fulfillRequest —
+    // there is no real redirect, just a navigation). Filter out the no-op
+    // case where `page.url()` equals the URL we asked Chrome to load, so
+    // we don't clobber an HTTP-determined `final_redirect_destination`
+    // (e.g. doi.org -> link.springer.com) with the seed URL itself.
+    let pu = page.url().await.ok()??;
+    if pu == target_url {
+        None
+    } else {
+        Some(pu)
+    }
 }
 
 /// The response cookies mapped. This does nothing without the cookies feature flag enabled.
