@@ -218,13 +218,33 @@ lazy_static! {
 }
 
 /// Check if a connect error is a DNS resolution failure.
-/// Zero-alloc fast path via `downcast_ref`, single-alloc fallback via Aho-Corasick O(n) scan.
+/// Zero-alloc fast path via `downcast_ref`, fallback via Aho-Corasick O(n) scan
+/// against each source-chain layer's Display.
+///
+/// Why each layer instead of just the top: reqwest's Error `Display` does NOT
+/// chain source text — it renders only `"error sending request for url (...)"`.
+/// The actual DNS phrases (`"dns error"`, `"failed to lookup address …"`) live
+/// on inner sources (hyper-util `ConnectError`, the underlying `io::Error`).
+/// A single top-level `to_string()` scan misses them entirely. macOS getaddrinfo
+/// also reports `io::ErrorKind::Uncategorized` (not `NotFound`), so the typed
+/// fast path alone is insufficient on Darwin.
+///
 /// Only called when `err.is_connect()` is already true.
 fn is_dns_error(err: &crate::client::Error) -> bool {
     use std::error::Error;
 
-    // Fast path: walk source chain looking for io::Error with specific kinds.
-    // Hickory DNS surfaces as: reqwest → hyper → io::Error(Custom("dns error: ..."))
+    // Top-level scan: covers wrapped errors whose own Display already carries
+    // the DNS phrase (e.g. `http-cache-reqwest` re-stringifies the inner error).
+    if DNS_ERROR_AC.is_match(&err.to_string()) {
+        return true;
+    }
+
+    // Walk the source chain. At each layer:
+    //   1. Typed fast path: `io::Error` with `NotFound` (hickory NoRecordsFound,
+    //      DnsCacheResolver empty-result fallback) — instant return, zero alloc.
+    //   2. AC fallback against that layer's `to_string()` — catches macOS GAI
+    //      (`io::ErrorKind::Uncategorized` + "failed to lookup address …") and
+    //      hyper-util's `ConnectError("dns error", …)` Display.
     let mut source: Option<&(dyn Error + 'static)> = err.source();
     let mut depth = 0u8;
     while let Some(e) = source {
@@ -236,12 +256,14 @@ fn is_dns_error(err: &crate::client::Error) -> bool {
                 return true;
             }
         }
+        if DNS_ERROR_AC.is_match(&e.to_string()) {
+            return true;
+        }
         source = e.source();
         depth += 1;
     }
 
-    // Slow fallback: single to_string() + single-pass Aho-Corasick scan.
-    DNS_ERROR_AC.is_match(&err.to_string())
+    false
 }
 
 /// Check whether a reqwest error is a permanent SSL/TLS handshake failure.
@@ -9739,6 +9761,44 @@ fn test_dns_error_ac_rejects_unrelated_errors() {
     assert!(!DNS_ERROR_AC.is_match("request timed out"));
     assert!(!DNS_ERROR_AC.is_match("broken pipe"));
     assert!(!DNS_ERROR_AC.is_match(""));
+}
+
+/// Regression: `is_dns_error` must walk the source chain. A real reqwest
+/// connect error against an NXDOMAIN host renders its top-level Display as
+/// `"error sending request for url (...)"` only — none of the DNS phrases
+/// surface there. They live on inner sources (`hyper_util::ConnectError`,
+/// the underlying `io::Error`). On macOS the deepest `io::Error` reports
+/// `ErrorKind::Uncategorized`, not `NotFound`, so the typed-kind fast path
+/// also misses. Without per-layer AC scanning the error falls through to
+/// `*UNREACHABLE_REQUEST_ERROR` (503 — retryable), and the retry loop
+/// burns the full budget on every NXDOMAIN host.
+#[tokio::test(flavor = "current_thread")]
+async fn test_is_dns_error_walks_chain_for_macos_gai_uncategorized() {
+    let client = reqwest::Client::builder()
+        .build()
+        .expect("client should build");
+    let err = client
+        .get("https://orthwestsci.invalid/")
+        .send()
+        .await
+        .expect_err("NXDOMAIN must error");
+
+    let top_display = err.to_string();
+    assert!(
+        !DNS_ERROR_AC.is_match(&top_display),
+        "guard: top-level Display should not contain DNS phrases — \
+         this test is meaningful only because per-layer scanning is required. \
+         Got: {top_display}"
+    );
+    assert!(
+        is_dns_error(&err),
+        "is_dns_error must classify reqwest NXDOMAIN error via source-chain walk"
+    );
+    assert_eq!(
+        get_error_http_status_code(&err),
+        *DNS_RESOLVE_ERROR,
+        "NXDOMAIN must map to 525 (permanent), not 503 (retryable)"
+    );
 }
 
 // ---------------------------------------------------------------------------
