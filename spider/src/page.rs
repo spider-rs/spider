@@ -309,6 +309,30 @@ pub fn is_retryable_status(status: StatusCode) -> bool {
             ))
 }
 
+/// Whether a status code represents a permanent destination-side failure where
+/// duplicating the request through hedge/parallel-backend siblings cannot
+/// help — they would all hit the same DNS name, the same unreachable IP, or
+/// the same redirect chain.
+///
+/// Used to short-circuit hedge / parallel_backends grace-period collection on
+/// the very first request so we don't burn the full grace window waiting for
+/// siblings that are guaranteed to fail the same way. Distinct from
+/// `is_retryable_status` (which gates the retry loop): a 4xx response is
+/// non-retryable but a different backend may still produce a different result,
+/// so 4xx is NOT a permanent target failure for this purpose.
+///
+/// Permanent target-side codes:
+/// - **525** DNS resolve error — every sibling resolves the same name
+/// - **526** address unreachable / SSL handshake — every sibling reaches the
+///   same destination through the same TLS profile
+/// - **310** redirect-chain cap — every sibling follows the same chain
+#[inline]
+pub fn is_permanent_target_failure(status: StatusCode) -> bool {
+    status == *DNS_RESOLVE_ERROR
+        || status == *ADDRESS_UNREACHABLE_ERROR
+        || status == *TOO_MANY_REDIRECTS_ERROR
+}
+
 /// Get the HTTP status code of errors.
 
 pub(crate) fn get_error_http_status_code(err: &crate::client::Error) -> StatusCode {
@@ -9547,6 +9571,88 @@ fn test_dns_error_no_retry() {
     );
 }
 
+/// End-to-end retry-strategy contract: a custom `RetryStrategy` configured to
+/// retry up to 10× with `should_retry: true` MUST NEVER be consulted when the
+/// page status is 525 (DNS_RESOLVE_ERROR). Every retry loop in `website.rs`
+/// (`chrome_page_fetch!` macro ~L169, `crawl_establish_smart` ~L3610,
+/// `crawl_concurrent_*` ~L3788) is gated on `while page.needs_retry() && retry_count > 0`,
+/// so DNS-classified failures short-circuit before `s.on_retry(...)` is even called.
+/// Without this guarantee a misbehaving strategy could turn a single NXDOMAIN
+/// into N network round-trips per host.
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_retry_strategy_not_consulted_for_dns_error() {
+    use crate::retry_strategy::{AttemptOutcome, RetryDirective, RetryStrategy};
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    struct AggressiveStrategy {
+        on_retry_calls: AtomicU32,
+    }
+
+    impl RetryStrategy for AggressiveStrategy {
+        fn max_retries(&self) -> u32 {
+            10
+        }
+        fn on_retry(&self, _outcome: &AttemptOutcome) -> RetryDirective {
+            self.on_retry_calls.fetch_add(1, Ordering::SeqCst);
+            // Force retry — would normally produce 10 retries.
+            RetryDirective {
+                should_retry: true,
+                ..Default::default()
+            }
+        }
+    }
+
+    let strategy = AggressiveStrategy {
+        on_retry_calls: AtomicU32::new(0),
+    };
+
+    let dns_page = build(
+        "https://orthwestsci.invalid",
+        PageResponse {
+            status_code: *DNS_RESOLVE_ERROR,
+            content: None,
+            ..Default::default()
+        },
+    );
+
+    // Mirror the production loop guard from website.rs verbatim.
+    let mut retry_count: u32 = strategy.max_retries();
+    let mut iterations: u32 = 0;
+    while dns_page.needs_retry() && retry_count > 0 {
+        retry_count -= 1;
+        iterations += 1;
+        let outcome = AttemptOutcome {
+            attempt: iterations,
+            status_code: dns_page.status_code,
+            should_retry: dns_page.should_retry,
+            content_truncated: dns_page.content_truncated,
+            waf_check: dns_page.waf_check,
+            anti_bot_tech: &dns_page.anti_bot_tech,
+            proxy_configured: dns_page.proxy_configured,
+            url: "https://orthwestsci.invalid",
+            profile_key: None,
+            html_length: dns_page.size(),
+            bytes_transferred: dns_page.bytes_transferred,
+            error_status: None,
+            final_redirect_destination: None,
+        };
+        let _ = strategy.on_retry(&outcome);
+    }
+
+    assert_eq!(
+        iterations, 0,
+        "525 DNS errors must not enter the retry loop body even once \
+         (custom strategy with max_retries=10 + should_retry=true)"
+    );
+    assert_eq!(
+        strategy.on_retry_calls.load(Ordering::SeqCst),
+        0,
+        "RetryStrategy::on_retry must NEVER be consulted on DNS errors — \
+         needs_retry() guards every retry loop in website.rs before strategy lookup"
+    );
+}
+
 /// Normal server errors should still be retried.
 #[cfg(not(feature = "decentralized"))]
 #[test]
@@ -9772,8 +9878,21 @@ fn test_dns_error_ac_rejects_unrelated_errors() {
 /// also misses. Without per-layer AC scanning the error falls through to
 /// `*UNREACHABLE_REQUEST_ERROR` (503 — retryable), and the retry loop
 /// burns the full budget on every NXDOMAIN host.
+///
+/// Asserts the FULL retry-decision pipeline end-to-end against a real
+/// reqwest error from an unresolvable host (RFC 2606 `.invalid` TLD):
+///   1. top-level Display has no DNS phrase (the guard that makes this test
+///      meaningful — without it future top-only scanning could regress)
+///   2. `is_dns_error` returns true via chain walk
+///   3. `get_error_http_status_code` maps to 525, NOT the 503 catch-all
+///   4. `is_retryable_status` returns false on the mapped status
+///   5. a Page built from this PageResponse has `should_retry == false`
+///   6. `Page::needs_retry()` returns false → all retry loops short-circuit
+///      (covers `chrome_page_fetch!` macro, `crawl_establish_smart`,
+///      `crawl_concurrent_*` — every loop is gated on `needs_retry()`)
+#[cfg(not(feature = "decentralized"))]
 #[tokio::test(flavor = "current_thread")]
-async fn test_is_dns_error_walks_chain_for_macos_gai_uncategorized() {
+async fn test_dns_error_no_retry_end_to_end_via_real_reqwest() {
     let client = reqwest::Client::builder()
         .build()
         .expect("client should build");
@@ -9783,6 +9902,7 @@ async fn test_is_dns_error_walks_chain_for_macos_gai_uncategorized() {
         .await
         .expect_err("NXDOMAIN must error");
 
+    // (1) Guard: top-level Display must NOT match — confirms chain walk required.
     let top_display = err.to_string();
     assert!(
         !DNS_ERROR_AC.is_match(&top_display),
@@ -9790,14 +9910,57 @@ async fn test_is_dns_error_walks_chain_for_macos_gai_uncategorized() {
          this test is meaningful only because per-layer scanning is required. \
          Got: {top_display}"
     );
+
+    // (2) is_dns_error must return true via chain walk.
     assert!(
         is_dns_error(&err),
         "is_dns_error must classify reqwest NXDOMAIN error via source-chain walk"
     );
+
+    // (3) Mapped status MUST be 525, not the 503 catch-all.
+    let mapped = get_error_http_status_code(&err);
     assert_eq!(
-        get_error_http_status_code(&err),
-        *DNS_RESOLVE_ERROR,
-        "NXDOMAIN must map to 525 (permanent), not 503 (retryable)"
+        mapped, *DNS_RESOLVE_ERROR,
+        "NXDOMAIN must map to 525 (permanent), not 503 catch-all (retryable)"
+    );
+    assert_ne!(
+        mapped, *UNREACHABLE_REQUEST_ERROR,
+        "NXDOMAIN must NOT fall through to *UNREACHABLE_REQUEST_ERROR (503) — \
+         that path is retryable and would burn the retry budget"
+    );
+
+    // (4) is_retryable_status on the mapped code must be false.
+    assert!(
+        !is_retryable_status(mapped),
+        "is_retryable_status({mapped}) must be false for DNS-classified failures"
+    );
+
+    // (5) A Page built from this status must have should_retry=false.
+    //     get_error_status_base sets should_retry based on:
+    //       is_timeout || (is_connect && is_retryable_status(mapped))
+    //         || should_attempt_retry || retryable er.status() || is_retryable_status(mapped)
+    //     For DNS: is_connect=true but is_retryable_status(525)=false,
+    //              er.status()=None, h2 reason=None, no timeout. All branches false.
+    let dns_page = build(
+        "https://orthwestsci.invalid",
+        PageResponse {
+            status_code: mapped,
+            content: None,
+            ..Default::default()
+        },
+    );
+    assert!(
+        !dns_page.should_retry,
+        "Page.should_retry MUST be false for DNS-classified failures \
+         (mapped status: {mapped})"
+    );
+
+    // (6) needs_retry() short-circuits every retry loop.
+    assert!(
+        !dns_page.needs_retry(),
+        "Page::needs_retry() MUST be false — every retry loop in website.rs \
+         is gated on `while page.needs_retry() && retry_count > 0`, so this \
+         is the structural guarantee that DNS errors never enter the loop body"
     );
 }
 

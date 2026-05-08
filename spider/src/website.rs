@@ -543,6 +543,16 @@ macro_rules! chrome_page_post_process {
         #[cfg(feature = "parallel_backends")]
         if let Some(ref mut pb_set) = $pb_backend_set {
             if let (Some(ref pb_cfg), Some(ref pb_trk)) = (&$pb_config_ref, &$pb_tracker_ref) {
+                // Permanent destination-side failure (525 DNS, 526 unreachable,
+                // 310 redirect cap): every backend would hit the same condition,
+                // so abort siblings immediately instead of burning the grace
+                // window. See `crate::page::is_permanent_target_failure`.
+                if crate::page::is_permanent_target_failure(page.status_code) {
+                    pb_set.abort_all();
+                    pb_trk.record_race(0);
+                    pb_trk.record_success(0);
+                    pb_trk.record_win(0);
+                } else {
                 let primary_score = page.quality_score();
                 pb_trk.record_race(0);
                 pb_trk.record_success(0);
@@ -604,6 +614,7 @@ macro_rules! chrome_page_post_process {
                 } else {
                     pb_set.abort_all();
                     pb_trk.record_win(0);
+                }
                 }
             }
         }
@@ -7514,6 +7525,19 @@ impl Website {
                                                 pb_set.abort_all();
                                                 pb_trk.record_win(0);
                                                 crate::utils::parallel_backends::tag_page_source(&mut page, "primary");
+                                            } else if crate::page::is_permanent_target_failure(page.status_code) {
+                                                // Permanent destination-side failure (525 DNS,
+                                                // 526 unreachable / SSL, 310 redirect cap):
+                                                // every backend would hit the same condition.
+                                                // Skip scoring + grace period entirely so a
+                                                // single NXDOMAIN doesn't burn the full grace
+                                                // window waiting for siblings that are
+                                                // guaranteed to fail the same way.
+                                                pb_set.abort_all();
+                                                pb_trk.record_race(0);
+                                                pb_trk.record_success(0);
+                                                pb_trk.record_win(0);
+                                                crate::utils::parallel_backends::tag_page_source(&mut page, "primary");
                                             } else {
                                                 // Legacy path (hedge feature or runtime-disabled
                                                 // race): score primary, grace-period collect.
@@ -8348,6 +8372,16 @@ impl Website {
                                                             #[cfg(feature = "parallel_backends")]
                                                             if let Some(ref mut pb_set) = pb_backend_set {
                                                                 if let (Some(ref pb_cfg), Some(ref pb_trk)) = (&pb_config_ref, &pb_tracker_ref) {
+                                                                if crate::page::is_permanent_target_failure(page.status_code) {
+                                                                    // Permanent destination-side failure — every backend
+                                                                    // would hit the same DNS/network/redirect condition.
+                                                                    // Skip scoring + grace period entirely.
+                                                                    pb_set.abort_all();
+                                                                    pb_trk.record_race(0);
+                                                                    pb_trk.record_success(0);
+                                                                    pb_trk.record_win(0);
+                                                                    crate::utils::parallel_backends::tag_page_source(&mut page, "primary");
+                                                                } else {
                                                                     let primary_score = crate::utils::parallel_backends::html_quality_score_validated(
                                                                         page.get_bytes(),
                                                                         page.status_code,
@@ -8409,6 +8443,7 @@ impl Website {
                                                                         pb_trk.record_win(0);
                                                                         crate::utils::parallel_backends::tag_page_source(&mut page, "primary");
                                                                     }
+                                                                }
                                                                 }
                                                             }
                                                             // Drop the JoinSet so completed-but-unread backend
