@@ -5703,6 +5703,24 @@ impl Website {
                 }
             }
 
+            // Apply the redirect-aware selector update BEFORE link extraction
+            // so site-relative hrefs (e.g. `/foo`) resolve against the rendered
+            // page's host, not the original input host. Without this, a 301 from
+            // `fleet.io` → `www.fleetio.com` left every extracted `/path` link
+            // pointing at the pre-redirect host (which then 404s).
+            if let Some(domain) = page.final_redirect_destination.as_deref() {
+                let domain_owned = domain.to_string();
+                let prior_domain = self.domain_parsed.take();
+                crate::utils::modify_selectors(
+                    &prior_domain,
+                    &domain_owned,
+                    &mut self.domain_parsed,
+                    &mut self.url,
+                    base,
+                    AllowedDomainTypes::new(self.configuration.subdomains, self.configuration.tld),
+                );
+            }
+
             // Skip link extraction for single-page crawls unless the user wants page links.
             let (page_links, bytes_transferred): (HashSet<CaseInsensitiveString>, Option<f64>) =
                 if self.single_page() && !self.configuration.return_page_links {
@@ -5717,18 +5735,6 @@ impl Website {
                     )
                     .await
                 };
-
-            if let Some(domain) = &page.final_redirect_destination {
-                let prior_domain = self.domain_parsed.take();
-                crate::utils::modify_selectors(
-                    &prior_domain,
-                    domain,
-                    &mut self.domain_parsed,
-                    &mut self.url,
-                    base,
-                    AllowedDomainTypes::new(self.configuration.subdomains, self.configuration.tld),
-                );
-            }
 
             emit_log(self.url.inner());
 
