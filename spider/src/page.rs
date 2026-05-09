@@ -364,33 +364,35 @@ struct HostDnsCacheEntry {
     inserted_at: std::time::Instant,
 }
 
-#[derive(Debug, Default)]
-struct HostDnsCacheInner {
-    map: std::collections::HashMap<String, HostDnsCacheEntry>,
-    /// Insertion-order FIFO for bounded eviction. Length tracks `map.len()`
-    /// — entries are pushed on insert and popped on evict.
-    fifo: std::collections::VecDeque<String>,
-}
-
 /// Bounded per-process cache for [`host_resolves_locally`] results.
 ///
-/// **DoS / overflow protection** — every insertion is gated by `capacity`;
-/// when full, the oldest entry (FIFO) is evicted before the new one is
-/// inserted. A pathological crawl with thousands of distinct hostnames
-/// keeps memory bounded at `capacity × ~entry_size` regardless of input
-/// volume.
+/// **No user-facing locks** — backed by [`dashmap::DashMap`], the
+/// idiomatic Rust concurrent map. Reads return values atomically; writes
+/// take a per-shard internal lock (held for ~hundreds of ns, not across
+/// any `.await`). No `Mutex` / `RwLock` is exposed in this type's API.
 ///
-/// **Concurrency** — single `std::sync::RwLock<HostDnsCacheInner>`,
-/// briefly held, **never across an `.await` point**. The DNS lookup
-/// (`tokio::net::lookup_host`) runs *between* a read lock (cache miss
-/// check) and a write lock (insert). No deadlock paths; no lock held
-/// while doing async I/O.
+/// **DoS / overflow protection** — every insertion is gated by `capacity`.
+/// When at-or-above capacity after an insert, eviction runs to bring
+/// length back down: prefer evicting an expired (TTL-stale) entry; if
+/// none, evict the entry with the smallest `inserted_at` (oldest).
+/// O(N) per eviction, where N ≤ capacity, so worst case is constant time
+/// for a fixed capacity. A pathological crawl with thousands of distinct
+/// hostnames keeps memory bounded at `capacity × ~entry_size` regardless
+/// of input volume.
+///
+/// **Concurrency** — DashMap shards split contention; concurrent reads
+/// and writes to *different* hosts proceed independently. The DNS lookup
+/// (`tokio::net::lookup_host`, async) runs *between* a `get` (cache miss
+/// check) and an `insert`. No deadlock paths because no lock is held
+/// across the await.
 ///
 /// **TTL** — entries expire after `ttl` so stale negative-DNS results
 /// don't pin a hostname permanently. Expired entries are returned as
 /// `None` from [`Self::get`] and re-checked via a fresh `lookup_host`.
+/// They're also preferred during eviction (cheap to identify, no
+/// information loss).
 pub struct HostDnsCache {
-    inner: std::sync::RwLock<HostDnsCacheInner>,
+    entries: dashmap::DashMap<String, HostDnsCacheEntry>,
     capacity: usize,
     ttl: std::time::Duration,
 }
@@ -400,20 +402,17 @@ impl HostDnsCache {
     pub fn new(capacity: usize, ttl: std::time::Duration) -> Self {
         let capacity = capacity.max(1);
         Self {
-            inner: std::sync::RwLock::new(HostDnsCacheInner {
-                map: std::collections::HashMap::with_capacity(capacity),
-                fifo: std::collections::VecDeque::with_capacity(capacity),
-            }),
+            entries: dashmap::DashMap::with_capacity(capacity),
             capacity,
             ttl,
         }
     }
 
     /// Look up `host`. Returns `Some` only if the entry exists AND is
-    /// younger than `ttl`. Holds a read lock briefly; never blocks.
+    /// younger than `ttl`. Lock-free in the common case (sharded DashMap
+    /// read); never blocks across an `.await`.
     pub fn get(&self, host: &str) -> Option<LocalDnsState> {
-        let guard = self.inner.read().ok()?;
-        let entry = guard.map.get(host).copied()?;
+        let entry = *self.entries.get(host)?;
         if entry.inserted_at.elapsed() < self.ttl {
             Some(entry.state)
         } else {
@@ -421,49 +420,94 @@ impl HostDnsCache {
         }
     }
 
-    /// Insert `host -> state`. If at capacity, evicts the oldest entry
-    /// (FIFO) before inserting. Holds a write lock briefly; never blocks
-    /// across an `.await`.
+    /// Insert `host -> state`. After insertion, evicts entries until
+    /// `len() <= capacity`. Eviction prefers expired entries (cheap, no
+    /// info loss); otherwise drops the oldest by `inserted_at`.
+    ///
+    /// Concurrency note: under heavy contention from inserts of distinct
+    /// hosts the cache may transiently hold `capacity + N` entries
+    /// because each thread sees a stale len before its insert. The
+    /// post-insert eviction loop converges back to `len <= capacity`.
+    /// Capacity is therefore a *soft* hard-cap under contention; the
+    /// hard cap is enforced single-threaded
+    /// (see `test_host_dns_cache_bounded_capacity_evicts_fifo`).
     pub fn insert(&self, host: String, state: LocalDnsState) {
-        let mut guard = match self.inner.write() {
-            Ok(g) => g,
-            Err(_) => return, // Poisoned (caller panicked) — skip cache write.
-        };
-        let HostDnsCacheInner { map, fifo } = &mut *guard;
         let entry = HostDnsCacheEntry {
             state,
             inserted_at: std::time::Instant::now(),
         };
-        // If updating existing, refresh in place — keep FIFO position.
-        if map.contains_key(&host) {
-            map.insert(host, entry);
+
+        // Atomic insert (DashMap's `insert` replaces if present, inserts
+        // if absent). For an existing host we just refresh the value —
+        // no size change.
+        let was_present = self.entries.insert(host, entry).is_some();
+        if was_present {
             return;
         }
-        // New entry: evict if needed, then push.
-        while fifo.len() >= self.capacity {
-            if let Some(evicted) = fifo.pop_front() {
-                map.remove(&evicted);
-            } else {
-                break;
+
+        // New entry — bring size back under cap. Loop because under
+        // concurrency a single eviction may not be enough; in practice
+        // it almost always is.
+        while self.entries.len() > self.capacity {
+            if !self.evict_one() {
+                break; // Empty / racing eviction — give up to avoid spinning.
             }
         }
-        fifo.push_back(host.clone());
-        map.insert(host, entry);
+    }
+
+    /// Find and remove either an expired entry (preferred) or the oldest
+    /// entry. Returns `true` if something was evicted. O(N) where
+    /// N = current size, bounded by `capacity` (so constant time for a
+    /// fixed cache size).
+    fn evict_one(&self) -> bool {
+        let now = std::time::Instant::now();
+        let mut oldest_key: Option<String> = None;
+        let mut oldest_at: Option<std::time::Instant> = None;
+
+        // Single pass: short-circuit on first expired entry, otherwise
+        // remember the oldest by timestamp.
+        for kv in self.entries.iter() {
+            let inserted = kv.value().inserted_at;
+            if now.duration_since(inserted) >= self.ttl {
+                let key = kv.key().clone();
+                drop(kv); // Release the iter ref before mutating.
+                return self.entries.remove(&key).is_some();
+            }
+            match oldest_at {
+                None => {
+                    oldest_at = Some(inserted);
+                    oldest_key = Some(kv.key().clone());
+                }
+                Some(prev) if inserted < prev => {
+                    oldest_at = Some(inserted);
+                    oldest_key = Some(kv.key().clone());
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(k) = oldest_key {
+            self.entries.remove(&k).is_some()
+        } else {
+            false
+        }
     }
 
     /// Current cached entry count.
     pub fn len(&self) -> usize {
-        self.inner.read().map(|g| g.map.len()).unwrap_or(0)
+        self.entries.len()
+    }
+
+    /// `true` when the cache holds no entries.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 
     /// Drop all entries — exposed for tests so cross-test interference
     /// from the global cache doesn't surface as flaky assertions.
     #[cfg(test)]
     pub fn clear(&self) {
-        if let Ok(mut g) = self.inner.write() {
-            g.map.clear();
-            g.fifo.clear();
-        }
+        self.entries.clear();
     }
 }
 
