@@ -170,6 +170,35 @@ lazy_static! {
     ///                    "ssl handshake failed",  "SSL handshake failed"
     /// - Chrome surface → "ERR_SSL_VERSION_OR_CIPHER_MISMATCH",
     ///                    "ERR_SSL_PROTOCOL_ERROR"
+    ///
+    /// Aho-Corasick automaton for HTTP-proxy `CONNECT` tunnel failures.
+    ///
+    /// When a proxy returns non-200 to a `CONNECT` request (target NXDOMAIN at
+    /// the proxy, target server down, or proxy-side outage), `hyper-util`
+    /// surfaces the failure as `TunnelUnsuccessful`. Reqwest's top-level
+    /// Display is just `"error sending request for url (...)"`; the actual
+    /// signal lives on inner sources:
+    ///   src[0]: `"client error (Connect)"`
+    ///   src[1]: `"tunnel error: unsuccessful"`
+    ///
+    /// Without explicit detection these errors fall through `is_connect()` to
+    /// `*UNREACHABLE_REQUEST_ERROR` (503 — retryable), and the retry loop
+    /// burns the full budget × proxy rotation × exponential backoff (with
+    /// `timeout_mult=2` for proxied builds → up to several minutes per host).
+    ///
+    /// Reqwest does NOT expose the proxy's CONNECT response body, so we can't
+    /// distinguish "target NXDOMAIN at proxy" from "target down" or
+    /// "proxy-side outage" — all three surface as `TunnelUnsuccessful`. Treat
+    /// the bucket as `*ADDRESS_UNREACHABLE_ERROR` (526, non-retryable through
+    /// the same client) so the failure exits fast. Hedge through a sibling
+    /// proxy still races (parallel, not sequential). User-supplied
+    /// [`RetryStrategy`](crate::retry_strategy::RetryStrategy) can opt back
+    /// into rotation-based retries.
+    static ref PROXY_TUNNEL_FAILURE_AC: aho_corasick::AhoCorasick = aho_corasick::AhoCorasick::new([
+        "tunnel error",        // hyper-util Display
+        "TunnelUnsuccessful",  // hyper-util Debug + variant name (defensive)
+    ]).expect("valid patterns");
+
     static ref SSL_HANDSHAKE_ERROR_AC: aho_corasick::AhoCorasick = aho_corasick::AhoCorasick::new([
         // rustls — colon disambiguates from incidental URL hits
         "alert: HandshakeFailure",
@@ -257,6 +286,42 @@ fn is_dns_error(err: &crate::client::Error) -> bool {
             }
         }
         if DNS_ERROR_AC.is_match(&e.to_string()) {
+            return true;
+        }
+        source = e.source();
+        depth += 1;
+    }
+
+    false
+}
+
+/// Check whether a reqwest error is a proxy `CONNECT` tunnel failure
+/// (proxy returned non-200 to the CONNECT request).
+///
+/// Walks the source chain (depth-bounded) and AC-scans each layer's Display.
+/// Same architectural reasoning as [`is_dns_error`]: reqwest's Display does
+/// not chain source text, so a single top-level scan misses the inner
+/// `"tunnel error: unsuccessful"` phrase.
+///
+/// Only meaningful when `err.is_connect() == true` — a non-connect error
+/// path can't surface a tunnel failure.
+fn is_proxy_tunnel_failure(err: &crate::client::Error) -> bool {
+    use std::error::Error;
+
+    // Top-level scan first (cheap if the wrapper happens to carry the phrase).
+    if PROXY_TUNNEL_FAILURE_AC.is_match(&err.to_string()) {
+        return true;
+    }
+
+    // Walk source chain — typically src[1] is `TunnelUnsuccessful` whose
+    // Display is `"tunnel error: unsuccessful"`.
+    let mut source: Option<&(dyn Error + 'static)> = err.source();
+    let mut depth = 0u8;
+    while let Some(e) = source {
+        if depth >= 6 {
+            break;
+        }
+        if PROXY_TUNNEL_FAILURE_AC.is_match(&e.to_string()) {
             return true;
         }
         source = e.source();
@@ -376,6 +441,23 @@ pub(crate) fn get_error_http_status_code(err: &crate::client::Error) -> StatusCo
     // existing branches).
     if is_dns_error(err) {
         return *DNS_RESOLVE_ERROR;
+    }
+
+    // HTTP-proxy `CONNECT` tunnel failures — proxy returned non-200 to the
+    // CONNECT request. Caused by (a) target NXDOMAIN at the proxy, (b) target
+    // server down, or (c) proxy-side outage; reqwest doesn't expose the
+    // proxy's response body so we can't distinguish, but every cause is
+    // permanent through *this* client (same proxy, same target). Map to 526
+    // (`ADDRESS_UNREACHABLE_ERROR`, non-retryable) so the in-process retry
+    // loop exits fast instead of burning the full budget × proxy rotation ×
+    // exponential backoff (which with `timeout_mult=2` for proxied builds
+    // could push per-host failure to several minutes).
+    //
+    // Gated on `err.is_connect()` (matches when the failure surfaced through
+    // the connector, which is where hyper-util emits `TunnelUnsuccessful`)
+    // so non-connect errors stay on their existing classification.
+    if err.is_connect() && is_proxy_tunnel_failure(err) {
+        return *ADDRESS_UNREACHABLE_ERROR;
     }
 
     // `http-cache-reqwest` (the middleware spider attaches when
@@ -9571,6 +9653,110 @@ fn test_dns_error_no_retry() {
     );
 }
 
+/// Regression: HTTP-proxy `CONNECT` failures (proxy returned non-200) must
+/// classify to 526 (non-retryable) so the retry loop doesn't burn the full
+/// budget × proxy rotation × exponential backoff. Without this, the chain
+/// pattern is:
+///   src[0]: "client error (Connect)"
+///   src[1]: "tunnel error: unsuccessful"
+/// Neither of which contains DNS phrases, so `is_dns_error` returns false,
+/// and the immediate-source `io::Error` downcast in `get_error_http_status_code`
+/// also fails (src[1] is `TunnelUnsuccessful`, not an io::Error). The error
+/// falls through to `*UNREACHABLE_REQUEST_ERROR` (503 — retryable).
+///
+/// Test runs a fake HTTP proxy on a loopback port that responds to every
+/// CONNECT with `HTTP/1.1 502 Bad Gateway`, then asserts:
+///   (1) reqwest sees this as `is_connect() == true`
+///   (2) `is_proxy_tunnel_failure` returns true via chain walk
+///   (3) status maps to 526 (`*ADDRESS_UNREACHABLE_ERROR`), NOT 503
+///   (4) `is_retryable_status(526) == false`
+///   (5) Page built from the response has `should_retry == false` and
+///       `needs_retry() == false` → every retry loop short-circuits
+#[cfg(not(feature = "decentralized"))]
+#[tokio::test(flavor = "current_thread")]
+async fn test_proxy_tunnel_failure_no_retry() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    // Fake HTTP proxy: responds 502 to any CONNECT request.
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let proxy_addr = listener.local_addr().expect("local addr");
+    let proxy_port = proxy_addr.port();
+
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { continue };
+            let mut buf = [0u8; 1024];
+            let _ = s.read(&mut buf);
+            let _ = s.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
+            let _ = s.flush();
+        }
+    });
+
+    let proxy_url = format!("http://127.0.0.1:{proxy_port}");
+    let client = reqwest::Client::builder()
+        .proxy(reqwest::Proxy::all(&proxy_url).expect("valid proxy"))
+        .connect_timeout(std::time::Duration::from_secs(3))
+        .build()
+        .expect("client");
+
+    let err = client
+        .get("https://example.invalid/")
+        .send()
+        .await
+        .expect_err("CONNECT 502 must error");
+
+    // (1) Surfaces as a connect error.
+    assert!(
+        err.is_connect(),
+        "proxy CONNECT 502 must surface as is_connect()=true; got: {err}"
+    );
+
+    // (2) Chain walk catches the tunnel pattern.
+    assert!(
+        is_proxy_tunnel_failure(&err),
+        "is_proxy_tunnel_failure must catch hyper-util TunnelUnsuccessful via chain walk; \
+         got: {err:?}"
+    );
+
+    // (3) Maps to 526, NOT the 503 catch-all.
+    let mapped = get_error_http_status_code(&err);
+    assert_eq!(
+        mapped, *ADDRESS_UNREACHABLE_ERROR,
+        "proxy CONNECT failure must map to 526 (ADDRESS_UNREACHABLE_ERROR), \
+         not 503 (UNREACHABLE_REQUEST_ERROR catch-all). \
+         A retryable 503 would burn the full retry budget × proxy rotation × backoff."
+    );
+    assert_ne!(
+        mapped, *UNREACHABLE_REQUEST_ERROR,
+        "proxy CONNECT failure must NOT fall through to 503"
+    );
+
+    // (4) Non-retryable.
+    assert!(
+        !is_retryable_status(mapped),
+        "is_retryable_status({mapped}) must be false for proxy CONNECT failures"
+    );
+
+    // (5) Page-level short-circuit.
+    let page = build(
+        "https://example.invalid",
+        PageResponse {
+            status_code: mapped,
+            content: None,
+            ..Default::default()
+        },
+    );
+    assert!(
+        !page.should_retry,
+        "Page.should_retry must be false for proxy CONNECT failures"
+    );
+    assert!(
+        !page.needs_retry(),
+        "Page::needs_retry() must be false → every retry loop short-circuits"
+    );
+}
+
 /// End-to-end retry-strategy contract: a custom `RetryStrategy` configured to
 /// retry up to 10× with `should_retry: true` MUST NEVER be consulted when the
 /// page status is 525 (DNS_RESOLVE_ERROR). Every retry loop in `website.rs`
@@ -9855,6 +10041,49 @@ fn test_dns_error_ac_matches_existing_resolver_strings() {
     );
     assert!(DNS_ERROR_AC.is_match("No address associated with hostname"));
     assert!(DNS_ERROR_AC.is_match("getaddrinfo ENOTFOUND example.invalid"));
+}
+
+/// `PROXY_TUNNEL_FAILURE_AC` patterns must NOT match unrelated transport
+/// errors. False positives would silently flip transient failures (TLS, DNS,
+/// connection refused, etc.) into the non-retryable 526 bucket.
+#[test]
+fn test_proxy_tunnel_ac_rejects_unrelated_errors() {
+    // Pure DNS (local resolver) — must NOT match the tunnel AC.
+    assert!(!PROXY_TUNNEL_FAILURE_AC.is_match("dns error"));
+    assert!(!PROXY_TUNNEL_FAILURE_AC
+        .is_match("dns error: failed to lookup address information: nodename nor servname"));
+    assert!(!PROXY_TUNNEL_FAILURE_AC.is_match("Name or service not known"));
+    assert!(!PROXY_TUNNEL_FAILURE_AC.is_match("ENOTFOUND"));
+    // Connection refused / reset / aborted — handled by typed io::Error kinds.
+    assert!(!PROXY_TUNNEL_FAILURE_AC.is_match("connection refused"));
+    assert!(!PROXY_TUNNEL_FAILURE_AC.is_match("connection reset by peer"));
+    assert!(!PROXY_TUNNEL_FAILURE_AC.is_match("connection aborted"));
+    // TLS — handled by `is_ssl_handshake_error`.
+    assert!(!PROXY_TUNNEL_FAILURE_AC.is_match("tls handshake failure"));
+    assert!(!PROXY_TUNNEL_FAILURE_AC.is_match("alert: HandshakeFailure"));
+    assert!(!PROXY_TUNNEL_FAILURE_AC.is_match("ERR_SSL_VERSION_OR_CIPHER_MISMATCH"));
+    // Timeouts.
+    assert!(!PROXY_TUNNEL_FAILURE_AC.is_match("operation timed out"));
+    assert!(!PROXY_TUNNEL_FAILURE_AC.is_match("request timed out"));
+    // Generic / empty.
+    assert!(!PROXY_TUNNEL_FAILURE_AC.is_match("error sending request for url (https://x.test/)"));
+    assert!(!PROXY_TUNNEL_FAILURE_AC.is_match("client error (Connect)"));
+    assert!(!PROXY_TUNNEL_FAILURE_AC.is_match("broken pipe"));
+    assert!(!PROXY_TUNNEL_FAILURE_AC.is_match(""));
+    // Positive controls — actual hyper-util surfaces.
+    assert!(PROXY_TUNNEL_FAILURE_AC.is_match("tunnel error: unsuccessful"));
+    assert!(PROXY_TUNNEL_FAILURE_AC.is_match("TunnelUnsuccessful"));
+}
+
+/// `DNS_ERROR_AC` must NOT match tunnel-failure phrases — otherwise a proxy
+/// CONNECT failure with no DNS context would be misclassified to 525 (DNS)
+/// instead of 526 (tunnel). The two classifiers must be mutually exclusive
+/// over realistic chain phrases.
+#[test]
+fn test_dns_ac_rejects_tunnel_failure_phrases() {
+    assert!(!DNS_ERROR_AC.is_match("tunnel error: unsuccessful"));
+    assert!(!DNS_ERROR_AC.is_match("TunnelUnsuccessful"));
+    assert!(!DNS_ERROR_AC.is_match("client error (Connect)"));
 }
 
 /// Unrelated transport errors must NOT be misclassified as DNS — otherwise
