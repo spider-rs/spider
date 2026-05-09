@@ -604,11 +604,12 @@ pub async fn host_resolves_locally(host: &str, timeout: std::time::Duration) -> 
 /// the proxy signal alone produced the v2.51.165 regression where
 /// legitimate proxied requests on transient hiccups returned 526.
 ///
-/// **B. 526 + cache-wrapped transport error** (`ADDRESS_UNREACHABLE_ERROR`
-/// + `err.is_middleware()` + `CACHE_WRAPPED_TRANSPORT_AC` match).  When
-/// `cache_request` is active, `http-cache-reqwest` flattens the underlying
-/// transport error into `HttpCacheError::Cache(String)`, discarding the
-/// source chain — `is_proxy_tunnel_failure` can't walk it, so
+/// **B. 526 + cache-wrapped transport error**
+/// (`ADDRESS_UNREACHABLE_ERROR` paired with `err.is_middleware()` and a
+/// `CACHE_WRAPPED_TRANSPORT_AC` match).  When `cache_request` is active,
+/// `http-cache-reqwest` flattens the underlying transport error into
+/// `HttpCacheError::Cache(String)`, discarding the source chain —
+/// `is_proxy_tunnel_failure` can't walk it, so
 /// [`get_error_http_status_code`] conservatively buckets the lot as 526
 /// to avoid the retry-loop hang. That conservative classification
 /// over-counts: a confirmed-NXDOMAIN host gets 526 instead of 525, so
