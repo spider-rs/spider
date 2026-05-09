@@ -584,7 +584,19 @@ pub async fn host_resolves_locally_cached(
         return cached;
     }
     let state = host_resolves_locally(host, timeout).await;
-    cache.insert(host.to_string(), state);
+    // Only cache definitive states. `TimedOut` is a transient,
+    // resolver-load-dependent outcome — caching it (with a 5-minute TTL)
+    // poisons the cache for any subsequent caller that probes the same
+    // host with a longer timeout. In production this manifests as
+    // `confirm_tunnel_failure_with_local_dns` returning the cached
+    // `TimedOut` instead of probing, so the 525 upgrade never fires for
+    // confirmed-NXDOMAIN hosts after the first slow lookup. The
+    // miss-path cost is one fresh `lookup_host` per uncached call —
+    // bounded by the caller's timeout, same as before — but no longer
+    // amplified into a 5-minute regression.
+    if !matches!(state, LocalDnsState::TimedOut) {
+        cache.insert(host.to_string(), state);
+    }
     state
 }
 
@@ -4393,7 +4405,7 @@ impl Page {
         confirm_chrome_tunnel_failure_with_local_dns(
             &mut p,
             url,
-            std::time::Duration::from_millis(500),
+            std::time::Duration::from_millis(1_500),
         )
         .await;
 
@@ -4681,7 +4693,7 @@ impl Page {
         confirm_chrome_tunnel_failure_with_local_dns(
             &mut p,
             url,
-            std::time::Duration::from_millis(500),
+            std::time::Duration::from_millis(1_500),
         )
         .await;
 
@@ -4935,7 +4947,7 @@ impl Page {
         confirm_chrome_tunnel_failure_with_local_dns(
             &mut p,
             url,
-            std::time::Duration::from_millis(500),
+            std::time::Duration::from_millis(1_500),
         )
         .await;
 
@@ -10378,6 +10390,46 @@ async fn test_host_dns_cache_concurrent_no_deadlock() {
     );
 }
 
+/// **Regression v2.51.176**: `host_resolves_locally_cached` MUST NOT cache
+/// `TimedOut` outcomes. A transient resolver hiccup (busy VPC DNS, brief
+/// network slowdown) on a tight-timeout caller would otherwise pin
+/// `TimedOut` for the cache TTL (5 minutes by default) and every later
+/// caller — including `confirm_tunnel_failure_with_local_dns` — would see
+/// the stale TimedOut instead of probing. In production this manifests as
+/// `confirm_tunnel` returning the cached TimedOut → no 525 upgrade for
+/// confirmed-NXDOMAIN hosts → backend treats 503 as retryable → 30-60s
+/// hangs on dead hosts. Reproduced as a 36s+ wait on
+/// `https://midwestrodding.com/` after a 500ms-timeout call timed out.
+#[cfg(not(feature = "decentralized"))]
+#[tokio::test(flavor = "current_thread")]
+async fn test_host_resolves_locally_cached_does_not_cache_timed_out() {
+    let host = "this-host-must-not-exist-cache-pollution-test.invalid";
+
+    // Step 1: tight 1µs timeout — practically guaranteed to TimedOut on
+    // any system because tokio::time::timeout fires before lookup_host
+    // completes its first DNS round-trip.
+    let state1 = host_resolves_locally_cached(host, std::time::Duration::from_micros(1)).await;
+    assert_eq!(
+        state1,
+        LocalDnsState::TimedOut,
+        "1µs timeout must return TimedOut (sanity check for the repro setup)"
+    );
+
+    // Step 2: generous 5s timeout — must re-probe and return NxDomain
+    // (the .invalid TLD is RFC 2606 — never resolves). Pre-fix: returned
+    // the cached TimedOut from step 1 because the wrapper unconditionally
+    // inserted the TimedOut state.
+    let state2 = host_resolves_locally_cached(host, std::time::Duration::from_secs(5)).await;
+    assert_eq!(
+        state2,
+        LocalDnsState::NxDomain,
+        "second call with longer timeout must re-probe and resolve to \
+         NxDomain — TimedOut from call 1 must NOT be cached. This is the \
+         midwestrodding regression fix; cache pollution would have left \
+         confirm_tunnel unable to upgrade to 525 for 5 minutes."
+    );
+}
+
 /// `host_resolves_locally_cached`: second call for the same host hits the
 /// cache (much faster than the first). Validates the wrapper actually uses
 /// the cache.
@@ -12445,7 +12497,7 @@ fn test_get_timeout_proxy_errors() {
         let timeout = page.get_timeout();
         assert_eq!(
             timeout,
-            Some(std::time::Duration::from_millis(500)),
+            Some(std::time::Duration::from_millis(1_500)),
             "{code} → 500ms"
         );
     }

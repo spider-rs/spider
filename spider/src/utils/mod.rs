@@ -6504,7 +6504,7 @@ async fn build_error_page_response(target_url: &str, err: RequestError) -> PageR
         initial_status,
         &err,
         target_url,
-        std::time::Duration::from_millis(500),
+        std::time::Duration::from_millis(1_500),
     )
     .await;
     page_response.error_for_status = Some(Err(err));
@@ -7204,7 +7204,7 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
                 initial_status,
                 &err,
                 target_url,
-                std::time::Duration::from_millis(500),
+                std::time::Duration::from_millis(1_500),
             )
             .await;
 
@@ -7401,7 +7401,7 @@ pub async fn fetch_page_html<'h>(
                                     initial_status,
                                     &err,
                                     target_url,
-                                    std::time::Duration::from_millis(500),
+                                    std::time::Duration::from_millis(1_500),
                                 )
                                 .await;
 
@@ -8153,7 +8153,7 @@ async fn _fetch_page_html_chrome<'h>(
                                     initial_status,
                                     &err,
                                     target_url,
-                                    std::time::Duration::from_millis(500),
+                                    std::time::Duration::from_millis(1_500),
                                 )
                                 .await;
 
