@@ -758,31 +758,74 @@ async fn confirm_chrome_tunnel_failure_with_local_dns(
     target_url: &str,
     timeout: std::time::Duration,
 ) {
-    // Gate 1: status must be the chrome 599 catch-all.
+    // Gate 1: chrome failure status. Two chrome shapes can mean "couldn't
+    // reach the destination":
+    //
+    //   * 599 (CHROME_UNKNOWN) — chrome rendered an interstitial.
+    //     `build()` set this from the chrome event listener path that
+    //     observed `ERR_TUNNEL_CONNECTION_FAILED` / `ERR_PROXY_CONNECTION_FAILED`.
+    //     Body contains a chrome error page; classify via interstitial parse.
+    //
+    //   * 504 (GATEWAY_TIMEOUT, post-`build()` reclass) — chrome navigated
+    //     but produced an empty/shell body; `build()`'s
+    //     `empty_success_*_reclassified_to_504` rule downgraded a 200 to 504.
+    //     Common shape when the SOCKS proxy stalls long enough for chrome's
+    //     navigation timeout to fire before any response body lands.
+    //     Without this branch a confirmed-NXDOMAIN host stays at 504
+    //     (retryable per `is_retryable_status`) and the retry loop burns
+    //     the full budget — observed as ~39s on `https://midwestrodding.com/`
+    //     under request:chrome through Evomi SOCKS5.
+    //
+    // Both upgrade to 525 (DNS_RESOLVE_ERROR) when local DNS independently
+    // confirms NxDomain — same two-signal contract as the HTTP path.
     let chrome_unknown_status = StatusCode::from_u16(599).unwrap_or(StatusCode::BAD_GATEWAY);
-    if page.status_code != chrome_unknown_status {
+    let chrome_empty_504_status = StatusCode::from_u16(504).unwrap_or(StatusCode::GATEWAY_TIMEOUT);
+    let is_chrome_unknown = page.status_code == chrome_unknown_status;
+    let is_chrome_empty_504 = page.status_code == chrome_empty_504_status;
+    if !is_chrome_unknown && !is_chrome_empty_504 {
         return;
     }
 
     // Gates 2 + 3 (scoped borrow): inspect content without holding it
     // across the await below. Drops before any &mut page writes.
-    let is_tunnel_error = {
+    //
+    // For the 599 path: body must be a chrome error interstitial whose
+    // extracted error code is `ERR_TUNNEL_CONNECTION_FAILED` or
+    // `ERR_PROXY_CONNECTION_FAILED`.
+    //
+    // For the 504 path: body must be empty / near-empty. If chrome
+    // rendered real content (a captcha page, a slow API JSON, etc.) it's
+    // not the "couldn't reach destination" pattern and we MUST keep
+    // existing retry semantics. Cap at 256 bytes — anything bigger is
+    // real data, not the empty-success shape that triggered the reclass.
+    let qualifies_for_dns_check = {
         let content = page.get_html_bytes_u8();
-        if content.is_empty() || !is_chrome_error_page(content) {
-            false
+        if is_chrome_unknown {
+            if content.is_empty() || !is_chrome_error_page(content) {
+                false
+            } else {
+                extract_chrome_error_code(content)
+                    .map(|code| {
+                        let trimmed = code.strip_prefix("net::").unwrap_or(code);
+                        matches!(
+                            trimmed,
+                            "ERR_TUNNEL_CONNECTION_FAILED" | "ERR_PROXY_CONNECTION_FAILED"
+                        )
+                    })
+                    .unwrap_or(false)
+            }
         } else {
-            extract_chrome_error_code(content)
-                .map(|code| {
-                    let trimmed = code.strip_prefix("net::").unwrap_or(code);
-                    matches!(
-                        trimmed,
-                        "ERR_TUNNEL_CONNECTION_FAILED" | "ERR_PROXY_CONNECTION_FAILED"
-                    )
-                })
-                .unwrap_or(false)
+            // is_chrome_empty_504: body must be empty / near-empty. The
+            // empty-200 reclass rule that produced this 504 already
+            // confirmed the body has no usable payload, but a tiny shell
+            // (`<html></html>`, a meta refresh) still slips through that
+            // rule. Bound the check to 256 bytes so a real document
+            // (captcha, anti-bot interstitial, slow API JSON) keeps the
+            // retryable behaviour.
+            content.len() <= 256
         }
     };
-    if !is_tunnel_error {
+    if !qualifies_for_dns_check {
         return;
     }
 
@@ -800,7 +843,7 @@ async fn confirm_chrome_tunnel_failure_with_local_dns(
     ) {
         page.status_code = *DNS_RESOLVE_ERROR;
         // build()'s `should_retry_status` set this to true based on the
-        // 599 server_error status. Now that we've upgraded to 525,
+        // 599/504 server_error status. Now that we've upgraded to 525,
         // clear it so `needs_retry()` returns false and the retry loop
         // short-circuits — symmetric with the HTTP path's behaviour.
         page.should_retry = false;
@@ -10833,6 +10876,111 @@ async fn test_confirm_chrome_tunnel_failure_gates_short_circuit() {
         page3.status_code, pre_status,
         "non-tunnel errorCode (ERR_CONNECTION_RESET) must stay at 599 — \
          gate 3 short-circuits, no DNS work"
+    );
+}
+
+/// **504 + empty body + NXDOMAIN must upgrade to 525.** New v2.51.175
+/// branch covering chrome's empty-200 → 504 reclassification path.
+/// Reproduces the prod regression where `https://midwestrodding.com/`
+/// under `request:chrome` through Evomi SOCKS5 returned 504 in 39s
+/// (chrome stalled / returned empty body, build()'s
+/// empty_success_*_reclassified_to_504 rule fired, helper didn't fire
+/// because gate 1 only matched 599).
+#[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+#[tokio::test(flavor = "current_thread")]
+async fn test_confirm_chrome_tunnel_failure_504_nxdomain_upgrades_to_525() {
+    // Empty body shape — exactly what triggers the empty-200 reclass.
+    let mut page = Page::default();
+    page.status_code = StatusCode::from_u16(504).unwrap();
+    page.should_retry = true; // 504 is retryable per is_retryable_status
+
+    confirm_chrome_tunnel_failure_with_local_dns(
+        &mut page,
+        "https://this-host-must-not-exist.invalid/",
+        std::time::Duration::from_secs(2),
+    )
+    .await;
+
+    assert_eq!(
+        page.status_code, *DNS_RESOLVE_ERROR,
+        "504 + empty body + local NxDomain must upgrade to 525 — closes the \
+         midwestrodding chrome regression where the helper only fired on 599"
+    );
+    assert!(
+        !page.should_retry,
+        "should_retry must be cleared after 504 → 525 upgrade so chrome \
+         retry loop short-circuits"
+    );
+}
+
+/// **504 + empty body + RESOLVED host must STAY 504.** False-positive
+/// guard: a transient empty response on a legit host (slow API, captcha
+/// rendering, etc.) must keep the existing retryable behaviour. Same
+/// false-positive contract as the 599 path.
+#[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+#[tokio::test(flavor = "current_thread")]
+async fn test_confirm_chrome_tunnel_failure_504_resolved_keeps_504() {
+    let mut page = Page::default();
+    page.status_code = StatusCode::from_u16(504).unwrap();
+    page.should_retry = true;
+
+    confirm_chrome_tunnel_failure_with_local_dns(
+        &mut page,
+        "https://localhost/",
+        std::time::Duration::from_secs(2),
+    )
+    .await;
+
+    assert_eq!(
+        page.status_code,
+        StatusCode::from_u16(504).unwrap(),
+        "504 with locally-resolvable host must stay 504 (transient hiccup, \
+         retryable). Required to avoid false-positives on legit hosts."
+    );
+    assert!(
+        page.should_retry,
+        "should_retry must remain true on resolved hosts — retry can recover"
+    );
+}
+
+/// **504 + non-empty body must STAY 504, no DNS work.** When chrome
+/// renders a real document (captcha interstitial, slow API JSON,
+/// anti-bot wall) and `build()` reclassed it because the document was
+/// not the kind we expected, treat as retryable — body has actual
+/// content, not the empty-success shape. Cap at 256 bytes.
+#[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+#[tokio::test(flavor = "current_thread")]
+async fn test_confirm_chrome_tunnel_failure_504_non_empty_body_stays() {
+    // Build a page with status 504 + a real-content body (>256 bytes
+    // would qualify as "real" data; use 1KB to be unambiguous).
+    // Use `build()` so the html field is set via the public PageResponse
+    // path the way real chrome flows do (1KB > 256B threshold).
+    let big_body = vec![b'x'; 1024];
+    let mut page = build(
+        "https://this-host-must-not-exist.invalid/",
+        PageResponse {
+            status_code: StatusCode::from_u16(504).unwrap(),
+            content: Some(big_body),
+            ..Default::default()
+        },
+    );
+    page.should_retry = true;
+
+    // Even with NXDOMAIN target host, body presence must short-circuit
+    // the upgrade — we got real bytes back, retry semantics preserve.
+    confirm_chrome_tunnel_failure_with_local_dns(
+        &mut page,
+        "https://this-host-must-not-exist.invalid/",
+        std::time::Duration::from_millis(10),
+    )
+    .await;
+
+    assert_eq!(
+        page.status_code,
+        StatusCode::from_u16(504).unwrap(),
+        "504 with real (>256B) body must stay 504 even on NxDomain — body \
+         presence proves chrome got data back; this is the slow-API/captcha \
+         case, not the dead-host case"
     );
 }
 
