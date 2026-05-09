@@ -7191,11 +7191,22 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
             log::info!("error fetching {}", target_url);
             let mut page_response = PageResponse::default();
 
-            if let Some(status_code) = err.status() {
-                page_response.status_code = status_code;
+            let initial_status = if let Some(status_code) = err.status() {
+                status_code
             } else {
-                page_response.status_code = crate::page::get_error_http_status_code(&err);
-            }
+                crate::page::get_error_http_status_code(&err)
+            };
+            // Pair the proxy/cache transport classification with an
+            // independent local DNS lookup. Same two-signal contract as
+            // `build_error_page_response` — confirms NXDOMAIN before
+            // upgrading 503/526 to permanent 525. No-op on other paths.
+            page_response.status_code = crate::page::confirm_tunnel_failure_with_local_dns(
+                initial_status,
+                &err,
+                target_url,
+                std::time::Duration::from_millis(500),
+            )
+            .await;
 
             page_response.error_for_status = Some(Err(err));
             page_response
@@ -7380,12 +7391,19 @@ pub async fn fetch_page_html<'h>(
                             log::info!("error fetching {}", target_url);
                             let mut page_response = PageResponse::default();
 
-                            if let Some(status_code) = err.status() {
-                                page_response.status_code = status_code;
+                            let initial_status = if let Some(status_code) = err.status() {
+                                status_code
                             } else {
-                                page_response.status_code =
-                                    crate::page::get_error_http_status_code(&err);
-                            }
+                                crate::page::get_error_http_status_code(&err)
+                            };
+                            page_response.status_code =
+                                crate::page::confirm_tunnel_failure_with_local_dns(
+                                    initial_status,
+                                    &err,
+                                    target_url,
+                                    std::time::Duration::from_millis(500),
+                                )
+                                .await;
 
                             page_response.error_for_status = Some(Err(err));
                             page_response
@@ -8125,12 +8143,19 @@ async fn _fetch_page_html_chrome<'h>(
                             log::info!("error fetching {}", target_url);
                             let mut page_response = PageResponse::default();
 
-                            if let Some(status_code) = err.status() {
-                                page_response.status_code = status_code;
+                            let initial_status = if let Some(status_code) = err.status() {
+                                status_code
                             } else {
-                                page_response.status_code =
-                                    crate::page::get_error_http_status_code(&err);
-                            }
+                                crate::page::get_error_http_status_code(&err)
+                            };
+                            page_response.status_code =
+                                crate::page::confirm_tunnel_failure_with_local_dns(
+                                    initial_status,
+                                    &err,
+                                    target_url,
+                                    std::time::Duration::from_millis(500),
+                                )
+                                .await;
 
                             page_response.error_for_status = Some(Err(err));
                             page_response

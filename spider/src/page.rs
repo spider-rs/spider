@@ -2453,15 +2453,50 @@ fn h2_permanent_reason_status(err: &crate::client::Error) -> Option<StatusCode> 
 }
 
 /// Get the error status of the page base.
+///
+/// `pre_classified_status` is the status the caller has already chosen
+/// for this `PageResponse` — usually the raw `get_error_http_status_code`
+/// output, but may be an UPGRADED value when an async layer
+/// (`confirm_tunnel_failure_with_local_dns`, the v2.51.168 two-signal
+/// confirmation) has independently classified the error to a permanent
+/// code. When the pre-classified status is already non-retryable
+/// (525/526/310/etc., per `is_retryable_status`), this function returns
+/// early without touching `*should_retry` — that prevents the leak where
+/// the raw error keeps re-classifying as 503 (retryable) even after the
+/// async confirmation upgraded the response status to 525, which otherwise
+/// would force the retry loop to run on a confirmed-permanent host.
+///
+/// For transient classifications (and for callers that don't pre-classify)
+/// the function preserves the original behaviour: examine the raw error
+/// and set `*should_retry = true` when appropriate.
 #[cfg(not(feature = "decentralized"))]
 fn get_error_status_base(
     should_retry: &mut bool,
     error_for_status: Option<Result<crate::utils::RequestResponse, RequestError>>,
+    pre_classified_status: StatusCode,
 ) -> Option<RequestError> {
     match error_for_status {
         Some(e) => match e {
             Ok(_) => None,
             Err(er) => {
+                // **Respect upstream classification (v2.51.172)**. If the
+                // caller already classified this error to a non-retryable
+                // status — typically via the async
+                // `confirm_tunnel_failure_with_local_dns` layer that pairs
+                // the proxy tunnel signal with a local DNS lookup — don't
+                // re-evaluate the raw error and risk overriding
+                // `*should_retry` back to true. The raw error itself is
+                // still a connect-class transport error, so the
+                // `is_retryable_status(get_error_http_status_code(&er))`
+                // check below would always set should_retry=true, undoing
+                // the async upgrade. Returning early preserves
+                // `*should_retry` at whatever build()'s heuristics decided
+                // (which already correctly excludes permanent codes via
+                // `should_retry_status`).
+                if !is_retryable_status(pre_classified_status) {
+                    return Some(er);
+                }
+
                 // Compute the mapped status once and reuse it across every
                 // branch below. Previously this was computed up to twice
                 // per error (once through `is_dns_error` in the connect
@@ -2515,8 +2550,10 @@ fn get_error_status_base(
 fn get_error_status(
     should_retry: &mut bool,
     error_for_status: Option<Result<crate::utils::RequestResponse, RequestError>>,
+    pre_classified_status: StatusCode,
 ) -> Option<String> {
-    get_error_status_base(should_retry, error_for_status).map(|e| e.to_string())
+    get_error_status_base(should_retry, error_for_status, pre_classified_status)
+        .map(|e| e.to_string())
 }
 
 #[cfg(all(feature = "page_error_status_details", not(feature = "decentralized")))]
@@ -2524,8 +2561,10 @@ fn get_error_status(
 fn get_error_status(
     should_retry: &mut bool,
     error_for_status: Option<Result<crate::utils::RequestResponse, RequestError>>,
+    pre_classified_status: StatusCode,
 ) -> Option<std::sync::Arc<reqwest::Error>> {
-    get_error_status_base(should_retry, error_for_status).map(std::sync::Arc::new)
+    get_error_status_base(should_retry, error_for_status, pre_classified_status)
+        .map(std::sync::Arc::new)
 }
 
 #[cfg(not(feature = "decentralized"))]
@@ -2704,7 +2743,7 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
             #[cfg(feature = "time")]
             duration: res.duration,
             status_code: res.status_code,
-            error_status: get_error_status(&mut should_retry, res.error_for_status),
+            error_status: get_error_status(&mut should_retry, res.error_for_status, status),
             final_redirect_destination: if empty_page { None } else { res.final_url },
             #[cfg(feature = "chrome")]
             chrome_page: None,
@@ -2810,7 +2849,7 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
         #[cfg(feature = "time")]
         duration: res.duration,
         status_code: res.status_code,
-        error_status: get_error_status(&mut should_retry, res.error_for_status),
+        error_status: get_error_status(&mut should_retry, res.error_for_status, status),
         final_redirect_destination: if empty_page { None } else { res.final_url },
         #[cfg(feature = "chrome")]
         chrome_page: None,
@@ -10324,6 +10363,142 @@ async fn test_host_resolves_locally_cached_second_call_hits_cache() {
         "cached lookup must be <500µs (got {:?}); cold was {:?}",
         hot,
         cold
+    );
+}
+
+/// **Critical leak guard (v2.51.172)**: when `confirm_tunnel_failure_with_local_dns`
+/// upgrades `PageResponse.status_code` from 503 → 525, `build()` must NOT
+/// re-classify the raw error and force `should_retry=true` again. Pre-fix,
+/// this leak was the reason `midwestrodding.com` (NXDOMAIN through proxy)
+/// kept retrying — `page.status_code` was 525 but `page.should_retry` was
+/// true, so `needs_retry()` returned true and the retry loop ran for
+/// minutes.
+///
+/// Test simulates the full pipeline by:
+///   1. Creating a real reqwest tunnel error (proxy CONNECT 502 to .invalid)
+///   2. Building a `PageResponse` with status_code already upgraded to 525
+///      (the state `build_error_page_response` produces post-confirmation)
+///   3. Running it through `build()` and asserting `Page.should_retry ==
+///      false` and `needs_retry() == false`.
+#[cfg(not(feature = "decentralized"))]
+#[tokio::test(flavor = "current_thread")]
+async fn test_build_respects_pre_classified_525_does_not_force_retry() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    // Fake HTTP proxy returning 502 to every CONNECT.
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let proxy_port = listener.local_addr().expect("addr").port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { continue };
+            let mut buf = [0u8; 1024];
+            let _ = s.read(&mut buf);
+            let _ = s.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
+            let _ = s.flush();
+        }
+    });
+
+    let proxy_url = format!("http://127.0.0.1:{proxy_port}");
+    let client = reqwest::Client::builder()
+        .proxy(reqwest::Proxy::all(&proxy_url).expect("proxy"))
+        .connect_timeout(std::time::Duration::from_secs(3))
+        .build()
+        .expect("client");
+
+    let target = "https://this-host-must-not-exist.invalid/";
+    let err = client.get(target).send().await.expect_err("must err");
+
+    // Simulate post-confirmation state: status upgraded to 525, error
+    // preserved for diagnostics. This is what `build_error_page_response`
+    // produces after the async two-signal confirmation runs.
+    #[cfg(feature = "cache_request")]
+    let wrapped_err = reqwest_middleware::Error::Reqwest(err);
+    #[cfg(not(feature = "cache_request"))]
+    let wrapped_err = err;
+    let res = PageResponse {
+        status_code: *DNS_RESOLVE_ERROR,
+        error_for_status: Some(Err(wrapped_err)),
+        ..Default::default()
+    };
+
+    let page = build(target, res);
+
+    assert_eq!(
+        page.status_code, *DNS_RESOLVE_ERROR,
+        "status must remain 525 after build()"
+    );
+    assert!(
+        !page.should_retry,
+        "should_retry MUST be false — pre-classified 525 must short-circuit \
+         get_error_status_base's connect-error retry override. Pre-fix, this \
+         was true because get_error_status_base re-classified the raw error \
+         and saw a retryable connect failure (503 catch-all), forcing \
+         should_retry back to true and triggering the retry loop. The leak \
+         turned every NXDOMAIN-through-proxy host into minutes of wasted retries."
+    );
+    assert!(
+        !page.needs_retry(),
+        "needs_retry() MUST be false → retry loop short-circuits"
+    );
+}
+
+/// Behavior preservation: a TRANSIENT 503 (catch-all) still triggers
+/// `should_retry=true` so legitimate transient proxy hiccups continue to
+/// retry. Guards against the v2.51.172 fix accidentally killing retries
+/// for non-permanent statuses.
+#[cfg(not(feature = "decentralized"))]
+#[tokio::test(flavor = "current_thread")]
+async fn test_build_transient_503_still_retries() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let proxy_port = listener.local_addr().expect("addr").port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { continue };
+            let mut buf = [0u8; 1024];
+            let _ = s.read(&mut buf);
+            let _ = s.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
+            let _ = s.flush();
+        }
+    });
+
+    let proxy_url = format!("http://127.0.0.1:{proxy_port}");
+    let client = reqwest::Client::builder()
+        .proxy(reqwest::Proxy::all(&proxy_url).expect("proxy"))
+        .connect_timeout(std::time::Duration::from_secs(3))
+        .build()
+        .expect("client");
+
+    // localhost resolves locally → confirm helper would NOT upgrade →
+    // status stays 503.
+    let target = "https://localhost/";
+    let err = client.get(target).send().await.expect_err("must err");
+
+    #[cfg(feature = "cache_request")]
+    let wrapped_err = reqwest_middleware::Error::Reqwest(err);
+    #[cfg(not(feature = "cache_request"))]
+    let wrapped_err = err;
+    let res = PageResponse {
+        status_code: *UNREACHABLE_REQUEST_ERROR, // 503, transient
+        error_for_status: Some(Err(wrapped_err)),
+        ..Default::default()
+    };
+
+    let page = build(target, res);
+
+    assert_eq!(page.status_code, *UNREACHABLE_REQUEST_ERROR);
+    assert!(
+        page.should_retry,
+        "transient 503 must still set should_retry=true so legitimate \
+         transient proxy hiccups continue to retry — preserves the \
+         v2.51.165→v2.51.167 false-positive fix"
+    );
+    assert!(
+        page.needs_retry(),
+        "needs_retry() must be true for transient classifications"
     );
 }
 
