@@ -2277,40 +2277,35 @@ impl Configuration {
         self
     }
 
-    /// Resolve the HTTP first-byte watchdog args, gated on auto-arm
-    /// conditions:
+    /// Resolve the HTTP first-byte watchdog args.
     ///
-    /// * `balance` feature enabled, AND
-    /// * `self.proxies` has ≥ 2 entries whose `ignore != ProxyIgnore::Http`
-    ///   (i.e., proxies usable for HTTP — chrome-only proxies are
-    ///   excluded since they can't help the HTTP retry path rotate).
+    /// Returns the configured `http_first_byte_timeout` + `_jitter`
+    /// whenever the timeout field is `Some(_)` — caller opted in by
+    /// setting the field, so honor it regardless of proxy count.
     ///
-    /// When both conditions hold, returns the configured
-    /// `http_first_byte_timeout` + `_jitter` so callers can pass them
-    /// straight into `fetch_page_html_raw_with_watchdog` /
-    /// `Page::new_page_with_watchdog`. Otherwise returns
-    /// `(None, None)` — no rotation target exists, so the watchdog
-    /// would fire but retries would just hit the same proxy.
+    /// Previously this was gated on `balance` feature + ≥2 HTTP-eligible
+    /// proxies, on the premise that the watchdog firing without a
+    /// rotation target was wasted. That was wrong for the
+    /// proxy-shrouded NXDOMAIN case: a single proxy still returns an
+    /// upstream-DNS-shaped 5xx after ~15-22s, and reqwest's `.timeout()`
+    /// is not enforced through the proxy CONNECT tunnel for that phase.
+    /// The watchdog is the only knob that fires reliably, and a fast
+    /// 524 surfaced to the caller is strictly better than waiting for
+    /// the proxy's internal DNS deadline — even when no rotation
+    /// target exists.
     ///
-    /// When the `balance` feature is off, always returns `(None, None)`.
-    /// Callers that want unconditional arming should read the fields
-    /// directly off `Configuration` instead.
+    /// When the timeout field is `None`, returns `(None, None)` —
+    /// pure passthrough, no overhead. Setting the field on `Configuration`
+    /// is the opt-in.
     #[inline]
     pub fn auto_http_first_byte_args(&self) -> (Option<Duration>, Option<Duration>) {
-        #[cfg(feature = "balance")]
-        {
-            let http_eligible = match &self.proxies {
-                Some(p) => p.iter().filter(|rp| rp.ignore != ProxyIgnore::Http).count(),
-                None => 0,
-            };
-            if http_eligible >= 2 {
-                return (
-                    self.http_first_byte_timeout,
-                    self.http_first_byte_timeout_jitter,
-                );
-            }
+        match self.http_first_byte_timeout {
+            Some(_) => (
+                self.http_first_byte_timeout,
+                self.http_first_byte_timeout_jitter,
+            ),
+            None => (None, None),
         }
-        (None, None)
     }
 
     /// Build the borrowed chrome fetch parameter bundle.
