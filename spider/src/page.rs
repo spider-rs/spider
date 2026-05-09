@@ -305,7 +305,6 @@ fn is_dns_error(err: &crate::client::Error) -> bool {
 ///
 /// Only meaningful when `err.is_connect() == true` — a non-connect error
 /// path can't surface a tunnel failure.
-#[allow(dead_code)]
 fn is_proxy_tunnel_failure(err: &crate::client::Error) -> bool {
     use std::error::Error;
 
@@ -330,6 +329,108 @@ fn is_proxy_tunnel_failure(err: &crate::client::Error) -> bool {
     }
 
     false
+}
+
+/// Local DNS lookup result, used as an independent confirmation signal
+/// alongside proxy tunnel-failure detection. When a proxy reports
+/// `TunnelUnsuccessful` we can't tell from the proxy alone whether the
+/// target is truly invalid (NXDOMAIN at proxy) or the proxy itself is
+/// transiently unhealthy. A local DNS lookup answers that independently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalDnsState {
+    /// Local resolver returned at least one address.
+    Resolved,
+    /// Local resolver explicitly returned NXDOMAIN (or no records found).
+    NxDomain,
+    /// Lookup did not complete within the timeout, or surfaced a non-DNS
+    /// error. Treated as "no evidence" — the caller defaults to retryable
+    /// so transient resolver issues never false-positive into permanent.
+    TimedOut,
+}
+
+/// Probe local DNS for `host`. Bounded to `timeout` so a slow / dead
+/// resolver doesn't block the caller.
+///
+/// Distinguishes NXDOMAIN from transient lookup failures by:
+///   1. Typed `io::ErrorKind::NotFound` (hickory + Linux glibc fast path)
+///   2. Reusing [`DNS_ERROR_AC`] against `io::Error::to_string()` (catches
+///      macOS getaddrinfo's `Uncategorized` + "failed to lookup address …"
+///      surface, same fix as v2.51.162's `is_dns_error` chain walk)
+///
+/// Uses port 443 as a placeholder — `tokio::net::lookup_host` requires a
+/// port but we only care whether the hostname resolves; port choice doesn't
+/// affect the resolver lookup. Async / lock-free; safe to call concurrently
+/// from any tokio context.
+pub async fn host_resolves_locally(host: &str, timeout: std::time::Duration) -> LocalDnsState {
+    use std::io::ErrorKind;
+    let addr = format!("{host}:443");
+    match tokio::time::timeout(timeout, tokio::net::lookup_host(addr)).await {
+        Ok(Ok(mut iter)) => {
+            if iter.next().is_some() {
+                LocalDnsState::Resolved
+            } else {
+                LocalDnsState::NxDomain
+            }
+        }
+        Ok(Err(e)) => {
+            if matches!(e.kind(), ErrorKind::NotFound) || DNS_ERROR_AC.is_match(&e.to_string()) {
+                LocalDnsState::NxDomain
+            } else {
+                LocalDnsState::TimedOut
+            }
+        }
+        Err(_) => LocalDnsState::TimedOut,
+    }
+}
+
+/// Pair an HTTP-proxy tunnel-failure classification with an independent
+/// local DNS lookup. The proxy signal alone (`TunnelUnsuccessful`) is
+/// ambiguous: it covers both target NXDOMAIN at the proxy *and* transient
+/// proxy issues (rate limits, momentary outages). Classifying the bucket
+/// as permanent (526) on the proxy signal alone produced the v2.51.165
+/// regression where legitimate proxied requests on transient hiccups
+/// returned 526. This helper closes that gap by demanding two independent
+/// signals before flipping permanent.
+///
+/// **Decision matrix** (only when `initial_status == *UNREACHABLE_REQUEST_ERROR`
+/// AND `is_proxy_tunnel_failure(err)`):
+///
+/// | Local DNS  | Result                                    |
+/// |------------|-------------------------------------------|
+/// | NxDomain   | upgrade to `*DNS_RESOLVE_ERROR` (525, permanent) |
+/// | Resolved   | keep 503 (transient — retry path runs)    |
+/// | TimedOut   | keep 503 (no evidence — retry conservatively) |
+///
+/// **Zero-cost on success**: never called when the request didn't error.
+/// **Zero-cost on non-tunnel errors**: returns `initial_status` after a
+/// status-code comparison + chain walk, no DNS lookup performed.
+/// **Zero locks**: pure async function over the error and a hostname.
+/// **No behavior change for non-tunnel paths**: the gate
+/// `initial_status == *UNREACHABLE_REQUEST_ERROR` ensures the function is
+/// inert except on the 503 catch-all (where tunnel failures land).
+pub async fn confirm_tunnel_failure_with_local_dns(
+    initial_status: StatusCode,
+    err: &crate::client::Error,
+    target_url: &str,
+    timeout: std::time::Duration,
+) -> StatusCode {
+    if initial_status != *UNREACHABLE_REQUEST_ERROR {
+        return initial_status;
+    }
+    if !is_proxy_tunnel_failure(err) {
+        return initial_status;
+    }
+    let host = match url::Url::parse(target_url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+    {
+        Some(h) => h,
+        None => return initial_status,
+    };
+    match host_resolves_locally(&host, timeout).await {
+        LocalDnsState::NxDomain => *DNS_RESOLVE_ERROR,
+        LocalDnsState::Resolved | LocalDnsState::TimedOut => initial_status,
+    }
 }
 
 /// Check whether a reqwest error is a permanent SSL/TLS handshake failure.
@@ -9656,6 +9757,176 @@ fn test_dns_error_no_retry() {
     assert!(
         !page.needs_retry(),
         "DNS resolve errors (525) — needs_retry() must be false"
+    );
+}
+
+/// `host_resolves_locally` must distinguish NXDOMAIN from transient resolver
+/// issues. RFC 2606 reserves `.invalid` for unresolvable test hostnames.
+#[cfg(not(feature = "decentralized"))]
+#[tokio::test(flavor = "current_thread")]
+async fn test_host_resolves_locally_rfc2606_invalid() {
+    let state = host_resolves_locally(
+        "this-host-must-not-exist.invalid",
+        std::time::Duration::from_secs(2),
+    )
+    .await;
+    assert_eq!(
+        state,
+        LocalDnsState::NxDomain,
+        "RFC 2606 .invalid TLD must always classify as NxDomain — \
+         platform resolver Display strings are caught by typed NotFound \
+         OR DNS_ERROR_AC scan"
+    );
+}
+
+/// Resolvable host (loopback) must classify as Resolved.
+#[cfg(not(feature = "decentralized"))]
+#[tokio::test(flavor = "current_thread")]
+async fn test_host_resolves_locally_loopback() {
+    let state = host_resolves_locally("localhost", std::time::Duration::from_secs(2)).await;
+    assert_eq!(
+        state,
+        LocalDnsState::Resolved,
+        "localhost must always resolve via the OS resolver"
+    );
+}
+
+/// End-to-end: tunnel failure + local NxDomain → 525 (permanent).
+/// Uses a fake HTTP proxy on loopback that returns 502 to every CONNECT
+/// (synthetic TunnelUnsuccessful) and an RFC 2606 `.invalid` target
+/// (synthetic NxDomain). The two-signal contract requires BOTH to agree
+/// before classification flips permanent.
+#[cfg(not(feature = "decentralized"))]
+#[tokio::test(flavor = "current_thread")]
+async fn test_confirm_tunnel_failure_with_local_dns_nxdomain_upgrades_to_525() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let proxy_port = listener.local_addr().expect("local addr").port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { continue };
+            let mut buf = [0u8; 1024];
+            let _ = s.read(&mut buf);
+            let _ = s.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
+            let _ = s.flush();
+        }
+    });
+
+    let proxy_url = format!("http://127.0.0.1:{proxy_port}");
+    let client = reqwest::Client::builder()
+        .proxy(reqwest::Proxy::all(&proxy_url).expect("valid proxy"))
+        .connect_timeout(std::time::Duration::from_secs(3))
+        .build()
+        .expect("client");
+
+    let target = "https://this-host-must-not-exist.invalid/";
+    let err = client.get(target).send().await.expect_err("must error");
+
+    let initial = get_error_http_status_code(&err);
+    assert_eq!(
+        initial, *UNREACHABLE_REQUEST_ERROR,
+        "initial sync classification must be 503 (post-v2.51.167 revert)"
+    );
+
+    let final_status = confirm_tunnel_failure_with_local_dns(
+        initial,
+        &err,
+        target,
+        std::time::Duration::from_secs(2),
+    )
+    .await;
+    assert_eq!(
+        final_status, *DNS_RESOLVE_ERROR,
+        "tunnel failure + local NxDomain must upgrade to 525 — both signals agree"
+    );
+}
+
+/// End-to-end: tunnel failure + local Resolved → 503 (stays retryable).
+/// This is the v2.51.165 false-positive case the v2.51.167 revert fixed:
+/// proxy CONNECT failure to a working host must NOT classify as permanent
+/// because the proxy issue is likely transient.
+#[cfg(not(feature = "decentralized"))]
+#[tokio::test(flavor = "current_thread")]
+async fn test_confirm_tunnel_failure_with_local_dns_resolved_keeps_503() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let proxy_port = listener.local_addr().expect("local addr").port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { continue };
+            let mut buf = [0u8; 1024];
+            let _ = s.read(&mut buf);
+            let _ = s.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
+            let _ = s.flush();
+        }
+    });
+
+    let proxy_url = format!("http://127.0.0.1:{proxy_port}");
+    let client = reqwest::Client::builder()
+        .proxy(reqwest::Proxy::all(&proxy_url).expect("valid proxy"))
+        .connect_timeout(std::time::Duration::from_secs(3))
+        .build()
+        .expect("client");
+
+    // localhost resolves locally → tunnel failure must STAY retryable.
+    let target = "https://localhost/";
+    let err = client.get(target).send().await.expect_err("must error");
+
+    let initial = get_error_http_status_code(&err);
+    let final_status = confirm_tunnel_failure_with_local_dns(
+        initial,
+        &err,
+        target,
+        std::time::Duration::from_secs(2),
+    )
+    .await;
+    assert_eq!(
+        final_status, *UNREACHABLE_REQUEST_ERROR,
+        "tunnel failure + local Resolved must STAY at 503 — proxy issue is \
+         transient, retry path runs as before. Regression case from v2.51.165: \
+         example.com / cloudflare.com / github docs must keep retrying."
+    );
+    assert!(
+        is_retryable_status(final_status),
+        "503 must remain retryable so transient proxy hiccups recover"
+    );
+}
+
+/// Confirm helper must be a no-op for non-tunnel errors. Zero behavior
+/// change for paths that don't surface `TunnelUnsuccessful`.
+#[cfg(not(feature = "decentralized"))]
+#[tokio::test(flavor = "current_thread")]
+async fn test_confirm_tunnel_failure_no_op_for_non_tunnel_errors() {
+    // A pure local DNS error (no proxy) must NOT be touched — is_dns_error
+    // wins first and confirm helper's gate (initial != 503) fails fast.
+    let client = reqwest::Client::builder().build().expect("client");
+    let err = client
+        .get("https://orthwestsci.invalid/")
+        .send()
+        .await
+        .expect_err("must error");
+
+    let initial = get_error_http_status_code(&err);
+    assert_eq!(
+        initial, *DNS_RESOLVE_ERROR,
+        "pure local DNS error must classify to 525 via is_dns_error"
+    );
+
+    let final_status = confirm_tunnel_failure_with_local_dns(
+        initial,
+        &err,
+        "https://orthwestsci.invalid/",
+        std::time::Duration::from_millis(100),
+    )
+    .await;
+    assert_eq!(
+        final_status, initial,
+        "confirm helper must be no-op for non-tunnel classifications — \
+         only triggers when initial_status == *UNREACHABLE_REQUEST_ERROR"
     );
 }
 

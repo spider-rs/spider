@@ -6475,15 +6475,38 @@ pub(crate) fn valid_parsing_status(res: &Response) -> bool {
 }
 
 /// Build the error page response.
-fn build_error_page_response(target_url: &str, err: RequestError) -> PageResponse {
+///
+/// Async (since v2.51.168) so we can pair proxy tunnel-failure
+/// classifications with an independent local DNS lookup via
+/// [`crate::page::confirm_tunnel_failure_with_local_dns`]. The DNS
+/// confirmation is the second signal that closes the v2.51.165 false-positive
+/// gap: tunnel failures only flip to permanent (525) when local DNS
+/// independently confirms NXDOMAIN. Other classifications (525 from
+/// `is_dns_error`, 526 from SSL/h2/HostUnreachable, 524 timeout, 521-523
+/// connection refused/aborted/reset, real upstream `er.status()`) are
+/// already high-confidence and stay unchanged — the confirmation function
+/// gates on `initial_status == *UNREACHABLE_REQUEST_ERROR` so it's inert
+/// for them.
+///
+/// Cost: zero on the success path (function not called), zero on
+/// non-tunnel error paths (gate fast-rejects), one bounded local DNS
+/// lookup (≤500ms) on tunnel-error paths.
+async fn build_error_page_response(target_url: &str, err: RequestError) -> PageResponse {
     log::info!("error fetching {}", target_url);
 
     let mut page_response = PageResponse::default();
-    if let Some(status_code) = err.status() {
-        page_response.status_code = status_code;
+    let initial_status = if let Some(status_code) = err.status() {
+        status_code
     } else {
-        page_response.status_code = crate::page::get_error_http_status_code(&err);
-    }
+        crate::page::get_error_http_status_code(&err)
+    };
+    page_response.status_code = crate::page::confirm_tunnel_failure_with_local_dns(
+        initial_status,
+        &err,
+        target_url,
+        std::time::Duration::from_millis(500),
+    )
+    .await;
     page_response.error_for_status = Some(Err(err));
     page_response
 }
@@ -6604,7 +6627,7 @@ async fn fetch_page_html_raw_base(
                     .await
                     {
                         Ok(pr2) => pr2,
-                        Err(err2) => build_error_page_response(&flipped, err2),
+                        Err(err2) => build_error_page_response(&flipped, err2).await,
                     }
                 } else if let Some(no_www) = strip_www(target_url) {
                     log::info!(
@@ -6622,13 +6645,13 @@ async fn fetch_page_html_raw_base(
                     .await
                     {
                         Ok(pr2) => pr2,
-                        Err(err2) => build_error_page_response(&no_www, err2),
+                        Err(err2) => build_error_page_response(&no_www, err2).await,
                     }
                 } else {
-                    build_error_page_response(target_url, err)
+                    build_error_page_response(target_url, err).await
                 }
             } else {
-                build_error_page_response(target_url, err)
+                build_error_page_response(target_url, err).await
             }
         }
     };
@@ -6726,7 +6749,7 @@ pub async fn fetch_page_html_raw_conditional(
                 handle_response_bytes(res, target_url, false).await
             }
         }
-        Err(err) => build_error_page_response(target_url, err),
+        Err(err) => build_error_page_response(target_url, err).await,
     };
 
     set_page_response_duration(&mut page_response, duration);
