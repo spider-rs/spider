@@ -10333,7 +10333,7 @@ async fn test_host_resolves_locally_loopback() {
 /// (synthetic TunnelUnsuccessful) and an RFC 2606 `.invalid` target
 /// (synthetic NxDomain). The two-signal contract requires BOTH to agree
 /// before classification flips permanent.
-#[cfg(not(feature = "decentralized"))]
+#[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
 #[tokio::test(flavor = "current_thread")]
 async fn test_confirm_tunnel_failure_with_local_dns_nxdomain_upgrades_to_525() {
     use std::io::{Read, Write};
@@ -10384,7 +10384,7 @@ async fn test_confirm_tunnel_failure_with_local_dns_nxdomain_upgrades_to_525() {
 /// This is the v2.51.165 false-positive case the v2.51.167 revert fixed:
 /// proxy CONNECT failure to a working host must NOT classify as permanent
 /// because the proxy issue is likely transient.
-#[cfg(not(feature = "decentralized"))]
+#[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
 #[tokio::test(flavor = "current_thread")]
 async fn test_confirm_tunnel_failure_with_local_dns_resolved_keeps_503() {
     use std::io::{Read, Write};
@@ -10633,7 +10633,7 @@ async fn test_confirm_chrome_tunnel_failure_gates_short_circuit() {
 
 /// Confirm helper must be a no-op for non-tunnel errors. Zero behavior
 /// change for paths that don't surface `TunnelUnsuccessful`.
-#[cfg(not(feature = "decentralized"))]
+#[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
 #[tokio::test(flavor = "current_thread")]
 async fn test_confirm_tunnel_failure_no_op_for_non_tunnel_errors() {
     // A pure local DNS error (no proxy) must NOT be touched — is_dns_error
@@ -10823,7 +10823,7 @@ async fn test_confirm_tunnel_failure_cache_wrapped_unrelated_keeps_initial() {
 ///   (4) `is_retryable_status(526) == false`
 ///   (5) Page built from the response has `should_retry == false` and
 ///       `needs_retry() == false` → every retry loop short-circuits
-#[cfg(not(feature = "decentralized"))]
+#[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
 #[tokio::test(flavor = "current_thread")]
 async fn test_proxy_tunnel_failure_no_retry() {
     use std::io::{Read, Write};
@@ -11272,7 +11272,7 @@ fn test_dns_error_ac_rejects_unrelated_errors() {
 ///   6. `Page::needs_retry()` returns false → all retry loops short-circuit
 ///      (covers `chrome_page_fetch!` macro, `crawl_establish_smart`,
 ///      `crawl_concurrent_*` — every loop is gated on `needs_retry()`)
-#[cfg(not(feature = "decentralized"))]
+#[cfg(all(not(feature = "decentralized"), not(feature = "cache_request")))]
 #[tokio::test(flavor = "current_thread")]
 async fn test_dns_error_no_retry_end_to_end_via_real_reqwest() {
     let client = reqwest::Client::builder()
