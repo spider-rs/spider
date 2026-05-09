@@ -1852,6 +1852,17 @@ pub fn is_chrome_permanent_failure(code: &str) -> bool {
             | "ERR_ADDRESS_UNREACHABLE"
             | "ERR_CONNECTION_REFUSED"
             | "ERR_HTTP2_INADEQUATE_TRANSPORT_SECURITY"
+            // Chrome-side counterpart to the v2.51.165 HTTP `is_proxy_tunnel_failure`
+            // path. Both surface "proxy can't reach the target" without exposing
+            // *why* (target NXDOMAIN at proxy / target down / proxy outage), but
+            // every cause is permanent through the same client. Without this,
+            // chrome-through-proxy on NXDOMAIN targets falls through to 599
+            // (retryable 5xx) and burns N retries × exponential backoff per host.
+            // Symmetric semantics with the HTTP path: hedge through a sibling
+            // proxy still races (parallel, not sequential); a user-supplied
+            // RetryStrategy can opt back into rotation-based retries.
+            | "ERR_TUNNEL_CONNECTION_FAILED"
+            | "ERR_PROXY_CONNECTION_FAILED"
             | "ERR_INVALID_URL"
             | "ERR_UNSAFE_PORT"
             | "ERR_DISALLOWED_URL_SCHEME"
@@ -1883,7 +1894,12 @@ pub(crate) fn chrome_permanent_failure_status(code: &str) -> StatusCode {
     match trimmed {
         "ERR_ADDRESS_UNREACHABLE"
         | "ERR_CONNECTION_REFUSED"
-        | "ERR_HTTP2_INADEQUATE_TRANSPORT_SECURITY" => *ADDRESS_UNREACHABLE_ERROR,
+        | "ERR_HTTP2_INADEQUATE_TRANSPORT_SECURITY"
+        // Tunnel / proxy CONNECT failures bucket with the existing
+        // "destination not reachable from this client" cases — same
+        // semantics as the v2.51.165 HTTP path's TunnelUnsuccessful → 526.
+        | "ERR_TUNNEL_CONNECTION_FAILED"
+        | "ERR_PROXY_CONNECTION_FAILED" => *ADDRESS_UNREACHABLE_ERROR,
         "ERR_INVALID_URL"
         | "ERR_UNSAFE_PORT"
         | "ERR_DISALLOWED_URL_SCHEME"
@@ -9857,15 +9873,22 @@ fn test_server_error_still_retries() {
 fn test_chrome_error_page_detected_as_empty() {
     // Realistic Chrome error page: ~157KB with dino game CSS/JS, no </body>,
     // ends with loadTimeDataRaw JSON blob containing errorCode.
+    //
+    // Use `ERR_CONNECTION_RESET` (transient) so the reclassification falls
+    // through to the 599 catch-all + should_retry=true path. ERR_TUNNEL_*
+    // and ERR_PROXY_* are now permanent-failure codes (mapped to 526) per
+    // the chrome-side counterpart of the v2.51.165 HTTP TunnelUnsuccessful
+    // fix — they get their own dedicated coverage in
+    // `test_chrome_tunnel_failure_page_no_retry`.
     let padding = "x".repeat(1000); // enough to exceed 500 byte minimum
     let chrome_error_html_str = format!(
         "<html lang=\"en\" dir=\"ltr\">\n\
          <style>{padding}</style>\n\
          <div id=\"main-frame-error\" class=\"interstitial-wrapper\">\n\
          <h1><span>This site can\u{2019}t be reached</span></h1>\n\
-         <div class=\"error-code\">ERR_TUNNEL_CONNECTION_FAILED</div>\n\
+         <div class=\"error-code\">ERR_CONNECTION_RESET</div>\n\
          </div>\n\
-         <script>var loadTimeDataRaw = {{\"errorCode\":\"ERR_TUNNEL_CONNECTION_FAILED\",\
+         <script>var loadTimeDataRaw = {{\"errorCode\":\"ERR_CONNECTION_RESET\",\
          \"heading\":{{\"msg\":\"This site can't be reached\"}},\
          \"title\":\"www.example.com\"}};</script></html>"
     );
@@ -9888,12 +9911,12 @@ fn test_chrome_error_page_detected_as_empty() {
     let page = build("https://www.example.com", res);
     assert!(
         page.should_retry,
-        "Chrome error page with 200 status should trigger retry"
+        "Chrome error page with transient errorCode should trigger retry"
     );
     assert_eq!(
         page.status_code,
         StatusCode::from_u16(599).unwrap(),
-        "Chrome error page should be reclassified to 599"
+        "Chrome error page with transient errorCode should reclassify to 599"
     );
     assert!(
         !page.get_html().is_empty(),
@@ -10225,8 +10248,6 @@ fn test_is_chrome_permanent_failure_rejects_transient_and_unrelated() {
         "net::ERR_DNS_TIMED_OUT",
         "net::ERR_DNS_SERVER_FAILED",
         "net::ERR_DNS_MALFORMED_RESPONSE",
-        "net::ERR_TUNNEL_CONNECTION_FAILED",
-        "net::ERR_PROXY_CONNECTION_FAILED",
         "net::ERR_CONNECTION_RESET",
         "net::ERR_CONNECTION_TIMED_OUT",
         "net::ERR_TIMED_OUT",
@@ -10239,6 +10260,133 @@ fn test_is_chrome_permanent_failure_rejects_transient_and_unrelated() {
             "{code} must remain retryable"
         );
     }
+}
+
+/// Chrome tunnel/proxy CONNECT failures — chrome-side counterpart to the HTTP
+/// `is_proxy_tunnel_failure` (v2.51.165). Both `ERR_TUNNEL_CONNECTION_FAILED`
+/// and `ERR_PROXY_CONNECTION_FAILED` mean "proxy can't reach the target", and
+/// every cause (target NXDOMAIN at proxy / target down / proxy outage) is
+/// permanent through the same client. Without this, chrome-through-proxy on
+/// NXDOMAIN targets fell through to 599 → retryable → minutes per host.
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_is_chrome_permanent_failure_accepts_tunnel_codes() {
+    for code in [
+        "net::ERR_TUNNEL_CONNECTION_FAILED",
+        "ERR_TUNNEL_CONNECTION_FAILED",
+        "net::ERR_PROXY_CONNECTION_FAILED",
+        "ERR_PROXY_CONNECTION_FAILED",
+    ] {
+        assert!(
+            is_chrome_permanent_failure(code),
+            "{code} must classify as permanent (proxy can't reach target — \
+             retrying through same client won't change that)"
+        );
+    }
+}
+
+/// Chrome tunnel codes must map to 526 (`ADDRESS_UNREACHABLE_ERROR`),
+/// matching the HTTP path's TunnelUnsuccessful → 526 classification.
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_chrome_permanent_failure_status_maps_tunnel_to_526() {
+    assert_eq!(
+        chrome_permanent_failure_status("net::ERR_TUNNEL_CONNECTION_FAILED"),
+        *ADDRESS_UNREACHABLE_ERROR,
+        "ERR_TUNNEL_CONNECTION_FAILED must map to 526 — symmetric with v2.51.165 HTTP fix"
+    );
+    assert_eq!(
+        chrome_permanent_failure_status("ERR_PROXY_CONNECTION_FAILED"),
+        *ADDRESS_UNREACHABLE_ERROR,
+        "ERR_PROXY_CONNECTION_FAILED must map to 526"
+    );
+}
+
+/// End-to-end: a chrome-rendered error page with `errorCode = ERR_TUNNEL_CONNECTION_FAILED`
+/// must produce a Page with `should_retry == false` and `needs_retry() == false` so the
+/// `chrome_page_fetch!` retry loop short-circuits. Without this fix the rendered chrome
+/// error page reclassified to 599 (catch-all server error) → retryable → N retries ×
+/// exponential backoff per host.
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_chrome_tunnel_failure_page_no_retry() {
+    // Mirror the production `is_chrome_error_page` shape: ≥500 bytes,
+    // tail must be `};</script></html>`, errorCode in the last 4KB.
+    let padding = "x".repeat(1000);
+    let html_str = format!(
+        "<html lang=\"en\" dir=\"ltr\">\n\
+         <style>{padding}</style>\n\
+         <div id=\"main-frame-error\" class=\"interstitial-wrapper\">\n\
+         <div class=\"error-code\">ERR_TUNNEL_CONNECTION_FAILED</div>\n\
+         </div>\n\
+         <script>var loadTimeDataRaw = {{\"errorCode\":\"ERR_TUNNEL_CONNECTION_FAILED\",\
+         \"title\":\"www.example.invalid\"}};</script></html>"
+    );
+    let html = html_str.as_bytes();
+
+    assert!(
+        is_chrome_error_page(html),
+        "synthetic chrome error page must satisfy is_chrome_error_page detector — \
+         test is meaningless without this guard"
+    );
+
+    let page = build(
+        "https://example.invalid",
+        PageResponse {
+            status_code: StatusCode::OK,
+            content: Some(html.to_vec()),
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(
+        page.status_code, *ADDRESS_UNREACHABLE_ERROR,
+        "chrome-rendered ERR_TUNNEL_CONNECTION_FAILED must reclassify to 526, not 599"
+    );
+    assert!(
+        !is_retryable_status(page.status_code),
+        "is_retryable_status(526) must be false"
+    );
+    assert!(
+        !page.should_retry,
+        "Page.should_retry must be false for chrome tunnel failures — \
+         build()'s should_retry_status excludes *ADDRESS_UNREACHABLE_ERROR"
+    );
+    assert!(
+        !page.needs_retry(),
+        "Page::needs_retry() must be false → chrome_page_fetch! retry loop short-circuits"
+    );
+}
+
+/// Same end-to-end guarantee for `ERR_PROXY_CONNECTION_FAILED` — chrome
+/// couldn't even establish the proxy connection. Same bucket as tunnel
+/// failures: permanent through this client.
+#[cfg(not(feature = "decentralized"))]
+#[test]
+fn test_chrome_proxy_connection_failed_page_no_retry() {
+    let padding = "x".repeat(1000);
+    let html_str = format!(
+        "<html lang=\"en\" dir=\"ltr\">\n\
+         <style>{padding}</style>\n\
+         <script>var loadTimeDataRaw = {{\"errorCode\":\"ERR_PROXY_CONNECTION_FAILED\",\
+         \"title\":\"www.example.invalid\"}};</script></html>"
+    );
+    let html = html_str.as_bytes();
+
+    assert!(is_chrome_error_page(html));
+
+    let page = build(
+        "https://example.invalid",
+        PageResponse {
+            status_code: StatusCode::OK,
+            content: Some(html.to_vec()),
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(page.status_code, *ADDRESS_UNREACHABLE_ERROR);
+    assert!(!page.should_retry);
+    assert!(!page.needs_retry());
 }
 
 #[cfg(not(feature = "decentralized"))]
@@ -10624,15 +10772,21 @@ fn test_chrome_error_page_connection_refused_reclassified_to_526() {
     );
 }
 
-/// Non-DNS Chrome error pages keep the existing 599 (retryable) behaviour so
-/// proxy / tunnel / TLS failures still get rotated through the retry path.
+/// Transient Chrome error pages keep the existing 599 (retryable) behaviour
+/// so genuinely-recoverable failures (connection reset, DNS timeout, generic
+/// ERR_FAILED) still get rotated through the retry path.
+///
+/// `ERR_TUNNEL_CONNECTION_FAILED` and `ERR_PROXY_CONNECTION_FAILED` are NOT
+/// in the transient bucket anymore — see
+/// `test_chrome_tunnel_failure_page_no_retry` for their non-retryable
+/// 526 coverage.
 #[cfg(not(feature = "decentralized"))]
 #[test]
 fn test_chrome_error_page_non_dns_stays_599() {
     let padding = "x".repeat(1000);
     let html_str = format!(
         "<html><style>{padding}</style>\
-         <script>var loadTimeDataRaw = {{\"errorCode\":\"ERR_TUNNEL_CONNECTION_FAILED\",\
+         <script>var loadTimeDataRaw = {{\"errorCode\":\"ERR_CONNECTION_RESET\",\
          \"title\":\"example.com\"}};</script></html>"
     );
     let res = PageResponse {
@@ -10644,11 +10798,11 @@ fn test_chrome_error_page_non_dns_stays_599() {
     assert_eq!(
         page.status_code,
         StatusCode::from_u16(599).unwrap(),
-        "non-DNS Chrome error pages must still map to 599"
+        "transient Chrome error pages must still map to 599"
     );
     assert!(
         page.should_retry,
-        "599 errors remain retryable for proxy/tunnel rotation"
+        "599 errors remain retryable for transient failures (ERR_CONNECTION_RESET, etc.)"
     );
 }
 
