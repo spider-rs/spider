@@ -433,6 +433,111 @@ pub async fn confirm_tunnel_failure_with_local_dns(
     }
 }
 
+/// Pair a chrome rendered-error tunnel/proxy CONNECT failure with an
+/// independent local DNS lookup. Chrome-side counterpart to
+/// [`confirm_tunnel_failure_with_local_dns`] — same two-signal contract:
+/// permanent classification (525) flips only when BOTH chrome's tunnel
+/// signal AND local DNS agree the host is broken.
+///
+/// **Decision matrix** (in order — every gate fails fast if it can't
+/// possibly trigger an upgrade, so the function is near-zero cost on the
+/// success path and on every non-tunnel chrome error):
+///
+/// 1. `page.status_code != 599` (chrome catch-all set by `build()`) → return.
+///    Covers the success path (status 2xx), pre-classified permanent codes
+///    (525/526/400 from `chrome_permanent_failure_status`), real upstream
+///    statuses, and timeout codes (524/598). Skips the rest.
+/// 2. Page content is not a chrome rendered-error page (per
+///    [`is_chrome_error_page`]) → return. Covers ordinary 599s that aren't
+///    chrome-error surfaces (e.g. proxy hiccup that didn't render an
+///    interstitial).
+/// 3. Extracted `errorCode` is not `ERR_TUNNEL_CONNECTION_FAILED` or
+///    `ERR_PROXY_CONNECTION_FAILED` → return. Covers transient codes
+///    (`ERR_CONNECTION_RESET`, `ERR_DNS_TIMED_OUT`, etc.) that should keep
+///    their 599-retryable behaviour.
+/// 4. Local DNS check via [`host_resolves_locally`]:
+///    - `NxDomain` → upgrade `page.status_code` to `*DNS_RESOLVE_ERROR`
+///      (525) AND clear `page.should_retry` so `Page::needs_retry()`
+///      returns false → chrome retry loop short-circuits.
+///    - `Resolved` or `TimedOut` → leave status at 599 (retryable). The
+///      v2.51.166 false-positive case (legitimate proxied requests on
+///      transient proxy hiccups) stays retryable.
+///
+/// **Performance**:
+/// - Zero cost on success / non-599 paths (gate 1 returns instantly).
+/// - On 599 status the helper does a duplicate `is_chrome_error_page`
+///   structural check + (if positive) `extract_chrome_error_code` parse.
+///   `is_chrome_error_page` is a constant-time tail match + 4KB needle
+///   scan — nanoseconds. `extract_chrome_error_code` is a 4KB substring
+///   scan — also nanoseconds. Acceptable on the error path.
+/// - On a confirmed tunnel failure, one bounded local DNS lookup
+///   (≤ caller's timeout, default 500ms). Net perf win vs. burning the
+///   chrome retry budget × backoff per host on confirmed-NXDOMAIN targets.
+///
+/// **Concurrency**:
+/// - Pure async, no `Mutex` / `RwLock` / `OnceCell` writes.
+/// - `tokio::net::lookup_host` uses tokio's blocking pool (no spider
+///   locks).
+/// - `tokio::time::timeout` is timer-only.
+/// - Static AC patterns (`lazy_static!`) are read-only after first init.
+/// - Borrows of `page.content` are scoped to drop before the mutable
+///   `page.status_code` / `page.should_retry` writes — no
+///   borrow-across-await on `&mut page`.
+#[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+async fn confirm_chrome_tunnel_failure_with_local_dns(
+    page: &mut Page,
+    target_url: &str,
+    timeout: std::time::Duration,
+) {
+    // Gate 1: status must be the chrome 599 catch-all.
+    let chrome_unknown_status = StatusCode::from_u16(599).unwrap_or(StatusCode::BAD_GATEWAY);
+    if page.status_code != chrome_unknown_status {
+        return;
+    }
+
+    // Gates 2 + 3 (scoped borrow): inspect content without holding it
+    // across the await below. Drops before any &mut page writes.
+    let is_tunnel_error = {
+        let content = page.get_html_bytes_u8();
+        if content.is_empty() || !is_chrome_error_page(content) {
+            false
+        } else {
+            extract_chrome_error_code(content)
+                .map(|code| {
+                    let trimmed = code.strip_prefix("net::").unwrap_or(code);
+                    matches!(
+                        trimmed,
+                        "ERR_TUNNEL_CONNECTION_FAILED" | "ERR_PROXY_CONNECTION_FAILED"
+                    )
+                })
+                .unwrap_or(false)
+        }
+    };
+    if !is_tunnel_error {
+        return;
+    }
+
+    // Gate 4: independent local DNS lookup.
+    let host = match url::Url::parse(target_url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+    {
+        Some(h) => h,
+        None => return,
+    };
+    if matches!(
+        host_resolves_locally(&host, timeout).await,
+        LocalDnsState::NxDomain
+    ) {
+        page.status_code = *DNS_RESOLVE_ERROR;
+        // build()'s `should_retry_status` set this to true based on the
+        // 599 server_error status. Now that we've upgraded to 525,
+        // clear it so `needs_retry()` returns false and the retry loop
+        // short-circuits — symmetric with the HTTP path's behaviour.
+        page.should_retry = false;
+    }
+}
+
 /// Check whether a reqwest error is a permanent SSL/TLS handshake failure.
 ///
 /// Fast path: gated on `err.is_connect() || err.is_request()` — reqwest only
@@ -3930,6 +4035,17 @@ impl Page {
             p.chrome_page = Some(page.clone());
         }
 
+        // Chrome-side counterpart to the HTTP `confirm_tunnel_failure_with_local_dns`
+        // (v2.51.168). Pairs chrome rendered-error tunnel/proxy CONNECT failures
+        // with a local DNS lookup; only flips to permanent (525) when both signals
+        // agree. No-op on success / non-599 paths. See helper docs for full details.
+        confirm_chrome_tunnel_failure_with_local_dns(
+            &mut p,
+            url,
+            std::time::Duration::from_millis(500),
+        )
+        .await;
+
         p
     }
 
@@ -4207,6 +4323,17 @@ impl Page {
             update_link_capacity_hint(links.len());
         }
 
+        // Chrome-side tunnel/proxy CONNECT confirmation (v2.51.169). Idempotent
+        // — on the asset-url branch this re-runs after `new_base` already did
+        // it, but the gate `status != 599` short-circuits instantly so the
+        // double-call is free.
+        confirm_chrome_tunnel_failure_with_local_dns(
+            &mut p,
+            url,
+            std::time::Duration::from_millis(500),
+        )
+        .await;
+
         (p, extract_succeeded)
     }
 
@@ -4451,6 +4578,15 @@ impl Page {
 
             update_link_capacity_hint(links.len());
         }
+
+        // Chrome-side tunnel/proxy CONNECT confirmation (v2.51.169). Same
+        // helper, same idempotent semantics as `new_streaming`.
+        confirm_chrome_tunnel_failure_with_local_dns(
+            &mut p,
+            url,
+            std::time::Duration::from_millis(500),
+        )
+        .await;
 
         (p, extract_succeeded)
     }
@@ -9893,6 +10029,204 @@ async fn test_confirm_tunnel_failure_with_local_dns_resolved_keeps_503() {
     assert!(
         is_retryable_status(final_status),
         "503 must remain retryable so transient proxy hiccups recover"
+    );
+}
+
+/// Chrome-side counterpart: a chrome-rendered error page with errorCode
+/// `ERR_TUNNEL_CONNECTION_FAILED` + an unresolvable `.invalid` host must
+/// upgrade to 525 (permanent) and clear `should_retry` so the chrome
+/// retry loop short-circuits. Symmetric to the HTTP path's
+/// `test_confirm_tunnel_failure_with_local_dns_nxdomain_upgrades_to_525`.
+#[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+#[tokio::test(flavor = "current_thread")]
+async fn test_confirm_chrome_tunnel_failure_nxdomain_upgrades_to_525() {
+    // Build a synthetic chrome error page that satisfies `is_chrome_error_page`
+    // (≥500 bytes, ends with `};</script></html>`, has `"errorCode":"ERR` in
+    // the last 4KB).
+    let padding = "x".repeat(1000);
+    let html = format!(
+        "<html lang=\"en\" dir=\"ltr\">\n\
+         <style>{padding}</style>\n\
+         <div class=\"error-code\">ERR_TUNNEL_CONNECTION_FAILED</div>\n\
+         <script>var loadTimeDataRaw = {{\"errorCode\":\"ERR_TUNNEL_CONNECTION_FAILED\",\
+         \"title\":\"this-host-must-not-exist.invalid\"}};</script></html>"
+    );
+    let mut page = build(
+        "https://this-host-must-not-exist.invalid/",
+        PageResponse {
+            status_code: StatusCode::OK,
+            content: Some(html.into_bytes()),
+            ..Default::default()
+        },
+    );
+
+    // After `build()`: status reclassified to 599 catch-all (since
+    // ERR_TUNNEL_CONNECTION_FAILED is not in `is_chrome_permanent_failure`'s
+    // permanent list post-v2.51.167 revert). should_retry was set to true
+    // because 599 is server_error.
+    assert_eq!(
+        page.status_code,
+        StatusCode::from_u16(599).unwrap(),
+        "build() must classify chrome ERR_TUNNEL_CONNECTION_FAILED to 599 catch-all"
+    );
+    assert!(
+        page.should_retry,
+        "build()'s should_retry_status sets true for 599 server_error"
+    );
+
+    // Pair the chrome signal with local DNS — RFC 2606 .invalid is NXDOMAIN.
+    confirm_chrome_tunnel_failure_with_local_dns(
+        &mut page,
+        "https://this-host-must-not-exist.invalid/",
+        std::time::Duration::from_secs(2),
+    )
+    .await;
+
+    assert_eq!(
+        page.status_code, *DNS_RESOLVE_ERROR,
+        "chrome tunnel + local NxDomain must upgrade to 525 — both signals agree"
+    );
+    assert!(
+        !page.should_retry,
+        "should_retry must be cleared so chrome_page_fetch! retry loop short-circuits"
+    );
+    assert!(
+        !page.needs_retry(),
+        "needs_retry() must be false (525 is non-retryable, should_retry cleared)"
+    );
+}
+
+/// Chrome confirm helper must be a no-op for tunnel errors on RESOLVABLE
+/// hosts. The v2.51.166 false-positive case: chrome through proxy returns
+/// `ERR_TUNNEL_CONNECTION_FAILED` for a working host because of a
+/// transient proxy issue. Local DNS resolves → status STAYS 599
+/// (retryable) → retry runs as before.
+#[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+#[tokio::test(flavor = "current_thread")]
+async fn test_confirm_chrome_tunnel_failure_resolved_keeps_599() {
+    let padding = "x".repeat(1000);
+    let html = format!(
+        "<html lang=\"en\" dir=\"ltr\">\n\
+         <style>{padding}</style>\n\
+         <script>var loadTimeDataRaw = {{\"errorCode\":\"ERR_TUNNEL_CONNECTION_FAILED\",\
+         \"title\":\"localhost\"}};</script></html>"
+    );
+    let mut page = build(
+        "https://localhost/",
+        PageResponse {
+            status_code: StatusCode::OK,
+            content: Some(html.into_bytes()),
+            ..Default::default()
+        },
+    );
+
+    let initial_status = page.status_code;
+    let initial_should_retry = page.should_retry;
+    assert_eq!(
+        initial_status,
+        StatusCode::from_u16(599).unwrap(),
+        "build() classification must be 599 (catch-all)"
+    );
+
+    // localhost resolves → tunnel error stays transient.
+    confirm_chrome_tunnel_failure_with_local_dns(
+        &mut page,
+        "https://localhost/",
+        std::time::Duration::from_secs(2),
+    )
+    .await;
+
+    assert_eq!(
+        page.status_code, initial_status,
+        "chrome tunnel + local Resolved must STAY at 599 — proxy issue is \
+         transient, retry path runs as before. v2.51.166 regression case stays \
+         retryable."
+    );
+    assert_eq!(
+        page.should_retry, initial_should_retry,
+        "should_retry must be unchanged when local DNS doesn't confirm NxDomain"
+    );
+    assert!(
+        page.needs_retry(),
+        "needs_retry() must be true (599 is_retryable, transient proxy hiccup)"
+    );
+}
+
+/// Chrome confirm must NOT trigger on:
+/// - non-599 statuses (success, real upstream error, pre-classified permanent)
+/// - 599 without a chrome rendered-error page
+/// - 599 with a chrome error page but a non-tunnel errorCode (e.g.
+///   `ERR_CONNECTION_RESET`)
+///
+/// Each of these gates returns instantly with no DNS work — verified by
+/// using a `localhost` URL with a 100ms timeout (would time out and
+/// return TimedOut if we actually reached the lookup, leaving status
+/// unchanged anyway, but the test asserts the gate path).
+#[cfg(all(not(feature = "decentralized"), feature = "chrome"))]
+#[tokio::test(flavor = "current_thread")]
+async fn test_confirm_chrome_tunnel_failure_gates_short_circuit() {
+    // Gate 1: status != 599
+    let mut page = build(
+        "https://example.com/",
+        PageResponse {
+            status_code: StatusCode::OK,
+            content: Some(b"<html><body>fine</body></html>".to_vec()),
+            ..Default::default()
+        },
+    );
+    let initial = page.status_code;
+    confirm_chrome_tunnel_failure_with_local_dns(
+        &mut page,
+        "https://example.com/",
+        std::time::Duration::from_millis(10),
+    )
+    .await;
+    assert_eq!(
+        page.status_code, initial,
+        "non-599 status must be untouched"
+    );
+
+    // Gate 2: 599 but content is not a chrome error page.
+    let mut page2 = Page::default();
+    page2.status_code = StatusCode::from_u16(599).unwrap();
+    confirm_chrome_tunnel_failure_with_local_dns(
+        &mut page2,
+        "https://example.com/",
+        std::time::Duration::from_millis(10),
+    )
+    .await;
+    assert_eq!(
+        page2.status_code,
+        StatusCode::from_u16(599).unwrap(),
+        "599 without chrome-error content must stay 599 (gate 2 short-circuits)"
+    );
+
+    // Gate 3: 599 + chrome error page but errorCode is transient (not tunnel).
+    let padding = "x".repeat(1000);
+    let html_reset = format!(
+        "<html><style>{padding}</style>\
+         <script>var loadTimeDataRaw = {{\"errorCode\":\"ERR_CONNECTION_RESET\",\
+         \"title\":\"x\"}};</script></html>"
+    );
+    let mut page3 = build(
+        "https://this-host-must-not-exist.invalid/",
+        PageResponse {
+            status_code: StatusCode::OK,
+            content: Some(html_reset.into_bytes()),
+            ..Default::default()
+        },
+    );
+    let pre_status = page3.status_code;
+    confirm_chrome_tunnel_failure_with_local_dns(
+        &mut page3,
+        "https://this-host-must-not-exist.invalid/",
+        std::time::Duration::from_millis(10),
+    )
+    .await;
+    assert_eq!(
+        page3.status_code, pre_status,
+        "non-tunnel errorCode (ERR_CONNECTION_RESET) must stay at 599 — \
+         gate 3 short-circuits, no DNS work"
     );
 }
 
