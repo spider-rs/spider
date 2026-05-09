@@ -171,32 +171,52 @@ lazy_static! {
     /// - Chrome surface → "ERR_SSL_VERSION_OR_CIPHER_MISMATCH",
     ///                    "ERR_SSL_PROTOCOL_ERROR"
     ///
-    /// Aho-Corasick automaton for HTTP-proxy `CONNECT` tunnel failures.
+    /// Aho-Corasick automaton for proxy CONNECT failures, both HTTP-CONNECT
+    /// and SOCKS variants.
     ///
-    /// When a proxy returns non-200 to a `CONNECT` request (target NXDOMAIN at
-    /// the proxy, target server down, or proxy-side outage), `hyper-util`
-    /// surfaces the failure as `TunnelUnsuccessful`. Reqwest's top-level
-    /// Display is just `"error sending request for url (...)"`; the actual
-    /// signal lives on inner sources:
+    /// **HTTP-CONNECT** (hyper-util surface). When a proxy returns non-200 to
+    /// a `CONNECT` request (target NXDOMAIN at the proxy, target server down,
+    /// or proxy-side outage), `hyper-util` surfaces the failure as
+    /// `TunnelUnsuccessful`. Reqwest's top-level Display is just
+    /// `"error sending request for url (...)"`; the actual signal lives on
+    /// inner sources:
     ///   src[0]: `"client error (Connect)"`
     ///   src[1]: `"tunnel error: unsuccessful"`
+    ///
+    /// **SOCKS5 / SOCKS4** (tokio-socks via reqwest's socks feature). When a
+    /// SOCKS proxy can't reach the target (NXDOMAIN at proxy resolver, target
+    /// down, proxy-side outage), the inner errors are:
+    ///   src[0]: `"client error (Connect)"`
+    ///   src[1]: `"error connecting to socks proxy"`
+    ///   src[2]: `"SOCKS error: <reason>"` (e.g. `"general server failure"`,
+    ///            `"host unreachable"`, `"network unreachable"`)
+    /// None of these match `"tunnel error"`, so without SOCKS-specific
+    /// patterns the entire SOCKS proxy failure surface stays at 503
+    /// (retryable) — confirmed against the user's Evomi/Webshare/Datainpulse
+    /// rotating SOCKS5 stack on `https://midwestrodding.com/` (NXDOMAIN
+    /// target): the retry loop burned 47s before falling through.
     ///
     /// Without explicit detection these errors fall through `is_connect()` to
     /// `*UNREACHABLE_REQUEST_ERROR` (503 — retryable), and the retry loop
     /// burns the full budget × proxy rotation × exponential backoff (with
     /// `timeout_mult=2` for proxied builds → up to several minutes per host).
     ///
-    /// Reqwest does NOT expose the proxy's CONNECT response body, so we can't
-    /// distinguish "target NXDOMAIN at proxy" from "target down" or
-    /// "proxy-side outage" — all three surface as `TunnelUnsuccessful`. Treat
-    /// the bucket as `*ADDRESS_UNREACHABLE_ERROR` (526, non-retryable through
-    /// the same client) so the failure exits fast. Hedge through a sibling
-    /// proxy still races (parallel, not sequential). User-supplied
-    /// [`RetryStrategy`](crate::retry_strategy::RetryStrategy) can opt back
-    /// into rotation-based retries.
+    /// Reqwest does NOT expose the proxy's CONNECT response body / SOCKS
+    /// reply code beyond the surface above, so we can't distinguish
+    /// "target NXDOMAIN at proxy" from "target down" or "proxy-side outage"
+    /// purely from the proxy signal. The `confirm_tunnel_failure_with_local_dns`
+    /// helper (v2.51.168) pairs this signal with an independent local DNS
+    /// lookup and only flips classification permanent (525) when BOTH the
+    /// proxy AND local DNS agree the host is broken. Resolved / TimedOut
+    /// hosts keep 503 (retryable) — single signal alone is no longer
+    /// sufficient to flip permanent.
     static ref PROXY_TUNNEL_FAILURE_AC: aho_corasick::AhoCorasick = aho_corasick::AhoCorasick::new([
-        "tunnel error",        // hyper-util Display
-        "TunnelUnsuccessful",  // hyper-util Debug + variant name (defensive)
+        // HTTP-CONNECT (hyper-util)
+        "tunnel error",                         // hyper-util Display
+        "TunnelUnsuccessful",                   // hyper-util Debug + variant name (defensive)
+        // SOCKS5 / SOCKS4 (tokio-socks)
+        "error connecting to socks proxy",      // tokio-socks middle-layer Display
+        "SOCKS error",                          // tokio-socks inner Display ("SOCKS error: ...")
     ]).expect("valid patterns");
 
     static ref SSL_HANDSHAKE_ERROR_AC: aho_corasick::AhoCorasick = aho_corasick::AhoCorasick::new([
@@ -295,16 +315,22 @@ fn is_dns_error(err: &crate::client::Error) -> bool {
     false
 }
 
-/// Check whether a reqwest error is a proxy `CONNECT` tunnel failure
-/// (proxy returned non-200 to the CONNECT request).
+/// Check whether a reqwest error is a proxy CONNECT failure — both
+/// HTTP-CONNECT (`TunnelUnsuccessful`) and SOCKS4/5 (tokio-socks
+/// `"SOCKS error"`) variants. Both surfaces convey the same semantic
+/// fact: the proxy could not establish a tunnel to the target. The
+/// follow-on `confirm_tunnel_failure_with_local_dns` step pairs this
+/// signal with a local DNS lookup so confirmed-NXDOMAIN targets fast-fail
+/// at 525 while transient proxy hiccups stay at 503 (retryable).
 ///
 /// Walks the source chain (depth-bounded) and AC-scans each layer's Display.
 /// Same architectural reasoning as [`is_dns_error`]: reqwest's Display does
 /// not chain source text, so a single top-level scan misses the inner
-/// `"tunnel error: unsuccessful"` phrase.
+/// phrases (`"tunnel error: unsuccessful"` for HTTP-CONNECT,
+/// `"error connecting to socks proxy"` / `"SOCKS error: …"` for SOCKS).
 ///
 /// Only meaningful when `err.is_connect() == true` — a non-connect error
-/// path can't surface a tunnel failure.
+/// path can't surface a tunnel/SOCKS failure.
 fn is_proxy_tunnel_failure(err: &crate::client::Error) -> bool {
     use std::error::Error;
 
@@ -313,8 +339,11 @@ fn is_proxy_tunnel_failure(err: &crate::client::Error) -> bool {
         return true;
     }
 
-    // Walk source chain — typically src[1] is `TunnelUnsuccessful` whose
-    // Display is `"tunnel error: unsuccessful"`.
+    // Walk source chain — typically:
+    //   * HTTP-CONNECT: src[1] is `TunnelUnsuccessful` whose Display is
+    //     `"tunnel error: unsuccessful"`.
+    //   * SOCKS:        src[1] is `"error connecting to socks proxy"`,
+    //                   src[2] is `"SOCKS error: <reason>"`.
     let mut source: Option<&(dyn Error + 'static)> = err.source();
     let mut depth = 0u8;
     while let Some(e) = source {
@@ -11227,6 +11256,11 @@ fn test_proxy_tunnel_ac_rejects_unrelated_errors() {
     // Positive controls — actual hyper-util surfaces.
     assert!(PROXY_TUNNEL_FAILURE_AC.is_match("tunnel error: unsuccessful"));
     assert!(PROXY_TUNNEL_FAILURE_AC.is_match("TunnelUnsuccessful"));
+    // Positive controls — actual tokio-socks chain phrases.
+    assert!(PROXY_TUNNEL_FAILURE_AC.is_match("error connecting to socks proxy"));
+    assert!(PROXY_TUNNEL_FAILURE_AC.is_match("SOCKS error: general server failure"));
+    assert!(PROXY_TUNNEL_FAILURE_AC.is_match("SOCKS error: host unreachable"));
+    assert!(PROXY_TUNNEL_FAILURE_AC.is_match("SOCKS error: network unreachable"));
 }
 
 /// `DNS_ERROR_AC` must NOT match tunnel-failure phrases — otherwise a proxy
