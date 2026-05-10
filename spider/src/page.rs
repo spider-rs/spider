@@ -7079,7 +7079,7 @@ impl Page {
                     selectors,
                     html_bytes_taken.as_ref(),
                     &mut map,
-                    &base,
+                    base,
                 )
                 .await;
                 self.html = Some(html_bytes_taken);
@@ -7091,7 +7091,7 @@ impl Page {
                             selectors,
                             path.to_path_buf(),
                             &mut map,
-                            &base,
+                            base,
                         )
                         .await;
                     }
@@ -7273,10 +7273,10 @@ impl Page {
                     ));
 
                     element_content_handlers.push(text!("noscript", |el| {
-                        if upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD {
-                            if NO_SCRIPT_JS_REQUIRED.find(el.as_str()).is_some() {
-                                upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
-                            }
+                        if upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD
+                            && NO_SCRIPT_JS_REQUIRED.find(el.as_str()).is_some()
+                        {
+                            upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
                         }
                         Ok(())
                     }));
@@ -7285,16 +7285,15 @@ impl Page {
                         let s = el.as_str();
                         if !s.is_empty()
                             && upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD
+                            && DOM_SCRIPT_WATCH_METHODS.find(s).is_some()
                         {
-                            if DOM_SCRIPT_WATCH_METHODS.find(s).is_some() {
-                                // Inline DOM mutation is a medium signal (7 points).
-                                // Combined with script srcs it crosses the threshold.
-                                let _ = upgrade_score.fetch_update(
-                                    Ordering::Relaxed,
-                                    Ordering::Relaxed,
-                                    |v| Some(v.saturating_add(7)),
-                                );
-                            }
+                            // Inline DOM mutation is a medium signal (7 points).
+                            // Combined with script srcs it crosses the threshold.
+                            let _ = upgrade_score.fetch_update(
+                                Ordering::Relaxed,
+                                Ordering::Relaxed,
+                                |v| Some(v.saturating_add(7)),
+                            );
                         }
                         Ok(())
                     }));
@@ -7369,8 +7368,8 @@ impl Page {
                         if let Some(browser_controller) = browser
                             .get_or_init(|| {
                                 crate::website::Website::setup_browser_base(
-                                    &configuration,
-                                    &base,
+                                    configuration,
+                                    base,
                                     jar,
                                 )
                             })
@@ -7391,11 +7390,11 @@ impl Page {
                                         configuration.chrome_intercept.enabled,
                                         &configuration.auth_challenge_response,
                                         configuration.chrome_intercept.block_visuals,
-                                        &parent_host,
+                                        parent_host,
                                     ),
                                     crate::features::chrome::setup_chrome_events(
                                         &new_page,
-                                        &configuration,
+                                        configuration,
                                     ),
                                 );
 
@@ -7406,13 +7405,13 @@ impl Page {
                                             crate::features::chrome::seed_jar_from_cookie_header(
                                                 cookie_jar,
                                                 &configuration.cookie_str,
-                                                &u,
+                                                u,
                                             );
                                         }
 
                                         if let Ok(cps) =
                                             crate::features::chrome::cookie_params_from_jar(
-                                                cookie_jar, &u,
+                                                cookie_jar, u,
                                             )
                                         {
                                             let _ = crate::features::chrome::set_page_cookies(
@@ -7526,7 +7525,7 @@ impl Page {
                                     let base = if base_input_url.initialized() {
                                         base_input_url.get().cloned().map(Box::new)
                                     } else {
-                                        base1.as_deref().cloned().map(Box::new)
+                                        base1.cloned().map(Box::new)
                                     };
 
                                     bytes_transferred = resource.bytes_transferred;

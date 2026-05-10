@@ -5608,6 +5608,10 @@ impl Website {
             };
             page.proxy_configured = self.configuration.proxies.is_some();
             let mut attempt: u32 = 0;
+            // Track whether the loop already invoked chrome. Smart mode's
+            // post-loop transport-failure fallback (below) must not double
+            // invoke chrome when the retry budget already covered it.
+            let mut chrome_attempted = false;
 
             while page.needs_retry() && retry_count > 0 {
                 retry_count -= 1;
@@ -5671,6 +5675,7 @@ impl Website {
                                 browser,
                             )
                             .await;
+                            chrome_attempted = true;
                         } else {
                             let next_page = Page::new_page_with_cache(
                                 url,
@@ -5696,7 +5701,8 @@ impl Website {
                         &self.domain_parsed,
                         browser,
                     )
-                    .await
+                    .await;
+                    chrome_attempted = true;
                 } else {
                     page = Page::new_page_with_cache(
                         url,
@@ -5712,6 +5718,39 @@ impl Website {
                 if let Some(ref pk) = directive_profile_key {
                     page.profile_key = Some(pk.clone());
                 }
+            }
+
+            // Smart-mode chrome fallback for transport-level HTTP failures.
+            // When the initial HTTP fetch produces no usable content (TLS
+            // handshake failure on a cert/SAN mismatch — e.g. `www.host.io`
+            // whose cert is only valid for the bare host but redirects 301
+            // → bare host on the first byte; connection refused; SOCKS
+            // tunnel failure; etc.) the retry loop above never runs at the
+            // default `retry=0`, and even at `retry=1` its power-of-two
+            // heuristic does not trigger chrome on a 5xx (`is_power_of_two(0)
+            // == false`). Smart mode's "HTTP first, JS rendering as needed"
+            // contract degrades to plain HTTP-only without this guarantee.
+            // Run exactly one chrome attempt — chrome's broader protocol
+            // tolerance (`--ignore-certificate-errors`, redirect following
+            // before TLS verification, etc.) recovers many cases reqwest's
+            // strict TLS rejects.
+            //
+            // **Performance contract**: skipped on every success path. The
+            // double gate (`needs_retry` AND `is_empty`) excludes legitimate
+            // empty 200s (e.g. HEAD-style endpoints, beacon URLs) from
+            // triggering an unwanted chrome navigation. Skipped when the
+            // loop already invoked chrome to avoid duplicate work.
+            if !chrome_attempted && page.needs_retry() && page.is_empty() {
+                let fallback_url = self.url.inner();
+                Website::render_chrome_page(
+                    &self.configuration,
+                    client,
+                    &mut page,
+                    fallback_url,
+                    &self.domain_parsed,
+                    browser,
+                )
+                .await;
             }
 
             // Apply the redirect-aware selector update BEFORE link extraction
@@ -10295,6 +10334,10 @@ impl Website {
                                         None => shared.4.retry as u32,
                                     };
                                     let mut attempt: u32 = 0;
+                                    // Mirror of the establish-smart guard: track loop chrome
+                                    // invocations so the post-loop transport-failure fallback
+                                    // doesn't duplicate work the retry budget already covered.
+                                    let mut chrome_attempted = false;
 
                                     while page.needs_retry() && retry_count > 0 {
                                         retry_count -= 1;
@@ -10346,6 +10389,7 @@ impl Website {
                                                          &shared.6,
                                                     )
                                                     .await;
+                                                    chrome_attempted = true;
                                                 } else {
                                                     let next_page = Page::new_page_with_cache(
                                                         url,
@@ -10374,6 +10418,7 @@ impl Website {
                                                 &shared.6,
                                             )
                                             .await;
+                                            chrome_attempted = true;
                                         } else {
                                             page = Page::new_page_with_cache(
                                                     url,
@@ -10389,6 +10434,26 @@ impl Website {
                                         if let Some(ref pk) = _directive_profile_key {
                                             page.profile_key = Some(pk.clone());
                                         }
+                                    }
+
+                                    // Smart-mode chrome fallback for transport-level
+                                    // HTTP failures on sub-pages. Mirrors the same
+                                    // guard from `crawl_establish_smart`. See that
+                                    // site for the full rationale — `www`-cert
+                                    // mismatches that 301 to the bare host, etc.
+                                    // The `needs_retry` gate ensures legitimate
+                                    // empty 200s don't trigger an unnecessary
+                                    // chrome navigation.
+                                    if !chrome_attempted && page.needs_retry() && page.is_empty() {
+                                        Website::render_chrome_page(
+                                            &shared.4,
+                                            &shared.0,
+                                            &mut page,
+                                            url,
+                                            &shared.5,
+                                            &shared.6,
+                                        )
+                                        .await;
                                     }
 
                                     if add_external {
