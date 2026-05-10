@@ -6491,7 +6491,7 @@ pub(crate) fn valid_parsing_status(res: &Response) -> bool {
 /// Cost: zero on the success path (function not called), zero on
 /// non-tunnel error paths (gate fast-rejects), one bounded local DNS
 /// lookup (≤500ms) on tunnel-error paths.
-async fn build_error_page_response(target_url: &str, err: RequestError) -> PageResponse {
+pub(crate) async fn build_error_page_response(target_url: &str, err: RequestError) -> PageResponse {
     log::info!("error fetching {}", target_url);
 
     let mut page_response = PageResponse::default();

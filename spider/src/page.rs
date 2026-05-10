@@ -690,14 +690,23 @@ pub async fn confirm_tunnel_failure_with_local_dns(
     let qualifies_503_tunnel =
         initial_status == *UNREACHABLE_REQUEST_ERROR && is_proxy_tunnel_failure(err);
 
+    // The cache_request middleware wraps the underlying transport error
+    // with a `"Cache error: error sending request"` prefix and (depending
+    // on the inner classifier) can surface either ADDRESS_UNREACHABLE
+    // (526) OR UNREACHABLE_REQUEST_ERROR (503). Both shapes carry the
+    // same cache-wrapped phrase at the top level, and both need the
+    // independent local-DNS confirmation to upgrade to 525 NXDOMAIN.
+    // Matching only 526 (the original gate) leaves SOCKS5+cache_request
+    // chains that surface as 503 stuck retrying through the strategy.
     #[cfg(feature = "cache_request")]
-    let qualifies_526_cache_wrapped = initial_status == *ADDRESS_UNREACHABLE_ERROR
+    let qualifies_cache_wrapped = (initial_status == *ADDRESS_UNREACHABLE_ERROR
+        || initial_status == *UNREACHABLE_REQUEST_ERROR)
         && err.is_middleware()
         && CACHE_WRAPPED_TRANSPORT_AC.is_match(&err.to_string());
     #[cfg(not(feature = "cache_request"))]
-    let qualifies_526_cache_wrapped = false;
+    let qualifies_cache_wrapped = false;
 
-    if !qualifies_503_tunnel && !qualifies_526_cache_wrapped {
+    if !qualifies_503_tunnel && !qualifies_cache_wrapped {
         return initial_status;
     }
 
@@ -4110,22 +4119,19 @@ impl Page {
                     }
                 }
                 Err(err) => {
-                    log::info!("error fetching {}", url);
-
-                    let mut page_response = PageResponse::default();
-
-                    if let Some(status_code) = err.status() {
-                        page_response.status_code = status_code;
-                    } else {
-                        page_response.status_code = crate::page::get_error_http_status_code(&err);
-                    }
-
-                    page_response.error_for_status = Some(Err(err));
-
+                    // Pre-v2.51.176: this path handled errors inline as
+                    // `page_response.status_code = get_error_http_status_code(&err)`
+                    // and skipped the async two-signal confirmation. For NXDOMAIN
+                    // through a proxy, that meant tunnel failures stayed at the
+                    // 503 catch-all (retryable) and the retry loop ran for
+                    // minutes per host — even though `crawl()` /
+                    // `crawl_concurrent` is the most common entry point. Now
+                    // delegated to `build_error_page_response` so the two-signal
+                    // confirmation runs identically across every fetch path.
                     #[cfg(feature = "balance")]
                     crate::utils::vitals::request_error();
 
-                    page_response
+                    crate::utils::build_error_page_response(url, err).await
                 }
             },
         };
