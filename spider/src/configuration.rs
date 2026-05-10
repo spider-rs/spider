@@ -1576,7 +1576,10 @@ impl Configuration {
     }
 
     /// Borrowed access to the cache namespace (`None` = default partition).
+    /// Used by chrome / cache feature paths; the lib build without those
+    /// flags has no callers, hence `#[allow(dead_code)]`.
     #[inline]
+    #[allow(dead_code)]
     pub(crate) fn cache_namespace_str(&self) -> Option<&str> {
         self.cache_namespace.as_ref().map(|s| s.as_str())
     }
@@ -1599,8 +1602,11 @@ impl Configuration {
     }
 
     /// Whether the remote Chrome cache is in read-only mode. Always `false`
-    /// without the `chrome_remote_cache` feature.
+    /// without the `chrome_remote_cache` feature. Only consumed by the
+    /// chrome-cache wiring at `Configuration::chrome_fetch_params`, so the
+    /// default lib build flags this as unused.
     #[inline]
+    #[allow(dead_code)]
     pub(crate) fn chrome_remote_cache_read_only_enabled(&self) -> bool {
         #[cfg(feature = "chrome_remote_cache")]
         {
@@ -1678,8 +1684,10 @@ impl Configuration {
 
     /// Whether chrome remote-cache dumps should be restricted to the
     /// main document. Always `false` without the `chrome_remote_cache`
-    /// feature.
+    /// feature. Only consumed by the chrome-cache wiring at
+    /// `Configuration::chrome_fetch_params`; default lib build is unused.
     #[inline]
+    #[allow(dead_code)]
     pub(crate) fn chrome_remote_cache_main_doc_only_enabled(&self) -> bool {
         #[cfg(feature = "chrome_remote_cache")]
         {

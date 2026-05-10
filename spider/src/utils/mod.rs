@@ -9285,7 +9285,14 @@ pub(crate) async fn hash_html(html: &[u8]) -> u64 {
 /// - Lockfree, no mutexes, no `spawn_blocking` — only `tokio::fs` +
 ///   `tokio::io::BufReader` async I/O.
 /// - Panic-free: every fallible op returns via `?` or matches.
+//
+// Callers (`fetch_chrome_html_to_spool` / `_with_writer`) are themselves
+// `#[allow(dead_code)]` — staged for the chrome streaming spool wiring
+// (Step 4 of the spool refactor) and not yet on a hot path. Mark this
+// helper the same way so the default lib build doesn't surface a
+// misleading dead-code warning while the wiring lands.
 #[cfg(all(feature = "balance", not(feature = "decentralized")))]
+#[allow(dead_code)]
 pub(crate) async fn compute_spool_signature(
     path: &std::path::Path,
     cap: usize,
