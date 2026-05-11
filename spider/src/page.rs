@@ -6338,7 +6338,7 @@ impl Page {
                         break;
                     }
                     if should_yield && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1 {
-                        tokio::task::yield_now().await;
+                        tokio::task::consume_budget().await;
                     }
                 }
 
@@ -6805,7 +6805,7 @@ impl Page {
                         if should_yield
                             && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1
                         {
-                            tokio::task::yield_now().await;
+                            tokio::task::consume_budget().await;
                         }
                     }
 
@@ -7342,7 +7342,7 @@ impl Page {
                         if should_yield
                             && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1
                         {
-                            tokio::task::yield_now().await;
+                            tokio::task::consume_budget().await;
                         }
                     }
 
@@ -7915,7 +7915,7 @@ impl Page {
                         if should_yield
                             && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1
                         {
-                            tokio::task::yield_now().await;
+                            tokio::task::consume_budget().await;
                         }
                     }
 
@@ -8286,7 +8286,7 @@ impl Page {
                         if should_yield
                             && i % REWRITER_YIELD_INTERVAL == REWRITER_YIELD_INTERVAL - 1
                         {
-                            tokio::task::yield_now().await;
+                            tokio::task::consume_budget().await;
                         }
                     }
 

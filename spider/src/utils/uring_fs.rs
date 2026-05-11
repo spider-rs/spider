@@ -986,8 +986,11 @@ mod inner {
                 }
                 // Yield every 8 chunks (~512 KiB at 64 KiB chunks) so
                 // CPU-heavy consumers don't starve the executor.
+                // `consume_budget` is a no-op when the task's coop
+                // budget isn't exhausted, avoiding scheduler trips on
+                // the hot path while still being cooperative.
                 if i & 7 == 7 {
-                    tokio::task::yield_now().await;
+                    tokio::task::consume_budget().await;
                 }
             }
             return Ok(total);
