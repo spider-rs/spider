@@ -2687,7 +2687,8 @@ mod cf_turnstile_detection_tests {
 
     #[test]
     fn embedded_widget_div_single_quoted() {
-        let body = br#"<html><body><div class='cf-turnstile' data-sitekey='abc'></div></body></html>"#;
+        let body =
+            br#"<html><body><div class='cf-turnstile' data-sitekey='abc'></div></body></html>"#;
         assert!(detect_cf_embedded_turnstile(body));
         assert!(detect_cf_turnstyle(body));
     }
@@ -2721,7 +2722,8 @@ mod cf_turnstile_detection_tests {
     fn case_insensitive_class_attribute() {
         // HTML attribute values are case-insensitive per spec — make
         // sure shouty markup still routes through the same path.
-        let body = br#"<HTML><BODY><DIV CLASS="CF-TURNSTILE" DATA-SITEKEY="abc"></DIV></BODY></HTML>"#;
+        let body =
+            br#"<HTML><BODY><DIV CLASS="CF-TURNSTILE" DATA-SITEKEY="abc"></DIV></BODY></HTML>"#;
         assert!(detect_cf_embedded_turnstile(body));
     }
 }

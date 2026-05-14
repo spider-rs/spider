@@ -1095,7 +1095,7 @@ version = "0.0.0"
 dependencies = [
  "criterion",
  "spider 2.51.186",
- "spider_utils 2.51.183",
+ "spider_utils 2.51.186",
 ]
 
 [[package]]
@@ -8100,7 +8100,7 @@ dependencies = [
  "sonic-rs",
  "spider-http-cache-reqwest",
  "spider_agent",
- "spider_agent_types 2.51.183",
+ "spider_agent_types 2.51.186",
  "spider_fingerprint",
  "spider_firewall",
  "spider_network_blocker",
@@ -8179,7 +8179,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent"
-version = "2.51.183"
+version = "2.51.186"
 dependencies = [
  "aho-corasick",
  "async-openai 0.35.0",
@@ -8202,7 +8202,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spider_agent_html",
- "spider_agent_types 2.51.183",
+ "spider_agent_types 2.51.186",
  "spider_skills",
  "tempfile",
  "thirtyfour",
@@ -8213,13 +8213,13 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_html"
-version = "2.51.183"
+version = "2.51.186"
 dependencies = [
  "aho-corasick",
  "lol_html",
  "serde",
  "serde_json",
- "spider_agent_types 2.51.183",
+ "spider_agent_types 2.51.186",
 ]
 
 [[package]]
@@ -8237,7 +8237,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.51.183"
+version = "2.51.186"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -8287,7 +8287,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.51.183"
+version = "2.51.186"
 dependencies = [
  "clap",
  "env_logger",
@@ -8354,7 +8354,7 @@ dependencies = [
 
 [[package]]
 name = "spider_mcp"
-version = "2.51.181"
+version = "2.51.186"
 dependencies = [
  "clap",
  "dashmap",
@@ -8490,7 +8490,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.51.183"
+version = "2.51.186"
 dependencies = [
  "hashbrown 0.17.1",
  "indexmap",
@@ -8505,7 +8505,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.51.181"
+version = "2.51.186"
 dependencies = [
  "env_logger",
  "hyper",

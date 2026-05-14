@@ -821,8 +821,7 @@ impl ChromeNxdomainCache {
 /// `SPIDER_CHROME_NXDOMAIN_CACHE_CAPACITY` and
 /// `SPIDER_CHROME_NXDOMAIN_CACHE_TTL_SECS` env vars.
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
-static CHROME_NXDOMAIN_CACHE: std::sync::OnceLock<ChromeNxdomainCache> =
-    std::sync::OnceLock::new();
+static CHROME_NXDOMAIN_CACHE: std::sync::OnceLock<ChromeNxdomainCache> = std::sync::OnceLock::new();
 
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 #[inline]
