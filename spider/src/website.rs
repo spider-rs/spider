@@ -13917,6 +13917,40 @@ async fn test_crawl_shutdown() {
 
 #[tokio::test]
 #[cfg(all(feature = "cache_request", not(feature = "decentralized")))]
+async fn test_no_cache_does_not_wrap_transport_errors() {
+    // Regression test for the cache-middleware-gate fix in
+    // `Website::configure_http_client`: when `configuration.cache=false`,
+    // the http-cache-reqwest middleware MUST NOT be attached. Otherwise
+    // every transport error gets wrapped as
+    // `HttpCacheError::Cache(err.to_string())` which destroys the source
+    // chain and forces `status_code_from_reqwest_error` to bucket every
+    // failure as 526 ADDRESS_UNREACHABLE.
+    //
+    // We trigger a fast TCP-refused error against a port nothing's
+    // listening on (127.0.0.1:1) and assert the error string does NOT
+    // start with the "Cache error:" prefix that the middleware adds.
+    let mut website: Website = Website::new("http://127.0.0.1:1/");
+    website.configuration.cache = false;
+
+    let client = website.configure_http_client();
+    let resp = client.get("http://127.0.0.1:1/").send().await;
+
+    // We expect a transport error (not a successful response), and the
+    // error MUST be the raw reqwest error — no cache-middleware wrap.
+    match resp {
+        Err(err) => {
+            let err_str = err.to_string();
+            assert!(
+                !err_str.starts_with("Cache error:"),
+                "cache=false client wrapped transport error: {err_str}"
+            );
+        }
+        Ok(_) => panic!("expected transport error against 127.0.0.1:1, got Ok"),
+    }
+}
+
+#[tokio::test]
+#[cfg(all(feature = "cache_request", not(feature = "decentralized")))]
 async fn test_cache() {
     let domain = "https://choosealicense.com/";
     let mut website: Website = Website::new(&domain);
