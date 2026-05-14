@@ -907,6 +907,102 @@ fn dns_state_to_u8(state: LocalDnsState) -> u8 {
     }
 }
 
+// Aho-Corasick matcher over chrome `Network.loadingFailed` errorText
+// values that indicate a transport-level "host unreachable through
+// this chain" failure mode — the EARLY-trigger signal for the DNS
+// hedge. Includes proxy CONNECT failures (`ERR_TUNNEL_*` /
+// `ERR_PROXY_*`) and direct DNS resolution failures
+// (`ERR_NAME_NOT_RESOLVED` / `ERR_NAME_RESOLUTION_FAILED`) so the
+// hedge fires on both proxied and direct chrome paths.
+//
+// Patterns deliberately omit the `net::` prefix because chrome
+// formats errorText with the prefix on some surfaces and without on
+// others (CDP versions / chromium builds differ); a suffix match
+// catches both. False-positive risk is zero by construction — these
+// identifiers don't appear in non-error errorText payloads.
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+lazy_static! {
+    static ref CHROME_HEDGE_FAILURE_AC: aho_corasick::AhoCorasick =
+        aho_corasick::AhoCorasickBuilder::new()
+            .match_kind(aho_corasick::MatchKind::LeftmostFirst)
+            .build([
+                "ERR_TUNNEL_CONNECTION_FAILED",
+                "ERR_PROXY_CONNECTION_FAILED",
+                "ERR_NAME_NOT_RESOLVED",
+                "ERR_NAME_RESOLUTION_FAILED",
+            ])
+            .expect("valid chrome hedge failure patterns");
+}
+
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+#[inline]
+fn is_chrome_hedge_trigger_error(error_text: &str) -> bool {
+    !error_text.is_empty() && CHROME_HEDGE_FAILURE_AC.is_match(error_text)
+}
+
+/// Subscribe to chrome's `Network.loadingFailed` event stream and arm
+/// a `tokio::sync::Notify` to fire the FIRST time a main-frame
+/// Document failure matches [`is_chrome_hedge_trigger_error`]. Returns
+/// `None` when the subscription itself fails (chrome handler not
+/// ready, channel closed) — caller falls back to the timeout-only
+/// hedge.
+///
+/// The returned `JoinHandle` is owned by an `AbortGuard` in the
+/// hedge select; on any exit (chrome wins, timer wins, event wins,
+/// or panic) the listener is `abort()`ed so the spawned task never
+/// outlives the navigation. The bounded `tokio_stream::StreamExt`
+/// loop is the only async point inside, and it breaks on the first
+/// match — no busy poll, no Mutex, no lock held across the await.
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+async fn spawn_chrome_loading_failed_signal(
+    page: &chromiumoxide::Page,
+) -> Option<(
+    std::sync::Arc<tokio::sync::Notify>,
+    tokio::task::JoinHandle<()>,
+)> {
+    let stream = page
+        .event_listener::<chromiumoxide::cdp::browser_protocol::network::EventLoadingFailed>()
+        .await
+        .ok()?;
+    let notify = std::sync::Arc::new(tokio::sync::Notify::new());
+    let notify_clone = notify.clone();
+    let handle = tokio::spawn(async move {
+        use tokio_stream::StreamExt;
+        let mut stream = stream;
+        while let Some(event) = stream.next().await {
+            // Gate on Document type so sub-resource failures (an
+            // image 404 on a CDN, an analytics beacon dropped by an
+            // adblocker) cannot pre-trigger the hedge. The main-frame
+            // load is the only failure that justifies cancelling the
+            // overall page navigation.
+            if matches!(
+                event.r#type,
+                chromiumoxide::cdp::browser_protocol::network::ResourceType::Document
+            ) && is_chrome_hedge_trigger_error(&event.error_text)
+            {
+                notify_clone.notify_one();
+                break;
+            }
+        }
+    });
+    Some((notify, handle))
+}
+
+/// RAII guard that aborts a chrome event-watcher task on scope exit.
+/// Ensures the spawned listener never outlives the hedge call —
+/// covers normal returns, early returns, and panics uniformly.
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+struct ChromeEventTaskAbortGuard(Option<tokio::task::JoinHandle<()>>);
+
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+impl Drop for ChromeEventTaskAbortGuard {
+    fn drop(&mut self) {
+        if let Some(handle) = self.0.take() {
+            handle.abort();
+        }
+    }
+}
+
 /// Hedge a chrome page navigation against a parallel local DNS
 /// lookup. The chrome navigation runs unchanged; in parallel, a
 /// background tokio task probes the local resolver for the target
@@ -991,6 +1087,34 @@ async fn chrome_navigation_with_dns_hedge<'a>(
         });
     }
 
+    // Subscribe to chrome's `Network.loadingFailed` events so the
+    // hedge fires the INSTANT chrome's main frame surfaces a tunnel
+    // / proxy / DNS-resolution failure, rather than waiting for the
+    // full hedge timeout to tick. The watcher signals a `Notify` on
+    // the first matching event and exits; if chrome navigates
+    // successfully the watcher loops idly until the abort guard
+    // tears it down at function exit. When the subscription fails
+    // (handler busy, channel closed) the hedge falls back to the
+    // timeout-only path — no regression.
+    let event_sub = spawn_chrome_loading_failed_signal(page).await;
+    let event_notify: Option<std::sync::Arc<tokio::sync::Notify>> =
+        event_sub.as_ref().map(|(n, _)| n.clone());
+    let _event_guard = ChromeEventTaskAbortGuard(event_sub.map(|(_, h)| h));
+
+    // Heap-pin the notified future so we can `&mut` it from select.
+    // `notify.notified()` borrows from the owning `Arc<Notify>`; the
+    // async-move captures the Arc into the future, so the borrow is
+    // self-contained inside the Box. Falls back to `pending()` when
+    // event subscription failed — that branch then never wakes.
+    let mut chrome_failure_notified: std::pin::Pin<
+        Box<dyn std::future::Future<Output = ()> + Send>,
+    > = match event_notify {
+        Some(n) => Box::pin(async move {
+            n.notified().await;
+        }),
+        None => Box::pin(std::future::pending()),
+    };
+
     // `fetch_fut` is already a `Pin<Box<dyn Future>>` so it is `Unpin`
     // and the inner state machine lives on the heap — using `&mut`
     // in `tokio::select!` works without a `tokio::pin!` that would
@@ -1003,6 +1127,30 @@ async fn chrome_navigation_with_dns_hedge<'a>(
     tokio::select! {
         biased;
         r = &mut fetch_fut => r,
+        // Early-trigger arm: chrome itself signalled a transport-level
+        // main-frame failure. Same two-signal contract as the timeout
+        // arm — only short-circuits when local DNS independently
+        // confirms NXDOMAIN. When chrome surfaces a tunnel error AND
+        // local DNS agrees, this beats the timer to the punch and saves
+        // the remaining hedge-delay milliseconds.
+        _ = &mut chrome_failure_notified => {
+            if signal.load(std::sync::atomic::Ordering::Acquire) == DNS_STATE_NXDOMAIN {
+                let _ = page.stop_loading().await;
+                chrome_nxdomain_cache().insert(host.clone());
+                let mut pr = crate::utils::PageResponse::default();
+                pr.status_code = *DNS_RESOLVE_ERROR;
+                pr.final_url = Some(url.to_string());
+                pr
+            } else {
+                // Chrome's failure landed but local DNS hasn't
+                // confirmed yet (probe still in flight, or returned
+                // Resolved / TimedOut). Fall through to the natural
+                // chrome path so the reactive
+                // `confirm_chrome_tunnel_failure_with_local_dns`
+                // can complete its own two-signal check post-build.
+                fetch_fut.await
+            }
+        }
         _ = &mut timer => {
             if signal.load(std::sync::atomic::Ordering::Acquire) == DNS_STATE_NXDOMAIN {
                 // Two-signal-equivalent: chrome hasn't completed AND
@@ -13727,5 +13875,54 @@ mod chrome_hedge_dns_tests {
             "default hedge ({}) must fire before chrome's proxy-NXDOMAIN timeout path completes",
             super::DEFAULT_CHROME_HEDGE_DNS_DELAY_MS,
         );
+    }
+
+    #[test]
+    fn loading_failed_trigger_matches_tunnel_proxy_dns_errors() {
+        use super::is_chrome_hedge_trigger_error;
+        // Canonical chrome net::* identifiers that justify firing
+        // the hedge early. Both prefixed and unprefixed surfaces.
+        assert!(is_chrome_hedge_trigger_error(
+            "net::ERR_TUNNEL_CONNECTION_FAILED"
+        ));
+        assert!(is_chrome_hedge_trigger_error(
+            "ERR_TUNNEL_CONNECTION_FAILED"
+        ));
+        assert!(is_chrome_hedge_trigger_error(
+            "net::ERR_PROXY_CONNECTION_FAILED"
+        ));
+        assert!(is_chrome_hedge_trigger_error("net::ERR_NAME_NOT_RESOLVED"));
+        assert!(is_chrome_hedge_trigger_error(
+            "net::ERR_NAME_RESOLUTION_FAILED"
+        ));
+    }
+
+    #[test]
+    fn loading_failed_trigger_rejects_unrelated_chrome_errors() {
+        use super::is_chrome_hedge_trigger_error;
+        // Critical false-positive guard: transient or unrelated
+        // chrome errors (timeouts, resets, aborts, TLS issues) must
+        // NOT trip the hedge. The hedge only fires for permanent
+        // host-unreachable surfaces because the two-signal check
+        // also requires DNS NXDOMAIN; widening this matcher to
+        // transient errors would still need DNS-NXDOMAIN to
+        // short-circuit, but the runtime cost of the wakeup +
+        // atomic load is wasted for failure modes that are never
+        // going to satisfy the two-signal contract.
+        assert!(!is_chrome_hedge_trigger_error(""));
+        assert!(!is_chrome_hedge_trigger_error("net::ERR_CONNECTION_RESET"));
+        assert!(!is_chrome_hedge_trigger_error(
+            "net::ERR_CONNECTION_REFUSED"
+        ));
+        assert!(!is_chrome_hedge_trigger_error(
+            "net::ERR_CONNECTION_TIMED_OUT"
+        ));
+        assert!(!is_chrome_hedge_trigger_error(
+            "net::ERR_CERT_AUTHORITY_INVALID"
+        ));
+        assert!(!is_chrome_hedge_trigger_error("net::ERR_ABORTED"));
+        assert!(!is_chrome_hedge_trigger_error(
+            "net::ERR_INTERNET_DISCONNECTED"
+        ));
     }
 }
