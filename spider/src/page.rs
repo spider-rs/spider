@@ -656,6 +656,127 @@ fn host_dns_cache() -> &'static HostDnsCache {
     })
 }
 
+/// Default per-host timeout for the chrome pre-flight DNS shortcircuit.
+/// Override via `SPIDER_CHROME_PREFLIGHT_DNS_TIMEOUT_MS`.
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+const DEFAULT_CHROME_PREFLIGHT_DNS_TIMEOUT_MS: u64 = 500;
+
+/// Hard upper bound on the configurable pre-flight DNS timeout. Caps the
+/// env-overridable value so a typo doesn't turn the shortcircuit into a
+/// long-blocking lookup. 5 seconds is more than any sane local resolver
+/// needs; values past this hint at misconfiguration.
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+const MAX_CHROME_PREFLIGHT_DNS_TIMEOUT_MS: u64 = 5_000;
+
+/// Process-wide enable flag for [`chrome_preflight_dns_shortcircuit`]. Read
+/// once at first call; subsequent reads are lock-free. Default off so this
+/// is purely opt-in — zero behavior change for callers that don't set the
+/// `SPIDER_CHROME_PREFLIGHT_DNS` env var.
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+static CHROME_PREFLIGHT_DNS_ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// Process-wide cached pre-flight DNS timeout. Same lazy-init pattern as
+/// the enable flag — read once, cap at [`MAX_CHROME_PREFLIGHT_DNS_TIMEOUT_MS`].
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+static CHROME_PREFLIGHT_DNS_TIMEOUT_MS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+#[inline]
+fn chrome_preflight_dns_enabled() -> bool {
+    *CHROME_PREFLIGHT_DNS_ENABLED.get_or_init(|| {
+        let v = std::env::var("SPIDER_CHROME_PREFLIGHT_DNS").unwrap_or_default();
+        matches!(
+            v.as_str(),
+            "1" | "true" | "TRUE" | "True" | "yes" | "YES" | "on" | "ON"
+        )
+    })
+}
+
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+#[inline]
+fn chrome_preflight_dns_timeout() -> std::time::Duration {
+    let ms = *CHROME_PREFLIGHT_DNS_TIMEOUT_MS.get_or_init(|| {
+        std::env::var("SPIDER_CHROME_PREFLIGHT_DNS_TIMEOUT_MS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|&v| v > 0)
+            .map(|v| v.min(MAX_CHROME_PREFLIGHT_DNS_TIMEOUT_MS))
+            .unwrap_or(DEFAULT_CHROME_PREFLIGHT_DNS_TIMEOUT_MS)
+    });
+    std::time::Duration::from_millis(ms)
+}
+
+/// Pre-flight local DNS shortcircuit for the chrome navigation path.
+///
+/// Returns `Some(PageResponse)` carrying a 525 DNS-resolve status when the
+/// local resolver explicitly reports NXDOMAIN for the URL's host — the
+/// chrome caller then skips the navigation (and any proxy CONNECT
+/// roundtrip behind it) and feeds the synthesised response straight into
+/// [`build`]. Returns `None` (caller proceeds with normal chrome flow)
+/// when any of these hold:
+///
+///   * `SPIDER_CHROME_PREFLIGHT_DNS` is unset or not truthy (default —
+///     zero behavior change for everyone who hasn't opted in).
+///   * The URL is unparseable or lacks a host (data:/file:/about:blank/…
+///     — chrome navigates these without DNS so a pre-flight is wrong).
+///   * The local resolver reports `Resolved` (host exists — no
+///     short-circuit) or `TimedOut` (no evidence — fall through to
+///     chrome and let the existing reactive
+///     [`confirm_chrome_tunnel_failure_with_local_dns`] do its work).
+///
+/// **Why opt-in.** A proxy may sit behind an internal resolver that sees
+/// hosts the caller's local resolver doesn't (private DNS, split-horizon
+/// setups, corporate VPN). For those topologies a confirmed-local-NXDOMAIN
+/// is NOT proof of global NXDOMAIN, so a pre-flight would false-positive
+/// reachable hosts to 525. The reactive path is safe by default because it
+/// requires BOTH chrome's tunnel-error signal AND a local NXDOMAIN before
+/// upgrading. The pre-flight trades that safety for browser-grade speed,
+/// so it stays default-off and the operator opts in once they've confirmed
+/// their resolver view matches their proxy view.
+///
+/// **Performance.** Lookups go through [`host_resolves_locally_cached`],
+/// so the first lookup per host bounds at the per-host timeout (default
+/// 500ms, configurable via `SPIDER_CHROME_PREFLIGHT_DNS_TIMEOUT_MS`,
+/// capped at 5s) and every subsequent lookup of the same host during the
+/// process lifetime hits the bounded [`HostDnsCache`] in ~50ns.
+///
+/// **Concurrency.** Pure async, no locks acquired here, no panics; the
+/// underlying cache is a DashMap (no spider-side mutex). Safe to call
+/// concurrently from any tokio context.
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+async fn chrome_preflight_dns_shortcircuit(
+    url: &str,
+) -> Option<crate::utils::PageResponse> {
+    if !chrome_preflight_dns_enabled() {
+        return None;
+    }
+    let host = url::Url::parse(url).ok()?.host_str()?.to_string();
+    if host.is_empty() {
+        return None;
+    }
+    let state = host_resolves_locally_cached(&host, chrome_preflight_dns_timeout()).await;
+    synthesize_chrome_preflight_response(url, state)
+}
+
+/// Pure decision function for [`chrome_preflight_dns_shortcircuit`].
+/// Split out so unit tests can pin down the synthesis logic without
+/// reaching through the cache or env-var OnceLock state. Returns a
+/// 525-status [`PageResponse`] on confirmed NXDOMAIN, `None` for every
+/// other resolver state.
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+fn synthesize_chrome_preflight_response(
+    url: &str,
+    state: LocalDnsState,
+) -> Option<crate::utils::PageResponse> {
+    if !matches!(state, LocalDnsState::NxDomain) {
+        return None;
+    }
+    let mut pr = crate::utils::PageResponse::default();
+    pr.status_code = *DNS_RESOLVE_ERROR;
+    pr.final_url = Some(url.to_string());
+    Some(pr)
+}
+
 /// Cached wrapper around [`host_resolves_locally`]. Cache hits return in
 /// ~50ns (single read-lock + HashMap lookup); misses fall through to the
 /// underlying lookup, then insert the result with bounded eviction.
@@ -4454,6 +4575,22 @@ impl Page {
         params: &crate::utils::ChromeFetchParams<'_>,
         extract: Option<&mut ChromeStreamingExtractor<'h>>,
     ) -> Self {
+        // Pre-flight local DNS shortcircuit. Default off (env-gated by
+        // `SPIDER_CHROME_PREFLIGHT_DNS`). When enabled, confirmed-NXDOMAIN
+        // hosts skip the chrome navigation (and any proxy CONNECT
+        // roundtrip behind it) entirely — matches the browser's fail-fast
+        // on resolver-level NXDOMAIN instead of paying the proxy RTT plus
+        // the reactive `confirm_chrome_tunnel_failure_with_local_dns`
+        // chain walk. See `chrome_preflight_dns_shortcircuit` for the
+        // full opt-in rationale and decision matrix.
+        if let Some(pr) = chrome_preflight_dns_shortcircuit(url).await {
+            let mut p = build(url, pr);
+            if cfg!(feature = "chrome_store_page") {
+                p.chrome_page = Some(page.clone());
+            }
+            return p;
+        }
+
         let page_resource = if seeded_resource.is_some() {
             crate::utils::fetch_page_html_seeded(
                 url,
@@ -13070,5 +13207,55 @@ mod empty_success_tests {
             page.content_byte_len, 12_345,
             "content_byte_len must come from spool vitals — never re-read disk"
         );
+    }
+}
+
+#[cfg(all(test, feature = "chrome", not(feature = "decentralized")))]
+mod chrome_preflight_dns_tests {
+    use super::{synthesize_chrome_preflight_response, LocalDnsState, DNS_RESOLVE_ERROR};
+
+    #[test]
+    fn nxdomain_synthesises_525_with_final_url() {
+        let url = "https://this-host-cannot-exist.invalid/";
+        let pr = synthesize_chrome_preflight_response(url, LocalDnsState::NxDomain)
+            .expect("NxDomain must produce a synthesised response");
+        assert_eq!(pr.status_code, *DNS_RESOLVE_ERROR);
+        assert_eq!(pr.final_url.as_deref(), Some(url));
+        // No content body — caller treats this as a transport-failure
+        // surface, not a real HTML response.
+        assert!(pr.content.is_none());
+    }
+
+    #[test]
+    fn resolved_returns_none_so_chrome_proceeds() {
+        assert!(
+            synthesize_chrome_preflight_response("https://example.com/", LocalDnsState::Resolved)
+                .is_none(),
+            "Resolved hosts must NOT short-circuit — chrome navigates normally"
+        );
+    }
+
+    #[test]
+    fn timed_out_returns_none_so_reactive_path_can_run() {
+        // The reactive `confirm_chrome_tunnel_failure_with_local_dns`
+        // already handles TimedOut conservatively (keeps 599 retryable).
+        // The pre-flight intentionally does NOT short-circuit here — no
+        // evidence of NXDOMAIN means we hand the navigation to chrome and
+        // let the existing two-signal path decide later.
+        assert!(
+            synthesize_chrome_preflight_response("https://example.com/", LocalDnsState::TimedOut)
+                .is_none(),
+            "TimedOut must NOT short-circuit — fall through to the reactive path"
+        );
+    }
+
+    #[test]
+    fn preserves_query_and_path_in_final_url() {
+        // The synthesised final_url is consumed downstream by callers
+        // building error pages and metadata. Stripping the path or query
+        // would silently rewrite the URL the user asked us to fetch.
+        let url = "https://kingfishelectric.com/catalog?id=42&page=3";
+        let pr = synthesize_chrome_preflight_response(url, LocalDnsState::NxDomain).unwrap();
+        assert_eq!(pr.final_url.as_deref(), Some(url));
     }
 }

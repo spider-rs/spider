@@ -1094,7 +1094,7 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider 2.51.184",
+ "spider 2.51.185",
  "spider_utils 2.51.183",
 ]
 
@@ -8039,7 +8039,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.51.184"
+version = "2.51.185"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -8296,7 +8296,7 @@ dependencies = [
  "percent-encoding",
  "quote",
  "serde_json",
- "spider 2.51.184",
+ "spider 2.51.185",
  "spider_transformations",
  "tikv-jemallocator",
  "tokio",
@@ -8313,7 +8313,7 @@ dependencies = [
  "flexbuffers",
  "htr",
  "serde_json",
- "spider 2.51.184",
+ "spider 2.51.185",
  "spider_transformations",
  "spider_utils 2.51.176",
 ]
@@ -8363,7 +8363,7 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
- "spider 2.51.184",
+ "spider 2.51.185",
  "spider_transformations",
  "tokio",
  "uuid",
@@ -8512,7 +8512,7 @@ dependencies = [
  "hyper-util",
  "lazy_static",
  "rustls-pemfile",
- "spider 2.51.184",
+ "spider 2.51.185",
  "tokio-rustls",
  "warp",
 ]
