@@ -656,119 +656,226 @@ fn host_dns_cache() -> &'static HostDnsCache {
     })
 }
 
-/// Default per-host timeout for the chrome pre-flight DNS shortcircuit.
-/// Override via `SPIDER_CHROME_PREFLIGHT_DNS_TIMEOUT_MS`.
+/// Default capacity for [`ChromeNxdomainCache`]. Bounds memory at
+/// ~1024 hostnames × ~64 bytes per entry ≈ tens of KB worst case.
+/// Override via `SPIDER_CHROME_NXDOMAIN_CACHE_CAPACITY`.
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
-const DEFAULT_CHROME_PREFLIGHT_DNS_TIMEOUT_MS: u64 = 500;
+pub const DEFAULT_CHROME_NXDOMAIN_CACHE_CAPACITY: usize = 1024;
 
-/// Hard upper bound on the configurable pre-flight DNS timeout. Caps the
-/// env-overridable value so a typo doesn't turn the shortcircuit into a
-/// long-blocking lookup. 5 seconds is more than any sane local resolver
-/// needs; values past this hint at misconfiguration.
+/// Default TTL for [`ChromeNxdomainCache`] entries. 5 minutes mirrors
+/// [`DEFAULT_HOST_DNS_CACHE_TTL_SECS`] so a chrome-confirmed NXDOMAIN
+/// doesn't pin a hostname forever (DNS records do come back).
+/// Override via `SPIDER_CHROME_NXDOMAIN_CACHE_TTL_SECS`.
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
-const MAX_CHROME_PREFLIGHT_DNS_TIMEOUT_MS: u64 = 5_000;
+pub const DEFAULT_CHROME_NXDOMAIN_CACHE_TTL_SECS: u64 = 300;
 
-/// Process-wide enable flag for [`chrome_preflight_dns_shortcircuit`]. Read
-/// once at first call; subsequent reads are lock-free. Default off so this
-/// is purely opt-in — zero behavior change for callers that don't set the
-/// `SPIDER_CHROME_PREFLIGHT_DNS` env var.
+/// Bounded process-wide cache of hostnames the chrome two-signal
+/// reactive path has CONFIRMED as NXDOMAIN. Populated only inside
+/// [`confirm_chrome_tunnel_failure_with_local_dns`] at the exact point
+/// where chrome's tunnel/proxy CONNECT error AND an independent local
+/// DNS lookup BOTH agree the host is broken. Read at the top of
+/// [`Page::new_base`] so repeat requests to the same host skip the
+/// proxy CONNECT roundtrip entirely and synthesise a 525 response
+/// directly — matching browser-grade latency for the second-and-later
+/// hits in a crawl without sacrificing the safety of the two-signal
+/// contract.
+///
+/// **Zero false positives by construction.** Every cache entry has
+/// been independently confirmed by both signals BEFORE being inserted.
+/// Unlike a pre-flight that trusts local DNS alone, a cache hit here
+/// means "this exact transport chain (chrome → proxy → target) has
+/// already proven NXDOMAIN" — there is no resolver-view-disagreement
+/// failure mode because the proxy itself surfaced the failure.
+///
+/// **No user-facing locks** — backed by [`dashmap::DashMap`]. Reads
+/// return values atomically; writes take a per-shard internal lock
+/// (held for ~hundreds of ns, never across an `.await`).
+/// **No** `Mutex` / `RwLock` is exposed in this type's API.
+///
+/// **DoS / overflow protection** — bounded by `capacity` (default
+/// 1024). When at-or-above capacity after an insert, eviction runs
+/// to bring length back down: prefer evicting an expired (TTL-stale)
+/// entry; if none, evict the entry with the smallest `inserted_at`
+/// (oldest). Same eviction shape as [`HostDnsCache`].
+///
+/// **TTL** — entries expire after `ttl` so cached negative results
+/// don't pin a hostname permanently when the upstream finally
+/// publishes DNS. Expired entries are returned as `None` from
+/// [`Self::contains`] and preferred during eviction.
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
-static CHROME_PREFLIGHT_DNS_ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+pub struct ChromeNxdomainCache {
+    entries: dashmap::DashMap<String, std::time::Instant>,
+    capacity: usize,
+    ttl: std::time::Duration,
+}
 
-/// Process-wide cached pre-flight DNS timeout. Same lazy-init pattern as
-/// the enable flag — read once, cap at [`MAX_CHROME_PREFLIGHT_DNS_TIMEOUT_MS`].
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
-static CHROME_PREFLIGHT_DNS_TIMEOUT_MS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+impl ChromeNxdomainCache {
+    /// Create a new cache. `capacity` is clamped to at least 1.
+    pub fn new(capacity: usize, ttl: std::time::Duration) -> Self {
+        let capacity = capacity.max(1);
+        Self {
+            entries: dashmap::DashMap::with_capacity(capacity),
+            capacity,
+            ttl,
+        }
+    }
+
+    /// `true` only when `host` has a non-expired confirmed-NXDOMAIN
+    /// entry. Lock-free in the common case (sharded DashMap read),
+    /// never blocks across an `.await`. Stale entries (past TTL)
+    /// return `false` AND are eagerly removed so the next caller
+    /// sees a clean miss without paying the staleness check again.
+    pub fn contains(&self, host: &str) -> bool {
+        let stale = {
+            let entry = match self.entries.get(host) {
+                Some(e) => e,
+                None => return false,
+            };
+            let elapsed = entry.value().elapsed();
+            if elapsed < self.ttl {
+                return true;
+            }
+            // Drop the read ref before remove() to avoid DashMap
+            // re-entry under the same shard lock.
+            drop(entry);
+            true
+        };
+        if stale {
+            self.entries.remove(host);
+        }
+        false
+    }
+
+    /// Insert `host` as a freshly-confirmed NXDOMAIN. Idempotent —
+    /// re-inserting refreshes the timestamp. After insertion evicts
+    /// entries until `len() <= capacity` (expired first, then oldest).
+    pub fn insert(&self, host: String) {
+        let now = std::time::Instant::now();
+        let was_present = self.entries.insert(host, now).is_some();
+        if was_present {
+            return;
+        }
+        while self.entries.len() > self.capacity {
+            if !self.evict_one() {
+                break;
+            }
+        }
+    }
+
+    /// Single-pass evict: short-circuit on first expired entry, else
+    /// remove the oldest. O(N) where N ≤ capacity, so constant time
+    /// for a fixed cache size.
+    fn evict_one(&self) -> bool {
+        let now = std::time::Instant::now();
+        let mut oldest_key: Option<String> = None;
+        let mut oldest_at: Option<std::time::Instant> = None;
+
+        for kv in self.entries.iter() {
+            let inserted = *kv.value();
+            if now.duration_since(inserted) >= self.ttl {
+                let key = kv.key().clone();
+                drop(kv);
+                return self.entries.remove(&key).is_some();
+            }
+            match oldest_at {
+                None => {
+                    oldest_at = Some(inserted);
+                    oldest_key = Some(kv.key().clone());
+                }
+                Some(prev) if inserted < prev => {
+                    oldest_at = Some(inserted);
+                    oldest_key = Some(kv.key().clone());
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(k) = oldest_key {
+            self.entries.remove(&k).is_some()
+        } else {
+            false
+        }
+    }
+
+    /// Current entry count (live + not-yet-evicted-stale).
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// `true` when the cache holds no entries.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Drop all entries — exposed for tests so cross-test interference
+    /// from the global cache doesn't surface as flaky assertions.
+    #[cfg(test)]
+    pub fn clear(&self) {
+        self.entries.clear();
+    }
+}
+
+/// Process-wide [`ChromeNxdomainCache`], lazily initialised on first
+/// use. Capacity and TTL are read once from
+/// `SPIDER_CHROME_NXDOMAIN_CACHE_CAPACITY` and
+/// `SPIDER_CHROME_NXDOMAIN_CACHE_TTL_SECS` env vars.
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+static CHROME_NXDOMAIN_CACHE: std::sync::OnceLock<ChromeNxdomainCache> =
+    std::sync::OnceLock::new();
 
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 #[inline]
-fn chrome_preflight_dns_enabled() -> bool {
-    *CHROME_PREFLIGHT_DNS_ENABLED.get_or_init(|| {
-        let v = std::env::var("SPIDER_CHROME_PREFLIGHT_DNS").unwrap_or_default();
-        matches!(
-            v.as_str(),
-            "1" | "true" | "TRUE" | "True" | "yes" | "YES" | "on" | "ON"
-        )
+fn chrome_nxdomain_cache() -> &'static ChromeNxdomainCache {
+    CHROME_NXDOMAIN_CACHE.get_or_init(|| {
+        let capacity = std::env::var("SPIDER_CHROME_NXDOMAIN_CACHE_CAPACITY")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|c| *c > 0)
+            .unwrap_or(DEFAULT_CHROME_NXDOMAIN_CACHE_CAPACITY);
+        let ttl_secs = std::env::var("SPIDER_CHROME_NXDOMAIN_CACHE_TTL_SECS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(DEFAULT_CHROME_NXDOMAIN_CACHE_TTL_SECS);
+        ChromeNxdomainCache::new(capacity, std::time::Duration::from_secs(ttl_secs))
     })
 }
 
+/// Chrome page-entry shortcircuit driven by the
+/// [`ChromeNxdomainCache`]. Returns `Some(PageResponse)` carrying a
+/// 525 DNS-resolve status when the URL's host is currently cached as
+/// chrome-confirmed NXDOMAIN — the caller skips the navigation (and
+/// any proxy CONNECT roundtrip behind it) and feeds the synthesised
+/// response straight into [`build`].
+///
+/// Hot-path cost on a cache miss (the common case for any first-time
+/// host or any host that resolves normally): one DashMap shard read
+/// (~50ns, lock-free). No URL parse work happens on the truly cold
+/// path either — `host_str()` is only called when the cache has at
+/// least one entry to look up against, because the cache is lazily
+/// initialised on first reactive-confirmed NXDOMAIN.
+///
+/// Returns `None` for every URL whose host isn't (yet) in the cache,
+/// and for unparseable / hostless URLs. The caller proceeds with
+/// normal chrome navigation; the existing reactive
+/// [`confirm_chrome_tunnel_failure_with_local_dns`] populates the
+/// cache on the FIRST confirmed NXDOMAIN for a host so future calls
+/// to this helper short-circuit.
+///
+/// **Concurrency**: lock-free read on the success-path, no `.await`
+/// (the operation is pure compute over an in-memory DashMap).
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
-#[inline]
-fn chrome_preflight_dns_timeout() -> std::time::Duration {
-    let ms = *CHROME_PREFLIGHT_DNS_TIMEOUT_MS.get_or_init(|| {
-        std::env::var("SPIDER_CHROME_PREFLIGHT_DNS_TIMEOUT_MS")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .filter(|&v| v > 0)
-            .map(|v| v.min(MAX_CHROME_PREFLIGHT_DNS_TIMEOUT_MS))
-            .unwrap_or(DEFAULT_CHROME_PREFLIGHT_DNS_TIMEOUT_MS)
-    });
-    std::time::Duration::from_millis(ms)
-}
-
-/// Pre-flight local DNS shortcircuit for the chrome navigation path.
-///
-/// Returns `Some(PageResponse)` carrying a 525 DNS-resolve status when the
-/// local resolver explicitly reports NXDOMAIN for the URL's host — the
-/// chrome caller then skips the navigation (and any proxy CONNECT
-/// roundtrip behind it) and feeds the synthesised response straight into
-/// [`build`]. Returns `None` (caller proceeds with normal chrome flow)
-/// when any of these hold:
-///
-///   * `SPIDER_CHROME_PREFLIGHT_DNS` is unset or not truthy (default —
-///     zero behavior change for everyone who hasn't opted in).
-///   * The URL is unparseable or lacks a host (data:/file:/about:blank/…
-///     — chrome navigates these without DNS so a pre-flight is wrong).
-///   * The local resolver reports `Resolved` (host exists — no
-///     short-circuit) or `TimedOut` (no evidence — fall through to
-///     chrome and let the existing reactive
-///     [`confirm_chrome_tunnel_failure_with_local_dns`] do its work).
-///
-/// **Why opt-in.** A proxy may sit behind an internal resolver that sees
-/// hosts the caller's local resolver doesn't (private DNS, split-horizon
-/// setups, corporate VPN). For those topologies a confirmed-local-NXDOMAIN
-/// is NOT proof of global NXDOMAIN, so a pre-flight would false-positive
-/// reachable hosts to 525. The reactive path is safe by default because it
-/// requires BOTH chrome's tunnel-error signal AND a local NXDOMAIN before
-/// upgrading. The pre-flight trades that safety for browser-grade speed,
-/// so it stays default-off and the operator opts in once they've confirmed
-/// their resolver view matches their proxy view.
-///
-/// **Performance.** Lookups go through [`host_resolves_locally_cached`],
-/// so the first lookup per host bounds at the per-host timeout (default
-/// 500ms, configurable via `SPIDER_CHROME_PREFLIGHT_DNS_TIMEOUT_MS`,
-/// capped at 5s) and every subsequent lookup of the same host during the
-/// process lifetime hits the bounded [`HostDnsCache`] in ~50ns.
-///
-/// **Concurrency.** Pure async, no locks acquired here, no panics; the
-/// underlying cache is a DashMap (no spider-side mutex). Safe to call
-/// concurrently from any tokio context.
-#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
-async fn chrome_preflight_dns_shortcircuit(
-    url: &str,
-) -> Option<crate::utils::PageResponse> {
-    if !chrome_preflight_dns_enabled() {
+fn chrome_nxdomain_shortcircuit(url: &str) -> Option<crate::utils::PageResponse> {
+    // Skip the URL parse entirely when nothing has ever been cached.
+    // OnceLock's get() is a single atomic load with no allocation, so
+    // the cold path (cache never populated) is two atomic loads + a
+    // branch — bytewise free.
+    let cache = CHROME_NXDOMAIN_CACHE.get()?;
+    if cache.is_empty() {
         return None;
     }
     let host = url::Url::parse(url).ok()?.host_str()?.to_string();
-    if host.is_empty() {
-        return None;
-    }
-    let state = host_resolves_locally_cached(&host, chrome_preflight_dns_timeout()).await;
-    synthesize_chrome_preflight_response(url, state)
-}
-
-/// Pure decision function for [`chrome_preflight_dns_shortcircuit`].
-/// Split out so unit tests can pin down the synthesis logic without
-/// reaching through the cache or env-var OnceLock state. Returns a
-/// 525-status [`PageResponse`] on confirmed NXDOMAIN, `None` for every
-/// other resolver state.
-#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
-fn synthesize_chrome_preflight_response(
-    url: &str,
-    state: LocalDnsState,
-) -> Option<crate::utils::PageResponse> {
-    if !matches!(state, LocalDnsState::NxDomain) {
+    if !cache.contains(&host) {
         return None;
     }
     let mut pr = crate::utils::PageResponse::default();
@@ -1084,6 +1191,15 @@ async fn confirm_chrome_tunnel_failure_with_local_dns(
         // clear it so `needs_retry()` returns false and the retry loop
         // short-circuits — symmetric with the HTTP path's behaviour.
         page.should_retry = false;
+        // Cache the chrome-confirmed NXDOMAIN. This branch is the
+        // ONLY writer of `CHROME_NXDOMAIN_CACHE`, and it runs only
+        // after the two-signal contract has agreed (chrome tunnel
+        // error + local DNS NXDOMAIN), so every cache entry carries
+        // zero false-positive risk by construction. Subsequent
+        // chrome page builds for the same host short-circuit at the
+        // top of `Page::new_base` via `chrome_nxdomain_shortcircuit`,
+        // skipping the proxy CONNECT roundtrip entirely.
+        chrome_nxdomain_cache().insert(host);
     }
 }
 
@@ -4575,15 +4691,23 @@ impl Page {
         params: &crate::utils::ChromeFetchParams<'_>,
         extract: Option<&mut ChromeStreamingExtractor<'h>>,
     ) -> Self {
-        // Pre-flight local DNS shortcircuit. Default off (env-gated by
-        // `SPIDER_CHROME_PREFLIGHT_DNS`). When enabled, confirmed-NXDOMAIN
-        // hosts skip the chrome navigation (and any proxy CONNECT
-        // roundtrip behind it) entirely — matches the browser's fail-fast
-        // on resolver-level NXDOMAIN instead of paying the proxy RTT plus
-        // the reactive `confirm_chrome_tunnel_failure_with_local_dns`
-        // chain walk. See `chrome_preflight_dns_shortcircuit` for the
-        // full opt-in rationale and decision matrix.
-        if let Some(pr) = chrome_preflight_dns_shortcircuit(url).await {
+        // Reactive-NXDOMAIN cache shortcircuit. The first time a host
+        // fails through chrome+proxy, the existing
+        // `confirm_chrome_tunnel_failure_with_local_dns` two-signal
+        // path runs (chrome tunnel error + independent local DNS
+        // NXDOMAIN) and, on agreement, records the host into the
+        // process-wide `CHROME_NXDOMAIN_CACHE`. Every subsequent
+        // chrome page build for the same host short-circuits here:
+        // synthesise a 525 PageResponse and skip the chrome
+        // navigation (and the proxy CONNECT roundtrip behind it)
+        // entirely. Browser-grade latency on the second-and-later
+        // hits with ZERO false positives — every cache entry has
+        // already been confirmed via two independent signals before
+        // it landed. Cold-path cost is two atomic loads + a branch
+        // (OnceLock empty + is_empty), no URL parse on a never-
+        // populated cache. See `chrome_nxdomain_shortcircuit` and
+        // `ChromeNxdomainCache` for the full safety + perf rationale.
+        if let Some(pr) = chrome_nxdomain_shortcircuit(url) {
             let mut p = build(url, pr);
             if cfg!(feature = "chrome_store_page") {
                 p.chrome_page = Some(page.clone());
@@ -13211,51 +13335,106 @@ mod empty_success_tests {
 }
 
 #[cfg(all(test, feature = "chrome", not(feature = "decentralized")))]
-mod chrome_preflight_dns_tests {
-    use super::{synthesize_chrome_preflight_response, LocalDnsState, DNS_RESOLVE_ERROR};
+mod chrome_nxdomain_cache_tests {
+    use super::ChromeNxdomainCache;
+    use std::time::Duration;
 
     #[test]
-    fn nxdomain_synthesises_525_with_final_url() {
-        let url = "https://this-host-cannot-exist.invalid/";
-        let pr = synthesize_chrome_preflight_response(url, LocalDnsState::NxDomain)
-            .expect("NxDomain must produce a synthesised response");
-        assert_eq!(pr.status_code, *DNS_RESOLVE_ERROR);
-        assert_eq!(pr.final_url.as_deref(), Some(url));
-        // No content body — caller treats this as a transport-failure
-        // surface, not a real HTML response.
-        assert!(pr.content.is_none());
+    fn insert_then_contains_within_ttl() {
+        let cache = ChromeNxdomainCache::new(16, Duration::from_secs(60));
+        cache.insert("a.invalid".to_string());
+        assert!(cache.contains("a.invalid"));
+        assert!(!cache.contains("b.invalid"));
     }
 
     #[test]
-    fn resolved_returns_none_so_chrome_proceeds() {
-        assert!(
-            synthesize_chrome_preflight_response("https://example.com/", LocalDnsState::Resolved)
-                .is_none(),
-            "Resolved hosts must NOT short-circuit — chrome navigates normally"
+    fn expired_entries_report_miss_and_self_evict() {
+        // 1ms TTL → entry expires before the contains() call returns.
+        let cache = ChromeNxdomainCache::new(16, Duration::from_millis(1));
+        cache.insert("expiring.invalid".to_string());
+        std::thread::sleep(Duration::from_millis(10));
+        // First contains() after expiry must return false AND evict so
+        // the cache doesn't accumulate stale entries forever.
+        assert!(!cache.contains("expiring.invalid"));
+        assert!(cache.is_empty(), "stale entry must self-evict on read");
+    }
+
+    #[test]
+    fn bounded_capacity_evicts_oldest_when_no_expired() {
+        let cache = ChromeNxdomainCache::new(3, Duration::from_secs(3600));
+        cache.insert("a.invalid".to_string());
+        std::thread::sleep(Duration::from_millis(2));
+        cache.insert("b.invalid".to_string());
+        std::thread::sleep(Duration::from_millis(2));
+        cache.insert("c.invalid".to_string());
+        // All three fit within capacity.
+        assert!(cache.contains("a.invalid"));
+        assert!(cache.contains("b.invalid"));
+        assert!(cache.contains("c.invalid"));
+        // Inserting a 4th forces eviction of the oldest (`a`).
+        std::thread::sleep(Duration::from_millis(2));
+        cache.insert("d.invalid".to_string());
+        assert_eq!(cache.len(), 3, "len must stay <= capacity after eviction");
+        assert!(!cache.contains("a.invalid"), "oldest entry must be evicted");
+        assert!(cache.contains("d.invalid"));
+    }
+
+    #[test]
+    fn reinsert_refreshes_timestamp_without_growing() {
+        let cache = ChromeNxdomainCache::new(8, Duration::from_secs(60));
+        cache.insert("x.invalid".to_string());
+        let before_len = cache.len();
+        cache.insert("x.invalid".to_string());
+        cache.insert("x.invalid".to_string());
+        assert_eq!(
+            cache.len(),
+            before_len,
+            "re-inserting the same host must not grow the cache"
+        );
+        assert!(cache.contains("x.invalid"));
+    }
+
+    #[test]
+    fn capacity_clamped_to_one() {
+        let cache = ChromeNxdomainCache::new(0, Duration::from_secs(60));
+        cache.insert("only.invalid".to_string());
+        assert!(cache.contains("only.invalid"));
+        assert_eq!(cache.len(), 1);
+        cache.insert("second.invalid".to_string());
+        assert_eq!(
+            cache.len(),
+            1,
+            "capacity-0 input must clamp to 1 — cache must stay bounded"
         );
     }
 
     #[test]
-    fn timed_out_returns_none_so_reactive_path_can_run() {
-        // The reactive `confirm_chrome_tunnel_failure_with_local_dns`
-        // already handles TimedOut conservatively (keeps 599 retryable).
-        // The pre-flight intentionally does NOT short-circuit here — no
-        // evidence of NXDOMAIN means we hand the navigation to chrome and
-        // let the existing two-signal path decide later.
+    fn concurrent_inserts_stay_bounded() {
+        use std::sync::Arc;
+        // Hammer the cache from multiple threads inserting distinct
+        // hosts. Bound must hold: under contention the cache may
+        // transiently overshoot (per the DashMap soft-cap pattern
+        // documented on HostDnsCache) but eviction converges.
+        let cache = Arc::new(ChromeNxdomainCache::new(32, Duration::from_secs(60)));
+        let mut handles = Vec::new();
+        for t in 0..8 {
+            let c = cache.clone();
+            handles.push(std::thread::spawn(move || {
+                for i in 0..50 {
+                    c.insert(format!("host-{t}-{i}.invalid"));
+                }
+            }));
+        }
+        for h in handles {
+            h.join().expect("thread panicked");
+        }
+        // 8 × 50 = 400 inserts into a 32-capacity cache. Eviction must
+        // converge — assert we're at or near the cap (small overshoot
+        // tolerated per the existing HostDnsCache invariant).
         assert!(
-            synthesize_chrome_preflight_response("https://example.com/", LocalDnsState::TimedOut)
-                .is_none(),
-            "TimedOut must NOT short-circuit — fall through to the reactive path"
+            cache.len() <= 32 + 16,
+            "cache must stay near capacity under contention (len={})",
+            cache.len()
         );
-    }
-
-    #[test]
-    fn preserves_query_and_path_in_final_url() {
-        // The synthesised final_url is consumed downstream by callers
-        // building error pages and metadata. Stripping the path or query
-        // would silently rewrite the URL the user asked us to fetch.
-        let url = "https://kingfishelectric.com/catalog?id=42&page=3";
-        let pr = synthesize_chrome_preflight_response(url, LocalDnsState::NxDomain).unwrap();
-        assert_eq!(pr.final_url.as_deref(), Some(url));
     }
 }
