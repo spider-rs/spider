@@ -659,14 +659,24 @@ fn host_dns_cache() -> &'static HostDnsCache {
 /// Default capacity for [`ChromeNxdomainCache`]. Bounds memory at
 /// ~1024 hostnames × ~64 bytes per entry ≈ tens of KB worst case.
 /// Override via `SPIDER_CHROME_NXDOMAIN_CACHE_CAPACITY`.
-#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+///
+/// Despite the legacy chrome-prefixed name (introduced in v2.51.186
+/// when the cache was chrome-only) this cache is now populated AND
+/// read by BOTH the chrome and HTTP transports. The two-signal
+/// safety contract is preserved on both sides: chrome writes inside
+/// [`confirm_chrome_tunnel_failure_with_local_dns`] and the chrome
+/// hedge timer / loadingFailed arms; HTTP writes inside
+/// [`confirm_tunnel_failure_with_local_dns`]. Reads happen at
+/// [`Page::new_base`] (chrome entry) and inside the HTTP fetch
+/// helpers.
+#[cfg(not(feature = "decentralized"))]
 pub const DEFAULT_CHROME_NXDOMAIN_CACHE_CAPACITY: usize = 1024;
 
 /// Default TTL for [`ChromeNxdomainCache`] entries. 5 minutes mirrors
-/// [`DEFAULT_HOST_DNS_CACHE_TTL_SECS`] so a chrome-confirmed NXDOMAIN
+/// [`DEFAULT_HOST_DNS_CACHE_TTL_SECS`] so a confirmed NXDOMAIN
 /// doesn't pin a hostname forever (DNS records do come back).
 /// Override via `SPIDER_CHROME_NXDOMAIN_CACHE_TTL_SECS`.
-#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+#[cfg(not(feature = "decentralized"))]
 pub const DEFAULT_CHROME_NXDOMAIN_CACHE_TTL_SECS: u64 = 300;
 
 /// Bounded process-wide cache of hostnames the chrome two-signal
@@ -702,14 +712,14 @@ pub const DEFAULT_CHROME_NXDOMAIN_CACHE_TTL_SECS: u64 = 300;
 /// don't pin a hostname permanently when the upstream finally
 /// publishes DNS. Expired entries are returned as `None` from
 /// [`Self::contains`] and preferred during eviction.
-#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+#[cfg(not(feature = "decentralized"))]
 pub struct ChromeNxdomainCache {
     entries: dashmap::DashMap<String, std::time::Instant>,
     capacity: usize,
     ttl: std::time::Duration,
 }
 
-#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+#[cfg(not(feature = "decentralized"))]
 impl ChromeNxdomainCache {
     /// Create a new cache. `capacity` is clamped to at least 1.
     pub fn new(capacity: usize, ttl: std::time::Duration) -> Self {
@@ -820,12 +830,12 @@ impl ChromeNxdomainCache {
 /// use. Capacity and TTL are read once from
 /// `SPIDER_CHROME_NXDOMAIN_CACHE_CAPACITY` and
 /// `SPIDER_CHROME_NXDOMAIN_CACHE_TTL_SECS` env vars.
-#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+#[cfg(not(feature = "decentralized"))]
 static CHROME_NXDOMAIN_CACHE: std::sync::OnceLock<ChromeNxdomainCache> = std::sync::OnceLock::new();
 
-#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+#[cfg(not(feature = "decentralized"))]
 #[inline]
-fn chrome_nxdomain_cache() -> &'static ChromeNxdomainCache {
+pub(crate) fn chrome_nxdomain_cache() -> &'static ChromeNxdomainCache {
     CHROME_NXDOMAIN_CACHE.get_or_init(|| {
         let capacity = std::env::var("SPIDER_CHROME_NXDOMAIN_CACHE_CAPACITY")
             .ok()
@@ -1068,24 +1078,39 @@ async fn chrome_navigation_with_dns_hedge<'a>(
         return fetch_fut.await;
     }
 
-    // Spawn the DNS probe as a detached background task. The atomic
-    // signal is the ONLY shared state with the hedge select below —
-    // no oneshot, no channel, no Mutex. Tokio's runtime schedules
-    // the task; on completion the signal flips from PENDING to one
-    // of the three terminal codes. If the hedge fires before the
-    // probe resolves, the signal stays PENDING and the hedge falls
-    // through to letting chrome complete naturally — preserving
-    // the two-signal contract (no preemption without DNS evidence).
+    // Spawn the DNS probe as a detached background task — UNLESS the
+    // existing [`HostDnsCache`] (v2.51.171) already has a definitive
+    // answer for this host. On cache hit (Resolved or NxDomain), we
+    // write the cached state directly into the AtomicU8 signal and
+    // skip the `tokio::spawn` + lookup entirely. Multi-page crawls of
+    // the same host then pay one DNS lookup for the whole crawl
+    // instead of one per page; on success paths the savings is one
+    // tokio::spawn + one Arc<AtomicU8> clone per fetch.
+    //
+    // `TimedOut` and cache misses fall through to the spawn so the
+    // probe can re-validate. The atomic signal is the ONLY shared
+    // state with the hedge select below — no oneshot, no channel,
+    // no Mutex.
     let signal = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(DNS_STATE_PENDING));
-    {
-        let signal_clone = signal.clone();
-        let host_clone = host.clone();
-        tokio::spawn(async move {
-            let state =
-                host_resolves_locally_cached(&host_clone, CHROME_HEDGE_DNS_PROBE_TIMEOUT).await;
-            signal_clone.store(dns_state_to_u8(state), std::sync::atomic::Ordering::Release);
-        });
-    }
+    let host_known_resolved = match host_dns_cache().get(&host) {
+        Some(cached) => {
+            signal.store(
+                dns_state_to_u8(cached),
+                std::sync::atomic::Ordering::Release,
+            );
+            matches!(cached, LocalDnsState::Resolved)
+        }
+        None => {
+            let signal_clone = signal.clone();
+            let host_clone = host.clone();
+            tokio::spawn(async move {
+                let state =
+                    host_resolves_locally_cached(&host_clone, CHROME_HEDGE_DNS_PROBE_TIMEOUT).await;
+                signal_clone.store(dns_state_to_u8(state), std::sync::atomic::Ordering::Release);
+            });
+            false
+        }
+    };
 
     // Subscribe to chrome's `Network.loadingFailed` events so the
     // hedge fires the INSTANT chrome's main frame surfaces a tunnel
@@ -1096,7 +1121,22 @@ async fn chrome_navigation_with_dns_hedge<'a>(
     // tears it down at function exit. When the subscription fails
     // (handler busy, channel closed) the hedge falls back to the
     // timeout-only path — no regression.
-    let event_sub = spawn_chrome_loading_failed_signal(page).await;
+    //
+    // OPTIMISATION (v2.51.189): when the host is known-Resolved from
+    // [`HostDnsCache`] we skip the subscription entirely. The
+    // two-signal contract requires both chrome's loadingFailed AND
+    // local NXDOMAIN; if local DNS already says Resolved, the event
+    // arm can NEVER short-circuit (DNS_STATE_RESOLVED never matches
+    // the NxDomain check inside the arm), so the listener task is
+    // dead weight. The 3 s timer arm still runs as the anti-hang
+    // safety net — it also requires DNS NxDomain to short-circuit,
+    // so it's similarly inert on Resolved hosts but cheap enough
+    // (one stack-pinned sleep) to leave in place.
+    let event_sub = if host_known_resolved {
+        None
+    } else {
+        spawn_chrome_loading_failed_signal(page).await
+    };
     let event_notify: Option<std::sync::Arc<tokio::sync::Notify>> =
         event_sub.as_ref().map(|(n, _)| n.clone());
     let _event_guard = ChromeEventTaskAbortGuard(event_sub.map(|(_, h)| h));
@@ -1201,8 +1241,8 @@ async fn chrome_navigation_with_dns_hedge<'a>(
 ///
 /// **Concurrency**: lock-free read on the success-path, no `.await`
 /// (the operation is pure compute over an in-memory DashMap).
-#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
-fn chrome_nxdomain_shortcircuit(url: &str) -> Option<crate::utils::PageResponse> {
+#[cfg(not(feature = "decentralized"))]
+pub(crate) fn chrome_nxdomain_shortcircuit(url: &str) -> Option<crate::utils::PageResponse> {
     // Skip the URL parse entirely when nothing has ever been cached.
     // OnceLock's get() is a single atomic load with no allocation, so
     // the cold path (cache never populated) is two atomic loads + a
@@ -1378,7 +1418,18 @@ pub async fn confirm_tunnel_failure_with_local_dns(
         None => return initial_status,
     };
     match host_resolves_locally_cached(&host, timeout).await {
-        LocalDnsState::NxDomain => *DNS_RESOLVE_ERROR,
+        LocalDnsState::NxDomain => {
+            // Two signals already agreed (HTTP proxy tunnel error +
+            // local DNS NXDOMAIN). Populate the cross-feature
+            // [`ChromeNxdomainCache`] so subsequent fetches — whether
+            // chrome or HTTP — short-circuit without re-paying the
+            // proxy CONNECT roundtrip. Zero false-positive risk by
+            // construction: this branch only fires after the
+            // two-signal contract has been satisfied.
+            #[cfg(not(feature = "decentralized"))]
+            chrome_nxdomain_cache().insert(host);
+            *DNS_RESOLVE_ERROR
+        }
         LocalDnsState::Resolved | LocalDnsState::TimedOut => initial_status,
     }
 }
@@ -13696,7 +13747,7 @@ mod empty_success_tests {
     }
 }
 
-#[cfg(all(test, feature = "chrome", not(feature = "decentralized")))]
+#[cfg(all(test, not(feature = "decentralized")))]
 mod chrome_nxdomain_cache_tests {
     use super::ChromeNxdomainCache;
     use std::time::Duration;
@@ -13798,6 +13849,37 @@ mod chrome_nxdomain_cache_tests {
             "cache must stay near capacity under contention (len={})",
             cache.len()
         );
+    }
+
+    #[test]
+    fn cross_feature_shortcircuit_returns_525_after_insert() {
+        // v2.51.189 cross-feature contract: once a host has been
+        // confirmed-NXDOMAIN (regardless of whether the confirmation
+        // came from the chrome or HTTP transport), every subsequent
+        // call to `chrome_nxdomain_shortcircuit` for that host must
+        // return a 525 PageResponse — across both transports.
+        let host = "shortcircuit-cross-feature.invalid";
+        let url = format!("https://{host}/some/path?q=1");
+        // Lazy-init the process-wide cache and seed it directly.
+        super::chrome_nxdomain_cache().insert(host.to_string());
+        let pr = super::chrome_nxdomain_shortcircuit(&url)
+            .expect("populated cache must produce a synthesised response");
+        assert_eq!(pr.status_code, *super::DNS_RESOLVE_ERROR);
+        assert_eq!(pr.final_url.as_deref(), Some(url.as_str()));
+        assert!(pr.content.is_none());
+    }
+
+    #[test]
+    fn shortcircuit_returns_none_for_hostless_url() {
+        // Defensive guard: `data:`, `file:`, `about:blank` and other
+        // URLs lacking a host must not match the cache, even if the
+        // cache happens to be populated. Otherwise the synthesis
+        // path would inject a 525 onto schemes that have no DNS
+        // semantics.
+        super::chrome_nxdomain_cache().insert("guard.invalid".to_string());
+        assert!(super::chrome_nxdomain_shortcircuit("about:blank").is_none());
+        assert!(super::chrome_nxdomain_shortcircuit("data:text/plain,hi").is_none());
+        assert!(super::chrome_nxdomain_shortcircuit("not-a-url").is_none());
     }
 }
 

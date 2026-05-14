@@ -29,8 +29,8 @@ use std::time::Duration;
 
 #[tokio::main]
 async fn main() {
-    let url = std::env::var("TARGET_URL")
-        .unwrap_or_else(|_| "https://kingfishelectric.com/".to_string());
+    let url =
+        std::env::var("TARGET_URL").unwrap_or_else(|_| "https://kingfishelectric.com/".to_string());
     let chrome_ws = std::env::var("CHROME_WS_URL").ok();
     let request_timeout_secs = std::env::var("REQUEST_TIMEOUT_SECS")
         .ok()
@@ -45,7 +45,9 @@ async fn main() {
         ),
     }
     println!("[chrome_nxdomain_test] request_timeout={request_timeout_secs}s");
-    println!("[chrome_nxdomain_test] first call should hit hedge arm; second should hit v2.51.186 cache");
+    println!(
+        "[chrome_nxdomain_test] first call should hit hedge arm; second should hit v2.51.186 cache"
+    );
 
     // First request — through the full chrome path. Hedge fires
     // either via the CDP loadingFailed event (v2.51.188) or the

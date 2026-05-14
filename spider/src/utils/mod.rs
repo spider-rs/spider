@@ -6548,6 +6548,21 @@ async fn fetch_page_html_raw_base(
     first_byte_timeout: Option<Duration>,
     first_byte_jitter: Option<Duration>,
 ) -> PageResponse {
+    // Cross-feature NXDOMAIN cache shortcircuit (v2.51.189). The same
+    // bounded cache that backs the chrome `Page::new_base` fast-fail
+    // is populated whenever EITHER transport's two-signal reactive
+    // path (`confirm_tunnel_failure_with_local_dns` for HTTP or
+    // `confirm_chrome_tunnel_failure_with_local_dns` for chrome)
+    // confirms NXDOMAIN. Reading it here lets HTTP fetches skip the
+    // reqwest connect + retry loop on hosts a prior call (via either
+    // transport) already proved unresolvable. Zero false positives
+    // by construction; lock-free OnceLock + DashMap shard read on
+    // the hot path (<50 ns), no allocation on cache miss.
+    #[cfg(not(feature = "decentralized"))]
+    if let Some(pr) = crate::page::chrome_nxdomain_shortcircuit(target_url) {
+        return pr;
+    }
+
     async fn attempt_once(
         url: &str,
         client: &Client,
