@@ -249,6 +249,32 @@ lazy_static! {
             b"Just a moment...".as_slice(),
         ])
         .expect("valid CF just-a-moment patterns");
+
+    /// Embedded Turnstile widget matcher.
+    ///
+    /// Distinct from the wall-page detector above: these patterns
+    /// recognise pages that aren't a full "Just a moment..." wall but
+    /// still host a real Turnstile widget (CF-protected pages that
+    /// render an embedded challenge, or managed-challenge variants).
+    ///
+    /// Patterns are intentionally narrow to avoid false positives on
+    /// documentation pages that quote the markup:
+    ///
+    /// * `challenges.cloudflare.com/turnstile` — the official api.js
+    ///   endpoint. Only loaded by sites that actually use Turnstile.
+    /// * `<div class="cf-turnstile"` / `<div class='cf-turnstile` —
+    ///   the canonical widget markup with HTML tag context, so a
+    ///   string literal `"cf-turnstile"` inside a script body or a
+    ///   JSON blob cannot trigger a match.
+    static ref CF_EMBEDDED_TURNSTILE_AC: aho_corasick::AhoCorasick = aho_corasick::AhoCorasickBuilder::new()
+        .ascii_case_insensitive(true)
+        .match_kind(aho_corasick::MatchKind::LeftmostFirst)
+        .build([
+            b"challenges.cloudflare.com/turnstile".as_slice(),
+            b"<div class=\"cf-turnstile".as_slice(),
+            b"<div class='cf-turnstile".as_slice(),
+        ])
+        .expect("valid CF embedded turnstile patterns");
 }
 
 #[inline(always)]
@@ -335,7 +361,27 @@ pub(crate) fn detect_cf_turnstyle(b: &[u8]) -> bool {
 
     let pfx = cf_prefix_slice(b);
 
-    pfx.starts_with(CF_JUST_A_MOMENT.as_ref()) || CF_JUST_A_MOMENT_AC.is_match(pfx)
+    if pfx.starts_with(CF_JUST_A_MOMENT.as_ref()) || CF_JUST_A_MOMENT_AC.is_match(pfx) {
+        return true;
+    }
+
+    // Embedded Turnstile widget on an otherwise-non-wall page. Scans the
+    // whole body (not just the prefix) because the widget markup can
+    // appear anywhere. Patterns are scoped to actual HTML tag context
+    // and the official api.js endpoint so quoted code samples in docs
+    // pages don't false-positive.
+    detect_cf_embedded_turnstile(b)
+}
+
+/// Detect an embedded Cloudflare Turnstile widget anywhere in the body.
+///
+/// Distinct entry point so callers that only want the embedded-widget
+/// signal (without the wall-page fingerprints) can use it directly. Pure
+/// byte-level Aho-Corasick scan — no allocations, no mutexes, no panics.
+#[cfg(feature = "chrome")]
+#[inline]
+pub(crate) fn detect_cf_embedded_turnstile(b: &[u8]) -> bool {
+    !b.is_empty() && CF_EMBEDDED_TURNSTILE_AC.is_match(b)
 }
 
 lazy_static! {
@@ -2610,5 +2656,72 @@ pub async fn geetest_handle(
     match page_result {
         Ok(_) => Ok(progressed),
         Err(_) => Err(CdpError::Timeout),
+    }
+}
+
+#[cfg(all(test, feature = "chrome"))]
+mod cf_turnstile_detection_tests {
+    use super::{detect_cf_embedded_turnstile, detect_cf_turnstyle};
+
+    #[test]
+    fn empty_body_no_match() {
+        assert!(!detect_cf_turnstyle(&[]));
+        assert!(!detect_cf_embedded_turnstile(&[]));
+    }
+
+    #[test]
+    fn just_a_moment_wall_still_detected() {
+        // Regression guard: the prefix-only AC for the wall-page
+        // fingerprint must keep matching exactly as before, even
+        // though the wall page contains no embedded-widget markup.
+        let body = br#"<!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title></head><body>cf wall</body></html>"#;
+        assert!(detect_cf_turnstyle(body));
+    }
+
+    #[test]
+    fn embedded_widget_div_double_quoted() {
+        let body = br#"<html><body><form><div class="cf-turnstile" data-sitekey="abc"></div></form></body></html>"#;
+        assert!(detect_cf_embedded_turnstile(body));
+        assert!(detect_cf_turnstyle(body));
+    }
+
+    #[test]
+    fn embedded_widget_div_single_quoted() {
+        let body = br#"<html><body><div class='cf-turnstile' data-sitekey='abc'></div></body></html>"#;
+        assert!(detect_cf_embedded_turnstile(body));
+        assert!(detect_cf_turnstyle(body));
+    }
+
+    #[test]
+    fn embedded_widget_api_js_endpoint() {
+        let body = br#"<html><head><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script></head><body></body></html>"#;
+        assert!(detect_cf_embedded_turnstile(body));
+        assert!(detect_cf_turnstyle(body));
+    }
+
+    #[test]
+    fn quoted_class_in_script_does_not_match() {
+        // Critical false-positive guard: a script body or JSON blob
+        // that mentions the string "cf-turnstile" without an actual
+        // HTML tag wrapper must NOT trigger detection. The patterns
+        // require the `<div class=` tag prefix specifically.
+        let body = br#"<html><body><script>var name="cf-turnstile";var data={"class":"cf-turnstile"};</script></body></html>"#;
+        assert!(!detect_cf_embedded_turnstile(body));
+        assert!(!detect_cf_turnstyle(body));
+    }
+
+    #[test]
+    fn unrelated_page_does_not_match() {
+        let body = br#"<html><body><h1>Welcome</h1><p>Hello world.</p></body></html>"#;
+        assert!(!detect_cf_embedded_turnstile(body));
+        assert!(!detect_cf_turnstyle(body));
+    }
+
+    #[test]
+    fn case_insensitive_class_attribute() {
+        // HTML attribute values are case-insensitive per spec — make
+        // sure shouty markup still routes through the same path.
+        let body = br#"<HTML><BODY><DIV CLASS="CF-TURNSTILE" DATA-SITEKEY="abc"></DIV></BODY></HTML>"#;
+        assert!(detect_cf_embedded_turnstile(body));
     }
 }
