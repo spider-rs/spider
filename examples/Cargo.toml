@@ -148,11 +148,6 @@ path = "chrome.rs"
 required-features = ["spider/sync", "spider/chrome"]
 
 [[example]]
-name = "chrome_proxy_dns_shortcircuit"
-path = "chrome_proxy_dns_shortcircuit.rs"
-required-features = ["spider/sync", "spider/chrome"]
-
-[[example]]
 name = "chrome_nxdomain_test"
 path = "chrome_nxdomain_test.rs"
 required-features = ["spider/sync", "spider/chrome"]
