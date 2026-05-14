@@ -840,6 +840,196 @@ fn chrome_nxdomain_cache() -> &'static ChromeNxdomainCache {
     })
 }
 
+/// Default hedge delay for the chrome DNS-race fast-fail (v2.51.187).
+/// At this elapsed time the hedge checks the in-flight DNS signal; on
+/// confirmed NXDOMAIN AND no chrome response yet, chrome navigation is
+/// cancelled and a 525 PageResponse is synthesised. Picked to be
+/// shorter than the typical chrome+proxy NXDOMAIN failure path
+/// (~1-3s) so the hedge catches it, while still long enough that
+/// legitimate slow loads (sub-3s) finish normally.
+/// Override via `SPIDER_CHROME_HEDGE_DNS_DELAY_MS`. Setting `0`
+/// disables the hedge entirely; the per-process value is read once.
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+pub const DEFAULT_CHROME_HEDGE_DNS_DELAY_MS: u64 = 3_000;
+
+/// Hard upper bound for the hedge delay. Above this the hedge no
+/// longer provides meaningful latency benefit (chrome's own timeout
+/// path takes over); cap so a misconfigured env value can't push
+/// the hedge into "never fires" territory.
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+pub const MAX_CHROME_HEDGE_DNS_DELAY_MS: u64 = 30_000;
+
+/// Per-host bound for the DNS hedge probe. Local resolvers return
+/// NXDOMAIN in single-digit ms (~50ns on cache hit via
+/// [`HostDnsCache`]); 500ms is generous enough to swallow a one-off
+/// slow lookup without keeping the hedge waiting past the chrome
+/// hedge tick. Reused unchanged by the existing reactive paths.
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+const CHROME_HEDGE_DNS_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Cached hedge delay, lazily resolved on first call.
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+static CHROME_HEDGE_DNS_DELAY_MS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+#[inline]
+fn chrome_hedge_dns_delay() -> std::time::Duration {
+    let ms = *CHROME_HEDGE_DNS_DELAY_MS.get_or_init(|| {
+        std::env::var("SPIDER_CHROME_HEDGE_DNS_DELAY_MS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .map(|v| v.min(MAX_CHROME_HEDGE_DNS_DELAY_MS))
+            .unwrap_or(DEFAULT_CHROME_HEDGE_DNS_DELAY_MS)
+    });
+    std::time::Duration::from_millis(ms)
+}
+
+// Atomic-encoded `LocalDnsState` codes carried across the hedge task
+// boundary. `Pending` is the initial value the DNS task hasn't
+// touched yet; the hedge tick treats it as "no evidence" and lets
+// chrome continue.
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+const DNS_STATE_PENDING: u8 = 0;
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+const DNS_STATE_RESOLVED: u8 = 1;
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+const DNS_STATE_NXDOMAIN: u8 = 2;
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+const DNS_STATE_TIMEDOUT: u8 = 3;
+
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+#[inline]
+fn dns_state_to_u8(state: LocalDnsState) -> u8 {
+    match state {
+        LocalDnsState::Resolved => DNS_STATE_RESOLVED,
+        LocalDnsState::NxDomain => DNS_STATE_NXDOMAIN,
+        LocalDnsState::TimedOut => DNS_STATE_TIMEDOUT,
+    }
+}
+
+/// Hedge a chrome page navigation against a parallel local DNS
+/// lookup. The chrome navigation runs unchanged; in parallel, a
+/// background tokio task probes the local resolver for the target
+/// host's hostname. At `chrome_hedge_dns_delay()` elapsed wall time,
+/// the hedge inspects the atomic-encoded DNS signal:
+///
+///   * `NxDomain` → call `page.stop_loading()` (clean chrome
+///     cancellation so the page can be reused by the pool), insert
+///     the host into [`CHROME_NXDOMAIN_CACHE`] (so subsequent
+///     requests fast-fail via the v2.51.186 cache shortcircuit
+///     without even running the hedge), and return a synthesised
+///     525 PageResponse.
+///   * Any other state (Pending, Resolved, TimedOut) → let the
+///     fetch future complete naturally. The existing reactive
+///     [`confirm_chrome_tunnel_failure_with_local_dns`] still runs
+///     after `build()` for genuine-NXDOMAIN hosts whose chrome path
+///     surfaces a tunnel error.
+///
+/// The hedge is bypassed entirely (zero overhead beyond a single
+/// atomic OnceLock read) when:
+///   * `chrome_hedge_dns_delay()` returns `Duration::ZERO`
+///     (env-disabled via `SPIDER_CHROME_HEDGE_DNS_DELAY_MS=0`).
+///   * URL is unparseable or hostless (`data:`, `file:`,
+///     `about:blank`, malformed input — chrome navigates these
+///     without DNS so the hedge has nothing to probe).
+///
+/// **Concurrency.** Pure async with `tokio::pin!` over the fetch
+/// future and a `Box<AtomicU8>` shared with the spawned DNS task.
+/// Uses `tokio::select!` with `biased` polling order so the
+/// fetch-completion arm is checked first on every wake — minimises
+/// hedge bookkeeping when chrome wins the race (the common case).
+/// No `Mutex` / `RwLock` of any kind; the DashMap-backed
+/// [`ChromeNxdomainCache`] is the only shared writable state, and
+/// its insert is bounded + lock-free. No `.await` while holding
+/// any reference into the cache. No panic — all parses use `.ok()?`
+/// / `unwrap_or`.
+///
+/// **Drop safety.** When the hedge wins, `fetch_fut` is dropped
+/// after `page.stop_loading()` resolves. Chromiumoxide's `page.goto`
+/// future drops cleanly (no CDP state machine corruption — the
+/// underlying `chromey::Handler` owns the connection and continues
+/// servicing it) and the pool-returned `chromiumoxide::Page` is
+/// reusable. The atomic signal lives on the DNS task; if the task
+/// outlives the hedge it sets the signal and exits — the orphaned
+/// Arc<AtomicU8> drops with the task. No leaks.
+#[cfg(all(feature = "chrome", not(feature = "decentralized")))]
+async fn chrome_navigation_with_dns_hedge<'a>(
+    url: &str,
+    page: &chromiumoxide::Page,
+    mut fetch_fut: std::pin::Pin<
+        Box<dyn std::future::Future<Output = crate::utils::PageResponse> + Send + 'a>,
+    >,
+) -> crate::utils::PageResponse {
+    let hedge_delay = chrome_hedge_dns_delay();
+    let host = match url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+    {
+        Some(h) if !h.is_empty() => h,
+        _ => return fetch_fut.await,
+    };
+    if hedge_delay.is_zero() {
+        return fetch_fut.await;
+    }
+
+    // Spawn the DNS probe as a detached background task. The atomic
+    // signal is the ONLY shared state with the hedge select below —
+    // no oneshot, no channel, no Mutex. Tokio's runtime schedules
+    // the task; on completion the signal flips from PENDING to one
+    // of the three terminal codes. If the hedge fires before the
+    // probe resolves, the signal stays PENDING and the hedge falls
+    // through to letting chrome complete naturally — preserving
+    // the two-signal contract (no preemption without DNS evidence).
+    let signal = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(DNS_STATE_PENDING));
+    {
+        let signal_clone = signal.clone();
+        let host_clone = host.clone();
+        tokio::spawn(async move {
+            let state =
+                host_resolves_locally_cached(&host_clone, CHROME_HEDGE_DNS_PROBE_TIMEOUT).await;
+            signal_clone.store(dns_state_to_u8(state), std::sync::atomic::Ordering::Release);
+        });
+    }
+
+    // `fetch_fut` is already a `Pin<Box<dyn Future>>` so it is `Unpin`
+    // and the inner state machine lives on the heap — using `&mut`
+    // in `tokio::select!` works without a `tokio::pin!` that would
+    // stack-pin the (very large) chrome fetch state machine and
+    // exhaust the task stack on deep crawls. The timer is small and
+    // can be stack-pinned safely.
+    let timer = tokio::time::sleep(hedge_delay);
+    tokio::pin!(timer);
+
+    tokio::select! {
+        biased;
+        r = &mut fetch_fut => r,
+        _ = &mut timer => {
+            if signal.load(std::sync::atomic::Ordering::Acquire) == DNS_STATE_NXDOMAIN {
+                // Two-signal-equivalent: chrome hasn't completed AND
+                // local DNS confirms NXDOMAIN. Stop chrome cleanly
+                // and synthesise. The cache insert here means the
+                // SECOND-and-later requests to this host skip even
+                // the hedge — they short-circuit at
+                // `chrome_nxdomain_shortcircuit` (cache hit, no
+                // navigation, no DNS spawn).
+                let _ = page.stop_loading().await;
+                chrome_nxdomain_cache().insert(host);
+                let mut pr = crate::utils::PageResponse::default();
+                pr.status_code = *DNS_RESOLVE_ERROR;
+                pr.final_url = Some(url.to_string());
+                pr
+            } else {
+                // No NXDOMAIN evidence yet — let chrome complete its
+                // natural lifecycle and rely on the existing reactive
+                // `confirm_chrome_tunnel_failure_with_local_dns`
+                // run inside `Page::new_base` to handle the genuine-
+                // failure surface.
+                fetch_fut.await
+            }
+        }
+    }
+}
+
 /// Chrome page-entry shortcircuit driven by the
 /// [`ChromeNxdomainCache`]. Returns `Some(PageResponse)` carrying a
 /// 525 DNS-resolve status when the URL's host is currently cached as
@@ -4715,6 +4905,11 @@ impl Page {
         }
 
         let page_resource = if seeded_resource.is_some() {
+            // Seeded path skips the hedge: the chrome page is loaded
+            // from caller-provided bytes via `setDocumentContent`, no
+            // DNS resolution happens. Adding a DNS hedge here would
+            // burn a spawned task on every seeded call for no
+            // possible benefit.
             crate::utils::fetch_page_html_seeded(
                 url,
                 client,
@@ -4731,41 +4926,61 @@ impl Page {
             )
             .await
         } else {
-            #[cfg(feature = "fs")]
-            {
-                crate::utils::fetch_page_html(
-                    url,
-                    client,
-                    page,
-                    page_set,
-                    referrer,
-                    max_page_bytes,
-                    cache_options,
-                    #[cfg(feature = "cookies")]
-                    jar,
-                    cache_namespace,
-                    params,
-                    extract,
-                )
-                .await
-            }
-            #[cfg(not(feature = "fs"))]
-            {
-                let _ = jar;
-                crate::utils::fetch_page_html(
-                    url,
-                    client,
-                    page,
-                    page_set,
-                    referrer,
-                    max_page_bytes,
-                    cache_options,
-                    cache_namespace,
-                    params,
-                    extract,
-                )
-                .await
-            }
+            // Non-seeded path runs the DNS hedge alongside chrome's
+            // actual navigation. The hedge is bypassed (~one atomic
+            // OnceLock read) when disabled via env or when the URL
+            // has no host.
+            //
+            // The fetch future is heap-pinned via `Box::pin` BEFORE
+            // entering the hedge. `fetch_page_html`'s state machine
+            // is large (it captures the full chrome interception
+            // pipeline + lol_html rewriter + streaming buffer); a
+            // stack-pin (`tokio::pin!`) of it inside the hedge would
+            // bloat the task stack and overflow on deep crawls.
+            // Boxing keeps the state machine on the heap and the
+            // hedge's stack frame minimal. See
+            // `chrome_navigation_with_dns_hedge` for the full
+            // contract.
+            let fetch_fut: std::pin::Pin<
+                Box<dyn std::future::Future<Output = crate::utils::PageResponse> + Send>,
+            > = Box::pin(async {
+                #[cfg(feature = "fs")]
+                {
+                    crate::utils::fetch_page_html(
+                        url,
+                        client,
+                        page,
+                        page_set,
+                        referrer,
+                        max_page_bytes,
+                        cache_options,
+                        #[cfg(feature = "cookies")]
+                        jar,
+                        cache_namespace,
+                        params,
+                        extract,
+                    )
+                    .await
+                }
+                #[cfg(not(feature = "fs"))]
+                {
+                    let _ = jar;
+                    crate::utils::fetch_page_html(
+                        url,
+                        client,
+                        page,
+                        page_set,
+                        referrer,
+                        max_page_bytes,
+                        cache_options,
+                        cache_namespace,
+                        params,
+                        extract,
+                    )
+                    .await
+                }
+            });
+            chrome_navigation_with_dns_hedge(url, page, fetch_fut).await
         };
         let mut p = build(url, page_resource);
 
@@ -13434,6 +13649,83 @@ mod chrome_nxdomain_cache_tests {
             cache.len() <= 32 + 16,
             "cache must stay near capacity under contention (len={})",
             cache.len()
+        );
+    }
+}
+
+#[cfg(all(test, feature = "chrome", not(feature = "decentralized")))]
+mod chrome_hedge_dns_tests {
+    use super::{
+        dns_state_to_u8, LocalDnsState, DNS_STATE_NXDOMAIN, DNS_STATE_PENDING, DNS_STATE_RESOLVED,
+        DNS_STATE_TIMEDOUT, MAX_CHROME_HEDGE_DNS_DELAY_MS,
+    };
+
+    #[test]
+    fn dns_state_codes_round_trip_exactly_once() {
+        // Atomic encoding is the only shared channel between the
+        // spawned probe and the hedge select. Pin the codes so a
+        // future refactor (e.g. reordering the enum) cannot silently
+        // swap "Resolved" with "NxDomain" and turn the hedge into a
+        // false-positive footgun.
+        assert_eq!(DNS_STATE_PENDING, 0, "PENDING must be the AtomicU8 init");
+        assert_eq!(dns_state_to_u8(LocalDnsState::Resolved), DNS_STATE_RESOLVED);
+        assert_eq!(dns_state_to_u8(LocalDnsState::NxDomain), DNS_STATE_NXDOMAIN);
+        assert_eq!(dns_state_to_u8(LocalDnsState::TimedOut), DNS_STATE_TIMEDOUT);
+
+        // No two terminal codes collide — every real state is
+        // distinguishable from PENDING and from each other.
+        let codes = [
+            DNS_STATE_PENDING,
+            DNS_STATE_RESOLVED,
+            DNS_STATE_NXDOMAIN,
+            DNS_STATE_TIMEDOUT,
+        ];
+        for (i, a) in codes.iter().enumerate() {
+            for b in &codes[i + 1..] {
+                assert_ne!(a, b, "DNS state codes must be pairwise distinct");
+            }
+        }
+    }
+
+    #[test]
+    fn hedge_delay_env_is_clamped() {
+        // The cap is the only safety belt against a misconfigured
+        // env var pushing the hedge into "never fires" territory
+        // (e.g. someone sets `SPIDER_CHROME_HEDGE_DNS_DELAY_MS=86400000`
+        // expecting milliseconds and getting a 24-hour delay).
+        // Verify the cap is a reasonable upper bound — under 1 min.
+        assert!(
+            MAX_CHROME_HEDGE_DNS_DELAY_MS <= 60_000,
+            "hedge delay cap must stay under a minute (got {})",
+            MAX_CHROME_HEDGE_DNS_DELAY_MS
+        );
+        // And large enough that the default + a normal headroom
+        // factor still fits.
+        assert!(
+            MAX_CHROME_HEDGE_DNS_DELAY_MS >= super::DEFAULT_CHROME_HEDGE_DNS_DELAY_MS * 3,
+            "cap ({}) must be >= 3× the default ({}) so the env knob has useful range",
+            MAX_CHROME_HEDGE_DNS_DELAY_MS,
+            super::DEFAULT_CHROME_HEDGE_DNS_DELAY_MS,
+        );
+    }
+
+    #[test]
+    fn hedge_default_delay_is_in_browser_failure_window() {
+        // Browsers surface proxy-fronted NXDOMAIN as
+        // ERR_TUNNEL_CONNECTION_FAILED within ~1-3s. The default
+        // hedge has to fire AFTER chrome would have a chance to
+        // respond on a healthy host but BEFORE the bulk of the
+        // proxy-NXDOMAIN failure path lands so the hedge can replace
+        // the wait. 1500-5000ms is the right band.
+        assert!(
+            super::DEFAULT_CHROME_HEDGE_DNS_DELAY_MS >= 1_500,
+            "default hedge ({}) must allow fast healthy responses through",
+            super::DEFAULT_CHROME_HEDGE_DNS_DELAY_MS,
+        );
+        assert!(
+            super::DEFAULT_CHROME_HEDGE_DNS_DELAY_MS <= 5_000,
+            "default hedge ({}) must fire before chrome's proxy-NXDOMAIN timeout path completes",
+            super::DEFAULT_CHROME_HEDGE_DNS_DELAY_MS,
         );
     }
 }
