@@ -3229,12 +3229,40 @@ impl Website {
             .default_headers(headers)
             .build()
             .unwrap_unchecked()
-        })
-        .with(Cache(HttpCache {
-            mode: CacheMode::Default,
-            manager: CACACHE_MANAGER.clone(),
-            options: cache_options,
-        }));
+        });
+
+        // Gate the http-cache-reqwest middleware on `configuration.cache`,
+        // matching `configure_http_client_builder` (line ~2683) and the
+        // proxy-client builder (line ~2882). Previously this path attached
+        // the middleware unconditionally — which meant every request,
+        // even on `with_caching(false)` clients, ran through the cache
+        // layer. That layer wraps any underlying transport error as
+        // `HttpCacheError::Cache(err.to_string())`, destroying the source
+        // chain. Spider's `crate::page::status_code_from_reqwest_error`
+        // (page.rs:~1019) then can't recover the original error type
+        // (DNS / refused / reset / timed out / SSL / etc.) and conservatively
+        // buckets every wrapped transport error as 526 ADDRESS_UNREACHABLE
+        // (page.rs:1020). Downstream consumers see a misleading 526 for
+        // hosts that actually resolve and aren't unreachable — they were
+        // just blocked or slow.
+        //
+        // Behavior change: when `configuration.cache=false`, requests no
+        // longer go through the cache layer (which was a no-op for them
+        // anyway) and transport errors keep their proper classification.
+        // When `configuration.cache=true`, behavior is unchanged.
+        let client = if self.configuration.cache {
+            client.with(Cache(HttpCache {
+                mode: CacheMode::Default,
+                manager: CACACHE_MANAGER.clone(),
+                options: cache_options,
+            }))
+        } else {
+            // `cache_options` was computed up front to avoid threading
+            // the option construction across both branches; intentionally
+            // dropped here when caching is disabled.
+            let _ = cache_options;
+            client
+        };
 
         client.build()
     }
