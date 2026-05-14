@@ -250,19 +250,35 @@ lazy_static! {
 lazy_static! {
     /// Aho-Corasick automaton for detecting `http-cache-reqwest`-wrapped
     /// transport errors. The middleware stringifies the underlying
-    /// error via `BoxError::to_string()` and wraps it as
-    /// `HttpCacheError::Cache(String)` — Display rendered as
-    /// `"Cache error: <inner>"`. Reqwest's transport-error Display is
-    /// consistently `"error sending request"` (DNS, connection
-    /// refused/reset, timeouts, TLS handshake all share that prefix),
-    /// so a single conjunction match is a near-zero false-positive
-    /// signal that the original error was transport-level and therefore
-    /// non-retryable through the same client. Used by
-    /// `get_error_http_status_code` only when `err.is_middleware()` is
-    /// true so legitimate higher-level cache errors (which would have a
-    /// different Display prefix) keep their existing classification.
+    /// error via `BoxError::to_string()`. Two wrapper prefixes possible:
+    ///
+    ///   * `"Cache error: error sending request"` — legacy
+    ///     `HttpCacheError::Cache(String)` variant. Source chain
+    ///     destroyed; this regex is the ONLY signal we have.
+    ///   * `"HTTP client error: error sending request"` — fixed
+    ///     `HttpCacheError::Client(BoxError)` variant
+    ///     (spider-http-cache-reqwest 1.0.0-alpha.7+). Source chain
+    ///     preserved; the chain-walk path in
+    ///     `get_error_http_status_code` recovers the original
+    ///     `reqwest::Error` and returns proper DNS/refused/timeout
+    ///     classification before this regex even runs. The regex is
+    ///     kept as a safety net for callers still on the legacy variant
+    ///     and for any source-chain walk failure.
+    ///
+    /// Reqwest's transport-error Display is consistently
+    /// `"error sending request"` (DNS, connection refused/reset,
+    /// timeouts, TLS handshake all share that prefix), so matching on
+    /// either prefix alongside the inner phrase is a near-zero
+    /// false-positive signal that the original error was transport-level.
+    /// Used by `get_error_http_status_code` only when
+    /// `err.is_middleware()` is true so legitimate higher-level cache
+    /// errors (which would have a different Display prefix) keep their
+    /// existing classification.
     static ref CACHE_WRAPPED_TRANSPORT_AC: aho_corasick::AhoCorasick =
-        aho_corasick::AhoCorasick::new(["Cache error: error sending request"])
+        aho_corasick::AhoCorasick::new([
+            "Cache error: error sending request",
+            "HTTP client error: error sending request",
+        ])
             .expect("valid patterns");
 }
 
@@ -313,6 +329,85 @@ fn is_dns_error(err: &crate::client::Error) -> bool {
     }
 
     false
+}
+
+/// Walk the source chain of a middleware-wrapped error looking for the
+/// underlying `reqwest::Error`. With `spider-http-cache-reqwest 1.0.0-alpha.7+`
+/// (which uses `HttpCacheError::Client(BoxError)` instead of the legacy
+/// `HttpCacheError::Cache(String)`) the chain is preserved and we can
+/// recover the original transport error type. Returns `None` when the
+/// chain doesn't contain one (legacy stringified variant, depth cap, or
+/// some other middleware shape).
+///
+/// Bounded depth (6 layers) so we don't loop on cyclic chains, never
+/// allocate, and never panic.
+#[cfg(feature = "cache_request")]
+fn extract_inner_reqwest_error(err: &crate::client::Error) -> Option<&reqwest::Error> {
+    use std::error::Error;
+    let mut source: Option<&(dyn Error + 'static)> = err.source();
+    let mut depth = 0u8;
+    while let Some(e) = source {
+        if depth >= 6 {
+            return None;
+        }
+        if let Some(req_err) = e.downcast_ref::<reqwest::Error>() {
+            return Some(req_err);
+        }
+        source = e.source();
+        depth += 1;
+    }
+    None
+}
+
+/// Classify a borrowed `reqwest::Error` recovered from a middleware-wrapped
+/// chain into the same status codes the typed paths in
+/// `get_error_http_status_code` produce. Returns `None` when none of the
+/// typed inspectors fire — the caller falls back to its existing
+/// safety net (e.g. the cache-wrap regex).
+///
+/// Mirrors the same precedence order as the main classifier:
+///   1. `is_timeout()` → CONNECTION_TIMEOUT_ERROR (504)
+///   2. `is_connect()` with kernel-level kind inspection (refused/aborted/
+///      reset/host-unreachable/timed-out)
+///   3. `is_body()` → BODY_DECODE_ERROR
+///   4. `is_request()` → 400 BAD_REQUEST
+///
+/// Does NOT call `is_dns_error()` — that's already invoked by the main
+/// classifier on the top-level error before we reach this helper, and it
+/// already walks the chain.
+#[cfg(feature = "cache_request")]
+fn classify_reqwest_error_borrowed(err: &reqwest::Error) -> Option<StatusCode> {
+    use std::error::Error;
+
+    if err.is_timeout() {
+        return Some(*CONNECTION_TIMEOUT_ERROR);
+    }
+    if err.is_connect() {
+        if let Some(io_err) = err
+            .source()
+            .and_then(|e| e.downcast_ref::<std::io::Error>())
+        {
+            return Some(match io_err.kind() {
+                std::io::ErrorKind::ConnectionRefused => *CONNECTION_REFUSED_ERROR,
+                std::io::ErrorKind::ConnectionAborted => *CONNECTION_ABORTED_ERROR,
+                std::io::ErrorKind::ConnectionReset => *CONNECTION_RESET_ERROR,
+                std::io::ErrorKind::NotFound => *UNREACHABLE_REQUEST_ERROR,
+                std::io::ErrorKind::HostUnreachable | std::io::ErrorKind::NetworkUnreachable => {
+                    *ADDRESS_UNREACHABLE_ERROR
+                }
+                std::io::ErrorKind::TimedOut => *CONNECTION_TIMEOUT_ERROR,
+                _ => *UNREACHABLE_REQUEST_ERROR,
+            });
+        }
+        return Some(*UNREACHABLE_REQUEST_ERROR);
+    }
+    if err.is_body() {
+        return Some(*BODY_DECODE_ERROR);
+    }
+    if err.is_request() {
+        return Some(StatusCode::BAD_REQUEST);
+    }
+    None
 }
 
 /// Check whether a reqwest error is a proxy CONNECT failure — both
@@ -999,25 +1094,40 @@ pub(crate) fn get_error_http_status_code(err: &crate::client::Error) -> StatusCo
 
     // `http-cache-reqwest` (the middleware spider attaches when
     // `cache_request` / `cache_mem` is active and `cache=true` — the
-    // chrome-feature default) stringifies any underlying transport
-    // error via `BoxError::to_string()` before wrapping it as
-    // `HttpCacheError::Cache(String)`. The full source chain is
-    // discarded at that point, so neither `is_connect()`, `is_dns_error`,
-    // nor any other typed inspector can recover the original classification.
+    // chrome-feature default) wraps any underlying transport error.
     //
-    // The Display of the wrap is `"Cache error: error sending request for url (…)"`.
-    // We can't tell DNS / refused / reset / timeout apart anymore, but we
-    // *can* tell this is a transport-level failure that the caller cannot
-    // resolve by retrying through the same client. Bucket it with 526
-    // (`ADDRESS_UNREACHABLE_ERROR`, "permanent for this destination via
-    // this client") so `is_retryable_status` returns false and the retry
-    // loop halts — matching the SSL-handshake bucket. Without this guard
-    // the catch-all at the bottom of this function returns 599 →
-    // retryable → the loop burns the full retry budget on every fetch
-    // (observed as a 9-20s hang in `cache_mem + chrome` builds).
+    // Two wrapper shapes possible (see CACHE_WRAPPED_TRANSPORT_AC docs):
+    //
+    //   * Legacy `HttpCacheError::Cache(String)` (upstream
+    //     http-cache-reqwest ≤ 1.0.0-alpha.6) stringifies the error and
+    //     destroys the source chain. `is_connect()` / `is_dns_error` can't
+    //     recover the original classification — fall back to bucketing
+    //     as 526 ADDRESS_UNREACHABLE so the retry loop halts.
+    //
+    //   * Fixed `HttpCacheError::Client(BoxError)` (spider-http-cache-reqwest
+    //     1.0.0-alpha.7+) preserves the source chain. We walk down via
+    //     `source()` looking for the original `reqwest::Error` and, if
+    //     found, recursively classify it with the proper typed inspectors
+    //     (`is_connect()` / `is_timeout()` / `is_dns_error`). This recovers
+    //     the right status (CONNECTION_REFUSED, CONNECTION_TIMEOUT, etc.)
+    //     instead of conflating every transport class as 526.
+    //
+    // The chain-walk runs FIRST so we get accurate classification on the
+    // fixed variant. The string-match safety net only fires when the walk
+    // fails (legacy variant or unexpected chain shape).
     #[cfg(feature = "cache_request")]
-    if err.is_middleware() && CACHE_WRAPPED_TRANSPORT_AC.is_match(&err.to_string()) {
-        return *ADDRESS_UNREACHABLE_ERROR;
+    if err.is_middleware() {
+        if let Some(inner) = extract_inner_reqwest_error(err) {
+            if let Some(status) = classify_reqwest_error_borrowed(inner) {
+                return status;
+            }
+        }
+        // Fall back to the string-match safety net for legacy variants
+        // and any unexpected chain shape where the walk + typed
+        // inspection both came up empty.
+        if CACHE_WRAPPED_TRANSPORT_AC.is_match(&err.to_string()) {
+            return *ADDRESS_UNREACHABLE_ERROR;
+        }
     }
 
     if err.is_connect() {
