@@ -1530,7 +1530,25 @@ async fn confirm_chrome_tunnel_failure_with_local_dns(
     // not the "couldn't reach destination" pattern and we MUST keep
     // existing retry semantics. Cap at 256 bytes — anything bigger is
     // real data, not the empty-success shape that triggered the reclass.
-    let qualifies_for_dns_check = {
+    //
+    // **Spool safety**: under the `balance` feature, a body large enough
+    // to trigger spooling is moved to a temp file and `self.html` is
+    // cleared, so `get_html_bytes_u8()` returns an empty slice. Two
+    // false-positive shapes are blocked at the source by checking
+    // `is_html_on_disk()` (which is hardcoded `false` outside `balance`,
+    // so non-balance builds are byte-identical to the prior behaviour):
+    //
+    //   * 599 + spool: empty slice trivially fails `is_chrome_error_page`,
+    //     so the existing `content.is_empty()` short-circuit already
+    //     handles it. The explicit guard below is belt-and-braces.
+    //   * 504 + spool: a literal `content.len() <= 256` would trivially
+    //     pass on an empty post-spool buffer, falsely qualifying a real
+    //     spooled document for the DNS check and risking a mis-upgrade
+    //     to 525 plus a poisoned `CHROME_NXDOMAIN_CACHE` entry. The
+    //     explicit guard prevents this.
+    let qualifies_for_dns_check = if page.is_html_on_disk() {
+        false
+    } else {
         let content = page.get_html_bytes_u8();
         if is_chrome_unknown {
             if content.is_empty() || !is_chrome_error_page(content) {
@@ -1976,21 +1994,46 @@ pub(crate) static IGNORE_EXTENSIONS: phf::Set<&'static str> = phf_set! {
     // Image
     "jpg", "jpeg", "png", "gif", "svg", "webp", "bmp", "tiff", "tif",
     "heic", "heif", "apng", "avif", "ico",
+    "jfif", "pjp", "pjpeg", "psd", "ai", "tga", "xbm", "jxl", "jxr",
+    "cur", "pbm", "pgm", "ppm",
+    // Raw camera
+    "cr2", "cr3", "nef", "arw", "dng", "orf", "rw2", "raf", "pef",
+    "srw", "nrw", "kdc", "x3f",
     // Video
     "mp4", "avi", "mov", "wmv", "flv", "mkv", "webm", "m4v", "mpeg",
     "3gp", "3g2",
+    "mpg", "mpe", "m2v", "mts", "m2ts", "vob", "asf", "rm", "rmvb",
+    "f4v", "divx", "xvid", "dv",
     // Audio
     "mp3", "wav", "ogg", "aac", "flac", "m4a", "aiff", "cda", "mid",
     "midi", "oga", "opus", "weba",
+    "wma", "ra", "aif", "aifc", "amr", "au", "snd", "ac3", "dts",
+    "mka", "caf",
     // Font
     "woff", "woff2", "ttf", "otf", "eot",
     // Document
     "pdf", "eps", "rtf", "txt", "doc", "docx", "csv", "epub",
     "abw", "azw", "odt", "ods", "odp", "ppt", "pptx", "xls", "xlsx", "vsd",
+    // E-books (binary containers)
+    "mobi", "azw3", "kf8", "lit", "chm", "prc", "pdb",
+    // Office legacy/binary templates
+    "xlt", "dot", "pot", "pps", "wri", "wks", "wpd", "wps",
     // Data / config
     "yaml", "yml", "ics", "md", "webmanifest",
     // Archive / binary
     "gz", "arc", "bin", "bz", "bz2", "jar", "mpkg", "rar", "tar", "zip", "7z",
+    "xz", "lz", "lzma", "zst", "tgz", "tbz", "tbz2", "txz", "cab",
+    "lzh", "lha", "sit", "sitx", "ace", "arj", "cpio", "ar", "s7z", "wim",
+    // Installers / packages / disk images
+    "exe", "msi", "dmg", "iso", "pkg", "deb", "rpm", "apk", "ipa",
+    "appx", "appimage", "crx", "xpi", "nupkg", "gem", "whl",
+    "vhd", "vmdk", "qcow2", "ova", "vdi",
+    // Native libs / compiled artifacts
+    "dll", "so", "dylib", "class", "pyc", "pyo",
+    // Databases
+    "db", "sqlite", "sqlite3", "mdb", "accdb",
+    // 3D / CAD (binary only)
+    "dwg", "stl", "fbx", "3ds", "blend", "glb", "usdz",
     // Legacy plugin
     "swf", "xap",
     // Ogg containers
