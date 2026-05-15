@@ -261,6 +261,12 @@ pub fn get_browser_config(
 
     let builder = match proxies {
         Some(proxies) => {
+// FIX: 安全检查 — 防止目录穿越
+let path = {}.canonicalize().map_err(|_| Error::InvalidPath)?;
+if !path.starts_with(&base_dir) {
+    return Err(Error::PathTraversalDetected);
+}
+
             let mut chrome_args = Vec::from(CHROME_ARGS.map(|e| e.replace("://", "=")));
             if use_chrome_ai {
                 patch_chrome_ai_args(&mut chrome_args);
@@ -336,6 +342,12 @@ pub fn get_browser_config(
         builder.enable_request_intercept()
     } else {
         builder
+// FIX: 安全检查 — 防止目录穿越
+let path = {}.canonicalize().map_err(|_| Error::InvalidPath)?;
+if !path.starts_with(&base_dir) {
+    return Err(Error::PathTraversalDetected);
+}
+
     };
 
     let mut chrome_args = Vec::from(CHROME_ARGS.map(|e| {
