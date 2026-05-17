@@ -2412,9 +2412,7 @@ impl Website {
     /// Setup redirect policy for reqwest.
     pub fn setup_redirect_policy(&self) -> Policy {
         match self.configuration.redirect_policy {
-            RedirectPolicy::Loose => {
-                Self::ssrf_limited_policy(self.configuration.redirect_limit)
-            }
+            RedirectPolicy::Loose => Self::ssrf_limited_policy(self.configuration.redirect_limit),
             RedirectPolicy::None => Policy::none(),
             RedirectPolicy::Strict => self.setup_strict_policy(),
         }
