@@ -2263,6 +2263,89 @@ impl Website {
         }
     }
 
+    /// SSRF guard for redirect targets. Refuses hops into loopback,
+    /// link-local (cloud-metadata), private, broadcast, or unspecified
+    /// addresses, and non-HTTP(S) schemes.
+    ///
+    /// The configured seed URL is fetched directly and never passes
+    /// through the redirect policy, so an intentionally-internal start
+    /// URL still works — only an *unexpected* redirect into internal
+    /// space is blocked, which is the SSRF exfiltration vector an
+    /// attacker-controlled page uses (cf. GHSA-8v6v-g4rh-jmcm). Operates
+    /// on the already-parsed `Url` so it adds no allocation per hop.
+    fn is_ssrf_redirect(url: &Url) -> bool {
+        use std::net::IpAddr;
+
+        let scheme = url.scheme();
+        if scheme != "http" && scheme != "https" {
+            return true;
+        }
+        let host = match url.host_str() {
+            Some(h) => h,
+            None => return true,
+        };
+        if host == "localhost"
+            || host == "0.0.0.0"
+            || host.ends_with(".localhost")
+            || host == "[::1]"
+            || host == "[::0]"
+        {
+            return true;
+        }
+        if host == "169.254.169.254"
+            || host == "metadata.google.internal"
+            || host == "metadata.goog"
+        {
+            return true;
+        }
+        // `url` serializes IPv6 hosts with brackets; strip one pair so
+        // bracketed / IPv4-mapped literals can't bypass the parse.
+        let ip_host = host
+            .strip_prefix('[')
+            .and_then(|h| h.strip_suffix(']'))
+            .unwrap_or(host);
+        match ip_host.parse::<IpAddr>() {
+            Ok(IpAddr::V4(v4)) => {
+                v4.is_loopback()
+                    || v4.is_private()
+                    || v4.is_link_local()
+                    || v4.is_unspecified()
+                    || v4.is_broadcast()
+            }
+            Ok(IpAddr::V6(v6)) => {
+                v6.is_loopback()
+                    || v6.is_unspecified()
+                    || v6
+                        .to_ipv4_mapped()
+                        .map(|v4| {
+                            v4.is_loopback()
+                                || v4.is_private()
+                                || v4.is_link_local()
+                                || v4.is_unspecified()
+                        })
+                        .unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+
+    /// Redirect policy for `Loose` (and the no-parsed-domain fallback):
+    /// the same hop cap as `Policy::limited`, but every hop is first
+    /// screened by [`Website::is_ssrf_redirect`].
+    fn ssrf_limited_policy(limit: usize) -> Policy {
+        use crate::client::redirect::Attempt;
+
+        Policy::custom(move |attempt: Attempt| {
+            if Self::is_ssrf_redirect(attempt.url()) {
+                attempt.error("SSRF blocked: redirect to internal address")
+            } else if attempt.previous().len() > limit {
+                attempt.error("too many redirects")
+            } else {
+                attempt.follow()
+            }
+        })
+    }
+
     /// Setup strict a strict redirect policy for request. All redirects need to match the host.
     pub fn setup_strict_policy(&self) -> Policy {
         use crate::client::redirect::Attempt;
@@ -2291,6 +2374,9 @@ impl Website {
                     let initial_redirect = Arc::new(AtomicU8::new(0));
 
                     move |attempt: Attempt| {
+                        if Self::is_ssrf_redirect(attempt.url()) {
+                            return attempt.error("SSRF blocked: redirect to internal address");
+                        }
                         if tld && domain_name(attempt.url()) == host_domain_name
                             || subdomains
                                 && attempt
@@ -2316,14 +2402,19 @@ impl Website {
                 };
                 Policy::custom(custom_policy)
             }
-            _ => default_policy,
+            // No parsed crawl domain to scope against — still screen
+            // every redirect hop for SSRF rather than falling back to a
+            // bare auto-follow policy.
+            _ => Self::ssrf_limited_policy(self.configuration.redirect_limit),
         }
     }
 
     /// Setup redirect policy for reqwest.
     pub fn setup_redirect_policy(&self) -> Policy {
         match self.configuration.redirect_policy {
-            RedirectPolicy::Loose => Policy::limited(self.configuration.redirect_limit),
+            RedirectPolicy::Loose => {
+                Self::ssrf_limited_policy(self.configuration.redirect_limit)
+            }
             RedirectPolicy::None => Policy::none(),
             RedirectPolicy::Strict => self.setup_strict_policy(),
         }
@@ -14250,6 +14341,44 @@ async fn test_cache_shortcircuit_crawl_smart() {
 
 #[cfg(test)]
 mod tests {
+
+    /// Redirect SSRF guard must refuse loopback, link-local (cloud
+    /// metadata), private, IPv6 / IPv4-mapped, localhost variants and
+    /// non-HTTP schemes, while still allowing ordinary public hosts so
+    /// legitimate cross-site redirects keep working.
+    #[test]
+    fn test_is_ssrf_redirect_blocks_internal() {
+        use url::Url;
+        for blocked in [
+            "http://127.0.0.1/",
+            "http://localhost/admin",
+            "http://sub.localhost/",
+            "http://0.0.0.0/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://metadata.google.internal/",
+            "http://10.0.0.5/",
+            "http://192.168.1.1/",
+            "http://172.16.0.1/",
+            "http://[::1]/",
+            "http://[::ffff:127.0.0.1]/",
+            "ftp://127.0.0.1/",
+        ] {
+            assert!(
+                super::Website::is_ssrf_redirect(&Url::parse(blocked).unwrap()),
+                "should block {blocked}"
+            );
+        }
+        for allowed in [
+            "http://example.com/",
+            "https://api.github.com/repos",
+            "http://93.184.216.34/",
+        ] {
+            assert!(
+                !super::Website::is_ssrf_redirect(&Url::parse(allowed).unwrap()),
+                "should allow {allowed}"
+            );
+        }
+    }
 
     #[cfg(not(feature = "decentralized"))]
     #[test]
