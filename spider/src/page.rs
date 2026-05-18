@@ -5222,7 +5222,20 @@ impl Page {
                     .await
                 }
             });
-            chrome_navigation_with_dns_hedge(url, page, fetch_fut).await
+            // Heap-pin the hedge future itself, not just `fetch_fut`.
+            // v2.51.188 roughly doubled `chrome_navigation_with_dns_hedge`'s
+            // own async frame (loadingFailed listener + abort guard +
+            // 4-arm select). Awaited inline it folds into new_base ->
+            // new_streaming -> the crawl loop's state machine and
+            // overflowed the 2MB default worker/test-thread stack,
+            // regressing the v2.51.187 `website::scrape` fix. Boxing
+            // keeps the grown hedge frame on the heap, off the
+            // enclosing crawl future — one alloc per chrome fetch,
+            // negligible vs. the network round-trip.
+            let hedge_fut: std::pin::Pin<
+                Box<dyn std::future::Future<Output = crate::utils::PageResponse> + Send>,
+            > = Box::pin(chrome_navigation_with_dns_hedge(url, page, fetch_fut));
+            hedge_fut.await
         };
         let mut p = build(url, page_resource);
 

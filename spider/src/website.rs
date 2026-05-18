@@ -13668,6 +13668,14 @@ async fn crawl_cron_own() {
     let _ = tokio::join!(runner.stop(), join_handle);
 }
 
+// Stack-frame regression sentinel: under `--features chrome` the crawl
+// page-fetch future folds new_streaming -> new_base ->
+// chrome_navigation_with_dns_hedge inline. If any of those frames regrow
+// and aren't heap-pinned at their boundary (see the Box::pin around the
+// hedge in page.rs), this overflows the 2MB default test/worker stack
+// and SIGABRTs — exactly the v2.51.188 regression. Must be run with
+// `cargo test -p spider --features chrome`; default-feature CI does NOT
+// compile the chrome paths and so cannot catch this.
 #[tokio::test]
 #[cfg(not(feature = "decentralized"))]
 async fn scrape() {

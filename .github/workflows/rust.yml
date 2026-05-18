@@ -38,6 +38,32 @@ jobs:
         if: env.RUN_LIVE_TESTS == '1' || env.RUN_LIVE_TESTS == 'true' || env.RUN_LIVE_TESTS == 'TRUE'
         run: cargo test -p spider_agent --features "openai search_serper" --test live_env_smoke -- --nocapture
 
+  chrome:
+    runs-on: ubuntu-latest
+    env:
+      RUN_LIVE_TESTS: ${{ secrets.RUN_LIVE_TESTS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-chrome-${{ hashFiles('**/Cargo.lock') }}
+      # Stack-frame regression guard. `website::scrape` does not launch
+      # chrome (default config uses the HTTP path), so no browser binary
+      # is needed — but compiling with `--features chrome` folds the
+      # chrome page-fetch frames into the crawl future, and if they
+      # regrow unboxed this SIGABRTs on the 2MB stack (the v2.51.188
+      # regression). Network-bound (hits choosealicense.com), so gated
+      # on RUN_LIVE_TESTS like the spider_agent live smoke step.
+      - name: Cargo test spider scrape (chrome frame guard)
+        if: env.RUN_LIVE_TESTS == '1' || env.RUN_LIVE_TESTS == 'true' || env.RUN_LIVE_TESTS == 'TRUE'
+        run: cargo test -p spider --features chrome website::scrape -- --exact --nocapture
+
   io_uring:
     runs-on: ubuntu-latest
     steps:
