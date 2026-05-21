@@ -36,6 +36,14 @@ pub fn setup_default_headers(
         }
     }
 
+    // wreq's default_headers is mem::swap, not merge. Calling it with an
+    // empty map wipes the precise Chrome/Safari/etc. header map that
+    // .emulation(...) just installed, silently breaking the JA3+headers
+    // fingerprint. Skip the call entirely when nothing was configured.
+    if headers.0.is_empty() {
+        return client_builder;
+    }
+
     client_builder.default_headers(headers.0)
 }
 
