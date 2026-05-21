@@ -3945,6 +3945,16 @@ pub async fn fetch_page_html_chrome_base<'h>(
     };
     let asset = is_asset_url(target_url);
 
+    // Media-capture race-channel: ONLY created when `target_url` is an
+    // asset URL (image / video / pdf / etc., per `is_asset_url`'s
+    // extension sniff). For HTML targets the channel is `None`, which
+    // means the later `match rx1` falls through to the `_ =>` arm and
+    // runs `run_page_response.await` directly — the HTML render is
+    // never raced against a media body fetch, so an HTML page cannot
+    // be accidentally clobbered by a sub-resource `getResponseBody`
+    // capture. Don't loosen this gate without re-auditing: letting
+    // `rx1` race on HTML URLs would let an inline-media body win over
+    // the page's real DOM.
     let (tx1, rx1) = if asset {
         let c = oneshot::channel::<Option<RequestId>>();
 
@@ -5205,12 +5215,27 @@ pub async fn fetch_page_html_chrome_base<'h>(
 
             page_response
         } else {
-            // Apply wait_for config (e.g. idle_network0) before HTML extraction.
-            // The run_events branch already calls page_wait; this ensures the
-            // non-content / empty-response path also honors the config, matching
-            // smart mode behavior.
+            // Apply wait_for config (e.g. idle_network0) before HTML
+            // extraction. The run_events branch already calls page_wait;
+            // this ensures the non-content / empty-response path also
+            // honours the config, matching smart-mode behaviour.
+            //
+            // The cap was previously hardcoded to 15 s, which silently
+            // cut SPA pages whose JS hydration runs longer than that
+            // under chrome CPU pressure. `page_wait` got cancelled mid-
+            // flight; `outer_html_bytes()` then captured the pre-
+            // hydration DOM, which serialises byte-identical to the
+            // server's HTTP response body — looked like a "real" 200
+            // but contained no hydrated content. The bound now matches
+            // the `run_events` branch above: the remaining
+            // `base_timeout` (already bounded by
+            // `request_timeout.min(MAX_PAGE_TIMEOUT)` at the top of
+            // this function), so the cap honours the caller's
+            // configured per-page budget without ever exceeding it.
+            // Deadlock-safe: `tokio::time::timeout` is the outer hard
+            // ceiling.
             if wait_for.is_some() && !block_bytes && !base_timeout.is_zero() {
-                let idle_timeout = base_timeout.min(Duration::from_secs(15));
+                let idle_timeout = base_timeout;
                 #[cfg(feature = "wait_guard")]
                 let idle_timeout = crate::utils::wait_guard::global_wait_guard()
                     .adjusted_timeout(get_domain_from_url(target_url), idle_timeout);
