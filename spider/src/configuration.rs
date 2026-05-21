@@ -686,6 +686,18 @@ pub struct Configuration {
     /// Parallel crawl backend configuration. Race CDP / Servo backends alongside
     /// the primary crawl path. Requires the `parallel_backends` feature.
     pub parallel_backends: Option<ParallelBackendsConfig>,
+    #[cfg(feature = "decentralized")]
+    /// Per-`Website` remote Spider worker URLs used for crawl requests. When
+    /// `None`, falls back to the process-wide `SPIDER_WORKER` env var (or its
+    /// default), preserving pre-2.51.x behavior. When `Some`, overrides the
+    /// global pool for this `Website` only.
+    pub worker_connection_urls: Option<Vec<String>>,
+    #[cfg(feature = "decentralized")]
+    /// Per-`Website` remote Spider worker URLs used for scrape requests. When
+    /// `None`, falls back to the process-wide `SPIDER_WORKER_SCRAPER` env var
+    /// (or its default), preserving pre-2.51.x behavior. When `Some`,
+    /// overrides the global pool for this `Website` only.
+    pub scraper_worker_connection_urls: Option<Vec<String>>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -2004,6 +2016,105 @@ impl Configuration {
     #[cfg(not(feature = "chrome"))]
     /// Set multiple remote Chrome connection URLs. This method does nothing if the `chrome` is not enabled.
     pub fn with_chrome_connections(&mut self, _urls: Vec<String>) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "decentralized")]
+    /// Set the Spider worker URL for crawl requests. `None` clears the
+    /// per-website override so this `Website` falls back to the process-wide
+    /// `SPIDER_WORKER` env var (default `http://127.0.0.1:3030`). `Some` with
+    /// a non-empty URL routes crawl traffic through that worker; `Some` with
+    /// an empty/whitespace URL disables the crawl worker pool for this
+    /// `Website` without affecting any other `Website` in the process.
+    pub fn with_worker_connection(&mut self, worker_connection_url: Option<String>) -> &mut Self {
+        self.worker_connection_urls = worker_connection_url.map(|url| {
+            let url = url.trim();
+            if url.is_empty() {
+                Vec::new()
+            } else {
+                vec![url.to_string()]
+            }
+        });
+        self
+    }
+
+    #[cfg(not(feature = "decentralized"))]
+    /// Set the Spider worker URL for crawl requests. This method does nothing
+    /// if the `decentralized` feature is not enabled.
+    pub fn with_worker_connection(&mut self, _worker_connection_url: Option<String>) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "decentralized")]
+    /// Set multiple Spider worker URLs for crawl requests. Empty/whitespace
+    /// entries are dropped. An empty resulting list disables the crawl worker
+    /// pool for this `Website` only.
+    pub fn with_worker_connections(&mut self, urls: Vec<String>) -> &mut Self {
+        self.worker_connection_urls = Some(
+            urls.into_iter()
+                .map(|url| url.trim().to_string())
+                .filter(|url| !url.is_empty())
+                .collect(),
+        );
+        self
+    }
+
+    #[cfg(not(feature = "decentralized"))]
+    /// Set multiple Spider worker URLs for crawl requests. This method does
+    /// nothing if the `decentralized` feature is not enabled.
+    pub fn with_worker_connections(&mut self, _urls: Vec<String>) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "decentralized")]
+    /// Set the Spider scraper worker URL for scrape requests. `None` clears
+    /// the per-website override so this `Website` falls back to the
+    /// process-wide `SPIDER_WORKER_SCRAPER` env var (default
+    /// `http://127.0.0.1:3031`). `Some` with an empty/whitespace URL disables
+    /// the scraper worker pool for this `Website` only.
+    pub fn with_scraper_worker_connection(
+        &mut self,
+        scraper_worker_connection_url: Option<String>,
+    ) -> &mut Self {
+        self.scraper_worker_connection_urls = scraper_worker_connection_url.map(|url| {
+            let url = url.trim();
+            if url.is_empty() {
+                Vec::new()
+            } else {
+                vec![url.to_string()]
+            }
+        });
+        self
+    }
+
+    #[cfg(not(feature = "decentralized"))]
+    /// Set the Spider scraper worker URL for scrape requests. This method
+    /// does nothing if the `decentralized` feature is not enabled.
+    pub fn with_scraper_worker_connection(
+        &mut self,
+        _scraper_worker_connection_url: Option<String>,
+    ) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "decentralized")]
+    /// Set multiple Spider scraper worker URLs for scrape requests.
+    /// Empty/whitespace entries are dropped. An empty resulting list disables
+    /// the scraper worker pool for this `Website` only.
+    pub fn with_scraper_worker_connections(&mut self, urls: Vec<String>) -> &mut Self {
+        self.scraper_worker_connection_urls = Some(
+            urls.into_iter()
+                .map(|url| url.trim().to_string())
+                .filter(|url| !url.is_empty())
+                .collect(),
+        );
+        self
+    }
+
+    #[cfg(not(feature = "decentralized"))]
+    /// Set multiple Spider scraper worker URLs for scrape requests. This
+    /// method does nothing if the `decentralized` feature is not enabled.
+    pub fn with_scraper_worker_connections(&mut self, _urls: Vec<String>) -> &mut Self {
         self
     }
 

@@ -937,6 +937,19 @@ lazy_static! {
     };
 }
 
+/// Permit holder for the decentralized crawl loop. Allows the same call site
+/// to acquire from either the process-wide `SEM` (`Borrowed`, default path)
+/// or a per-`Website` override semaphore (`Owned`). When no override is set
+/// this resolves to `Borrowed(SEM.acquire().await)` — byte-identical to
+/// pre-2.51.x behavior. Inner fields are intentionally unread RAII wrappers
+/// whose `Drop` releases the slot back to the semaphore.
+#[cfg(feature = "decentralized")]
+#[allow(dead_code)]
+enum WebsiteWorkerPermit {
+    Borrowed(tokio::sync::SemaphorePermit<'static>),
+    Owned(tokio::sync::OwnedSemaphorePermit),
+}
+
 // const INVALID_URL: &str = "The domain should be a valid URL, refer to <https://www.w3.org/TR/2011/WD-html5-20110525/urls.html#valid-url>.";
 
 /// the active status of the crawl.
@@ -3279,9 +3292,17 @@ impl Website {
             }
         }
 
-        for worker in WORKERS.iter() {
-            if let Ok(worker) = crate::client::Proxy::all(worker) {
-                client = client.proxy(worker);
+        if self.has_worker_override() {
+            for worker in self.override_proxy_urls() {
+                if let Ok(worker) = crate::client::Proxy::all(&worker) {
+                    client = client.proxy(worker);
+                }
+            }
+        } else {
+            for worker in WORKERS.iter() {
+                if let Ok(worker) = crate::client::Proxy::all(worker) {
+                    client = client.proxy(worker);
+                }
             }
         }
 
@@ -3360,9 +3381,17 @@ impl Website {
             }
         }
 
-        for worker in WORKERS.iter() {
-            if let Ok(worker) = crate::client::Proxy::all(worker) {
-                client = client.proxy(worker);
+        if self.has_worker_override() {
+            for worker in self.override_proxy_urls() {
+                if let Ok(worker) = crate::client::Proxy::all(&worker) {
+                    client = client.proxy(worker);
+                }
+            }
+        } else {
+            for worker in WORKERS.iter() {
+                if let Ok(worker) = crate::client::Proxy::all(worker) {
+                    client = client.proxy(worker);
+                }
             }
         }
 
@@ -6130,6 +6159,83 @@ impl Website {
                     .unwrap_or(*DEFAULT_PERMITS),
             ))
         }
+    }
+
+    /// `true` when this `Website` has any per-website worker URL override set
+    /// (crawl or scraper). When `false`, the legacy global `WORKERS`/`SEM`
+    /// path is taken (byte-identical to pre-override behavior).
+    #[cfg(feature = "decentralized")]
+    #[inline]
+    pub(crate) fn has_worker_override(&self) -> bool {
+        self.configuration.worker_connection_urls.is_some()
+            || self.configuration.scraper_worker_connection_urls.is_some()
+    }
+
+    /// Resolved, trimmed, deduplicated combined (scraper + crawl) worker
+    /// proxy URLs for this `Website`. Only meaningful when
+    /// `has_worker_override()` is `true`. Order mirrors the legacy
+    /// `WORKERS` set iteration semantics: scraper URLs first, then crawl
+    /// URLs, with later duplicates dropped.
+    ///
+    /// Allocates a fresh `Vec` per call; not on a hot path (called once
+    /// per HTTP client build / crawl entry).
+    #[cfg(feature = "decentralized")]
+    fn override_proxy_urls(&self) -> Vec<String> {
+        let scraper = self
+            .configuration
+            .scraper_worker_connection_urls
+            .as_deref()
+            .unwrap_or(&[]);
+        let crawl = self
+            .configuration
+            .worker_connection_urls
+            .as_deref()
+            .unwrap_or(&[]);
+
+        let mut out: Vec<String> = Vec::with_capacity(scraper.len() + crawl.len());
+        let mut seen: HashSet<String> = HashSet::with_capacity(scraper.len() + crawl.len());
+
+        for url in scraper.iter().chain(crawl.iter()) {
+            let url = url.trim();
+            if url.is_empty() {
+                continue;
+            }
+            if seen.insert(url.to_string()) {
+                out.push(url.to_string());
+            }
+        }
+
+        out
+    }
+
+    /// `true` when this `Website`'s crawl worker pool routes traffic
+    /// through an `http:`-prefixed worker URL. Used by the decentralized
+    /// crawl loop to flip the `https`→`http` scheme rewrite. Falls back
+    /// to the existing `SPIDER_WORKER` env-var sniff when no per-website
+    /// override is set (byte-identical to pre-override behavior).
+    #[cfg(feature = "decentralized")]
+    fn http_worker_active(&self) -> bool {
+        match self.configuration.worker_connection_urls.as_deref() {
+            Some(urls) => urls.iter().any(|u| u.trim().starts_with("http:")),
+            None => std::env::var("SPIDER_WORKER")
+                .unwrap_or_else(|_| "http:".to_string())
+                .starts_with("http:"),
+        }
+    }
+
+    /// Per-website override semaphore for the decentralized crawl loop.
+    /// `None` when no override is set (caller falls back to the
+    /// process-wide `SEM`). When `Some`, sized as
+    /// `calc_limits(3) * combined_worker_count.max(1)` to mirror the
+    /// global `SEM` sizing formula for byte-identical concurrency under
+    /// the same effective worker count.
+    #[cfg(feature = "decentralized")]
+    fn override_worker_semaphore(&self) -> Option<Arc<Semaphore>> {
+        if !self.has_worker_override() {
+            return None;
+        }
+        let count = self.override_proxy_urls().len().max(1);
+        Some(Arc::new(Semaphore::const_new(calc_limits(3) * count)))
     }
 
     /// Fast path: serve single-page crawl from cache, bypassing ALL heavy setup.
@@ -10314,10 +10420,11 @@ impl Website {
         let mut interval = Box::pin(tokio::time::interval(Duration::from_millis(10)));
         let throttle = Box::pin(self.get_delay());
         let on_link_find_callback = self.on_link_find_callback.clone();
-        // http worker verify
-        let http_worker = std::env::var("SPIDER_WORKER")
-            .unwrap_or_else(|_| "http:".to_string())
-            .starts_with("http:");
+        // http worker verify — honors per-website override; falls back to env.
+        let http_worker = self.http_worker_active();
+        // Per-website override semaphore (None ⇒ use the legacy process-wide
+        // `SEM` for byte-identical behavior with pre-override builds).
+        let override_sem = self.override_worker_semaphore();
 
         let mut links: HashSet<CaseInsensitiveString> = self
             .crawl_establish(client, &(domain.into(), Default::default()), http_worker)
@@ -10362,7 +10469,15 @@ impl Website {
 
                         self.insert_link(&link).await;
 
-                        if let Ok(permit) = SEM.acquire().await {
+                        let permit_result = match override_sem.as_ref() {
+                            Some(sem) => sem
+                                .clone()
+                                .acquire_owned()
+                                .await
+                                .map(WebsiteWorkerPermit::Owned),
+                            None => SEM.acquire().await.map(WebsiteWorkerPermit::Borrowed),
+                        };
+                        if let Ok(permit) = permit_result {
                             let client = client.clone();
                             let on_link_find_callback = on_link_find_callback.clone();
 
@@ -12825,6 +12940,61 @@ impl Website {
         self
     }
 
+    /// Set the Spider worker URL for crawl requests. `None` falls back to the
+    /// process-wide `SPIDER_WORKER` env var. Empty/whitespace disables the
+    /// crawl worker pool for this `Website` only. No-op without
+    /// `decentralized`.
+    pub fn with_worker_connection(&mut self, worker_connection_url: Option<String>) -> &mut Self {
+        self.configuration
+            .with_worker_connection(worker_connection_url);
+        #[cfg(feature = "decentralized")]
+        {
+            self.client = None;
+        }
+        self
+    }
+
+    /// Set multiple Spider worker URLs for crawl requests. Empty list
+    /// disables the crawl worker pool for this `Website` only. No-op without
+    /// `decentralized`.
+    pub fn with_worker_connections(&mut self, urls: Vec<String>) -> &mut Self {
+        self.configuration.with_worker_connections(urls);
+        #[cfg(feature = "decentralized")]
+        {
+            self.client = None;
+        }
+        self
+    }
+
+    /// Set the Spider scraper worker URL for scrape requests. `None` falls
+    /// back to the process-wide `SPIDER_WORKER_SCRAPER` env var.
+    /// Empty/whitespace disables the scraper worker pool for this `Website`
+    /// only. No-op without `decentralized`.
+    pub fn with_scraper_worker_connection(
+        &mut self,
+        scraper_worker_connection_url: Option<String>,
+    ) -> &mut Self {
+        self.configuration
+            .with_scraper_worker_connection(scraper_worker_connection_url);
+        #[cfg(feature = "decentralized")]
+        {
+            self.client = None;
+        }
+        self
+    }
+
+    /// Set multiple Spider scraper worker URLs for scrape requests. Empty
+    /// list disables the scraper worker pool for this `Website` only. No-op
+    /// without `decentralized`.
+    pub fn with_scraper_worker_connections(&mut self, urls: Vec<String>) -> &mut Self {
+        self.configuration.with_scraper_worker_connections(urls);
+        #[cfg(feature = "decentralized")]
+        {
+            self.client = None;
+        }
+        self
+    }
+
     /// Set JS to run on certain pages. This method does nothing if the `chrome` is not enabled.
     pub fn with_execution_scripts(
         &mut self,
@@ -13875,6 +14045,104 @@ async fn crawl_invalid() {
     {
         assert_eq!(links.len(), 1, "{:?}", links);
     }
+}
+
+#[test]
+#[cfg(feature = "decentralized")]
+fn worker_override_dedups_trims_and_orders_scraper_first() {
+    let mut website = Website::new("https://example.com");
+
+    website
+        .with_worker_connections(vec![
+            "http://worker-1:3030".into(),
+            "http://worker-1:3030".into(),
+            " http://worker-2:3030 ".into(),
+            "   ".into(),
+        ])
+        .with_scraper_worker_connections(vec![
+            "http://scraper-1:3031".into(),
+            "".into(),
+            "http://scraper-1:3031".into(),
+        ]);
+
+    assert!(website.has_worker_override());
+    assert!(website.http_worker_active());
+    assert_eq!(
+        website.override_proxy_urls(),
+        vec![
+            "http://scraper-1:3031".to_string(),
+            "http://worker-1:3030".to_string(),
+            "http://worker-2:3030".to_string(),
+        ],
+        "override_proxy_urls must put scraper first, then crawl, deduped + trimmed"
+    );
+}
+
+#[test]
+#[cfg(feature = "decentralized")]
+fn worker_override_disabled_when_unset() {
+    let website = Website::new("https://example.com");
+    assert!(
+        !website.has_worker_override(),
+        "fresh Website must not flag a worker override"
+    );
+    assert!(
+        website.override_worker_semaphore().is_none(),
+        "no override ⇒ no per-website semaphore ⇒ global SEM path stays hot"
+    );
+    assert!(
+        website.override_proxy_urls().is_empty(),
+        "no override ⇒ no per-website proxy URLs"
+    );
+}
+
+#[test]
+#[cfg(feature = "decentralized")]
+fn worker_override_explicit_empty_disables_pool() {
+    let mut website = Website::new("https://example.com");
+
+    website
+        .with_worker_connection(None)
+        .with_scraper_worker_connection(None);
+
+    assert!(
+        !website.has_worker_override(),
+        "None ⇒ no override (env fallback)"
+    );
+
+    website
+        .with_worker_connections(Vec::new())
+        .with_scraper_worker_connections(Vec::new());
+
+    assert!(
+        website.has_worker_override(),
+        "Some(empty) ⇒ explicit override (pool disabled)"
+    );
+    assert!(website.override_proxy_urls().is_empty());
+    let sem = website
+        .override_worker_semaphore()
+        .expect("explicit override must build a semaphore");
+    assert!(
+        sem.available_permits() >= 1,
+        "override semaphore must clamp to >= 1 permit even with empty pool"
+    );
+}
+
+#[test]
+#[cfg(feature = "decentralized")]
+fn worker_override_http_worker_flag_tracks_crawl_scheme() {
+    let mut website = Website::new("https://example.com");
+    website.with_worker_connection(Some("https://secure-worker:3030".into()));
+    assert!(
+        !website.http_worker_active(),
+        "https worker URL must not flip the http_worker flag"
+    );
+
+    website.with_worker_connection(Some("http://insecure-worker:3030".into()));
+    assert!(
+        website.http_worker_active(),
+        "http worker URL must flip the http_worker flag"
+    );
 }
 
 #[tokio::test]
