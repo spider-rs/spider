@@ -813,6 +813,47 @@ pub fn set_interface(client: ClientBuilder, _interface: &str) -> ClientBuilder {
     client
 }
 
+/// Bind connections only on the specified network interface (wreq backend).
+///
+/// Owned `String` is passed because wreq's `ClientBuilder::interface` bound is
+/// `Into<Cow<'static, str>>` — a non-static `&str` does not satisfy it.
+#[cfg(all(
+    feature = "wreq",
+    not(feature = "cache_request"),
+    any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "linux",
+        target_os = "ios",
+        target_os = "macos",
+        target_os = "tvos",
+        target_os = "visionos",
+        target_os = "watchos",
+    )
+))]
+pub fn set_interface_wreq(client: ClientBuilder, network_interface: &str) -> ClientBuilder {
+    client.interface(network_interface.to_string())
+}
+
+/// No-op shim for platforms where wreq's `interface` is unavailable.
+#[cfg(all(
+    feature = "wreq",
+    not(feature = "cache_request"),
+    not(any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "linux",
+        target_os = "ios",
+        target_os = "macos",
+        target_os = "tvos",
+        target_os = "visionos",
+        target_os = "watchos",
+    ))
+))]
+pub fn set_interface_wreq(client: ClientBuilder, _interface: &str) -> ClientBuilder {
+    client
+}
+
 lazy_static! {
     static ref AC_JS_CHALLENGE: aho_corasick::AhoCorasick =  aho_corasick::AhoCorasick::new(JS_SAFE_CHALLENGE_PATTERNS).expect("safe challenges");
     /// The default Semaphore limits.
@@ -2620,6 +2661,12 @@ impl Website {
                     .default_http_read_timeout
                     .unwrap_or(Duration::from_secs(42 * timeout_mult)),
             );
+
+        let client = if let Some(network_interface) = &self.configuration.network_interface {
+            set_interface_wreq(client, network_interface)
+        } else {
+            client
+        };
 
         let client = if let Some(local_address) = &self.configuration.local_address {
             client.local_address(*local_address)
