@@ -1878,6 +1878,29 @@ impl TabCloseGuard {
         self.0 = None;
         // self is dropped here; Drop sees None → no-op.
     }
+
+    /// Swap the protected tab and return the prior one (if any).
+    ///
+    /// Cancel-safe: the guard always holds *some* tab in the steady state, so
+    /// if the outer future is cancelled between the swap and the explicit close
+    /// of the prior tab, both tabs still reach the background closer via Drop:
+    /// the prior tab via the caller still holding it (if it kept the value) and
+    /// the new tab via the guard's own Drop.
+    #[inline]
+    pub fn swap(&mut self, page: chromiumoxide::Page) -> Option<chromiumoxide::Page> {
+        self.0.replace(page)
+    }
+
+    /// Take the protected tab out, leaving the guard disarmed.
+    ///
+    /// Returns the page so the caller can close it explicitly (or hand it
+    /// elsewhere). The guard's Drop becomes a no-op because `self.0` is now
+    /// `None`. Used by retry-loop callers that want to choose whether to close
+    /// the final tab based on a runtime / feature-flag decision.
+    #[inline]
+    pub fn into_inner(mut self) -> Option<chromiumoxide::Page> {
+        self.0.take()
+    }
 }
 
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]

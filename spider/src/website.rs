@@ -98,8 +98,11 @@ macro_rules! chrome_page_fetch {
         .await
         {
             Ok(hedge_tab) => {
-                // Guard closes the tab if this future is cancelled mid-flight.
-                let _tab_guard = crate::features::chrome::TabCloseGuard::new(hedge_tab.clone());
+                // Guard closes the *currently-active* tab if this future is
+                // cancelled mid-flight. `mut` so the retry loop can swap in a
+                // fresh tab (and dispose the prior one) without ever letting
+                // the active tab go unprotected — see `TabCloseGuard::swap`.
+                let mut _tab_guard = crate::features::chrome::TabCloseGuard::new(hedge_tab.clone());
 
                 let (_, intercept_handle) = tokio::join!(
                     crate::features::chrome::setup_chrome_events(&hedge_tab, &$shared.6),
@@ -241,8 +244,17 @@ macro_rules! chrome_page_fetch {
                             lp.clear();
                         }
 
-                        if let Err(_elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                            let (p, succ) = Page::new_streaming(
+                        // Run the retry fetch under a backoff timeout. The
+                        // assignment to `page` happens *outside* the timeout —
+                        // so on `Err` the future is cancelled before `page` is
+                        // touched and `_retry_guard`'s Drop disposes
+                        // `retry_tab` safely. On `Ok` we commit the swap below,
+                        // moving `retry_tab` into the outer `_tab_guard` so
+                        // cancellation safety follows the tab whose clone is
+                        // now on `page.chrome_page`.
+                        match tokio::time::timeout(
+                            BACKOFF_MAX_DURATION,
+                            Page::new_streaming(
                                 $target_url,
                                 &$shared.0,
                                 &retry_tab,
@@ -263,20 +275,23 @@ macro_rules! chrome_page_fetch {
                                 $full_resources,
                                 $skip_links,
                                 false,
-                            )
-                            .await;
-                            page = p;
-                            extract_succeeded = succ;
-                        })
+                            ),
+                        )
                         .await
                         {
-                            log::info!(
-                                "{} chrome retry backoff timeout exceeded {}",
-                                $target_url,
-                                _elapsed
-                            );
-                            page.should_retry = false;
-                            break;
+                            Ok((p, succ)) => {
+                                page = p;
+                                extract_succeeded = succ;
+                            }
+                            Err(_elapsed) => {
+                                log::info!(
+                                    "{} chrome retry backoff timeout exceeded {}",
+                                    $target_url,
+                                    _elapsed
+                                );
+                                page.should_retry = false;
+                                break;
+                            }
                         }
 
                         // Stamp the profile key from the strategy directive.
@@ -284,9 +299,17 @@ macro_rules! chrome_page_fetch {
                             page.profile_key = Some(pk.clone());
                         }
 
-                        // Retry tab no longer needed — close explicitly.
+                        // `page.chrome_page` now holds a clone of `retry_tab`
+                        // (when `chrome_store_page` is enabled). Move `retry_tab`
+                        // into the outer guard so the tab the subscriber owns is
+                        // the one being protected from now on. The prior tab
+                        // (the initial `hedge_tab` or a superseded retry) is no
+                        // longer referenced anywhere — close it now to free
+                        // chrome resources.
                         _retry_guard.defuse();
-                        let _ = retry_tab.close().await;
+                        if let Some(prior) = _tab_guard.swap(retry_tab.clone()) {
+                            let _ = prior.close().await;
+                        }
                     } else {
                         log::warn!(
                             "{} chrome retry tab creation failed, attempt {}",
@@ -306,9 +329,18 @@ macro_rules! chrome_page_fetch {
                     }
                 }
 
-                // Initial tab no longer needed — close explicitly.
-                _tab_guard.defuse();
-                let _ = hedge_tab.close().await;
+                // Final tab disposition. With `chrome_store_page` enabled the
+                // subscriber owns the live tab via `Page::chrome_page` and is
+                // expected to call `Page::close_page()` when done — leave the
+                // guard disarmed so the tab stays open. Without the feature,
+                // close the tab now (legacy behavior). Either way, drop into
+                // the guard via `into_inner()` so cancellation safety is
+                // preserved up to this line.
+                if cfg!(feature = "chrome_store_page") {
+                    _tab_guard.defuse();
+                } else if let Some(active) = _tab_guard.into_inner() {
+                    let _ = active.close().await;
+                }
 
                 Some((page, links, links_pages, extract_succeeded))
             }
@@ -414,9 +446,18 @@ macro_rules! chrome_page_fetch_on {
                     }
                 }
 
-                // Tab no longer needed — close explicitly.
-                _tab_guard.defuse();
-                let _ = hedge_tab.close().await;
+                // Final tab disposition. Mirrors the non-hedge macro: when
+                // `chrome_store_page` is enabled, the subscriber owns the live
+                // tab via `Page::chrome_page` and is expected to call
+                // `Page::close_page()` when done — leave the guard disarmed so
+                // the tab stays open. Without the feature, close it explicitly
+                // (legacy behavior).
+                if cfg!(feature = "chrome_store_page") {
+                    _tab_guard.defuse();
+                } else {
+                    _tab_guard.defuse();
+                    let _ = hedge_tab.close().await;
+                }
 
                 Some((page, links, links_pages, extract_succeeded))
             }
@@ -8344,7 +8385,10 @@ impl Website {
                                                         match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
                                                         Ok(new_page) => {
                                                             // Guard closes the tab if this task is aborted (e.g. budget exceeded).
-                                                            let _tab_guard = crate::features::chrome::TabCloseGuard::new(new_page.clone());
+                                                            // `mut` so the retry loop can swap a fresh tab into the
+                                                            // guard (and dispose the prior one) without ever letting
+                                                            // the active tab go unprotected. See `TabCloseGuard::swap`.
+                                                            let mut _tab_guard = crate::features::chrome::TabCloseGuard::new(new_page.clone());
 
                                                             let (_, intercept_handle) = tokio::join!(
                                                                 crate::features::chrome::setup_chrome_events(&new_page, &shared.6),
@@ -8453,31 +8497,41 @@ impl Website {
                                                                     links.clear();
                                                                     if let Some(ref mut lp) = links_pages { lp.clear(); }
 
-                                                                    if let Err(_elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                                                                        let (p, succ) = Page::new_streaming(
-                                                                            target_url,
-                                                                            &shared.0,
-                                                                            &retry_page,
-                                                                            false,
-                                                                            shared.6.referer.clone(),
-                                                                            shared.6.max_page_bytes,
-                                                                            shared.6.get_cache_options(),
-                                                                            shared.6.cache_namespace_str(),
-                                                                            &shared.6.chrome_fetch_params(),
-                                                                            &shared.1,
-                                                                            &shared.3,
-                                                                            &mut links,
-                                                                            &mut links_pages,
-                                                                            full_resources,
-                                                                            skip_links,
-                                                                            false,
-                                                                        ).await;
-                                                                        page = p;
-                                                                        extract_succeeded = succ;
-                                                                    }).await {
-                                                                        log::info!("{target_url} chrome retry backoff timeout exceeded {_elapsed}");
-                                                                        page.should_retry = false;
-                                                                        break;
+                                                                    // Run the retry fetch under a backoff timeout. The
+                                                                    // assignment to `page` happens *outside* the timeout —
+                                                                    // so on `Err` the future is cancelled before `page` is
+                                                                    // touched and `_retry_guard`'s Drop disposes
+                                                                    // `retry_page` safely. On `Ok` we commit the swap below,
+                                                                    // moving `retry_page` into the outer `_tab_guard` so
+                                                                    // cancellation safety follows the tab whose clone is
+                                                                    // now on `page.chrome_page`.
+                                                                    match tokio::time::timeout(BACKOFF_MAX_DURATION, Page::new_streaming(
+                                                                        target_url,
+                                                                        &shared.0,
+                                                                        &retry_page,
+                                                                        false,
+                                                                        shared.6.referer.clone(),
+                                                                        shared.6.max_page_bytes,
+                                                                        shared.6.get_cache_options(),
+                                                                        shared.6.cache_namespace_str(),
+                                                                        &shared.6.chrome_fetch_params(),
+                                                                        &shared.1,
+                                                                        &shared.3,
+                                                                        &mut links,
+                                                                        &mut links_pages,
+                                                                        full_resources,
+                                                                        skip_links,
+                                                                        false,
+                                                                    )).await {
+                                                                        Ok((p, succ)) => {
+                                                                            page = p;
+                                                                            extract_succeeded = succ;
+                                                                        }
+                                                                        Err(_elapsed) => {
+                                                                            log::info!("{target_url} chrome retry backoff timeout exceeded {_elapsed}");
+                                                                            page.should_retry = false;
+                                                                            break;
+                                                                        }
                                                                     }
 
                                                                     // Stamp profile key from strategy.
@@ -8485,9 +8539,17 @@ impl Website {
                                                                         page.profile_key = Some(pk.clone());
                                                                     }
 
-                                                                    // Retry tab no longer needed.
+                                                                    // `page.chrome_page` now holds a clone of `retry_page`
+                                                                    // (when `chrome_store_page` is enabled). Move it into
+                                                                    // the outer guard so the tab the subscriber owns is
+                                                                    // the one being protected from now on. The prior tab
+                                                                    // (initial `new_page` or a superseded retry) is no
+                                                                    // longer referenced — close it now to free chrome
+                                                                    // resources.
                                                                     _retry_guard.defuse();
-                                                                    let _ = retry_page.close().await;
+                                                                    if let Some(prior) = _tab_guard.swap(retry_page.clone()) {
+                                                                        let _ = prior.close().await;
+                                                                    }
                                                                 } else {
                                                                     log::warn!("{target_url} chrome retry tab creation failed, attempt {attempt}");
                                                                 }
@@ -8501,9 +8563,16 @@ impl Website {
                                                                 }
                                                             }
 
-                                                            // Tab no longer needed — close explicitly.
-                                                            _tab_guard.defuse();
-                                                            let _ = new_page.close().await;
+                                                            // Final tab disposition. With `chrome_store_page` enabled the
+                                                            // subscriber owns the live tab via `Page::chrome_page` and is
+                                                            // expected to call `Page::close_page()` when done — leave the
+                                                            // guard disarmed so the tab stays open. Without the feature,
+                                                            // close the tab now (legacy behavior).
+                                                            if cfg!(feature = "chrome_store_page") {
+                                                                _tab_guard.defuse();
+                                                            } else if let Some(active) = _tab_guard.into_inner() {
+                                                                let _ = active.close().await;
+                                                            }
 
                                                             // ── Parallel backends: binary content-type early-out (Chrome non-hedge) ──
                                                             #[cfg(feature = "parallel_backends")]
@@ -9514,7 +9583,10 @@ impl Website {
                                                         let target_url = target_url_string.as_str();
                                                         match attempt_navigation("about:blank", &shared.5, &shared.6.request_timeout, &shared.8, &shared.6.viewport).await {
                                                             Ok(new_page) => {
-                                                                let _tab_guard = crate::features::chrome::TabCloseGuard::new(new_page.clone());
+                                                                // `mut` so the retry loop can swap a fresh tab into the
+                                                                // guard (and dispose the prior one). See
+                                                                // `TabCloseGuard::swap`.
+                                                                let mut _tab_guard = crate::features::chrome::TabCloseGuard::new(new_page.clone());
 
                                                                 let (_, intercept_handle) = tokio::join!(
                                                                     crate::features::chrome::setup_chrome_events(&new_page, &shared.6),
@@ -9615,31 +9687,35 @@ impl Website {
                                                                         links.clear();
                                                                         if let Some(ref mut lp) = links_pages { lp.clear(); }
 
-                                                                        if let Err(_elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                                                                            let (p, succ) = Page::new_streaming(
-                                                                                target_url,
-                                                                                &shared.0,
-                                                                                &retry_page,
-                                                                                false,
-                                                                                shared.6.referer.clone(),
-                                                                                shared.6.max_page_bytes,
-                                                                                shared.6.get_cache_options(),
-                                                                                shared.6.cache_namespace_str(),
-                                                                                &shared.6.chrome_fetch_params(),
-                                                                                &shared.1,
-                                                                                &shared.3,
-                                                                                &mut links,
-                                                                                &mut links_pages,
-                                                                                full_resources,
-                                                                                skip_links,
-                                                                                false,
-                                                                            ).await;
-                                                                            page = p;
-                                                                            extract_succeeded = succ;
-                                                                        }).await {
-                                                                            log::info!("{target_url} chrome retry backoff timeout exceeded {_elapsed}");
-                                                                            page.should_retry = false;
-                                                                            break;
+                                                                        // Run the retry fetch under a backoff timeout — see
+                                                                        // matching block above for the rationale.
+                                                                        match tokio::time::timeout(BACKOFF_MAX_DURATION, Page::new_streaming(
+                                                                            target_url,
+                                                                            &shared.0,
+                                                                            &retry_page,
+                                                                            false,
+                                                                            shared.6.referer.clone(),
+                                                                            shared.6.max_page_bytes,
+                                                                            shared.6.get_cache_options(),
+                                                                            shared.6.cache_namespace_str(),
+                                                                            &shared.6.chrome_fetch_params(),
+                                                                            &shared.1,
+                                                                            &shared.3,
+                                                                            &mut links,
+                                                                            &mut links_pages,
+                                                                            full_resources,
+                                                                            skip_links,
+                                                                            false,
+                                                                        )).await {
+                                                                            Ok((p, succ)) => {
+                                                                                page = p;
+                                                                                extract_succeeded = succ;
+                                                                            }
+                                                                            Err(_elapsed) => {
+                                                                                log::info!("{target_url} chrome retry backoff timeout exceeded {_elapsed}");
+                                                                                page.should_retry = false;
+                                                                                break;
+                                                                            }
                                                                         }
 
                                                                         // Stamp profile key from strategy.
@@ -9647,8 +9723,14 @@ impl Website {
                                                                             page.profile_key = Some(pk.clone());
                                                                         }
 
+                                                                        // Move retry_page into the outer guard — the
+                                                                        // subscriber-visible `page.chrome_page` now holds
+                                                                        // its clone, so it must be the one being
+                                                                        // protected. Close the prior tab.
                                                                         _retry_guard.defuse();
-                                                                        let _ = retry_page.close().await;
+                                                                        if let Some(prior) = _tab_guard.swap(retry_page.clone()) {
+                                                                            let _ = prior.close().await;
+                                                                        }
                                                                     } else {
                                                                         log::warn!("{target_url} chrome retry tab creation failed, attempt {attempt}");
                                                                     }
@@ -9662,8 +9744,12 @@ impl Website {
                                                                     }
                                                                 }
 
-                                                                _tab_guard.defuse();
-                                                                let _ = new_page.close().await;
+                                                                // Final tab disposition — see matching block above.
+                                                                if cfg!(feature = "chrome_store_page") {
+                                                                    _tab_guard.defuse();
+                                                                } else if let Some(active) = _tab_guard.into_inner() {
+                                                                    let _ = active.close().await;
+                                                                }
 
                                                                 chrome_page_post_process!(page, links, links_pages, extract_succeeded, shared, add_external, full_resources, return_page_links, on_should_crawl_callback, permit)
                                                             }
@@ -11210,8 +11296,18 @@ impl Website {
                                                                     }
                                                                 }
 
-                                                                _tab_guard.defuse();
-                                                                let _ = new_page.close().await;
+                                                                // Final tab disposition. With `chrome_store_page`
+                                                                // enabled the subscriber owns the live tab via
+                                                                // `Page::chrome_page` and is expected to call
+                                                                // `Page::close_page()` when done — leave the guard
+                                                                // disarmed so the tab stays open. Without the
+                                                                // feature, close it explicitly (legacy behavior).
+                                                                if cfg!(feature = "chrome_store_page") {
+                                                                    _tab_guard.defuse();
+                                                                } else {
+                                                                    _tab_guard.defuse();
+                                                                    let _ = new_page.close().await;
+                                                                }
 
                                                                 if page.page_links.is_none() {
                                                                     let links: HashSet<
@@ -11358,8 +11454,16 @@ impl Website {
                                                             }
                                                         }
 
-                                                        _tab_guard.defuse();
-                                                        let _ = new_page.close().await;
+                                                        // Final tab disposition. With `chrome_store_page` the
+                                                        // subscriber owns the live tab via `Page::chrome_page` and
+                                                        // is expected to call `Page::close_page()`. Otherwise close
+                                                        // the tab explicitly (legacy behavior).
+                                                        if cfg!(feature = "chrome_store_page") {
+                                                            _tab_guard.defuse();
+                                                        } else {
+                                                            _tab_guard.defuse();
+                                                            let _ = new_page.close().await;
+                                                        }
 
                                                         if page.page_links.is_none() {
                                                             let links: HashSet<CaseInsensitiveString> =
