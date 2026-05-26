@@ -392,6 +392,13 @@ pub mod client;
 pub mod configuration;
 /// Optional features to use.
 pub mod features;
+/// Optional remote-fetch hook — replaces spider's built-in per-URL
+/// network round-trip with a user-supplied transport while leaving
+/// every other crawl concern (tracking, scheduling, link extraction,
+/// subscription channels) in spider's hands. Opt-in via
+/// [`Website::with_remote_fetcher`](crate::website::Website::with_remote_fetcher);
+/// default behavior unchanged when unset.
+pub mod fetcher;
 /// Internal packages customized.
 pub mod packages;
 /// A page scraped.

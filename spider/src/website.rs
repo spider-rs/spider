@@ -1123,6 +1123,21 @@ pub struct Website {
     /// Custom retry strategy that controls retry behavior per attempt.
     /// When set, this takes precedence over the simple `Configuration::retry` counter.
     pub retry_strategy: Option<crate::retry_strategy::SharedRetryStrategy>,
+    /// Optional user-supplied transport that replaces spider's built-in
+    /// per-URL fetch. When set, every URL that passes the
+    /// [`is_allowed`](Self::is_allowed) gate is fetched through this
+    /// hook instead of spider's reqwest client. All other crawl
+    /// machinery (tracking, depth, allow/deny, robots, link extraction,
+    /// subscription channels) keeps running unchanged.
+    ///
+    /// Today the hook fires in the HTTP crawl path only
+    /// ([`crawl`](Self::crawl) / [`crawl_raw`](Self::crawl_raw));
+    /// chrome / webdriver / smart variants continue to drive their own
+    /// browser-backed fetches.
+    ///
+    /// Default `None` means today's behavior verbatim — every existing
+    /// fetch site still runs spider's reqwest path.
+    pub remote_fetcher: Option<crate::fetcher::SharedRemoteFetcher>,
     /// Optional per-request proxy routing strategy.
     ///
     /// When set together with [`crate::configuration::Configuration::proxies_by_kind`],
@@ -7134,9 +7149,181 @@ impl Website {
         }
     }
 
+    /// BFS using `remote_fetcher` for the per-URL fetch, spider for
+    /// everything else.
+    ///
+    /// Concurrency-bounded by [`setup_semaphore`](Self::setup_semaphore)
+    /// — same primitive as `crawl_concurrent_raw` uses. Skips spider's
+    /// internal retry / cache / hedge / parallel-backends machinery on
+    /// the assumption that the user's fetcher implementation handles
+    /// those concerns on its own side (which is the typical case —
+    /// gottem's orchestrator, for example, brings its own retry ladder
+    /// across cloud vendors).
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    async fn crawl_concurrent_remote(&mut self, handle: &Option<Arc<AtomicI8>>) {
+        use crate::fetcher::FetchContext;
+
+        let fetcher = match self.remote_fetcher.clone() {
+            Some(f) => f,
+            None => return,
+        };
+
+        self.start();
+        self.status = CrawlStatus::Active;
+
+        // Setup phase: selectors + initial frontier seed. Spider owns
+        // robots / allow-deny compilation; we just reuse the helpers.
+        let selectors = self.setup_selectors();
+        let base: Option<Box<Url>> = self.domain_parsed.as_deref().cloned().map(Box::new);
+        let return_page_links = self.configuration.return_page_links;
+        let only_html = self.configuration.only_html && !self.configuration.full_resources;
+        let _ = only_html; // surfaced via configuration to user fetchers
+
+        // Seed link — same primitive `crawl_concurrent_raw` uses.
+        let seed_ci = CaseInsensitiveString::from(self.url.inner().as_str());
+        let mut frontier: HashSet<CaseInsensitiveString> = HashSet::new();
+        // Drain any pre-seeded extra_links first; insert seed if it
+        // wasn't already covered.
+        for l in self.drain_extra_links() {
+            frontier.insert(l);
+        }
+        if !frontier.contains(&seed_ci) {
+            frontier.insert(seed_ci);
+        }
+
+        let semaphore = self.setup_semaphore();
+        let channel = self.channel.clone();
+        let channel_guard = self.channel_guard.clone();
+        let on_link_find_callback = self.on_link_find_callback.clone();
+        // `Arc` clone of the configuration so worker tasks borrow it
+        // immutably; spider's allow-deny / robots checks still drive
+        // through `self` on the dispatcher side.
+        let cfg_arc: Arc<crate::configuration::Configuration> =
+            Arc::new((*self.configuration).clone());
+
+        // Drain mid-crawl queued links each iteration (parity with
+        // `crawl_concurrent_raw`'s queue handling).
+        let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
+        let mut exceeded_budget = false;
+
+        'outer: loop {
+            self.dequeue(&mut q, &mut frontier, &mut exceeded_budget)
+                .await;
+            if exceeded_budget || frontier.is_empty() {
+                break;
+            }
+
+            let mut set: tokio::task::JoinSet<HashSet<CaseInsensitiveString>> =
+                tokio::task::JoinSet::new();
+            let current: Vec<CaseInsensitiveString> = frontier.drain().collect();
+
+            for link in current {
+                let allowed = self.is_allowed(&link);
+                if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                    exceeded_budget = true;
+                    break;
+                }
+                if allowed.eq(&ProcessLinkStatus::Blocked) || !self.is_allowed_disk(&link).await {
+                    continue;
+                }
+                self.insert_link(&link).await;
+
+                // Honor `on_link_find` callback (URL rewrite hook).
+                let (link, _) = match &on_link_find_callback {
+                    Some(cb) => cb(link, None),
+                    None => (link, None),
+                };
+
+                if !self
+                    .handle_process(
+                        handle,
+                        &mut tokio::time::interval(std::time::Duration::from_millis(1)),
+                        async {},
+                    )
+                    .await
+                {
+                    break 'outer;
+                }
+
+                let permit = match semaphore.clone().acquire_owned().await {
+                    Ok(p) => p,
+                    Err(_) => break 'outer,
+                };
+
+                let fetcher = fetcher.clone();
+                let channel = channel.clone();
+                let channel_guard = channel_guard.clone();
+                let selectors_clone = selectors.clone();
+                let base_clone = base.clone();
+                let cfg = cfg_arc.clone();
+
+                set.spawn(async move {
+                    let _permit = permit;
+                    let target_url = link.inner().to_string();
+                    let resp = fetcher
+                        .fetch(FetchContext {
+                            url: &target_url,
+                            configuration: &cfg,
+                        })
+                        .await;
+                    // Build a synthetic Page from the fetcher's bytes.
+                    // No second network round-trip — `page::build` is
+                    // pure.
+                    let mut page = crate::page::build(&target_url, resp);
+
+                    // Link extraction — same primitives the standard
+                    // crawl loop uses. `links` is async (HTML parse
+                    // via lol_html); page owns its bytes. The
+                    // `on_should_crawl` callback is intentionally not
+                    // honored on this path (today) — users requesting
+                    // remote fetch are typically performing their own
+                    // post-fetch filtering on the consumer side.
+                    let extracted = page.links(&selectors_clone, &base_clone).await;
+                    if return_page_links {
+                        page.page_links = Some(Box::new(extracted.clone()));
+                    }
+                    channel_send_page(&channel, page, &channel_guard).await;
+                    extracted
+                });
+            }
+
+            while let Some(joined) = set.join_next().await {
+                if let Ok(new_links) = joined {
+                    for link in new_links {
+                        // Skip immediate-allow check here; the next
+                        // outer-loop iteration will re-gate via
+                        // `is_allowed` which is the source of truth
+                        // for visited / depth / allow / deny / budget.
+                        frontier.insert(link);
+                    }
+                }
+            }
+
+            if exceeded_budget {
+                break;
+            }
+        }
+
+        self.subscription_guard().await;
+        self.status = CrawlStatus::Idle;
+        let _ = selectors;
+    }
+
     /// Start to crawl website concurrently - used mainly for chrome instances to connect to default raw HTTP.
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     async fn crawl_concurrent_raw(&mut self, client: &Client, handle: &Option<Arc<AtomicI8>>) {
+        // When a `RemoteFetcher` is installed, every per-URL fetch is
+        // delegated to it instead of running spider's built-in
+        // reqwest/cache/hedge/parallel-backends machinery. Spider
+        // continues to own visited tracking, depth, allow/deny, robots,
+        // link extraction, and the subscription channel — only the
+        // network round-trip moves outside. This branch is a no-op when
+        // `remote_fetcher` is `None` (the default), so today's behavior
+        // is unchanged for every existing caller.
+        if self.remote_fetcher.is_some() {
+            self.crawl_concurrent_remote(handle).await;
+            return;
+        }
         self.start();
 
         // Cache-only phase first
@@ -12476,6 +12663,37 @@ impl Website {
         strategy: crate::retry_strategy::SharedRetryStrategy,
     ) -> &mut Self {
         self.retry_strategy = Some(strategy);
+        self
+    }
+
+    /// Install a user-supplied transport that replaces spider's built-in
+    /// per-URL fetch in HTTP crawl mode.
+    ///
+    /// See [`crate::fetcher::RemoteFetcher`] for the full contract. The
+    /// fetcher is invoked on every URL that passes the
+    /// [`is_allowed`](Self::is_allowed) gate — spider continues to drive
+    /// visited tracking, depth, allow/deny, robots, link extraction, and
+    /// the subscription channel; only the network round-trip is
+    /// delegated.
+    ///
+    /// Calling without `with_remote_fetcher` leaves the field as `None`
+    /// — every existing fetch site keeps its current behavior verbatim
+    /// (the addition is opt-in and zero-cost when unused).
+    pub fn with_remote_fetcher<F: crate::fetcher::RemoteFetcher>(
+        &mut self,
+        fetcher: F,
+    ) -> &mut Self {
+        self.remote_fetcher = Some(std::sync::Arc::new(fetcher));
+        self
+    }
+
+    /// Install a pre-`Arc`d fetcher — handy when sharing one
+    /// implementation across multiple `Website` instances.
+    pub fn with_shared_remote_fetcher(
+        &mut self,
+        fetcher: crate::fetcher::SharedRemoteFetcher,
+    ) -> &mut Self {
+        self.remote_fetcher = Some(fetcher);
         self
     }
 
