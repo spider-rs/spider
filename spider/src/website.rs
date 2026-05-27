@@ -1258,6 +1258,18 @@ pub struct Website {
     /// `std::fs::remove_dir_all` call.
     #[cfg(feature = "balance")]
     spool_dir: std::sync::OnceLock<Arc<crate::utils::html_spool::WebsiteSpoolDir>>,
+    /// Optional externally-owned semaphore that gates worker concurrency
+    /// for this crawl. When set, [`Website::setup_semaphore`] returns
+    /// this `Arc` instead of building a fresh `Semaphore` from
+    /// `configuration.concurrency_limit` / `DEFAULT_PERMITS` — letting
+    /// an admission controller (typically wrapping a
+    /// [`crate::utils::adaptive_concurrency::AdaptiveSemaphore`]) resize
+    /// the crawler's effective concurrency mid-flight without rebuilding
+    /// the `Website`. Runtime-only handle: not serialized, not
+    /// configuration state. Defaults to `None`, preserving the static
+    /// `setup_semaphore` path byte-for-byte for callers that don't opt
+    /// in.
+    adaptive_concurrency_semaphore: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 impl fmt::Debug for Website {
@@ -6164,7 +6176,20 @@ impl Website {
     }
 
     /// Setup the Semaphore for the crawl.
+    ///
+    /// Resolution order:
+    /// 1. An externally-owned adaptive semaphore set via
+    ///    [`Self::with_concurrency_semaphore`] /
+    ///    [`Self::with_adaptive_concurrency`]. Lets an admission
+    ///    controller resize concurrency mid-crawl through
+    ///    [`crate::utils::adaptive_concurrency::AdaptiveSemaphore`].
+    /// 2. The shared global semaphore when `shared_queue` is on.
+    /// 3. A fresh `Semaphore` sized to `configuration.concurrency_limit`
+    ///    (or `DEFAULT_PERMITS`). Byte-for-byte the pre-adaptive path.
     pub fn setup_semaphore(&self) -> Arc<Semaphore> {
+        if let Some(sem) = self.adaptive_concurrency_semaphore.as_ref() {
+            return Arc::clone(sem);
+        }
         if self.configuration.shared_queue {
             SEM_SHARED.clone()
         } else {
@@ -12495,9 +12520,80 @@ impl Website {
         self
     }
 
-    /// Set the concurrency limits. If you set the value to None to use the default limits using the system CPU cors * n.
+    /// Set the static concurrency limit. `None` falls back to
+    /// `DEFAULT_PERMITS` (system CPU cores × n). Mutually exclusive with
+    /// the adaptive path: if you also call
+    /// [`Self::with_adaptive_concurrency`] /
+    /// [`Self::with_concurrency_semaphore`] the adaptive handle wins at
+    /// crawl time, and this static value is ignored. Calling only this
+    /// method preserves the pre-adaptive behavior byte-for-byte.
     pub fn with_concurrency_limit(&mut self, limit: Option<usize>) -> &mut Self {
         self.configuration.with_concurrency_limit(limit);
+        self
+    }
+
+    /// Plumb an externally-owned `Semaphore` into the crawler. When set,
+    /// [`Self::setup_semaphore`] returns this handle instead of building
+    /// one from `configuration.concurrency_limit` — so an admission
+    /// controller holding a clone of the same `Arc<Semaphore>` can
+    /// resize the crawler's effective concurrency mid-flight by calling
+    /// `add_permits` / `forget_permits` on it.
+    ///
+    /// Resolution rules (one or the other; never both):
+    ///
+    /// - `Some(sem)` here → crawl gates on this `sem`. The static
+    ///   `concurrency_limit` is *ignored*, even if set, because a
+    ///   live-tuned permit pool would be inconsistent with a fixed
+    ///   cap. Mixing the two is therefore not "merged" — the adaptive
+    ///   handle always wins, by design.
+    /// - `None` here (default) → fall back to the static path:
+    ///   `concurrency_limit` if set, else `DEFAULT_PERMITS`. Identical
+    ///   behavior to crates that don't know this API exists.
+    ///
+    /// For most callers, [`Self::with_adaptive_concurrency`] is the
+    /// higher-level helper — it accepts an
+    /// [`crate::utils::adaptive_concurrency::AdaptiveSemaphore`] and
+    /// wires the semaphore in for you.
+    pub fn with_concurrency_semaphore(
+        &mut self,
+        semaphore: Option<Arc<tokio::sync::Semaphore>>,
+    ) -> &mut Self {
+        self.adaptive_concurrency_semaphore = semaphore;
+        self
+    }
+
+    /// Convenience wrapper around [`Self::with_concurrency_semaphore`]
+    /// that takes an [`crate::utils::adaptive_concurrency::AdaptiveSemaphore`]
+    /// handle directly. The crawler will gate worker concurrency
+    /// through `handle.semaphore()`; the caller can resize via
+    /// `handle.set_target(n)` from any task, any time, without
+    /// rebuilding the `Website`.
+    ///
+    /// Mutually exclusive with [`Self::with_concurrency_limit`] in the
+    /// same sense — the adaptive handle takes precedence at crawl time
+    /// and the static cap is ignored when this is set. Calling this on
+    /// a `Website` that never used the static API is a strict
+    /// superset, not a behavior change for anyone else.
+    ///
+    /// Requires the `adaptive_concurrency` feature (on by default via
+    /// `__basic`). Without it the higher-level helper isn't built; use
+    /// the unconditional [`Self::with_concurrency_semaphore`] with a
+    /// raw `Arc<tokio::sync::Semaphore>` instead.
+    #[cfg(feature = "adaptive_concurrency")]
+    pub fn with_adaptive_concurrency(
+        &mut self,
+        handle: &crate::utils::adaptive_concurrency::AdaptiveSemaphore,
+    ) -> &mut Self {
+        self.adaptive_concurrency_semaphore = Some(handle.semaphore());
+        self
+    }
+
+    /// `adaptive_concurrency`-disabled stub. Keeps the symbol present so
+    /// downstream callers compile on all feature combos; collapses to a
+    /// no-op when the feature isn't available. Pass the same arguments
+    /// as the enabled version — `handle` is intentionally ignored here.
+    #[cfg(not(feature = "adaptive_concurrency"))]
+    pub fn with_adaptive_concurrency<T>(&mut self, _handle: &T) -> &mut Self {
         self
     }
 
