@@ -131,6 +131,22 @@ pub enum ActionType {
     Extract,
     /// Only continue if prior step was valid (chain control).
     ValidateChain,
+    /// Run a Python script in the embedded pure-Rust interpreter (rustpython-vm).
+    RunPython {
+        /// Python source code.
+        code: String,
+        /// Optional per-call timeout in milliseconds (falls back to engine default).
+        timeout_ms: Option<u64>,
+    },
+    /// Run a JavaScript script in the embedded pure-Rust interpreter (boa_engine).
+    ///
+    /// Distinct from `Script`/`Evaluate` which runs JS in the page's real browser context.
+    RunJavaScript {
+        /// JavaScript source code.
+        code: String,
+        /// Optional per-call timeout in milliseconds (falls back to engine default).
+        timeout_ms: Option<u64>,
+    },
     /// Custom action.
     Custom(String),
 }
@@ -196,6 +212,18 @@ impl std::fmt::Display for ActionType {
             Self::Refresh => write!(f, "refresh"),
             Self::Extract => write!(f, "extract"),
             Self::ValidateChain => write!(f, "validate_chain"),
+            Self::RunPython { code, timeout_ms } => write!(
+                f,
+                "run_python:{}b:{:?}ms",
+                code.len(),
+                timeout_ms.unwrap_or(0)
+            ),
+            Self::RunJavaScript { code, timeout_ms } => write!(
+                f,
+                "run_javascript:{}b:{:?}ms",
+                code.len(),
+                timeout_ms.unwrap_or(0)
+            ),
             Self::Custom(name) => write!(f, "custom:{}", name),
         }
     }

@@ -21,6 +21,7 @@ A concurrent-safe multimodal agent for web automation and research.
 - **Self-Healing Selectors**: Auto-repair failed selectors with LLM diagnosis
 - **Schema Generation**: Auto-generate JSON schemas from example outputs
 - **Concurrent Chains**: Execute independent actions in parallel with dependency graphs
+- **Embedded Scripting**: LLM-callable pure-Rust Python (`rustpython-vm`) and JavaScript (`boa_engine`) interpreters via the `scripting` feature — dedicated thread pool off tokio's blocking pool, no mutexes, no deadlocks, sandboxed filesystem and opt-in HTTP
 
 ## Installation
 
@@ -114,12 +115,71 @@ println!("Summary: {}", research.summary.unwrap());
 |---------|-------------|
 | `openai` | OpenAI/OpenAI-compatible LLM provider |
 | `chrome` | Browser automation via chromiumoxide |
+| `webdriver` | Browser automation via thirtyfour |
 | `search` | Base search functionality |
 | `search_serper` | Serper.dev search provider |
 | `search_brave` | Brave Search provider |
 | `search_bing` | Bing Search provider |
 | `search_tavily` | Tavily AI Search provider |
+| `fs` | Tempfile-backed disk storage helpers |
+| `skills` | Dynamic skill loading for web challenge solving |
+| `memvid` | Long-term experience memory via semantic search |
+| `scripting` | Embedded pure-Rust Python + JavaScript interpreters for LLM-callable `RunPython` / `RunJavaScript` actions |
 | `full` | All features |
+
+### Scripting
+
+With `features = ["scripting"]`, the agent embeds pure-Rust [`rustpython-vm`] (with the frozen pure-Python stdlib — `json`, `re`, `urllib.parse`, etc.) and [`boa_engine`] JavaScript interpreters and exposes them as two LLM-callable actions: `RunPython` and `RunJavaScript`.
+
+**Design constraints honored:**
+
+- **No `spawn_blocking`** — workers run on dedicated `std::thread`s, fully isolated from tokio's blocking pool (no contention with reqwest / file I/O / DB drivers).
+- **No mutexes in our code** — `OutputBuffer` uses a thread-local `RefCell<Vec<u8>>`; JS per-call state lives in a thread-local; channels are lock-free (`flume` MPMC + `tokio::oneshot`).
+- **No deadlocks** — async caller only awaits lock-free primitives (semaphore acquire, flume `send_async`, oneshot, timeout); worker `Handle::block_on` parks an OS thread on a futex without consuming a runtime worker.
+- **No panics escape** — every script invocation is wrapped in `catch_unwind`; a bad script cannot tear down a worker thread. All `unwrap`/`expect` removed from the worker path.
+- **Sandboxed filesystem** — `cap-std::fs::Dir` rooted at a per-call tmpdir; path escapes (`..`, absolute paths, symlinks) are structurally impossible.
+
+**Scripts get an `agent` object:**
+
+- `agent.url`, `agent.title`, `agent.html`, `agent.memory`, `agent.tmpdir` — read-only context
+- `agent.log(...)`, `print(...)`, `console.log(...)` — captured to `stdout`
+- `agent.fetch(url, opts?)` — reuses the shared reqwest client (gated by `allow_network`)
+- `agent.read_file(rel)` / `agent.write_file(rel, content)` — sandboxed I/O
+- `agent.check_interrupted()` — cooperative cancel poll (timeouts flip an `AtomicBool` the script polls)
+
+```rust,ignore
+use spider_agent::scripting::{ScriptConfig, ScriptContext, ScriptEngine};
+use std::time::Duration;
+
+let engine = ScriptEngine::new(ScriptConfig {
+    enabled: true,
+    allow_network: true,
+    default_timeout: Duration::from_secs(5),
+    ..ScriptConfig::default()
+});
+
+let result = engine.run_python(
+    r#"
+import json, re
+nums = [int(n) for n in re.findall(r"\d+", agent.html)]
+print(json.dumps({"url": agent.url, "found": nums}))
+"#.to_string(),
+    ScriptContext {
+        url: Some("https://shop.example.com".into()),
+        html: Some("<p>price 1999, stock 42</p>".into()),
+        ..ScriptContext::default()
+    },
+    None,
+).await;
+println!("{}", result.stdout);
+```
+
+When attached via `RemoteMultimodalEngine::with_script_engine(...)`, the LLM can emit `{"RunPython": {"code": "..."}}` or `{"RunJavaScript": {"code": "..."}}` actions and the chrome dispatcher routes them through the worker pool, surfacing stdout to the next round.
+
+Run the end-to-end demo: `cargo run --example scripting --features scripting`.
+
+[`rustpython-vm`]: https://crates.io/crates/rustpython-vm
+[`boa_engine`]: https://crates.io/crates/boa_engine
 
 ## Examples
 
@@ -135,6 +195,9 @@ OPENAI_API_KEY=xxx SERPER_API_KEY=xxx cargo run --example research --features "o
 
 # Concurrent execution
 OPENAI_API_KEY=xxx SERPER_API_KEY=xxx cargo run --example concurrent --features "openai search_serper"
+
+# Embedded scripting (Python + JS, no API key required)
+cargo run --example scripting --features scripting
 ```
 
 ## Verification

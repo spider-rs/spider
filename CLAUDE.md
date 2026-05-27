@@ -288,6 +288,16 @@ There is also `with_wait_for_idle_network0` (waits for zero outstanding requests
 
 `openai`, `gemini`, `agent`, `agent_chrome`, `agent_skills`, `agent_full`
 
+### Scripting (spider_agent only)
+
+The `scripting` feature on `spider_agent` enables embedded **pure-Rust** Python (`rustpython-vm` + frozen pylib) and JavaScript (`boa_engine`) interpreters that back two LLM-callable actions: `RunPython` and `RunJavaScript`.
+
+- Workers run on dedicated `std::thread`s (NOT tokio's blocking pool), bridged by `flume::bounded` + `tokio::oneshot`. Zero mutexes in our code, zero deadlocks, zero panics escape the worker pool (`catch_unwind`-guarded).
+- Sandbox: `cap-std::fs::Dir` rooted at a per-call tmpdir; path escapes are structurally impossible. `agent.fetch(...)` (opt-in) reuses the shared reqwest client.
+- `RemoteMultimodalEngine::with_script_engine(Some(ScriptEngine::new(...)))` plugs it into the chrome action dispatcher.
+
+Example: `cargo run --example scripting --features scripting` (in `spider_agent/`). Details in `spider_agent/src/scripting/{mod,python,js,sandbox}.rs`.
+
 ### Advanced
 
 `rate_limit`, `adaptive_concurrency`, `request_coalesce`, `auto_throttle`, `priority_frontier`, `hedge`, `parallel_backends`, `firewall`, `cron`, `sitemap`, `webdriver`, `decentralized`, `disk`

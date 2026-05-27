@@ -1,6 +1,6 @@
 [package]
 name = "spider_agent"
-version = "2.51.198"
+version = "2.51.200"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A concurrent-safe multimodal agent for web automation and research."
 repository = "https://github.com/spider-rs/spider"
@@ -28,8 +28,8 @@ parking_lot = "0.12"
 base64 = "0.22"
 
 # Extracted types and HTML processing
-spider_agent_types = { version = "2.51.198", path = "../spider_agent_types" }
-spider_agent_html = { version = "2.51.198", path = "../spider_agent_html" }
+spider_agent_types = { version = "2.51.200", path = "../spider_agent_types" }
+spider_agent_html = { version = "2.51.200", path = "../spider_agent_html" }
 
 # HTML processing (still needed for engine internals)
 lol_html = "2"
@@ -72,6 +72,16 @@ spider_skills = { version = "0.1.7", optional = true, default-features = false, 
 aws-sdk-s3 = { version = "1", optional = true, default-features = false, features = ["default-https-client", "rt-tokio", "sigv4a"] }
 aws-config = { version = "1", optional = true, default-features = false, features = ["default-https-client", "rt-tokio", "credentials-process"] }
 
+# Scripting (pure-Rust embedded interpreters)
+# Worker pool runs on dedicated std::thread, channel-bridged to async caller.
+# No spawn_blocking, no shared HTTP stack — workers use Handle::block_on for the existing reqwest client.
+rustpython-vm = { version = "0.4", optional = true, default-features = false, features = ["freeze-stdlib", "compiler", "importlib"] }
+rustpython-pylib = { version = "0.4", optional = true, default-features = false, features = ["freeze-stdlib"] }
+boa_engine = { version = "0.20", optional = true }
+boa_runtime = { version = "0.20", optional = true }
+flume = { version = "0.11", optional = true, default-features = false, features = ["async"] }
+cap-std = { version = "3", optional = true }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 env_logger = "0.11"
@@ -92,7 +102,7 @@ chrome = ["dep:chromey", "dep:futures"]
 webdriver = ["dep:thirtyfour"]
 
 # Temp filesystem support
-fs = ["dep:tempfile"]
+fs = ["dep:tempfile", "tokio/fs"]
 
 # Skills - dynamic skill loading for web challenge solving
 skills = ["dep:spider_skills"]
@@ -103,6 +113,19 @@ memvid = ["dep:memvid-rs"]
 # S3 skill loading
 skills_s3 = ["skills", "dep:aws-sdk-s3", "dep:aws-config"]
 
+# Scripting - pure-Rust embedded Python (rustpython-vm) + JS (boa_engine) interpreters.
+# Workers run on dedicated std::thread, async caller bridges via flume + tokio::oneshot.
+# `fs` is pulled in for per-call tmpdir creation; cap-std sandboxes filesystem access.
+scripting = [
+    "fs",
+    "dep:rustpython-vm",
+    "dep:rustpython-pylib",
+    "dep:boa_engine",
+    "dep:boa_runtime",
+    "dep:flume",
+    "dep:cap-std",
+]
+
 # Search providers
 search = []
 search_serper = ["search"]
@@ -111,7 +134,7 @@ search_bing = ["search"]
 search_tavily = ["search"]
 
 # Full feature set
-full = ["openai", "chrome", "webdriver", "fs", "skills", "memvid", "search_serper", "search_brave", "search_bing", "search_tavily", "skills_s3"]
+full = ["openai", "chrome", "webdriver", "fs", "skills", "memvid", "scripting", "search_serper", "search_brave", "search_bing", "search_tavily", "skills_s3"]
 
 [[example]]
 name = "basic_search"
@@ -136,3 +159,7 @@ required-features = ["openai", "search_serper"]
 [[example]]
 name = "open_page_concurrent"
 required-features = ["chrome"]
+
+[[example]]
+name = "scripting"
+required-features = ["scripting"]

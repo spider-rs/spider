@@ -80,6 +80,8 @@ pub(crate) struct ActionOutcome {
     pub success: bool,
     /// Human-readable detail when the action failed (e.g. "selector not found").
     pub error: Option<String>,
+    /// Optional success-side output to surface back to the LLM (e.g. script stdout).
+    pub output: Option<String>,
 }
 
 #[cfg(feature = "chrome")]
@@ -90,6 +92,7 @@ impl ActionOutcome {
             action: action.into(),
             success: true,
             error: None,
+            output: None,
         }
     }
 
@@ -99,13 +102,28 @@ impl ActionOutcome {
             action: action.into(),
             success: false,
             error: Some(reason.into()),
+            output: None,
         }
+    }
+
+    /// Attach a success-side output payload (e.g. captured stdout from a script).
+    #[cfg(feature = "scripting")]
+    pub fn with_output(mut self, output: impl Into<String>) -> Self {
+        self.output = Some(output.into());
+        self
     }
 
     /// Format as a compact single-line summary for prompt injection.
     pub fn to_feedback_line(&self) -> String {
         if self.success {
-            format!("- {} → ok", self.action)
+            match self.output.as_deref() {
+                Some(out) if !out.is_empty() => {
+                    let one_line = out.replace('\n', " ⏎ ");
+                    let trimmed = truncate_utf8_tail(&one_line, 240);
+                    format!("- {} → ok: {}", self.action, trimmed)
+                }
+                _ => format!("- {} → ok", self.action),
+            }
         } else {
             format!(
                 "- {} → FAILED: {}",
@@ -4571,6 +4589,10 @@ return await s.prompt(msg);
                 ActionOutcome::ok("ValidateChain")
             }
 
+            // === Embedded scripting (pure-Rust Python + JS) ===
+            #[cfg(feature = "scripting")]
+            "RunPython" | "RunJavaScript" => run_embedded_script(self, page, action, value).await,
+
             _ => {
                 log::debug!("Unknown action: {}", action);
                 ActionOutcome::fail(action, "unknown action")
@@ -5758,6 +5780,82 @@ pub async fn run_spawn_pages_with_factory<E: std::fmt::Display + Send + 'static>
     results
 }
 
+// =====================================================================================
+// Embedded scripting dispatcher (pure-Rust Python + JS via spider_agent::scripting)
+// =====================================================================================
+
+/// Route a `RunPython`/`RunJavaScript` action through the embedded scripting engine.
+///
+/// JSON payload accepted by either action:
+///   `{"code": "<source>"}`                          — minimum
+///   `{"code": "<source>", "timeout_ms": 5000}`      — per-call timeout override
+///   `"<source>"`                                    — shorthand: just the code
+///
+/// Page URL / title / HTML are captured here and forwarded as the read-only
+/// `agent.url` / `agent.title` / `agent.html` globals.
+#[cfg(feature = "scripting")]
+async fn run_embedded_script(
+    engine: &RemoteMultimodalEngine,
+    page: &Page,
+    action: &str,
+    value: &serde_json::Value,
+) -> ActionOutcome {
+    let script = match engine.script_engine.as_ref() {
+        Some(s) => s,
+        None => return ActionOutcome::fail(action, "scripting engine not attached"),
+    };
+    if !script.is_enabled() {
+        return ActionOutcome::fail(action, "scripting engine disabled in config");
+    }
+
+    let (code, timeout_ms) = if let Some(s) = value.as_str() {
+        (s.to_string(), None::<u64>)
+    } else if let Some(obj) = value.as_object() {
+        let code = obj
+            .get("code")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let timeout = obj.get("timeout_ms").and_then(|v| v.as_u64());
+        match code {
+            Some(c) => (c, timeout),
+            None => return ActionOutcome::fail(action, "missing `code` field"),
+        }
+    } else {
+        return ActionOutcome::fail(action, "expected string or {code, timeout_ms?}");
+    };
+
+    let url = page.url().await.ok().flatten();
+    let title = page.get_title().await.ok().flatten();
+    let html = page.content().await.ok();
+    let ctx = crate::scripting::ScriptContext {
+        url,
+        title,
+        html,
+        memory_json: None,
+    };
+    let timeout = timeout_ms.map(std::time::Duration::from_millis);
+
+    let result = match action {
+        "RunPython" => script.run_python(code, ctx, timeout).await,
+        "RunJavaScript" => script.run_javascript(code, ctx, timeout).await,
+        _ => return ActionOutcome::fail(action, "unreachable: action mismatch"),
+    };
+
+    if result.success {
+        // Surface stdout to the LLM via the feedback line.
+        ActionOutcome::ok(action).with_output(result.stdout)
+    } else {
+        let msg = if result.timed_out {
+            format!("script timed out after {}ms", result.elapsed_ms)
+        } else if !result.stderr.is_empty() {
+            result.stderr
+        } else {
+            "script failed".to_string()
+        };
+        ActionOutcome::fail(action, msg)
+    }
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -6076,6 +6174,7 @@ mod tests {
             action: "Evaluate".to_string(),
             success: false,
             error: None,
+            output: None,
         };
         assert_eq!(
             outcome.to_feedback_line(),
@@ -6382,6 +6481,11 @@ mod tests {
 
     /// Verifies SetViewport clamps width/height to [1, 7680] (8K).
     #[test]
+    // The `.max(1).min(MAX)` form mirrors the runtime clamp at the call site
+    // (where the value is dynamic, not a literal). Rewriting these as `.clamp()`
+    // would diverge from the production path; suppressing the const-folded
+    // "always greater/smaller" warnings is the correct choice here.
+    #[allow(clippy::manual_clamp, clippy::unnecessary_min_or_max)]
     fn test_viewport_dimension_clamped() {
         // Huge values capped
         assert_eq!(99999i64.max(1).min(MAX_VIEWPORT_DIM), 7680);

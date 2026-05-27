@@ -66,11 +66,13 @@ mod feedback_tests {
 
     #[test]
     fn partial_result_with_usage_preserved() {
-        let mut usage = AutomationUsage::default();
-        usage.prompt_tokens = 1000;
-        usage.completion_tokens = 200;
-        usage.total_tokens = 1200;
-        usage.llm_calls = 3;
+        let usage = AutomationUsage {
+            prompt_tokens: 1000,
+            completion_tokens: 200,
+            total_tokens: 1200,
+            llm_calls: 3,
+            ..AutomationUsage::default()
+        };
 
         let result = AutomationResult::failure("test", "LLM error").with_usage(usage.clone());
 

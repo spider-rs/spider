@@ -76,7 +76,71 @@
 //! - `search_brave` - Brave Search provider
 //! - `search_bing` - Bing Search provider
 //! - `search_tavily` - Tavily AI Search provider
+//! - `webdriver` - Browser automation via thirtyfour
+//! - `fs` - Tempfile-backed disk storage helpers
+//! - `skills` - Dynamic skill loading for web challenge solving
+//! - `memvid` - Long-term experience memory via semantic search
+//! - `scripting` - Embedded pure-Rust Python + JavaScript interpreters
+//!   ([`scripting`]) for LLM-callable `RunPython` / `RunJavaScript` actions
 //! - `full` - All features
+//!
+//! ## Scripting (pure-Rust embedded Python + JS)
+//!
+//! With `features = ["scripting"]`, the agent can evaluate arbitrary Python
+//! (via `rustpython-vm` with the frozen pure-Python stdlib) and JavaScript
+//! (via `boa_engine`) entirely inside the spider_agent process — no CPython,
+//! no V8, no subprocesses. Workers run on dedicated `std::thread`s
+//! (not tokio's blocking pool), with `flume::bounded` + `tokio::oneshot`
+//! bridging the async caller; the design has no `Mutex`/`RwLock` in the
+//! scripting module and no `unwrap`/`expect` that can panic the worker.
+//!
+//! Scripts run with an injected `agent` object exposing:
+//!
+//! - `agent.url`, `agent.title`, `agent.html`, `agent.memory`, `agent.tmpdir` — read-only
+//! - `agent.log(...)` / `print(...)` / `console.log(...)` — captured to `stdout`
+//! - `agent.fetch(url, opts?)` — reuses spider_agent's reqwest client (gated on `allow_network`)
+//! - `agent.read_file(rel)` / `agent.write_file(rel, content)` — sandboxed to a
+//!   per-call tmpdir via `cap-std`; path escapes are structurally impossible
+//! - `agent.check_interrupted()` — cooperative cancel poll honoring per-call timeout
+//!
+//! ```rust,ignore
+//! use spider_agent::scripting::{ScriptConfig, ScriptContext, ScriptEngine};
+//! use std::time::Duration;
+//!
+//! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+//! let engine = ScriptEngine::new(ScriptConfig {
+//!     enabled: true,
+//!     allow_network: true,
+//!     default_timeout: Duration::from_secs(5),
+//!     ..ScriptConfig::default()
+//! });
+//!
+//! let result = engine.run_python(
+//!     r#"
+//! import json, re
+//! numbers = [int(n) for n in re.findall(r"\d+", agent.html)]
+//! print(json.dumps({"url": agent.url, "found": numbers}))
+//! "#.to_string(),
+//!     ScriptContext {
+//!         url: Some("https://shop.example.com".into()),
+//!         html: Some("<p>price 1999, stock 42</p>".into()),
+//!         ..ScriptContext::default()
+//!     },
+//!     None,
+//! ).await;
+//!
+//! println!("{}", result.stdout);
+//! # Ok(()) }
+//! ```
+//!
+//! When wired into the chrome action dispatcher
+//! (`RemoteMultimodalEngine::with_script_engine(...)`), the LLM can emit
+//! `{"RunPython": {"code": "..."}}` or `{"RunJavaScript": {"code": "..."}}`
+//! actions and the engine routes them through the worker pool, surfacing
+//! stdout back to the next LLM round.
+//!
+//! See `examples/scripting.rs` for the full end-to-end demo:
+//! `cargo run --example scripting --features scripting`.
 
 #![warn(missing_docs)]
 
@@ -99,6 +163,9 @@ pub mod webdriver;
 
 #[cfg(feature = "fs")]
 pub mod temp;
+
+#[cfg(feature = "scripting")]
+pub mod scripting;
 
 // Re-exports
 pub use agent::{Agent, AgentBuilder, FetchResult, PageExtraction};

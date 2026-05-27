@@ -105,6 +105,13 @@ pub struct RemoteMultimodalEngine {
     /// Optional pre-built HTTP client (e.g. with proxy configuration).
     /// When `None`, uses the default static client.
     pub client: Option<Client>,
+    /// Optional embedded scripting engine (pure-Rust Python + JS).
+    ///
+    /// When set, the LLM-driven action dispatcher honors the `RunPython` and
+    /// `RunJavaScript` actions by routing them through the worker pool. When
+    /// `None`, those actions return an "engine unavailable" error.
+    #[cfg(feature = "scripting")]
+    pub script_engine: Option<crate::scripting::ScriptEngine>,
 }
 
 impl RemoteMultimodalEngine {
@@ -137,7 +144,17 @@ impl RemoteMultimodalEngine {
             model_router: None,
             model_pool: Vec::new(),
             client: None,
+            #[cfg(feature = "scripting")]
+            script_engine: None,
         }
+    }
+
+    /// Attach an embedded scripting engine. When set, the dispatcher routes
+    /// `RunPython` and `RunJavaScript` actions through its worker pool.
+    #[cfg(feature = "scripting")]
+    pub fn with_script_engine(mut self, engine: Option<crate::scripting::ScriptEngine>) -> Self {
+        self.script_engine = engine;
+        self
     }
 
     /// Set/clear the API key (Bearer token).
@@ -332,6 +349,8 @@ impl RemoteMultimodalEngine {
             model_router: self.model_router.clone(),
             model_pool: self.model_pool.clone(),
             client: self.client.clone(),
+            #[cfg(feature = "scripting")]
+            script_engine: self.script_engine.clone(),
         }
     }
 
