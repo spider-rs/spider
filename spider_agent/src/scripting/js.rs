@@ -38,6 +38,30 @@ struct CallState {
 
 thread_local! {
     static STATE: RefCell<Option<Arc<CallState>>> = const { RefCell::new(None) };
+
+    /// Per-worker-thread Boa `Context` cache. First call on a worker pays the
+    /// Context::default() cost (ECMAScript stdlib registration); subsequent
+    /// calls reuse the context for a major warm-call speedup.
+    ///
+    /// `console` is installed once on Context creation; `agent` is replaced
+    /// per call via `global_object().set(...)` so each script sees fresh
+    /// context (url/html/etc.) without leaking the prior script's `agent`.
+    ///
+    /// Module-level mutations to built-in prototypes (e.g. monkey-patching
+    /// `Array.prototype.push`) DO persist across calls on the same worker —
+    /// accepted tradeoff for warm-call speed in an LLM-tool context.
+    ///
+    /// Cleaned up explicitly by `worker_loop` via `cleanup_thread_local()`
+    /// BEFORE the worker thread exits to avoid thread-destructor-phase issues.
+    static JS_CONTEXT: RefCell<Option<Context>> = const { RefCell::new(None) };
+}
+
+/// Drop the cached context while the worker thread is still in normal execution.
+/// Called by `worker_loop` after `rx.recv()` returns Disconnected.
+pub(crate) fn cleanup_thread_local() {
+    JS_CONTEXT.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
 }
 
 /// Run `f` with the installed call state. Returns `Err` if state is missing — that
@@ -90,58 +114,76 @@ pub(crate) fn run(job: &Job) -> Result<ScriptResult, String> {
     }
     let _guard = StateGuard;
 
-    let mut context = Context::default();
+    // Reuse a per-worker-thread Context to amortize ECMAScript stdlib init.
+    // First call on this worker creates the Context + installs `console`;
+    // subsequent calls reuse it and refresh the `agent` global per script.
+    //
+    // All Context-borrowing work (build agent, eval, format error, json-convert)
+    // happens inside the `with` closure since the borrow drops on exit.
+    let eval_outcome: Result<Option<serde_json::Value>, String> = JS_CONTEXT.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        let context: &mut Context = match borrow.as_mut() {
+            Some(c) => c,
+            None => {
+                let mut c = Context::default();
+                if let Err(e) = install_console(&mut c) {
+                    let msg = format_js_error(&mut c, e);
+                    return Err(format!("console setup: {msg}"));
+                }
+                *borrow = Some(c);
+                borrow.as_mut().expect("just set Some above")
+            }
+        };
 
-    // Build `agent` global.
-    let agent_obj = build_agent_object(&mut context, job, sandbox.as_deref())
-        .map_err(|e| format!("agent setup: {}", format_js_error(&mut context, e)))?;
-    context
-        .register_global_property(js_string!("agent"), agent_obj, Attribute::all())
-        .map_err(|e| format!("register agent: {}", format_js_error(&mut context, e)))?;
+        // Build `agent` per call so each script sees fresh url/html/etc.
+        // `global_object().set(...)` overwrites cleanly; the prior call's
+        // `agent` is dropped here.
+        let agent_obj = build_agent_object(context, job, sandbox.as_deref())
+            .map_err(|e| format!("agent setup: {}", format_js_error(context, e)))?;
+        let global = context.global_object();
+        global
+            .set(js_string!("agent"), agent_obj, false, context)
+            .map_err(|e| format!("install agent: {}", format_js_error(context, e)))?;
 
-    // Override console.log / console.error
-    install_console(&mut context)
-        .map_err(|e| format!("console setup: {}", format_js_error(&mut context, e)))?;
-
-    // Parse + evaluate
-    let exec_result = context.eval(Source::from_bytes(&job.code));
+        // Parse + evaluate. Convert the result to JSON or render the error
+        // BEFORE we release the context borrow.
+        match context.eval(Source::from_bytes(&job.code)) {
+            Ok(value) => {
+                // Boa's `to_json` panics on `undefined` — guard it.
+                let value_json = if value.is_undefined() || value.is_null() {
+                    None
+                } else {
+                    value.to_json(context).ok()
+                };
+                Ok(value_json)
+            }
+            Err(err) => Err(format_js_error(context, err)),
+        }
+    });
     let elapsed_ms = job.started_at.elapsed().as_millis() as u64;
 
     let stdout_str = stdout.drain_to_string();
     let timed_out = job.interrupt.load(Ordering::Relaxed);
 
-    match exec_result {
-        Ok(value) => {
-            // Boa's `to_json` panics on `undefined` (no JSON representation).
-            // Guard so scripts ending in a statement (no return value) don't
-            // tear down the worker via a panic.
-            let value_json = if value.is_undefined() || value.is_null() {
-                None
-            } else {
-                value.to_json(&mut context).ok()
-            };
-            Ok(ScriptResult {
-                language: ScriptLanguage::JavaScript.as_str().to_string(),
-                success: true,
-                stdout: stdout_str,
-                stderr: String::new(),
-                value: value_json,
-                elapsed_ms,
-                timed_out,
-            })
-        }
-        Err(err) => {
-            let msg = format_js_error(&mut context, err);
-            Ok(ScriptResult {
-                language: ScriptLanguage::JavaScript.as_str().to_string(),
-                success: false,
-                stdout: stdout_str,
-                stderr: msg,
-                value: None,
-                elapsed_ms,
-                timed_out,
-            })
-        }
+    match eval_outcome {
+        Ok(value_json) => Ok(ScriptResult {
+            language: ScriptLanguage::JavaScript.as_str().to_string(),
+            success: true,
+            stdout: stdout_str,
+            stderr: String::new(),
+            value: value_json,
+            elapsed_ms,
+            timed_out,
+        }),
+        Err(msg) => Ok(ScriptResult {
+            language: ScriptLanguage::JavaScript.as_str().to_string(),
+            success: false,
+            stdout: stdout_str,
+            stderr: msg,
+            value: None,
+            elapsed_ms,
+            timed_out,
+        }),
     }
 }
 

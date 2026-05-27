@@ -75,6 +75,13 @@ pub struct ScriptConfig {
     pub max_concurrent: usize,
     /// Default per-call timeout when the action doesn't specify one.
     pub default_timeout: Duration,
+    /// Maximum wait when acquiring an in-flight permit before failing the call.
+    ///
+    /// Prevents unbounded backpressure if all workers are stuck on pathological
+    /// scripts that ignore `agent.check_interrupted()`. Without this cap, async
+    /// callers accumulate as futures parked on the semaphore even though the
+    /// per-call `default_timeout` wouldn't apply (it only wraps the worker reply).
+    pub permit_acquire_timeout: Duration,
     /// Truncate combined stdout/stderr to this many bytes before returning.
     pub max_output_bytes: usize,
     /// Expose `agent.fetch(url, opts)` to scripts.
@@ -95,6 +102,7 @@ impl Default for ScriptConfig {
             queue_capacity: 64,
             max_concurrent: 4,
             default_timeout: Duration::from_secs(5),
+            permit_acquire_timeout: Duration::from_secs(30),
             max_output_bytes: 64 * 1024,
             allow_network: false,
             allow_filesystem: true,
@@ -289,9 +297,22 @@ impl ScriptEngine {
         }
 
         // Acquire a concurrency permit — bounded in-flight independent of queue depth.
-        let _permit = match self.permits.clone().acquire_owned().await {
-            Ok(p) => p,
-            Err(_) => return ScriptResult::error(language, "permit acquire failed", 0),
+        // Wrapped in a timeout so stuck workers can't pile up unbounded waiters.
+        let _permit = match tokio::time::timeout(
+            self.config.permit_acquire_timeout,
+            self.permits.clone().acquire_owned(),
+        )
+        .await
+        {
+            Ok(Ok(p)) => p,
+            Ok(Err(_)) => return ScriptResult::error(language, "permit acquire failed", 0),
+            Err(_) => {
+                return ScriptResult::error(
+                    language,
+                    "permit acquire timed out — workers may be stuck",
+                    elapsed(start),
+                );
+            }
         };
 
         let (reply_tx, reply_rx) = oneshot::channel();
@@ -388,6 +409,12 @@ fn worker_loop(rx: flume::Receiver<Job>) {
         // (caller timed out). That's an expected race; we just discard the result.
         let _ = job.reply.send(result);
     }
+    // Channel closed — explicitly drop cached interpreters while we're still on
+    // a normally-scheduled thread. Dropping them inside the pthread destructor
+    // phase (i.e. letting the thread_local just fall out of scope) has surfaced
+    // SIGTRAPs in stress tests on macOS.
+    python::cleanup_thread_local();
+    js::cleanup_thread_local();
     log::debug!(
         "script worker stopped on thread {:?}",
         std::thread::current().name()
