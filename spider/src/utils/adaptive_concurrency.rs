@@ -147,35 +147,58 @@ impl AIMDController {
     }
 }
 
-/// Lock-free, atomic bridge from an in-memory target value to a live
+/// Lock-free atomic bridge from an in-memory target value to a live
 /// `tokio::sync::Semaphore` that gates worker concurrency on a crawl.
 ///
 /// The semaphore is the authoritative gate the crawler holds; the
 /// atomic `target` is the most-recently-requested permit count. Calling
-/// [`Self::set_target`] computes the delta against the previous target
-/// (atomic `swap`) and applies it to the semaphore — `add_permits` for
-/// expansion, `forget_permits` for contraction. Both are non-blocking
-/// and never panic for normal inputs.
+/// [`Self::set_target`] swaps the target atomically and applies the
+/// matching delta to the semaphore via `add_permits` / `forget_permits`.
 ///
-/// Behavior worth knowing:
+/// ## Concurrency contract — single-writer
 ///
-/// - **Existing in-flight permits are never cancelled.** Shrinking the
-///   target only forgets *available* permits; workers holding an
-///   outstanding permit complete their fetch and release as usual.
-///   Forgotten permits don't return to the pool, so the effective
-///   ceiling drops smoothly to the new target.
-/// - **Lock-free.** Both the atomic target and the underlying
-///   `Semaphore` are lock-free in tokio — `set_target` adds zero
-///   overhead beyond an atomic swap + (at most) one
-///   `add_permits`/`forget_permits` call.
-/// - **No deadlocks.** The bridge holds no locks of its own; callers
-///   acquire permits with the standard `acquire().await` / `try_acquire`
-///   API on the inner semaphore. Dropping all clones drops the
-///   semaphore and any pending acquires return `AcquireError`, which
-///   the crawl treats as "shut down".
+/// **`set_target` is single-writer.** Read paths
+/// ([`Self::target`], [`Self::available`], and the crawler's permit
+/// acquisitions) are unrestricted and fully lock-free, but *write*
+/// callers (`set_target`) must serialize externally if more than one
+/// task can issue a resize. The intended pattern is one admission
+/// controller owning the bridge and driving `set_target` from its
+/// reconciliation loop — that case needs no extra synchronization.
+///
+/// Why the bridge doesn't serialize internally: a `Mutex` would be the
+/// natural answer, but spider's invariant of "no locks on the
+/// hot/control path" rules it out. Two interleaved writers can leave
+/// the semaphore's permanent capacity transiently out of sync with the
+/// target (one writer's `forget_permits` may see fewer available
+/// permits than its delta implies if another writer's `add_permits`
+/// hasn't landed yet). The state is *eventually* consistent — every
+/// `set_target` swap is observed and every delta is applied — but a
+/// snapshot mid-burst may show drift. Callers that need strict
+/// transactional resizes can wrap `set_target` calls in their own
+/// `tokio::sync::Mutex`; the bridge does not impose one for everyone.
+///
+/// ## Safety properties
+///
+/// - **No locks.** The bridge holds no `Mutex`, no `RwLock`, no
+///   spinlock. All synchronization goes through `AtomicUsize` and
+///   `tokio::sync::Semaphore`, both of which are lock-free in their
+///   own internals.
+/// - **No deadlocks.** Without any locks, deadlock is structurally
+///   impossible on the bridge's own surface. `Acquire` on the inner
+///   semaphore is tokio's standard lock-free queue; dropping all
+///   bridge clones drops the semaphore and any pending acquires
+///   return `AcquireError`, which the crawl treats as "shut down".
 /// - **No panics.** `target` is clamped to `[1, Semaphore::MAX_PERMITS]`
-///   on construction and on `set_target`, so `add_permits` can never
-///   overflow tokio's internal counter.
+///   on construction and on every `set_target`, so `add_permits` can
+///   never overflow tokio's internal counter.
+///   `forget_permits(n)` is capped by tokio at the currently-available
+///   count, so a "forget more than available" call returns silently
+///   instead of panicking.
+/// - **Existing in-flight permits are never cancelled.** Shrinking
+///   only forgets *available* permits; workers holding an outstanding
+///   permit complete their fetch normally. Released permits are
+///   forgotten in turn as tokio's internal accounting catches up to
+///   the new permanent capacity.
 ///
 /// Cloning is cheap (Arc bumps). Hand one clone to the `Website`, keep
 /// another in the admission controller, call `set_target` from the
@@ -223,26 +246,23 @@ impl AdaptiveSemaphore {
         self.sem.available_permits()
     }
 
-    /// Resize toward `new_target`. Lock-free, non-blocking, never panics.
-    ///
-    /// Concurrent `set_target` calls compose correctly: the atomic
-    /// `swap` returns the previous target, and the delta against that
-    /// previous value is applied to the semaphore — so two interleaved
-    /// `set_target(a)` / `set_target(b)` calls leave the semaphore at
-    /// `b` regardless of which "saw" which intermediate state.
+    /// Resize toward `new_target`. Lock-free, non-blocking, panic-free
+    /// in a single-writer setting (see the type docblock). Concurrent
+    /// writers can transiently drift the semaphore from the target;
+    /// callers that need strict transactional resizes must serialize
+    /// externally.
     pub fn set_target(&self, new_target: usize) {
         let clamped = Self::clamp_permits(new_target);
         let prev = self.target.swap(clamped, Ordering::Relaxed);
         if clamped > prev {
             self.sem.add_permits(clamped - prev);
         } else if clamped < prev {
-            // forget_permits is capped at currently-available by tokio,
-            // so a "forget more than available" never panics — it just
-            // returns the smaller actually-forgotten count, and the
-            // remaining shrinkage takes effect as in-flight permits are
-            // released back to the pool (the released permits are
-            // forgotten in turn by tokio's internal accounting since the
-            // semaphore's permanent capacity has dropped).
+            // forget_permits is capped at currently-available by tokio:
+            // a "forget more than available" never panics — it returns
+            // the smaller actually-forgotten count, and the remaining
+            // shrinkage takes effect as in-flight permits are released
+            // back to the pool (released permits are forgotten in turn
+            // because the semaphore's permanent capacity has dropped).
             self.sem.forget_permits(prev - clamped);
         }
     }
