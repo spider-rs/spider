@@ -90,48 +90,43 @@ pub(crate) struct FetchResponse {
     pub truncated: bool,
 }
 
-/// Process-wide HTTP client used by `agent.fetch`. Built on the agent's existing
-/// reqwest dep so we get one connection pool + TLS config across spider_agent.
+/// Perform a fetch from a worker thread.
 ///
-/// Returns `Err` (not a panic) if the client cannot be initialized — `reqwest`'s
-/// own `Client::new` panics on TLS-init failure, so we cache an `Option` and
-/// surface a string error to the script.
-fn http_client() -> Result<&'static reqwest::Client, &'static str> {
-    use std::sync::OnceLock;
-    static CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
-    let cached = CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .user_agent(concat!("spider_agent_script/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .ok()
-    });
-    cached
-        .as_ref()
-        .ok_or("failed to initialize HTTP client (TLS backend)")
-}
-
-/// Perform a fetch from a worker thread. `runtime` is the handle captured at job
-/// submission time. `interrupt` lets a timeout short-circuit the call.
+/// * `client` — the engine-provided reqwest client (carries proxy/TLS config).
+///   Passed in by reference and cloned for the future (cheap, Arc-internal).
+/// * `runtime` — the handle captured at job submission time; bridges from this
+///   non-runtime worker thread back to the tokio runtime via `block_on`.
+/// * `interrupt` — cooperative cancel flag flipped by the caller on timeout.
+/// * `usage` — process-wide counters; incremented per call + per byte.
 pub(crate) fn agent_fetch_blocking(
+    client: &reqwest::Client,
     runtime: &tokio::runtime::Handle,
     interrupt: &Arc<AtomicBool>,
+    usage: &super::ScriptUsage,
     url: &str,
     req: FetchRequest,
 ) -> Result<FetchResponse, String> {
+    usage.fetch_calls.fetch_add(1, Ordering::Relaxed);
+
     if interrupt.load(Ordering::Relaxed) {
+        usage.fetch_errors.fetch_add(1, Ordering::Relaxed);
         return Err("interrupted".into());
     }
 
     let method = req.method.as_deref().unwrap_or("GET").to_ascii_uppercase();
-    let method = reqwest::Method::from_bytes(method.as_bytes())
-        .map_err(|e| format!("invalid method: {e}"))?;
+    let method = reqwest::Method::from_bytes(method.as_bytes()).map_err(|e| {
+        usage.fetch_errors.fetch_add(1, Ordering::Relaxed);
+        format!("invalid method: {e}")
+    })?;
 
     let timeout = req
         .timeout_ms
         .map(Duration::from_millis)
         .unwrap_or(DEFAULT_FETCH_TIMEOUT);
 
-    let client = http_client().map_err(|e| e.to_string())?.clone();
+    // Cheap clone — reqwest::Client is internally Arc'd, so this just bumps a
+    // refcount. The cloned client carries the engine's proxy/TLS/header config.
+    let client = client.clone();
     let url_owned = url.to_string();
 
     // Handle::block_on from a non-runtime thread is the canonical sync→async bridge.
@@ -149,10 +144,13 @@ pub(crate) fn agent_fetch_blocking(
             builder = builder.body(body);
         }
 
-        let response = builder
-            .send()
-            .await
-            .map_err(|e| format!("fetch error: {e}"))?;
+        let response = match builder.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                usage.fetch_errors.fetch_add(1, Ordering::Relaxed);
+                return Err(format!("fetch error: {e}"));
+            }
+        };
 
         let status = response.status().as_u16();
         let ok = response.status().is_success();
@@ -164,15 +162,21 @@ pub(crate) fn agent_fetch_blocking(
             }
         }
 
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| format!("read body: {e}"))?;
+        let bytes = match response.bytes().await {
+            Ok(b) => b,
+            Err(e) => {
+                usage.fetch_errors.fetch_add(1, Ordering::Relaxed);
+                return Err(format!("read body: {e}"));
+            }
+        };
         let (slice, truncated) = if bytes.len() > FETCH_BODY_MAX_BYTES {
             (&bytes[..FETCH_BODY_MAX_BYTES], true)
         } else {
             (&bytes[..], false)
         };
+        usage
+            .fetch_bytes_in
+            .fetch_add(slice.len() as u64, Ordering::Relaxed);
         let body = String::from_utf8_lossy(slice).into_owned();
 
         Ok(FetchResponse {

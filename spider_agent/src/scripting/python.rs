@@ -64,6 +64,8 @@ pub(crate) fn run(job: &Job) -> Result<ScriptResult, String> {
     };
     let job_runtime = job.runtime.clone();
     let job_interrupt = job.interrupt.clone();
+    let job_client = job.client.clone();
+    let job_usage = job.usage.clone();
     let allow_network = job.config.allow_network;
     let inject_html = job.config.inject_page_html;
     let html_max = job.config.html_max_bytes;
@@ -195,9 +197,14 @@ pub(crate) fn run(job: &Job) -> Result<ScriptResult, String> {
             // agent.fetch(url, opts?) — opts is a dict; response is returned as a dict
             // built directly via the VM context (no `json` module dependency, which
             // would require the frozen stdlib to be loaded).
+            //
+            // The client carries the engine's proxy/TLS/header configuration
+            // (passed in by the chrome dispatcher via `run_python_with_client`).
             if allow_network {
                 let runtime = job_runtime.clone();
                 let interrupt = job_interrupt.clone();
+                let client = job_client.clone();
+                let usage = job_usage.clone();
                 let fetch_fn = vm.new_function(
                     "fetch",
                     move |args: FuncArgs, vm: &VirtualMachine| -> PyResult<PyObjectRef> {
@@ -210,8 +217,9 @@ pub(crate) fn run(job: &Job) -> Result<ScriptResult, String> {
                         } else {
                             FetchRequest::default()
                         };
-                        let resp = agent_fetch_blocking(&runtime, &interrupt, &url, req)
-                            .map_err(|e| vm.new_runtime_error(e))?;
+                        let resp =
+                            agent_fetch_blocking(&client, &runtime, &interrupt, &usage, &url, req)
+                                .map_err(|e| vm.new_runtime_error(e))?;
                         fetch_resp_to_pydict(vm, &resp)
                     },
                 );

@@ -34,6 +34,10 @@ struct CallState {
     runtime: tokio::runtime::Handle,
     sandbox: Option<Arc<SandboxedDir>>,
     allow_network: bool,
+    /// Engine-provided HTTP client (proxy/TLS config from `engine.client`).
+    client: reqwest::Client,
+    /// Process-wide usage counters; updated atomically by `agent.fetch`.
+    usage: Arc<super::ScriptUsage>,
 }
 
 thread_local! {
@@ -101,6 +105,8 @@ pub(crate) fn run(job: &Job) -> Result<ScriptResult, String> {
         runtime: job.runtime.clone(),
         sandbox: sandbox.clone(),
         allow_network: job.config.allow_network,
+        client: job.client.clone(),
+        usage: job.usage.clone(),
     });
 
     // Install per-call state; ensure it's cleared even on panic/early return.
@@ -373,9 +379,11 @@ fn js_fetch(_this: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<Js
     } else {
         FetchRequest::default()
     };
-    let resp = try_with_state(|s| agent_fetch_blocking(&s.runtime, &s.interrupt, &url, req))
-        .map_err(|_| state_missing_err())?
-        .map_err(|e| JsNativeError::error().with_message(e))?;
+    let resp = try_with_state(|s| {
+        agent_fetch_blocking(&s.client, &s.runtime, &s.interrupt, &s.usage, &url, req)
+    })
+    .map_err(|_| state_missing_err())?
+    .map_err(|e| JsNativeError::error().with_message(e))?;
     let resp_json = serde_json::to_value(&resp)
         .map_err(|e| JsNativeError::error().with_message(format!("serialize: {e}")))?;
     JsValue::from_json(&resp_json, ctx)

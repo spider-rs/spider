@@ -29,7 +29,7 @@
 //!   script refuses to honor the cooperative interrupt.
 //! * Fresh VM per call — zero cross-call state leakage.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -39,6 +39,76 @@ use tokio::sync::{oneshot, Semaphore};
 pub mod js;
 pub mod python;
 pub mod sandbox;
+
+/// Lock-free counters for activity inside the scripting engine.
+///
+/// All fields are atomic; no `Mutex`/`RwLock`. Counters monotonically increase
+/// for the engine's lifetime; reset only by constructing a new `ScriptEngine`.
+#[derive(Debug, Default)]
+pub struct ScriptUsage {
+    /// Scripts dispatched (Python + JS combined).
+    pub scripts_run: AtomicU64,
+    /// Scripts that timed out (cooperative cancel or wall-clock exceeded).
+    pub scripts_timed_out: AtomicU64,
+    /// Scripts that returned a non-success result (compile/runtime error or timeout).
+    pub scripts_failed: AtomicU64,
+    /// Total `agent.fetch(...)` calls (success + error).
+    pub fetch_calls: AtomicU64,
+    /// `agent.fetch` calls that returned an error (network/TLS/timeout).
+    pub fetch_errors: AtomicU64,
+    /// Bytes received across all successful `agent.fetch` calls (post-truncation).
+    pub fetch_bytes_in: AtomicU64,
+}
+
+/// Plain-data snapshot of [`ScriptUsage`] taken atomically at one point in time.
+///
+/// Safe to clone / serialize. Returned by [`ScriptEngine::usage_snapshot`].
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ScriptUsageSnapshot {
+    /// Total scripts dispatched to the engine since construction.
+    pub scripts_run: u64,
+    /// Scripts that triggered the cooperative-cancel hook or exceeded their wall-clock timeout.
+    pub scripts_timed_out: u64,
+    /// Scripts that returned a non-success result (subset that includes timed-out ones).
+    pub scripts_failed: u64,
+    /// Total `agent.fetch(...)` invocations (success + error).
+    pub fetch_calls: u64,
+    /// `agent.fetch` invocations that returned an error.
+    pub fetch_errors: u64,
+    /// Bytes received across all successful `agent.fetch` calls (post-truncation).
+    pub fetch_bytes_in: u64,
+}
+
+impl ScriptUsage {
+    pub(crate) fn snapshot(&self) -> ScriptUsageSnapshot {
+        ScriptUsageSnapshot {
+            scripts_run: self.scripts_run.load(Ordering::Relaxed),
+            scripts_timed_out: self.scripts_timed_out.load(Ordering::Relaxed),
+            scripts_failed: self.scripts_failed.load(Ordering::Relaxed),
+            fetch_calls: self.fetch_calls.load(Ordering::Relaxed),
+            fetch_errors: self.fetch_errors.load(Ordering::Relaxed),
+            fetch_bytes_in: self.fetch_bytes_in.load(Ordering::Relaxed),
+        }
+    }
+}
+
+/// Default HTTP client used when neither the call site nor the engine supplies one.
+///
+/// Process-wide, lazy, never panics — `reqwest::Client::new` panics on TLS-init
+/// failure, so we cache an `Option` and surface a None on the very-rare failure
+/// path. `agent.fetch` callers receive a clear error in that case.
+pub(crate) fn fallback_http_client() -> Option<&'static reqwest::Client> {
+    use std::sync::OnceLock;
+    static CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .user_agent(concat!("spider_agent_script/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .ok()
+        })
+        .as_ref()
+}
 
 /// Which interpreter to run a script in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,6 +268,13 @@ pub(crate) struct Job {
     pub started_at: std::time::Instant,
     pub runtime: tokio::runtime::Handle,
     pub reply: oneshot::Sender<ScriptResult>,
+    /// HTTP client to use for `agent.fetch`. Inherits the engine's
+    /// proxy/TLS/header configuration when the chrome dispatcher passes
+    /// `engine.client.clone()`; falls back to the process-wide default
+    /// otherwise. Cheap to clone (reqwest::Client is internally Arc'd).
+    pub client: reqwest::Client,
+    /// Shared usage counters for the engine that submitted this job.
+    pub usage: Arc<ScriptUsage>,
 }
 
 /// Public scripting engine — clone-safe handle around the worker pool.
@@ -206,6 +283,14 @@ pub struct ScriptEngine {
     config: Arc<ScriptConfig>,
     tx: flume::Sender<Job>,
     permits: Arc<Semaphore>,
+    /// Default HTTP client for `agent.fetch`. Set via `with_client(...)`; falls
+    /// back to the process-wide static client when not configured. The chrome
+    /// dispatcher passes the engine's proxy-configured client per call via
+    /// `run_python_with_client` / `run_javascript_with_client`, so this default
+    /// is mainly for direct API users.
+    default_client: reqwest::Client,
+    /// Lock-free usage counters; cloneable handle.
+    usage: Arc<ScriptUsage>,
 }
 
 impl std::fmt::Debug for ScriptEngine {
@@ -244,10 +329,19 @@ impl ScriptEngine {
             }
         }
 
+        // Default client: process-wide fallback. If TLS init failed at static
+        // construction, we synthesize a fresh `Client::new()` (which itself
+        // panics on TLS failure, but at that point the process is already broken).
+        let default_client = fallback_http_client()
+            .cloned()
+            .unwrap_or_else(reqwest::Client::new);
+
         Self {
             config,
             tx,
             permits,
+            default_client,
+            usage: Arc::new(ScriptUsage::default()),
         }
     }
 
@@ -261,26 +355,97 @@ impl ScriptEngine {
         &self.config
     }
 
-    /// Run a Python script. Async — never blocks the calling runtime worker.
+    /// Override the default HTTP client used by `agent.fetch`.
+    ///
+    /// Pass a proxy-configured / header-customized `reqwest::Client` so scripts
+    /// inherit the same outbound settings as the rest of the agent. The
+    /// per-call `run_*_with_client` variants take precedence over this default.
+    pub fn with_client(mut self, client: reqwest::Client) -> Self {
+        self.default_client = client;
+        self
+    }
+
+    /// Lock-free atomic snapshot of script + fetch usage counters since this
+    /// engine instance was constructed. Counters never reset.
+    pub fn usage_snapshot(&self) -> ScriptUsageSnapshot {
+        self.usage.snapshot()
+    }
+
+    /// Shared handle to the live usage counters.
+    pub fn usage_handle(&self) -> Arc<ScriptUsage> {
+        self.usage.clone()
+    }
+
+    /// Run a Python script with the engine's default HTTP client.
+    /// Async — never blocks the calling runtime worker.
     pub async fn run_python(
         &self,
         code: String,
         context: ScriptContext,
         timeout_override: Option<Duration>,
     ) -> ScriptResult {
-        self.run(ScriptLanguage::Python, code, context, timeout_override)
-            .await
+        self.run(
+            ScriptLanguage::Python,
+            code,
+            context,
+            timeout_override,
+            None,
+        )
+        .await
     }
 
-    /// Run a JavaScript script. Async — never blocks the calling runtime worker.
+    /// Run a Python script with a specific HTTP client override. Use this from
+    /// the chrome dispatcher to inherit the agent's proxy-configured client.
+    pub async fn run_python_with_client(
+        &self,
+        code: String,
+        context: ScriptContext,
+        timeout_override: Option<Duration>,
+        client: reqwest::Client,
+    ) -> ScriptResult {
+        self.run(
+            ScriptLanguage::Python,
+            code,
+            context,
+            timeout_override,
+            Some(client),
+        )
+        .await
+    }
+
+    /// Run a JavaScript script with the engine's default HTTP client.
     pub async fn run_javascript(
         &self,
         code: String,
         context: ScriptContext,
         timeout_override: Option<Duration>,
     ) -> ScriptResult {
-        self.run(ScriptLanguage::JavaScript, code, context, timeout_override)
-            .await
+        self.run(
+            ScriptLanguage::JavaScript,
+            code,
+            context,
+            timeout_override,
+            None,
+        )
+        .await
+    }
+
+    /// Run a JavaScript script with a specific HTTP client override.
+    pub async fn run_javascript_with_client(
+        &self,
+        code: String,
+        context: ScriptContext,
+        timeout_override: Option<Duration>,
+        client: reqwest::Client,
+    ) -> ScriptResult {
+        self.run(
+            ScriptLanguage::JavaScript,
+            code,
+            context,
+            timeout_override,
+            Some(client),
+        )
+        .await
     }
 
     async fn run(
@@ -289,6 +454,7 @@ impl ScriptEngine {
         code: String,
         context: ScriptContext,
         timeout_override: Option<Duration>,
+        client_override: Option<reqwest::Client>,
     ) -> ScriptResult {
         let start = std::time::Instant::now();
 
@@ -328,7 +494,13 @@ impl ScriptEngine {
             started_at: start,
             runtime,
             reply: reply_tx,
+            // Prefer the per-call client (set by the chrome dispatcher with
+            // engine.client.clone()); fall back to the engine's default.
+            client: client_override.unwrap_or_else(|| self.default_client.clone()),
+            usage: self.usage.clone(),
         };
+
+        self.usage.scripts_run.fetch_add(1, Ordering::Relaxed);
 
         if self.tx.send_async(job).await.is_err() {
             return ScriptResult::error(
@@ -342,11 +514,18 @@ impl ScriptEngine {
         match tokio::time::timeout(deadline, reply_rx).await {
             Ok(Ok(mut result)) => {
                 result.truncate_output(self.config.max_output_bytes);
+                if !result.success {
+                    self.usage.scripts_failed.fetch_add(1, Ordering::Relaxed);
+                    if result.timed_out {
+                        self.usage.scripts_timed_out.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
                 result
             }
             Ok(Err(_)) => {
                 // Worker dropped the reply channel without sending — should not happen,
                 // but recover instead of panicking.
+                self.usage.scripts_failed.fetch_add(1, Ordering::Relaxed);
                 ScriptResult::error(
                     language,
                     "script worker dropped reply channel",
@@ -356,6 +535,8 @@ impl ScriptEngine {
             Err(_) => {
                 // Signal the worker to bail via cooperative-cancel hook.
                 interrupt.store(true, Ordering::Relaxed);
+                self.usage.scripts_failed.fetch_add(1, Ordering::Relaxed);
+                self.usage.scripts_timed_out.fetch_add(1, Ordering::Relaxed);
                 ScriptResult::timeout(language, elapsed(start))
             }
         }

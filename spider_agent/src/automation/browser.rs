@@ -5835,9 +5835,22 @@ async fn run_embedded_script(
     };
     let timeout = timeout_ms.map(std::time::Duration::from_millis);
 
-    let result = match action {
-        "RunPython" => script.run_python(code, ctx, timeout).await,
-        "RunJavaScript" => script.run_javascript(code, ctx, timeout).await,
+    // Inherit the agent's HTTP client (proxy / TLS / headers) so `agent.fetch`
+    // from inside the script doesn't bypass the configured outbound path.
+    // Cheap clone — reqwest::Client is Arc-internal.
+    let result = match (action, engine.client.clone()) {
+        ("RunPython", Some(client)) => {
+            script
+                .run_python_with_client(code, ctx, timeout, client)
+                .await
+        }
+        ("RunPython", None) => script.run_python(code, ctx, timeout).await,
+        ("RunJavaScript", Some(client)) => {
+            script
+                .run_javascript_with_client(code, ctx, timeout, client)
+                .await
+        }
+        ("RunJavaScript", None) => script.run_javascript(code, ctx, timeout).await,
         _ => return ActionOutcome::fail(action, "unreachable: action mismatch"),
     };
 
