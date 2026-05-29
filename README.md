@@ -6,7 +6,7 @@
 
 <h1 align="center">Spider</h1>
 
-<p align="center">A production-grade web crawler and scraper for Rust.</p>
+<p align="center">The fastest web crawler and scraper for Rust.</p>
 
 <p align="center">
   <a href="https://crates.io/crates/spider"><img src="https://img.shields.io/crates/v/spider.svg" alt="Crates.io"></a>
@@ -26,7 +26,36 @@
 
 ---
 
-Spider is an open-source web crawler and scraper for Rust. Point it at a URL and you get the pages back as a stream — no batching, no waiting for the crawl to finish.
+Spider is a concurrency-first crawling engine built in Rust. It streams pages the moment they arrive, renders JavaScript only when a page demands it, and scales from a single script to a distributed fleet without changing your code. The same engine powers [Spider Cloud](https://spider.cloud), so you can prototype locally and move to managed infrastructure with one config change.
+
+## Start in the cloud
+
+The hardest part of crawling at scale isn't the code. It's the proxies, headless browsers, and constant anti-bot churn. Spider Cloud runs all of that for you behind the same API.
+
+[**Get a free API key →**](https://spider.cloud) (no card required)
+
+```toml
+[dependencies]
+spider = { version = "2", features = ["spider_cloud"] }
+```
+
+```rust
+use spider::configuration::{SpiderCloudConfig, SpiderCloudMode};
+use spider::website::Website;
+
+let cloud = SpiderCloudConfig::new("sk-...")
+    .with_mode(SpiderCloudMode::Smart); // proxy by default, auto-unblock when blocked
+
+let mut website = Website::new("https://example.com")
+    .with_spider_cloud_config(cloud)
+    .build()?;
+```
+
+`Smart` mode routes through proxies first and escalates to the unblocker only on pages that fight back, so you pay for bypass exactly when it's needed and never when it isn't.
+
+## Or run it locally
+
+No key, no service. Just the crawler.
 
 ```toml
 [dependencies]
@@ -52,37 +81,11 @@ async fn main() {
 }
 ```
 
-The whole program. Pages stream as they arrive. The crawler stops on its own.
+Pages stream in as they're fetched. The crawler discovers links, respects boundaries, and stops on its own.
 
-## What's inside
+## How it works
 
-- ⚡ Built for speed — handles large crawls without falling over
-- 🌊 Streams pages as they're fetched
-- 🧠 Renders JavaScript only when a page needs it
-- 🛡️ Proxies, retries, and stealth built in
-- 🧩 Scales from one script to a fleet of workers — same API
-- 🦀 Pure Rust, embeddable anywhere
-
-## Don't want to run the plumbing?
-
-Crawling the modern web takes ongoing work — proxy pools, headless Chrome, Cloudflare updates, fingerprinting. We maintain all of that as a service so you don't have to.
-
-[Spider Cloud](https://spider.cloud) is a managed backend for the same crawler. The code stays the same; the operational load goes away.
-
-```rust
-use spider::configuration::{SpiderCloudConfig, SpiderCloudMode};
-
-let cloud = SpiderCloudConfig::new("sk-...")
-    .with_mode(SpiderCloudMode::Smart);
-
-let mut website = Website::new("https://example.com")
-    .with_spider_cloud_config(cloud)
-    .build()?;
-```
-
-`Smart` mode uses the unblocker only on pages that need it, so you don't pay for bypass on requests that work fine on their own.
-
-> Free tier on signup at [spider.cloud](https://spider.cloud) — no card required.
+Spider runs HTTP-first and only launches headless Chrome when a page actually needs JavaScript. Streaming is built into both the HTTP and Chrome paths, so pages flow back the moment they're fetched instead of batching at the end. That design delivers best-in-class concurrency throughput, sustaining extremely high request volumes that scale from a single async task to a distributed worker fleet on the same API. Proxies, retries, rate limiting, and stealth are built in.
 
 ## Install
 
@@ -95,13 +98,15 @@ let mut website = Website::new("https://example.com")
 | MCP server (Claude, Cursor, …) | `cargo install spider_mcp` |
 | Managed crawling | [spider.cloud](https://spider.cloud) |
 
-## A little configuration
+## Configuration
+
+Every option has a sensible default, so set only what you need.
 
 ```rust
 let mut website = Website::new("https://example.com")
     .with_limit(50)                    // concurrent requests
     .with_depth(10)                    // how deep to follow links
-    .with_delay(500)                   // polite pause between hits (ms)
+    .with_delay(500)                   // pause between requests (ms)
     .with_respect_robots_txt(true)
     .with_subdomains(true)
     .with_user_agent(Some("MyBot/1.0"))
@@ -110,26 +115,20 @@ let mut website = Website::new("https://example.com")
     .unwrap();
 ```
 
-Defaults are reasonable — you only set what you care about. Full reference in the [`Configuration` docs](https://docs.rs/spider/latest/spider/configuration/struct.Configuration.html).
+Full reference in the [`Configuration` docs](https://docs.rs/spider/latest/spider/configuration/struct.Configuration.html).
 
-Need JavaScript rendering? Turn on `features = ["chrome"]` and call `crawl_smart()` — Spider tries HTTP first and only spins up Chrome on pages that need it.
+For JavaScript-heavy sites, enable `features = ["chrome"]` and call `crawl_smart()`. Spider tries HTTP first and only launches Chrome on pages that need it.
 
-## A few things people do with it
+## Use cases
 
-- Ingest the open web into vector stores for LLM pipelines
-- Watch sites for SEO or price changes
-- Export pages as Markdown, JSON, or WARC archives
-- Drive headless Chrome for AI browsing agents
-- Build small search indexes on a single machine
+Teams use Spider to feed the open web into vector stores for LLM and RAG pipelines, monitor sites for SEO and price changes, export pages as Markdown, JSON, or WARC, and drive headless Chrome for AI browsing agents. There are [50+ runnable examples](./examples/) to start from.
 
-→ 50+ runnable [examples](./examples/) to start from.
+## Learn more
 
-## Going deeper
-
-- 📚 [Guides](https://spider.cloud/guides) — recipes and integrations
-- 📖 [API docs](https://docs.rs/spider) — every option and method
-- 💬 [Discord](https://discord.spider.cloud) — questions and ideas
-- 🐛 [Issues](https://github.com/spider-rs/spider/issues) — bugs and feature requests
+- 📚 [Guides](https://spider.cloud/guides): recipes and integrations
+- 📖 [API docs](https://docs.rs/spider): every option and method
+- 💬 [Discord](https://discord.spider.cloud): questions and ideas
+- 🐛 [Issues](https://github.com/spider-rs/spider/issues): bugs and feature requests
 
 ## Contributing
 
