@@ -22,6 +22,14 @@ const MAX_ACTION_HISTORY: usize = 50;
 const MAX_URL_HISTORY: usize = 100;
 /// Maximum number of extractions to keep.
 const MAX_EXTRACTIONS: usize = 50;
+/// Maximum number of distinct keys in the key-value store.
+///
+/// A deliberately generous bound: normal sessions stay far below it, so it is
+/// invisible in practice. It engages only under pathological key churn (e.g. an
+/// agent looping and writing a unique key every round), where it caps memory by
+/// evicting one older entry per new key. This is DoS / leak protection, not a
+/// normal-use path.
+const MAX_DATA_ENTRIES: usize = 10_000;
 
 /// Session memory for storing state across operations.
 ///
@@ -92,8 +100,27 @@ impl AgentMemory {
     }
 
     /// Set a value in memory.
+    ///
+    /// The number of distinct keys is bounded by [`MAX_DATA_ENTRIES`]. Updating
+    /// an existing key never grows the store; once the cap is reached, adding a
+    /// *new* key evicts one arbitrary older entry (the just-set key is always
+    /// kept). Below the cap this is a plain insert with no behavior change.
     pub fn set(&self, key: impl Into<String>, value: serde_json::Value) {
-        self.data.insert(key.into(), value);
+        let key = key.into();
+        let is_new = !self.data.contains_key(&key);
+        self.data.insert(key.clone(), value);
+        if is_new && self.data.len() > MAX_DATA_ENTRIES {
+            // Collect a victim key BEFORE removing so no shard guard is held
+            // across the mutation — DashMap would self-deadlock otherwise.
+            let victim = self
+                .data
+                .iter()
+                .find(|entry| entry.key() != &key)
+                .map(|entry| entry.key().clone());
+            if let Some(victim) = victim {
+                self.data.remove(&victim);
+            }
+        }
     }
 
     /// Remove a value from memory.
@@ -379,6 +406,31 @@ mod tests {
         assert_eq!(memory.get("key2"), Some(serde_json::json!(42)));
         assert_eq!(memory.get("key3"), None);
         assert_eq!(memory.len(), 2);
+    }
+
+    #[test]
+    fn data_store_is_bounded_and_keeps_recent_key() {
+        let memory = AgentMemory::new();
+        // Overflow the cap with unique keys (pathological-churn case).
+        for i in 0..(MAX_DATA_ENTRIES + 100) {
+            memory.set(format!("k{i}"), serde_json::json!(i));
+        }
+        assert!(memory.len() <= MAX_DATA_ENTRIES);
+        // The most recently inserted key is always retained.
+        let last = MAX_DATA_ENTRIES + 99;
+        assert_eq!(
+            memory.get(&format!("k{last}")),
+            Some(serde_json::json!(last))
+        );
+    }
+
+    #[test]
+    fn data_store_updates_do_not_count_against_cap() {
+        let memory = AgentMemory::new();
+        for _ in 0..(MAX_DATA_ENTRIES * 2) {
+            memory.set("same", serde_json::json!("v"));
+        }
+        assert_eq!(memory.len(), 1);
     }
 
     #[test]

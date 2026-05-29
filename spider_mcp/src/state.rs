@@ -1,6 +1,17 @@
 use dashmap::DashMap;
 use serde::Serialize;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+/// Hard cap on retained sessions. Once reached, the oldest *terminal*
+/// (complete/failed) sessions are evicted to make room. In-flight (`Running`)
+/// sessions are never evicted, so an active crawl's results are always
+/// readable until it finishes.
+const MAX_SESSIONS: usize = 256;
+
+/// Age after which a terminal session is dropped even if under the cap. Bounds
+/// memory for a long-lived server: completed results stay readable for a
+/// window, then the session is reclaimed.
+const SESSION_TTL: Duration = Duration::from_secs(60 * 60);
 
 /// Shared server state for crawl sessions.
 pub struct SharedState {
@@ -13,6 +24,56 @@ impl SharedState {
             sessions: DashMap::new(),
         }
     }
+
+    /// Reclaim finished crawl sessions so a long-running server's memory stays
+    /// bounded. Without this, every completed crawl's pages/links would be
+    /// retained for the process lifetime.
+    ///
+    /// Two-stage, both bounded by the session count:
+    /// 1. Drop terminal sessions older than [`SESSION_TTL`].
+    /// 2. If still at/over [`MAX_SESSIONS`], evict the oldest terminal sessions
+    ///    until back under the cap.
+    ///
+    /// Concurrency: keys to remove are collected during a read-only `iter()`,
+    /// which is dropped *before* any `remove()` — so no shard guard is ever
+    /// held across a mutation (no DashMap self-deadlock). No mutexes, no
+    /// blocking, no `.await`. `Running` sessions are left untouched.
+    pub fn evict_stale_sessions(&self) {
+        let now = Instant::now();
+
+        // Pass 1: classify terminal sessions. TTL-expired ones are queued for
+        // removal; the rest are recorded (key, start time) as cap candidates.
+        let mut expired: Vec<String> = Vec::new();
+        let mut terminal: Vec<(String, Instant)> = Vec::new();
+        for entry in self.sessions.iter() {
+            let session = entry.value();
+            if matches!(
+                session.status,
+                CrawlSessionStatus::Complete | CrawlSessionStatus::Failed
+            ) {
+                if now.duration_since(session.started_at) >= SESSION_TTL {
+                    expired.push(entry.key().clone());
+                } else {
+                    terminal.push((entry.key().clone(), session.started_at));
+                }
+            }
+        }
+        // `iter()` fully consumed and dropped above — safe to mutate now.
+
+        for key in &expired {
+            self.sessions.remove(key);
+        }
+
+        // Pass 2: enforce the hard cap by dropping the oldest terminal sessions.
+        let len = self.sessions.len();
+        if len >= MAX_SESSIONS {
+            let overflow = len + 1 - MAX_SESSIONS;
+            terminal.sort_by_key(|(_, started_at)| *started_at); // oldest first
+            for (key, _) in terminal.into_iter().take(overflow) {
+                self.sessions.remove(&key);
+            }
+        }
+    }
 }
 
 /// A stored crawl session with accumulated results.
@@ -20,8 +81,10 @@ impl SharedState {
 pub struct CrawlSession {
     pub status: CrawlSessionStatus,
     pub pages: Vec<CrawlPageResult>,
+    /// When the session was created; drives age-based eviction in
+    /// [`SharedState::evict_stale_sessions`]. Not serialized (`Instant` has no
+    /// stable representation).
     #[serde(skip)]
-    #[allow(dead_code)]
     pub started_at: Instant,
 }
 
@@ -40,4 +103,93 @@ pub struct CrawlPageResult {
     pub content: String,
     pub status_code: u16,
     pub links: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn session(status: CrawlSessionStatus, started_at: Instant) -> CrawlSession {
+        CrawlSession {
+            status,
+            pages: Vec::new(),
+            started_at,
+        }
+    }
+
+    #[test]
+    fn running_sessions_are_never_evicted() {
+        let state = SharedState::new();
+        let old = Instant::now()
+            .checked_sub(SESSION_TTL * 2)
+            .unwrap_or_else(Instant::now);
+        // A running session well past the TTL must survive — its results may
+        // still be streaming in.
+        state
+            .sessions
+            .insert("running".into(), session(CrawlSessionStatus::Running, old));
+        state.evict_stale_sessions();
+        assert!(state.sessions.contains_key("running"));
+    }
+
+    #[test]
+    fn ttl_expired_terminal_sessions_are_dropped() {
+        let state = SharedState::new();
+        let old = Instant::now()
+            .checked_sub(SESSION_TTL + Duration::from_secs(1))
+            .unwrap_or_else(Instant::now);
+        state
+            .sessions
+            .insert("old".into(), session(CrawlSessionStatus::Complete, old));
+        state.sessions.insert(
+            "fresh".into(),
+            session(CrawlSessionStatus::Complete, Instant::now()),
+        );
+        state.evict_stale_sessions();
+        assert!(!state.sessions.contains_key("old"));
+        assert!(state.sessions.contains_key("fresh"));
+    }
+
+    #[test]
+    fn hard_cap_evicts_oldest_terminal_first() {
+        let state = SharedState::new();
+        let base = Instant::now()
+            .checked_sub(Duration::from_secs(MAX_SESSIONS as u64 + 10))
+            .unwrap_or_else(Instant::now);
+        // Fill to the cap with terminal sessions of strictly increasing age-anchor.
+        for i in 0..MAX_SESSIONS {
+            let started = base + Duration::from_secs(i as u64);
+            state.sessions.insert(
+                format!("s{i}"),
+                session(CrawlSessionStatus::Complete, started),
+            );
+        }
+        assert_eq!(state.sessions.len(), MAX_SESSIONS);
+
+        // Inserting one more triggers eviction of exactly the oldest entry.
+        state.evict_stale_sessions();
+        assert!(state.sessions.len() < MAX_SESSIONS);
+        assert!(!state.sessions.contains_key("s0"), "oldest evicted");
+        assert!(
+            state
+                .sessions
+                .contains_key(&format!("s{}", MAX_SESSIONS - 1)),
+            "newest retained"
+        );
+    }
+
+    #[test]
+    fn running_sessions_survive_cap_pressure() {
+        let state = SharedState::new();
+        // All running, over the cap: none are terminal, so none can be evicted.
+        // Bounded growth is acceptable here — running sessions are transient.
+        for i in 0..(MAX_SESSIONS + 5) {
+            state.sessions.insert(
+                format!("r{i}"),
+                session(CrawlSessionStatus::Running, Instant::now()),
+            );
+        }
+        state.evict_stale_sessions();
+        assert_eq!(state.sessions.len(), MAX_SESSIONS + 5);
+    }
 }

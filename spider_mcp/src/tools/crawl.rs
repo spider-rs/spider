@@ -155,6 +155,9 @@ pub async fn run(params: CrawlParams, state: Arc<SharedState>) -> Result<String,
         serde_json::to_string_pretty(&json!({ "pages": pages })).map_err(|e| e.to_string())
     } else {
         let crawl_id = uuid::Uuid::new_v4().to_string();
+        // Reclaim finished sessions before adding a new one so the server's
+        // memory stays bounded over its lifetime.
+        state.evict_stale_sessions();
         state.sessions.insert(
             crawl_id.clone(),
             CrawlSession {

@@ -5410,6 +5410,54 @@ pub async fn run_spawn_pages_concurrent(
     run_spawn_pages_with_options(browser, urls, cfgs, SpawnPageOptions::new()).await
 }
 
+/// Closes a spawned automation page's browser target when it leaves scope.
+///
+/// Dropping a chromiumoxide [`Page`] does **not** close the underlying CDP
+/// target, so each URL processed by the spawn-pages helpers would otherwise
+/// leak a tab for the lifetime of the shared `Browser`. This guard mirrors the
+/// dedicated tab-closer in the core `spider` chrome path: on drop it detaches a
+/// bounded `page.close()` so the closure stays fully async, never blocks, holds
+/// no locks (no deadlock), and returns its result with identical timing — the
+/// only change is the freed tab.
+#[cfg(feature = "chrome")]
+struct SpawnPageCloseGuard {
+    page: Option<Page>,
+}
+
+#[cfg(feature = "chrome")]
+impl SpawnPageCloseGuard {
+    #[inline]
+    fn new(page: Page) -> Self {
+        Self { page: Some(page) }
+    }
+
+    /// Borrow the live page. Always `Some` until the guard is dropped.
+    #[inline]
+    fn page(&self) -> &Page {
+        self.page
+            .as_ref()
+            .expect("spawn page present until guard drop")
+    }
+}
+
+#[cfg(feature = "chrome")]
+impl Drop for SpawnPageCloseGuard {
+    fn drop(&mut self) {
+        if let Some(page) = self.page.take() {
+            // `close()` is a CDP round-trip; detach it so drop stays sync and
+            // non-blocking. Bounded by a timeout so a wedged target cannot pin
+            // the task. Guarded on an active runtime so drop during shutdown is
+            // a no-op (the tab dies with the process anyway).
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let _ =
+                        tokio::time::timeout(std::time::Duration::from_secs(5), page.close()).await;
+                });
+            }
+        }
+    }
+}
+
 /// Process spawn_pages URLs concurrently with custom options.
 ///
 /// This is the full-featured version that allows customizing extraction,
@@ -5489,9 +5537,11 @@ pub async fn run_spawn_pages_with_options(
                 }
             };
 
-            // Create new page for this URL
+            // Create new page for this URL. Wrapped in a close guard so the
+            // browser target is released on every exit path (success, error,
+            // panic) — dropping the `Page` alone does not close the tab.
             let new_page = match browser.new_page(&url_clone).await {
-                Ok(page) => page,
+                Ok(page) => SpawnPageCloseGuard::new(page),
                 Err(e) => {
                     return SpawnedPageResult {
                         url: url_clone,
@@ -5504,18 +5554,22 @@ pub async fn run_spawn_pages_with_options(
 
             // Run page setup callback if provided (for event tracking propagation)
             if let Some(ref setup) = options.page_setup {
-                setup(&new_page).await;
+                setup(new_page.page()).await;
             }
 
             // Wait for page readiness using the configured strategy
-            options.page_wait.apply(&new_page).await;
+            options.page_wait.apply(new_page.page()).await;
 
             // Set up bytes tracking if enabled
             let total_bytes: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
             let response_map: Arc<DashMap<String, u64>> = Arc::new(DashMap::new());
 
             let bytes_listener = if options.track_bytes {
-                new_page.event_listener::<EventDataReceived>().await.ok()
+                new_page
+                    .page()
+                    .event_listener::<EventDataReceived>()
+                    .await
+                    .ok()
             } else {
                 None
             };
@@ -5562,7 +5616,7 @@ pub async fn run_spawn_pages_with_options(
             }
 
             // Run automation on the new page
-            let result = run_remote_multimodal_with_page(&page_cfgs, &new_page, &url_clone)
+            let result = run_remote_multimodal_with_page(&page_cfgs, new_page.page(), &url_clone)
                 .await
                 .map_err(|e| format!("Automation failed: {}", e));
 
@@ -5711,18 +5765,22 @@ pub async fn run_spawn_pages_with_factory<E: std::fmt::Display + Send + 'static>
             };
 
             let result = async {
-                // Create new page using the factory
-                let new_page = page_factory(url_clone.clone())
-                    .await
-                    .map_err(|e| format!("Failed to create page: {}", e))?;
+                // Create new page using the factory. Wrapped in a close guard so
+                // the browser target is released on every exit path — dropping
+                // the `Page` alone does not close the tab.
+                let new_page = SpawnPageCloseGuard::new(
+                    page_factory(url_clone.clone())
+                        .await
+                        .map_err(|e| format!("Failed to create page: {}", e))?,
+                );
 
                 // Run page setup callback if provided (for event tracking propagation)
                 if let Some(ref setup) = options.page_setup {
-                    setup(&new_page).await;
+                    setup(new_page.page()).await;
                 }
 
                 // Wait for page readiness using the configured strategy
-                options.page_wait.apply(&new_page).await;
+                options.page_wait.apply(new_page.page()).await;
 
                 // Build page-specific config from the full base config to preserve
                 // routing, schemas, relevance gates, and other production knobs.
@@ -5745,7 +5803,7 @@ pub async fn run_spawn_pages_with_factory<E: std::fmt::Display + Send + 'static>
                 }
 
                 // Run automation on the new page
-                run_remote_multimodal_with_page(&page_cfgs, &new_page, &url_clone)
+                run_remote_multimodal_with_page(&page_cfgs, new_page.page(), &url_clone)
                     .await
                     .map_err(|e| format!("Automation failed: {}", e))
             }

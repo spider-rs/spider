@@ -70,14 +70,37 @@ pub struct AutomationMemory {
 impl AutomationMemory {
     const LEVEL_ATTEMPTS_KEY: &'static str = "_level_attempts";
 
+    /// Maximum number of distinct keys in the store. Generous enough to be
+    /// invisible in normal sessions; engages only under pathological key churn
+    /// to cap memory (DoS / leak protection).
+    const MAX_STORE_ENTRIES: usize = 10_000;
+
     /// Create a new empty memory.
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Store a value by key.
+    ///
+    /// The number of distinct keys is bounded by [`Self::MAX_STORE_ENTRIES`].
+    /// Updating an existing key never grows the store; once the cap is reached,
+    /// adding a *new* key evicts one arbitrary older entry. The just-set key and
+    /// the engine's `_level_attempts` control key are never evicted. Below the
+    /// cap this is a plain insert with no behavior change.
     pub fn set(&mut self, key: impl Into<String>, value: serde_json::Value) {
-        self.store.insert(key.into(), value);
+        let key = key.into();
+        let is_new = !self.store.contains_key(&key);
+        self.store.insert(key.clone(), value);
+        if is_new && self.store.len() > Self::MAX_STORE_ENTRIES {
+            let victim = self
+                .store
+                .keys()
+                .find(|k| *k != &key && k.as_str() != Self::LEVEL_ATTEMPTS_KEY)
+                .cloned();
+            if let Some(victim) = victim {
+                self.store.remove(&victim);
+            }
+        }
     }
 
     /// Get a value by key.
@@ -348,5 +371,41 @@ mod tests {
         assert_eq!(memory.get_level_attempt("L7:word-search"), 2);
         assert_eq!(memory.increment_level_attempt("L2:image-grid"), 1);
         assert_eq!(memory.get_level_attempt("L2:image-grid"), 1);
+    }
+
+    #[test]
+    fn store_is_bounded_and_keeps_recent_key() {
+        let mut memory = AutomationMemory::new();
+        // Overflow the cap with unique keys (the pathological-churn case).
+        for i in 0..(AutomationMemory::MAX_STORE_ENTRIES + 100) {
+            memory.set(format!("k{i}"), serde_json::json!(i));
+        }
+        assert!(memory.store.len() <= AutomationMemory::MAX_STORE_ENTRIES);
+        // The most recently inserted key is always retained.
+        let last = AutomationMemory::MAX_STORE_ENTRIES + 99;
+        assert_eq!(
+            memory.get(&format!("k{last}")),
+            Some(&serde_json::json!(last))
+        );
+    }
+
+    #[test]
+    fn store_cap_preserves_level_attempts_control_key() {
+        let mut memory = AutomationMemory::new();
+        memory.increment_level_attempt("L1:checkbox");
+        for i in 0..(AutomationMemory::MAX_STORE_ENTRIES + 100) {
+            memory.set(format!("k{i}"), serde_json::json!(i));
+        }
+        // The engine's control key survives eviction pressure.
+        assert_eq!(memory.get_level_attempt("L1:checkbox"), 1);
+    }
+
+    #[test]
+    fn store_updates_do_not_count_against_cap() {
+        let mut memory = AutomationMemory::new();
+        for _ in 0..(AutomationMemory::MAX_STORE_ENTRIES * 2) {
+            memory.set("same", serde_json::json!("v"));
+        }
+        assert_eq!(memory.store.len(), 1);
     }
 }
