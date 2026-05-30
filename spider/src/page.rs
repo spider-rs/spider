@@ -2768,10 +2768,16 @@ pub(crate) fn validate_link<
             // attempt to check if domain matches with port.
             if !can_process && host_name.is_some() && abs.port().is_some() {
                 if let Some(host) = host_name {
-                    let hname =
-                        string_concat!(host, ":", abs.port().unwrap_or_default().to_string());
+                    use std::fmt::Write as _;
+                    // Build "host:port" without the two heap Strings that
+                    // string_concat! + port.to_string() would each allocate.
+                    // CompactString keeps small host:port values inline (no heap).
+                    let mut hname = CompactString::with_capacity(host.len() + 6);
+                    hname.push_str(host);
+                    hname.push(':');
+                    let _ = write!(hname, "{}", abs.port().unwrap_or_default());
                     can_process = parent_host_match(
-                        Some(&hname),
+                        Some(hname.as_str()),
                         base_domain,
                         parent_host,
                         base_input_domain,

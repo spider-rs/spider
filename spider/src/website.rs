@@ -9712,7 +9712,7 @@ impl Website {
                             let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
 
                             let mut links: HashSet<CaseInsensitiveString> =
-                                *self.extra_links.clone();
+                                (*self.extra_links).clone();
 
                             links.extend(base_links);
 
