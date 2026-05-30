@@ -845,6 +845,16 @@ pub async fn process_spawn_pages_with_config(
                 }
             };
 
+            // Close this spawned tab on every exit path (success, error, panic,
+            // task cancellation). `new_page` is local to this task and discarded
+            // after automation runs, so the guard hands it to the background
+            // tab-closer on drop — without it each spawned URL leaks its CDP
+            // target. cfg-gated because `TabCloseGuard` only exists under
+            // `not(decentralized)`, and this fn is reachable via `agent_chrome`
+            // which does not exclude `decentralized`.
+            #[cfg(not(feature = "decentralized"))]
+            let _tab_guard = crate::features::chrome::TabCloseGuard::new(new_page.clone());
+
             // Apply spider configuration (stealth, fingerprinting, event tracking)
             crate::features::chrome::setup_chrome_events(&new_page, &spider_config).await;
 

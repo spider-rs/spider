@@ -6125,6 +6125,13 @@ impl Website {
             )
             .await
             {
+                // Close this render tab on every exit path (success, error,
+                // panic, cancellation). `chrome_page` is local to this block —
+                // its rendered content is moved into the spider `Page` — so the
+                // guard hands the tab to the background tab-closer on drop;
+                // without it the CDP target leaks per smart fallback render.
+                let _tab_guard = crate::features::chrome::TabCloseGuard::new(chrome_page.clone());
+
                 let (_, intercept_handle) = tokio::join!(
                     crate::features::chrome::setup_chrome_events(&chrome_page, config),
                     crate::features::chrome::setup_chrome_interception_base(

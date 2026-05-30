@@ -8224,6 +8224,15 @@ impl Page {
                             )
                             .await
                             {
+                                // Close this smart-upgrade tab on every exit
+                                // path (success, error, panic, cancellation).
+                                // `new_page` is local to this block and
+                                // discarded after link extraction, so the guard
+                                // hands it to the background tab-closer on drop;
+                                // without it the CDP target leaks per upgrade.
+                                let _tab_guard =
+                                    crate::features::chrome::TabCloseGuard::new(new_page.clone());
+
                                 let (intercept_handle, _) = tokio::join!(
                                     crate::features::chrome::setup_chrome_interception_base(
                                         &new_page,
@@ -8797,6 +8806,15 @@ impl Page {
                             )
                             .await
                             {
+                                // Close this smart-upgrade tab on every exit
+                                // path (success, error, panic, cancellation).
+                                // `new_page` is local to this block and
+                                // discarded after link extraction, so the guard
+                                // hands it to the background tab-closer on drop;
+                                // without it the CDP target leaks per upgrade.
+                                let _tab_guard =
+                                    crate::features::chrome::TabCloseGuard::new(new_page.clone());
+
                                 let (intercept_handle, _) = tokio::join!(
                                     crate::features::chrome::setup_chrome_interception_base(
                                         &new_page,
