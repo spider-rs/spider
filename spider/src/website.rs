@@ -6901,7 +6901,7 @@ impl Website {
                 let url = self.url.inner().to_string();
                 run_with_crawl_timeout(crawl_timeout, &url, async {
                     self.crawl_concurrent_raw(&client, &handle).await;
-                    self.sitemap_crawl_chain(&client, &handle, false).await;
+                    self.sitemap_crawl_chain_raw(&client, &handle, false).await;
                 })
                 .await;
                 self.set_crawl_status();
@@ -12017,6 +12017,34 @@ impl Website {
         if !self.configuration.ignore_sitemap {
             self.sitemap_crawl_chrome(client, handle, scrape).await
         }
+    }
+
+    /// Sitemap crawl chain that always uses the plain-HTTP path, regardless of
+    /// whether the `chrome` feature is enabled. `crawl_raw` uses this so an
+    /// HTTP-only crawl never launches a browser for the sitemap pass. Without
+    /// it, `crawl_raw` would fall through to `sitemap_crawl_chain`, which spins
+    /// up Chrome on a chrome-enabled build. This does nothing without the
+    /// `sitemap` flag.
+    #[cfg(feature = "sitemap")]
+    async fn sitemap_crawl_chain_raw(
+        &mut self,
+        client: &Client,
+        handle: &Option<Arc<AtomicI8>>,
+        scrape: bool,
+    ) {
+        if !self.configuration.ignore_sitemap {
+            self.sitemap_crawl_raw(client, handle, scrape).await
+        }
+    }
+
+    /// No-op `sitemap_crawl_chain_raw` for builds without the `sitemap` flag.
+    #[cfg(not(feature = "sitemap"))]
+    async fn sitemap_crawl_chain_raw(
+        &mut self,
+        _client: &Client,
+        _handle: &Option<Arc<AtomicI8>>,
+        _scrape: bool,
+    ) {
     }
 
     /// Sitemap parse entire lists. Note: this method does not re-crawl the links of the pages found on the sitemap. This does nothing without the `sitemap` flag.
