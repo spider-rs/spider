@@ -1031,6 +1031,9 @@ pub type OnLinkFindCallback = Arc<
         + Sync,
 >;
 
+/// Callback fired when a link is blocked by robots.txt.
+pub type OnLinkBlockedCallback = Arc<dyn Fn(String) + Send + Sync>;
+
 /// Callback closure that determines if a link should be crawled or not.
 pub trait OnShouldCrawlClosure: Fn(&Page) -> bool + Send + Sync + 'static {}
 impl<F: Fn(&Page) -> bool + Send + Sync + 'static> OnShouldCrawlClosure for F {}
@@ -1120,6 +1123,8 @@ pub struct Website {
     pub on_link_find_callback: Option<OnLinkFindCallback>,
     /// The callback to use if a page should be ignored. Return false to ensure that the discovered links are not crawled.
     pub on_should_crawl_callback: Option<OnShouldCrawlCallback>,
+    /// Callback fired when a link is blocked by robots.txt.
+    pub on_link_blocked_callback: Option<OnLinkBlockedCallback>,
     /// Custom retry strategy that controls retry behavior per attempt.
     /// When set, this takes precedence over the simple `Configuration::retry` counter.
     pub retry_strategy: Option<crate::retry_strategy::SharedRetryStrategy>,
@@ -1813,7 +1818,12 @@ impl Website {
         let blocked_whitelist = !whitelist.is_empty() && !contains(whitelist, link.inner());
         let blocked_blacklist = !blacklist.is_empty() && contains(blacklist, link.inner());
 
-        if blocked_whitelist || blocked_blacklist || !self.is_allowed_robots(link.as_ref()) {
+        if blocked_whitelist || blocked_blacklist {
+            ProcessLinkStatus::Blocked
+        } else if !self.is_allowed_robots(link.as_ref()) {
+            if let Some(cb) = &self.on_link_blocked_callback {
+                cb(link.as_ref().to_string());
+            }
             ProcessLinkStatus::Blocked
         } else {
             ProcessLinkStatus::Allowed
@@ -1834,7 +1844,12 @@ impl Website {
         let blocked_whitelist = !whitelist.is_empty() && !contains(whitelist, link);
         let blocked_blacklist = !blacklist.is_empty() && contains(blacklist, link);
 
-        if blocked_whitelist || blocked_blacklist || !self.is_allowed_robots(link) {
+        if blocked_whitelist || blocked_blacklist {
+            ProcessLinkStatus::Blocked
+        } else if !self.is_allowed_robots(link) {
+            if let Some(cb) = &self.on_link_blocked_callback {
+                cb(link.to_string());
+            }
             ProcessLinkStatus::Blocked
         } else {
             ProcessLinkStatus::Allowed
@@ -12726,6 +12741,18 @@ impl Website {
             + 'static,
     {
         self.on_link_find_callback = Some(Arc::new(f));
+    }
+
+    /// Set a callback fired when a link is blocked by robots.txt.
+    pub fn with_on_link_blocked_callback<F: Fn(String) + Send + Sync + 'static>(
+        &mut self,
+        callback: Option<F>,
+    ) -> &mut Self {
+        match callback {
+            Some(cb) => self.on_link_blocked_callback = Some(Arc::new(cb)),
+            None => self.on_link_blocked_callback = None,
+        };
+        self
     }
 
     /// Use a callback to determine if a page should be ignored. Return false to ensure that the discovered links are not crawled.
