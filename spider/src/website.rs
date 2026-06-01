@@ -1817,15 +1817,13 @@ impl Website {
 
         let blocked_whitelist = !whitelist.is_empty() && !contains(whitelist, link.inner());
         let blocked_blacklist = !blacklist.is_empty() && contains(blacklist, link.inner());
-        let blocked_robots = !self.is_allowed_robots(link.as_ref());
 
-        if blocked_robots {
+        if blocked_whitelist || blocked_blacklist {
+            ProcessLinkStatus::Blocked
+        } else if !self.is_allowed_robots(link.as_ref()) {
             if let Some(cb) = &self.on_link_blocked_callback {
                 cb(link.as_ref().to_string());
             }
-        }
-
-        if blocked_whitelist || blocked_blacklist || blocked_robots {
             ProcessLinkStatus::Blocked
         } else {
             ProcessLinkStatus::Allowed
@@ -1845,15 +1843,13 @@ impl Website {
 
         let blocked_whitelist = !whitelist.is_empty() && !contains(whitelist, link);
         let blocked_blacklist = !blacklist.is_empty() && contains(blacklist, link);
-        let blocked_robots = !self.is_allowed_robots(link);
 
-        if blocked_robots {
+        if blocked_whitelist || blocked_blacklist {
+            ProcessLinkStatus::Blocked
+        } else if !self.is_allowed_robots(link) {
             if let Some(cb) = &self.on_link_blocked_callback {
                 cb(link.to_string());
             }
-        }
-
-        if blocked_whitelist || blocked_blacklist || blocked_robots {
             ProcessLinkStatus::Blocked
         } else {
             ProcessLinkStatus::Allowed
