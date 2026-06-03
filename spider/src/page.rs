@@ -13366,7 +13366,7 @@ fn test_get_timeout_proxy_errors() {
         let timeout = page.get_timeout();
         assert_eq!(
             timeout,
-            Some(std::time::Duration::from_millis(1_500)),
+            Some(std::time::Duration::from_millis(500)),
             "{code} → 500ms"
         );
     }
