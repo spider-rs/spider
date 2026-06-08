@@ -426,6 +426,7 @@ pub fn create_handler_config(config: &Configuration) -> HandlerConfig {
             _ => None,
         },
         intercept_manager: config.chrome_intercept.intercept_manager,
+        remote_local_policy: config.chrome_intercept.remote_local_policy,
         only_html: config.only_html && !config.full_resources,
         max_bytes_allowed: config.max_bytes_allowed,
         // Only enforce the redirect cap on the Chrome path when the user
