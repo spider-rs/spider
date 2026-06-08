@@ -119,7 +119,7 @@ tikv-jemallocator = { version = "0.6", optional = true }
 mimalloc = { version = "0.1", optional = true, default-features = false }
 
 [dependencies.chromey]
-version = "2.50"
+version = "2"
 optional = true
 default-features = false
 features = ["bytes", "stream"]
