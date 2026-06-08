@@ -1062,6 +1062,13 @@ pub struct RequestInterceptConfiguration {
     pub whitelist_patterns: Option<Vec<String>>,
     /// Blacklist patterns.
     pub blacklist_patterns: Option<Vec<String>>,
+    /// Push the interception policy (these flags + the per-job
+    /// blacklist/whitelist + page url) to a capable remote rendering engine
+    /// once per navigation, so it resolves block/allow decisions locally
+    /// instead of round-tripping every paused request. Default `false`. Safe
+    /// against a normal Chrome target (the vendor method is ignored), so this
+    /// only changes behavior for engines that implement it.
+    pub remote_local_policy: bool,
 }
 
 impl Default for RequestInterceptConfiguration {
@@ -1082,6 +1089,7 @@ impl Default for RequestInterceptConfiguration {
             intercept_manager: NetworkInterceptManager::default(),
             whitelist_patterns: None,
             blacklist_patterns: None,
+            remote_local_policy: false,
         }
     }
 }
@@ -1128,6 +1136,13 @@ impl RequestInterceptConfiguration {
     /// Set the blacklist patterns.
     pub fn set_blacklist_patterns(&mut self, blacklist_patterns: Option<Vec<String>>) {
         self.blacklist_patterns = blacklist_patterns;
+    }
+
+    /// Push the interception policy to a capable remote rendering engine once
+    /// per navigation so it resolves block/allow locally (no per-request
+    /// round-trip). No-op against a normal Chrome target.
+    pub fn set_remote_local_policy(&mut self, enabled: bool) {
+        self.remote_local_policy = enabled;
     }
 
     /// Block all request besides html and the important stuff.

@@ -13178,6 +13178,17 @@ impl Website {
         self
     }
 
+    /// Push the request-interception policy to a capable remote rendering
+    /// engine once per navigation so it resolves block/allow decisions locally
+    /// (the firewall/adblock lists stay baked into the engine; only the small
+    /// per-job flags + blacklist/whitelist travel, once), eliminating the
+    /// per-request round-trip. Enables request interception. No-op against a
+    /// normal Chrome target. Does nothing without the `chrome_intercept` flag.
+    pub fn with_remote_local_policy(&mut self, enabled: bool) -> &mut Self {
+        self.configuration.with_remote_local_policy(enabled);
+        self
+    }
+
     /// Add a referer to the request.
     pub fn with_referer(&mut self, referer: Option<String>) -> &mut Self {
         self.configuration.with_referer(referer);

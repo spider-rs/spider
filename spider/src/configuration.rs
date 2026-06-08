@@ -1972,6 +1972,28 @@ impl Configuration {
         self
     }
 
+    #[cfg(feature = "chrome_intercept")]
+    /// Push the interception policy (the `chrome_intercept` flags + per-job
+    /// blacklist/whitelist + page url) to a capable remote rendering engine
+    /// once per navigation, so it resolves block/allow decisions locally
+    /// instead of round-tripping every paused request. Enables request
+    /// interception. No-op against a normal Chrome target (the vendor method is
+    /// ignored), so it only changes behavior for engines that implement it.
+    pub fn with_remote_local_policy(&mut self, enabled: bool) -> &mut Self {
+        if enabled {
+            self.chrome_intercept.enabled = true;
+        }
+        self.chrome_intercept.set_remote_local_policy(enabled);
+        self
+    }
+
+    #[cfg(not(feature = "chrome_intercept"))]
+    /// Push the interception policy to a capable remote rendering engine. This
+    /// method does nothing without the `chrome_intercept` flag.
+    pub fn with_remote_local_policy(&mut self, _enabled: bool) -> &mut Self {
+        self
+    }
+
     #[cfg(feature = "chrome")]
     /// Set the connection url for the chrome instance. This method does nothing if the `chrome` is not enabled.
     pub fn with_chrome_connection(&mut self, chrome_connection_url: Option<String>) -> &mut Self {
