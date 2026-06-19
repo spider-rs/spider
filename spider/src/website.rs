@@ -12218,7 +12218,7 @@ impl Website {
 
                             if crawl {
                                 // Wait for a permit before spawning (respects concurrency_limit)
-                                let permit = crate::utils::get_semaphore(
+                                let permit = match crate::utils::get_semaphore(
                                     semaphore,
                                     !self.configuration.shared_queue,
                                 )
@@ -12226,7 +12226,10 @@ impl Website {
                                 .clone()
                                 .acquire_owned()
                                 .await
-                                .unwrap();
+                                {
+                                    Ok(p) => p,
+                                    Err(_) => break,
+                                };
 
                                 let client = client.clone();
                                 let tx = tx.clone();
@@ -12350,7 +12353,7 @@ impl Website {
             }
 
             // Wait for all spawned tasks to complete
-            while let Some(_) = set.join_next().await {}
+            while set.join_next().await.is_some() {}
         }
     }
 
