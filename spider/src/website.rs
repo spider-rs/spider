@@ -11251,6 +11251,8 @@ impl Website {
 
             let persist_links = self.status == CrawlStatus::Start;
 
+            let semaphore = self.setup_semaphore();
+
             let mut interval: Interval = tokio::time::interval(Duration::from_millis(15));
 
             let (sitemap_path, needs_trailing) = self.get_sitemap_setup(domain);
@@ -11382,6 +11384,7 @@ impl Website {
                                                 &tx,
                                                 &mut sitemaps,
                                                 true,
+                                                &semaphore,
                                             )
                                             .await;
                                         }
@@ -12172,6 +12175,7 @@ impl Website {
         tx: &tokio::sync::mpsc::Sender<Page>,
         sitemaps: &mut Vec<Box<CompactString>>,
         crawl: bool,
+        semaphore: &Arc<Semaphore>,
     ) {
         use sitemap::reader::{SiteMapEntity, SiteMapReader};
         use sitemap::structs::Location;
@@ -12181,6 +12185,14 @@ impl Website {
 
             let retry = self.configuration.retry;
             let retry_strategy_ref = self.retry_strategy.clone();
+            let cache_policy = self.configuration.cache_policy.clone();
+            let cache_ns = self
+                .configuration
+                .cache_namespace
+                .as_ref()
+                .map(|s| s.as_str().to_string());
+
+            let mut set: JoinSet<()> = JoinSet::new();
 
             for entity in reader {
                 if !self.handle_process(handle, interval, async {}).await {
@@ -12205,22 +12217,31 @@ impl Website {
                             self.insert_link(&link).await;
 
                             if crawl {
+                                // Wait for a permit before spawning (respects concurrency_limit)
+                                let permit = crate::utils::get_semaphore(
+                                    semaphore,
+                                    !self.configuration.shared_queue,
+                                )
+                                .await
+                                .clone()
+                                .acquire_owned()
+                                .await
+                                .unwrap();
+
                                 let client = client.clone();
                                 let tx = tx.clone();
-                                let cache_options = self.configuration.get_cache_options();
-                                let cache_policy = self.configuration.cache_policy.clone();
-                                let cache_ns: Option<String> = self
-                                    .configuration
-                                    .cache_namespace
-                                    .as_ref()
-                                    .map(|s| s.as_str().to_string());
-
+                                let cache_options_init = self.configuration.get_cache_options();
+                                let cache_policy = cache_policy.clone();
+                                let cache_ns = cache_ns.clone();
                                 let retry_strategy_ref = retry_strategy_ref.clone();
-                                crate::utils::spawn_task("page_fetch", async move {
+
+                                set.spawn(async move {
+                                    let _permit = permit; // Held for duration of task
+
                                     let mut page = Page::new_page_with_cache(
                                         link.inner(),
                                         &client,
-                                        cache_options.clone(),
+                                        cache_options_init.clone(),
                                         &cache_policy,
                                         cache_ns.as_deref(),
                                     )
@@ -12292,7 +12313,7 @@ impl Website {
                                         page = Page::new_page_with_cache(
                                             link.inner(),
                                             &client,
-                                            cache_options.clone(),
+                                            cache_options_init.clone(),
                                             &cache_policy,
                                             cache_ns.as_deref(),
                                         )
@@ -12327,6 +12348,9 @@ impl Website {
                     break;
                 }
             }
+
+            // Wait for all spawned tasks to complete
+            while let Some(_) = set.join_next().await {}
         }
     }
 
