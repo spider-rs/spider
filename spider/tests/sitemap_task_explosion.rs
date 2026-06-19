@@ -18,10 +18,7 @@ fn single_sitemap_large(base: &str, n: usize) -> String {
          <urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n",
     );
     for i in 0..n {
-        xml.push_str(&format!(
-            "  <url><loc>{}/page/{}</loc></url>\n",
-            base, i
-        ));
+        xml.push_str(&format!("  <url><loc>{}/page/{}</loc></url>\n", base, i));
     }
     xml.push_str("</urlset>\n");
     xml
@@ -152,7 +149,7 @@ async fn crawl_sitemap_semaphore_bounding() {
     // With unbounded spawning, thousands of tasks could be alive simultaneously.
     // With semaphore-gated spawning, only ~N tasks (where N = concurrency_limit + buffer)
     // should be alive at once.
-    // 
+    //
     // Note: tower's ConcurrencyLimitLayer also limits in-flight HTTP requests,
     // but the original code spawns ALL tasks immediately regardless.
     // The fix makes task spawning respect concurrency_limit via semaphore.
