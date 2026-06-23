@@ -28,7 +28,7 @@ cargo build -p spider_mcp --release
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `chrome` | yes | Chrome/CDP rendering for JavaScript-heavy sites |
-| `spider_cloud` | yes | [Spider Cloud](https://spider.cloud) managed crawling via `SPIDER_API_KEY` |
+| `spider_cloud` | yes | [Spider Cloud](https://spider.cloud?utm_source=github&utm_medium=readme&utm_campaign=spider_mcp) managed crawling via `SPIDER_API_KEY` |
 | `chrome_screenshot` | no | Page screenshot capture |
 | `smart` | no | Smart mode (hybrid Chrome + HTTP) |
 | `search_serper` | no | Web search via Serper |
@@ -76,7 +76,7 @@ Add to `claude_desktop_config.json`:
 
 ### With Spider Cloud
 
-Set `SPIDER_API_KEY` to route all crawling through [Spider Cloud](https://spider.cloud) (managed proxies, anti-bot bypass, CAPTCHA handling):
+Set `SPIDER_API_KEY` to route all crawling through [Spider Cloud](https://spider.cloud?utm_source=github&utm_medium=readme&utm_campaign=spider_mcp) (managed proxies, anti-bot bypass, CAPTCHA handling):
 
 ```json
 {

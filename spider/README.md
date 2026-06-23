@@ -174,7 +174,7 @@ This is needed if `headers` is set in both [spider](../spider/README.md) and [sp
 1. `string_interner_buffer_backend`: Enables the String interning using the buffer backend [default].
 1. `string_interner_string_backend`: Enables the String interning using the string backend.
 1. `string_interner_bucket_backend`: Enables the String interning using the bucket backend.
-1. `spider_cloud`: Use [spider.cloud](https://spider.cloud) for anti-bot bypass and proxy rotation.
+1. `spider_cloud`: Use [spider.cloud](https://spider.cloud?utm_source=github&utm_medium=readme&utm_campaign=spider) for anti-bot bypass and proxy rotation.
 
 ### Decentralization
 
@@ -598,7 +598,7 @@ If you need a blocking sync implementation use a version prior to `v1.12.0`.
 
 ### Spider Cloud
 
-Use [spider.cloud](https://spider.cloud) to help with hard-to-crawl pages. Get clean LLM-ready
+Use [spider.cloud](https://spider.cloud?utm_source=github&utm_medium=readme&utm_campaign=spider) to help with hard-to-crawl pages. Get clean LLM-ready
 markdown by setting `return_format` to `"markdown"`:
 
 ```toml

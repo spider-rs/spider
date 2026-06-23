@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://spider.cloud" target="_blank">
+  <a href="https://spider.cloud?utm_source=github&utm_medium=readme&utm_campaign=spider_rs" target="_blank">
     <img src="https://avatars.githubusercontent.com/u/112983871?s=400&u=e03cc05523f015dd1f2a5ab9e6158de8a30821c2&v=4" alt="Spider" width="140" height="140">
   </a>
 </p>
@@ -17,8 +17,8 @@
 </p>
 
 <h4 align="center">
-  <a href="https://spider.cloud">spider.cloud</a> ·
-  <a href="https://spider.cloud/guides">Guides</a> ·
+  <a href="https://spider.cloud?utm_source=github&utm_medium=readme&utm_campaign=spider_rs">spider.cloud</a> ·
+  <a href="https://spider.cloud/guides?utm_source=github&utm_medium=readme&utm_campaign=spider_rs">Guides</a> ·
   <a href="https://docs.rs/spider">Docs</a> ·
   <a href="./examples/">Examples</a> ·
   <a href="https://discord.spider.cloud">Discord</a>
@@ -26,13 +26,13 @@
 
 ---
 
-Spider is a concurrency-first crawling engine built in Rust. It streams pages the moment they arrive, renders JavaScript only when a page demands it, and scales from a single script to a distributed fleet without changing your code. The same engine powers [Spider Cloud](https://spider.cloud), so you can prototype locally and move to managed infrastructure with one config change.
+Spider is a concurrency-first crawling engine built in Rust. It streams pages the moment they arrive, renders JavaScript only when a page demands it, and scales from a single script to a distributed fleet without changing your code. The same engine powers [Spider Cloud](https://spider.cloud?utm_source=github&utm_medium=readme&utm_campaign=spider_rs), so you can prototype locally and move to managed infrastructure with one config change.
 
 ## Start in the cloud
 
 The hardest part of crawling at scale isn't the code. It's the proxies, headless browsers, and constant anti-bot churn. Spider Cloud runs all of that for you behind the same API.
 
-[**Get a free API key →**](https://spider.cloud) (no card required)
+[**Get a free API key →**](https://spider.cloud?utm_source=github&utm_medium=readme&utm_campaign=spider_rs) (no card required)
 
 ```toml
 [dependencies]
@@ -96,7 +96,7 @@ Spider runs HTTP-first and only launches headless Chrome when a page actually ne
 | Node.js package | `npm i @spider-rs/spider-rs` |
 | Python package | `pip install spider_rs` |
 | MCP server (Claude, Cursor, …) | `cargo install spider_mcp` |
-| Managed crawling | [spider.cloud](https://spider.cloud) |
+| Managed crawling | [spider.cloud](https://spider.cloud?utm_source=github&utm_medium=readme&utm_campaign=spider_rs) |
 
 ## Configuration
 
@@ -125,7 +125,7 @@ Teams use Spider to feed the open web into vector stores for LLM and RAG pipelin
 
 ## Learn more
 
-- 📚 [Guides](https://spider.cloud/guides): recipes and integrations
+- 📚 [Guides](https://spider.cloud/guides?utm_source=github&utm_medium=readme&utm_campaign=spider_rs): recipes and integrations
 - 📖 [API docs](https://docs.rs/spider): every option and method
 - 💬 [Discord](https://discord.spider.cloud): questions and ideas
 - 🐛 [Issues](https://github.com/spider-rs/spider/issues): bugs and feature requests
