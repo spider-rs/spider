@@ -84,8 +84,8 @@ pub struct Cli {
     /// SPIDER_CACHE_NAMESPACE env var.
     #[clap(long)]
     pub cache_namespace: Option<String>,
-    /// Spider Cloud mode: proxy (default), api, unblocker, fallback, or smart.
-    #[clap(long, default_value = "proxy")]
+    /// Spider Cloud mode: api (default), proxy, unblocker, fallback, or smart.
+    #[clap(long, default_value = "api")]
     pub spider_cloud_mode: Option<String>,
     /// Use Spider Browser Cloud (remote headless CDP) instead of the HTTP/proxy cloud.
     #[clap(long)]

@@ -166,7 +166,12 @@ async fn wait_for_code(listener: &TcpListener, state: &str) -> Result<String, Bo
             continue;
         }
         let params = query_pairs(&target);
-        let get = |key: &str| params.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
+        let get = |key: &str| {
+            params
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.clone())
+        };
 
         if let Some(error) = get("error") {
             return Err(format!("authorization denied: {error}").into());
@@ -222,7 +227,10 @@ fn origin_of(url: &str) -> Result<String, Box<dyn Error>> {
         .split_once("://")
         .filter(|(scheme, _)| *scheme == "http" || *scheme == "https")
         .ok_or("MCP server must be an http(s) URL")?;
-    Ok(format!("{scheme}://{}", rest.split('/').next().unwrap_or(rest)))
+    Ok(format!(
+        "{scheme}://{}",
+        rest.split('/').next().unwrap_or(rest)
+    ))
 }
 
 fn random_token() -> String {

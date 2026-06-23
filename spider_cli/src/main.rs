@@ -392,11 +392,12 @@ async fn main() {
                     use spider::configuration::{SpiderCloudConfig, SpiderCloudMode};
 
                     let mode = match cli.spider_cloud_mode.as_deref() {
-                        Some("api") => SpiderCloudMode::Api,
+                        Some("proxy") => SpiderCloudMode::Proxy,
                         Some("unblocker") => SpiderCloudMode::Unblocker,
                         Some("fallback") => SpiderCloudMode::Fallback,
                         Some("smart") => SpiderCloudMode::Smart,
-                        _ => SpiderCloudMode::Proxy,
+                        // api is the default mode.
+                        _ => SpiderCloudMode::Api,
                     };
 
                     let config = SpiderCloudConfig::new(&key).with_mode(mode);

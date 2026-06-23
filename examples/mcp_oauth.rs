@@ -82,25 +82,37 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("received access token ({} chars)", access_token.len());
 
     // 6. Open an MCP session and list the tools the token unlocks.
-    let (init, session) = mcp(&http, &server, access_token, None, &json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-06-18",
-            "capabilities": {},
-            "clientInfo": { "name": "spider-mcp-oauth-example", "version": "1.0" }
-        }
-    }))
+    let (init, session) = mcp(
+        &http,
+        &server,
+        access_token,
+        None,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": { "name": "spider-mcp-oauth-example", "version": "1.0" }
+            }
+        }),
+    )
     .await?;
     if let Some(name) = init["result"]["serverInfo"]["name"].as_str() {
         println!("connected to {name}");
     }
     notify(&http, &server, access_token, session.as_deref()).await?;
 
-    let (tools, _) = mcp(&http, &server, access_token, session.as_deref(), &json!({
-        "jsonrpc": "2.0", "id": 2, "method": "tools/list"
-    }))
+    let (tools, _) = mcp(
+        &http,
+        &server,
+        access_token,
+        session.as_deref(),
+        &json!({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/list"
+        }),
+    )
     .await?;
     if let Some(list) = tools["result"]["tools"].as_array() {
         println!("\n{} tools available:", list.len());
@@ -201,7 +213,12 @@ async fn wait_for_code(listener: &TcpListener, state: &str) -> Result<String, Bo
             continue;
         }
         let params = query_pairs(&target);
-        let get = |key: &str| params.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
+        let get = |key: &str| {
+            params
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.clone())
+        };
 
         if let Some(error) = get("error") {
             return Err(format!("authorization denied: {error}").into());
@@ -303,16 +320,18 @@ fn decode(input: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         match bytes.get(i..i + 3) {
-            Some([b'%', a, b]) => match u8::from_str_radix(&format!("{}{}", *a as char, *b as char), 16) {
-                Ok(byte) => {
-                    out.push(byte);
-                    i += 3;
+            Some([b'%', a, b]) => {
+                match u8::from_str_radix(&format!("{}{}", *a as char, *b as char), 16) {
+                    Ok(byte) => {
+                        out.push(byte);
+                        i += 3;
+                    }
+                    Err(_) => {
+                        out.push(bytes[i]);
+                        i += 1;
+                    }
                 }
-                Err(_) => {
-                    out.push(bytes[i]);
-                    i += 1;
-                }
-            },
+            }
             _ => {
                 out.push(bytes[i]);
                 i += 1;
