@@ -11,12 +11,13 @@ pub enum Commands {
         #[clap(short, long)]
         output_links: bool,
     },
-    /// Scrape the website extracting html and links returning the output as jsonl.
+    /// Scrape a page, returning its content as markdown (jsonl). Use --return-format
+    /// for another format, or --output-html for the raw HTML.
     SCRAPE {
-        /// stdout all pages links crawled
+        /// Include the page links in the output.
         #[clap(short, long)]
         output_links: bool,
-        /// stdout all pages html crawled
+        /// Return the raw HTML instead of the transformed (markdown) content.
         #[clap(long)]
         output_html: bool,
     },

@@ -186,11 +186,11 @@ async fn wait_for_code(listener: &TcpListener, state: &str) -> Result<String, Bo
             .unwrap_or("/")
             .to_string();
 
-        let page = "<html><body>Authorization complete — you can close this tab.</body></html>";
+        let page = "<!doctype html><meta charset=\"utf-8\"><title>MCP OAuth</title><body style=\"margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0e14;color:#e6e9ef;font:14px ui-monospace,Menlo,monospace\">Authorization complete. You can close this tab.</body>";
         let _ = stream
             .write_all(
                 format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{page}",
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{page}",
                     page.len()
                 )
                 .as_bytes(),

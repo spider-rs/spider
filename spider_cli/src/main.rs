@@ -523,8 +523,14 @@ async fn main() {
                         website.configuration.return_page_links = true;
                     }
 
+                    // Scrape returns the page content by default (markdown via
+                    // --return-format); --output-html returns the raw HTML instead.
                     let transform_conf = TransformConfig {
-                        return_format: ReturnFormat::from_str(&return_format),
+                        return_format: if output_html {
+                            ReturnFormat::Raw
+                        } else {
+                            ReturnFormat::from_str(&return_format)
+                        },
                         ..Default::default()
                     };
 
@@ -534,7 +540,7 @@ async fn main() {
                     });
 
                     while let Ok(res) = rx2.recv().await {
-                        let content = if output_html {
+                        let content = {
                             let input = TransformInput {
                                 url: res.get_url_parsed_ref().as_ref(),
                                 content: res.get_html_bytes_u8(),
@@ -544,8 +550,6 @@ async fn main() {
                                 ignore_tags: None,
                             };
                             transform_content_input(input, &transform_conf)
-                        } else {
-                            Default::default()
                         };
 
                         let page_json = json!({
