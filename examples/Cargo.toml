@@ -22,6 +22,12 @@ htr = "0.5.27"
 flexbuffers = "25"
 console-subscriber = { version = "0.5" }
 serde_json = "1"
+# mcp_oauth example — a standalone OAuth 2.1 + PKCE client for a remote MCP server.
+reqwest = { version = "0.13", features = ["json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util"] }
+base64 = "0.22"
+sha2 = "0.10"
+getrandom = "0.2"
 
 [dependencies.spider]
 version = "2"
@@ -392,3 +398,7 @@ path = "dns_nxdomain_test.rs"
 name = "chrome_remote_logrocket"
 path = "chrome_remote_logrocket.rs"
 required-features = ["spider/sync", "spider/chrome", "spider/chrome_intercept"]
+
+[[example]]
+name = "mcp_oauth"
+path = "mcp_oauth.rs"

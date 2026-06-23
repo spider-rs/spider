@@ -24,6 +24,7 @@ extern crate serde_json;
 extern crate spider;
 
 pub mod build_folders;
+pub mod oauth;
 pub mod options;
 
 use clap::Parser;
@@ -205,16 +206,28 @@ async fn main() {
     }
 
     // Handle the authenticate command early — it doesn't need a URL.
-    if let Some(Commands::AUTHENTICATE { api_key }) = &cli.command {
+    if let Some(Commands::AUTHENTICATE { api_key, paste }) = &cli.command {
+        use std::io::IsTerminal;
+
         let key = if let Some(k) = api_key {
             k.clone()
-        } else {
+        } else if *paste || !std::io::stdin().is_terminal() {
+            // Explicit --paste, or a piped key (scripting): read it from stdin.
             eprint!("Enter your Spider Cloud API key: ");
             let mut buf = String::new();
             std::io::stdin()
                 .read_line(&mut buf)
                 .expect("failed to read API key from stdin");
             buf.trim().to_string()
+        } else {
+            // Interactive: sign in through the browser and provision a key.
+            match oauth::login().await {
+                Ok(k) => k,
+                Err(e) => {
+                    eprintln!("Sign-in failed: {e}");
+                    std::process::exit(1);
+                }
+            }
         };
 
         if key.is_empty() {

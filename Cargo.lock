@@ -9382,13 +9382,17 @@ dependencies = [
 name = "spider_cli"
 version = "2.52.1"
 dependencies = [
+ "base64 0.22.1",
  "clap",
  "env_logger",
  "failure_derive",
+ "getrandom 0.2.17",
  "mimalloc",
  "percent-encoding",
  "quote",
+ "reqwest 0.13.4",
  "serde_json",
+ "sha2 0.10.9",
  "spider 2.52.1",
  "spider_transformations",
  "tikv-jemallocator",
@@ -9400,15 +9404,20 @@ dependencies = [
 name = "spider_examples"
 version = "2.37.105"
 dependencies = [
+ "base64 0.22.1",
  "console-subscriber",
  "convert_case 0.6.0",
  "env_logger",
  "flexbuffers",
+ "getrandom 0.2.17",
  "htr",
+ "reqwest 0.13.4",
  "serde_json",
+ "sha2 0.10.9",
  "spider 2.52.1",
  "spider_transformations",
  "spider_utils 2.51.208",
+ "tokio",
 ]
 
 [[package]]
