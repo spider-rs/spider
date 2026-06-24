@@ -319,6 +319,136 @@ macro_rules! chrome_page_fetch {
                     }
                 }
 
+                // ── In-request gateway re-acquire (retry the acquisition) ──
+                //
+                // The loop above re-renders on a fresh *tab* of the same browser.
+                // If that browser is dead — e.g. the first-byte watchdog saw the
+                // gateway's ~35s pool-acquisition timeout and flipped
+                // `browser_dead` — those tab retries can't recover it. Open a
+                // fresh connection (`HedgeBrowser`) to re-run the acquisition and
+                // re-render on it. NOTE: the gateway exposes no per-backend
+                // address, so this re-dials the LB ingress — a fresh acquisition,
+                // not a physical-peer pin; it still helps because the ~28%
+                // acquisition-timeout is roughly independent per attempt. Bounded
+                // budget, independent of `config.retry`; gives up if it keeps
+                // failing (no infinite loop).
+                //
+                // Skipped under `chrome_store_page`: there the subscriber keeps
+                // the live tab past this scope, so a reconnected browser can't be
+                // disposed at scope exit without Page-level lifetime plumbing.
+                if !cfg!(feature = "chrome_store_page") {
+                    let mut reacquire_budget: u32 = 2;
+                    while reacquire_budget > 0
+                        && $shared.11.load(std::sync::atomic::Ordering::Acquire)
+                        && (page.needs_retry() || page.is_empty())
+                    {
+                        reacquire_budget -= 1;
+                        log::warn!(
+                            "[chrome-reacquire] {} browser dead — gateway re-acquire (budget left {})",
+                            $target_url,
+                            reacquire_budget
+                        );
+                        // Fresh acquisition via the gateway (HedgeBrowser).
+                        // `None` => re-acquire failed; give up rather than loop.
+                        match crate::features::chrome::HedgeBrowser::connect(&$shared.5, &$shared.6)
+                            .await
+                        {
+                            Some(fresh) => {
+                                let peer_url = fresh.connected_url.clone();
+                                match crate::features::chrome::attempt_navigation(
+                                    "about:blank",
+                                    &fresh.browser,
+                                    &$shared.6.request_timeout,
+                                    &$shared.8,
+                                    &$shared.6.viewport,
+                                )
+                                .await
+                                {
+                                    Ok(fresh_tab) => {
+                                        let _fresh_tab_guard =
+                                            crate::features::chrome::TabCloseGuard::new(
+                                                fresh_tab.clone(),
+                                            );
+                                        let _ = tokio::join!(
+                                            crate::features::chrome::setup_chrome_events(
+                                                &fresh_tab,
+                                                &$shared.6
+                                            ),
+                                            crate::features::chrome::setup_chrome_interception_base(
+                                                &fresh_tab,
+                                                $shared.6.chrome_intercept.enabled,
+                                                &$shared.6.auth_challenge_response,
+                                                $shared.6.chrome_intercept.block_visuals,
+                                                &$shared.7,
+                                            )
+                                        );
+
+                                        // Only the final attempt's links reach the caller.
+                                        links.clear();
+                                        if let Some(ref mut lp) = links_pages {
+                                            lp.clear();
+                                        }
+
+                                        let (p, succ) = Page::new_streaming(
+                                            $target_url,
+                                            &$shared.0,
+                                            &fresh_tab,
+                                            false,
+                                            $shared.6.referer.clone(),
+                                            $shared.6.max_page_bytes,
+                                            $shared.6.get_cache_options(),
+                                            $shared.6.cache_namespace_str(),
+                                            // Watch the physical peer's own death
+                                            // flag + its direct endpoint.
+                                            &$shared
+                                                .6
+                                                .chrome_fetch_params()
+                                                .with_browser_dead(&fresh.browser_dead)
+                                                .with_chrome_endpoint(peer_url.as_deref()),
+                                            &$shared.1,
+                                            &$shared.3,
+                                            &mut links,
+                                            &mut links_pages,
+                                            $full_resources,
+                                            $skip_links,
+                                            false,
+                                        )
+                                        .await;
+                                        page = p;
+                                        extract_succeeded = succ;
+                                        // _fresh_tab_guard drops here → tab closed.
+                                    }
+                                    Err(_) => {
+                                        log::warn!(
+                                            "[chrome-reacquire] {} gateway re-acquire: fresh tab failed",
+                                            $target_url
+                                        );
+                                    }
+                                }
+
+                                // Dispose the physical reconnect (context + WS).
+                                fresh.close().await;
+
+                                if !page.needs_retry() && !page.is_empty() {
+                                    log::info!(
+                                        "[chrome-reacquire] {} recovered via gateway re-acquire ({})",
+                                        $target_url,
+                                        peer_url.as_deref().unwrap_or("?")
+                                    );
+                                    break;
+                                }
+                            }
+                            None => {
+                                log::warn!(
+                                    "[chrome-reacquire] {} gateway re-acquire failed — giving up",
+                                    $target_url
+                                );
+                                break;
+                            }
+                        }
+                    }
+                }
+
                 if let Some(h) = intercept_handle {
                     let abort_handle = h.abort_handle();
                     if let Err(elapsed) =
@@ -4657,6 +4787,13 @@ impl Website {
         base: &mut RelativeSelectors,
         _: bool,
         chrome_page: &chromiumoxide::Page,
+        // Gateway re-acquire inputs: the primary browser (for `websocket_address()`)
+        // and its `browser_dead` flag. Used to re-dial the gateway for a fresh
+        // acquisition on a dead-browser / gateway-timeout failure. (The gateway
+        // exposes no per-backend address, so this re-runs the LB acquisition — a
+        // reliability retry, not a physical-peer pin.)
+        browser: &chromiumoxide::Browser,
+        browser_dead: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> HashSet<CaseInsensitiveString> {
         if self.skip_initial {
             return Default::default();
@@ -4873,6 +5010,121 @@ impl Website {
                 }
             }
 
+            // ── In-request gateway re-acquire (retry the acquisition) ──
+            // The retries above re-render on the same tab/browser. If that
+            // browser died — e.g. the first-byte watchdog saw the gateway's ~35s
+            // pool-acquisition timeout and flipped `browser_dead` — re-dial the
+            // gateway (`browser.websocket_address()`) for a fresh acquisition and
+            // re-render on it. NOTE: the gateway exposes no per-backend address,
+            // so this is a fresh LB acquisition, not a physical-peer pin; it
+            // still helps because the ~28% acquisition-timeout is roughly
+            // independent per attempt. Bounded budget; gives up if it keeps
+            // failing. Skipped under `chrome_store_page` (the subscriber keeps
+            // the live tab past this scope).
+            if !cfg!(feature = "chrome_store_page") {
+                let mut reacquire_budget: u32 = 2;
+                while reacquire_budget > 0
+                    && browser_dead.load(std::sync::atomic::Ordering::Acquire)
+                    && (page.needs_retry() || page.is_empty())
+                {
+                    reacquire_budget -= 1;
+                    log::warn!(
+                        "[chrome-reacquire] {} (establish) browser dead — gateway re-acquire (budget left {})",
+                        self.url.inner().as_str(),
+                        reacquire_budget
+                    );
+                    match crate::features::chrome::relaunch_browser_at(
+                        browser.websocket_address().clone(),
+                        &self.configuration,
+                    )
+                    .await
+                    {
+                        Some((fresh_browser, fresh_handle, fresh_ctx, fresh_dead, fresh_url)) => {
+                            match crate::features::chrome::attempt_navigation(
+                                "about:blank",
+                                &fresh_browser,
+                                &self.configuration.request_timeout,
+                                &fresh_ctx,
+                                &self.configuration.viewport,
+                            )
+                            .await
+                            {
+                                Ok(fresh_tab) => {
+                                    let _fresh_tab_guard =
+                                        crate::features::chrome::TabCloseGuard::new(
+                                            fresh_tab.clone(),
+                                        );
+                                    let _ = tokio::join!(
+                                        crate::features::chrome::setup_chrome_events(
+                                            &fresh_tab,
+                                            &self.configuration
+                                        ),
+                                        self.setup_chrome_interception(&fresh_tab)
+                                    );
+
+                                    links.clear();
+                                    if let Some(ref mut lp) = links_pages {
+                                        lp.clear();
+                                    }
+
+                                    let (next_page, succ) = Page::new_streaming(
+                                        self.url.inner(),
+                                        client,
+                                        &fresh_tab,
+                                        false,
+                                        self.configuration.referer.clone(),
+                                        self.configuration.max_page_bytes,
+                                        self.configuration.get_cache_options(),
+                                        self.configuration.cache_namespace_str(),
+                                        &self
+                                            .configuration
+                                            .chrome_fetch_params()
+                                            .with_browser_dead(&fresh_dead)
+                                            .with_chrome_endpoint(fresh_url.as_deref()),
+                                        &*base,
+                                        &self.configuration.external_domains_caseless,
+                                        &mut links,
+                                        &mut links_pages,
+                                        full_resources,
+                                        skip_links,
+                                        true,
+                                    )
+                                    .await;
+                                    page = next_page;
+                                    extract_succeeded = succ;
+                                }
+                                Err(_) => {
+                                    log::warn!(
+                                        "[chrome-reacquire] {} (establish) gateway re-acquire: fresh tab failed",
+                                        self.url.inner().as_str()
+                                    );
+                                }
+                            }
+
+                            // Dispose the physical reconnect's handler; the
+                            // browser drops (WS closes) at scope end.
+                            fresh_handle.abort();
+
+                            if !page.needs_retry() && !page.is_empty() {
+                                log::info!(
+                                    "[chrome-reacquire] {} (establish) recovered via gateway re-acquire ({})",
+                                    self.url.inner().as_str(),
+                                    fresh_url.as_deref().unwrap_or("?")
+                                );
+                                break;
+                            }
+                        }
+                        None => {
+                            log::warn!(
+                                "[chrome-reacquire] {} (establish) gateway re-acquire failed — giving up",
+                                self.url.inner().as_str()
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+
             if let Some(h) = intercept_handle {
                 let abort_handle = h.abort_handle();
                 if let Err(elasped) =
@@ -4981,6 +5233,9 @@ impl Website {
         base: &mut RelativeSelectors,
         url: &Option<&str>,
         chrome_page: &chromiumoxide::Page,
+        // Gateway re-acquire inputs (see `crawl_establish`).
+        browser: &chromiumoxide::Browser,
+        browser_dead: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> HashSet<CaseInsensitiveString> {
         if self
             .is_allowed_default(self.get_base_link())
@@ -5164,6 +5419,121 @@ impl Website {
                         page.error_status = Some("Invalid proxy configuration.".into());
                         page.should_retry = true;
                         page.status_code = *crate::page::CHROME_UNKNOWN_STATUS_ERROR;
+                    }
+                }
+            }
+
+            // ── In-request gateway re-acquire (retry the acquisition) ──
+            // The retries above re-render on the same tab/browser. If that
+            // browser died — e.g. the first-byte watchdog saw the gateway's ~35s
+            // pool-acquisition timeout and flipped `browser_dead` — re-dial the
+            // gateway (`browser.websocket_address()`) for a fresh acquisition and
+            // re-render on it. NOTE: the gateway exposes no per-backend address,
+            // so this is a fresh LB acquisition, not a physical-peer pin; it
+            // still helps because the ~28% acquisition-timeout is roughly
+            // independent per attempt. Bounded budget; gives up if it keeps
+            // failing. Skipped under `chrome_store_page` (the subscriber keeps
+            // the live tab past this scope).
+            if !cfg!(feature = "chrome_store_page") {
+                let mut reacquire_budget: u32 = 2;
+                while reacquire_budget > 0
+                    && browser_dead.load(std::sync::atomic::Ordering::Acquire)
+                    && (page.needs_retry() || page.is_empty())
+                {
+                    reacquire_budget -= 1;
+                    log::warn!(
+                        "[chrome-reacquire] {} (establish) browser dead — gateway re-acquire (budget left {})",
+                        self.url.inner().as_str(),
+                        reacquire_budget
+                    );
+                    match crate::features::chrome::relaunch_browser_at(
+                        browser.websocket_address().clone(),
+                        &self.configuration,
+                    )
+                    .await
+                    {
+                        Some((fresh_browser, fresh_handle, fresh_ctx, fresh_dead, fresh_url)) => {
+                            match crate::features::chrome::attempt_navigation(
+                                "about:blank",
+                                &fresh_browser,
+                                &self.configuration.request_timeout,
+                                &fresh_ctx,
+                                &self.configuration.viewport,
+                            )
+                            .await
+                            {
+                                Ok(fresh_tab) => {
+                                    let _fresh_tab_guard =
+                                        crate::features::chrome::TabCloseGuard::new(
+                                            fresh_tab.clone(),
+                                        );
+                                    let _ = tokio::join!(
+                                        crate::features::chrome::setup_chrome_events(
+                                            &fresh_tab,
+                                            &self.configuration
+                                        ),
+                                        self.setup_chrome_interception(&fresh_tab)
+                                    );
+
+                                    links.clear();
+                                    if let Some(ref mut lp) = links_pages {
+                                        lp.clear();
+                                    }
+
+                                    let (next_page, succ) = Page::new_streaming(
+                                        self.url.inner(),
+                                        client,
+                                        &fresh_tab,
+                                        false,
+                                        self.configuration.referer.clone(),
+                                        self.configuration.max_page_bytes,
+                                        self.configuration.get_cache_options(),
+                                        self.configuration.cache_namespace_str(),
+                                        &self
+                                            .configuration
+                                            .chrome_fetch_params()
+                                            .with_browser_dead(&fresh_dead)
+                                            .with_chrome_endpoint(fresh_url.as_deref()),
+                                        &*base,
+                                        &self.configuration.external_domains_caseless,
+                                        &mut links,
+                                        &mut links_pages,
+                                        full_resources,
+                                        skip_links,
+                                        true,
+                                    )
+                                    .await;
+                                    page = next_page;
+                                    extract_succeeded = succ;
+                                }
+                                Err(_) => {
+                                    log::warn!(
+                                        "[chrome-reacquire] {} (establish) gateway re-acquire: fresh tab failed",
+                                        self.url.inner().as_str()
+                                    );
+                                }
+                            }
+
+                            // Dispose the physical reconnect's handler; the
+                            // browser drops (WS closes) at scope end.
+                            fresh_handle.abort();
+
+                            if !page.needs_retry() && !page.is_empty() {
+                                log::info!(
+                                    "[chrome-reacquire] {} (establish) recovered via gateway re-acquire ({})",
+                                    self.url.inner().as_str(),
+                                    fresh_url.as_deref().unwrap_or("?")
+                                );
+                                break;
+                            }
+                        }
+                        None => {
+                            log::warn!(
+                                "[chrome-reacquire] {} (establish) gateway re-acquire failed — giving up",
+                                self.url.inner().as_str()
+                            );
+                            break;
+                        }
                     }
                 }
             }
@@ -5532,6 +5902,11 @@ impl Website {
         base: &mut RelativeSelectors,
         _: bool,
         page: &chromiumoxide::Page,
+        // Gateway re-acquire inputs — accepted for signature parity with the
+        // non-glob `crawl_establish`; the per-glob-link loop does not yet wire
+        // the re-acquire.
+        _browser: &chromiumoxide::Browser,
+        _browser_dead: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> HashSet<CaseInsensitiveString> {
         if self.skip_initial {
             return Default::default();
@@ -8383,8 +8758,15 @@ impl Website {
                         let hedge_tracker = Arc::new(crate::utils::hedge::HedgeTracker::default());
 
                         if self.single_page() {
-                            self.crawl_establish(client, &mut selectors, false, &new_page)
-                                .await;
+                            self.crawl_establish(
+                                client,
+                                &mut selectors,
+                                false,
+                                &new_page,
+                                &b.browser.0,
+                                &b.browser_dead,
+                            )
+                            .await;
                             drop(new_page);
                             self.subscription_guard().await;
                             b.dispose();
@@ -8395,7 +8777,14 @@ impl Website {
                             let mut q = self.channel_queue.as_ref().map(|q| q.0.subscribe());
 
                             let base_links = self
-                                .crawl_establish(client, &mut selectors, false, &new_page)
+                                .crawl_establish(
+                                    client,
+                                    &mut selectors,
+                                    false,
+                                    &new_page,
+                                    &b.browser.0,
+                                    &b.browser_dead,
+                                )
                                 .await;
 
                             drop(new_page);
@@ -9711,7 +10100,14 @@ impl Website {
                         }
 
                         let base_links = website
-                            .crawl_establish(client, &mut selectors, false, &new_page)
+                            .crawl_establish(
+                                client,
+                                &mut selectors,
+                                false,
+                                &new_page,
+                                &b.browser.0,
+                                &b.browser_dead,
+                            )
                             .await;
 
                         drop(new_page);
@@ -10232,8 +10628,15 @@ impl Website {
                 {
                     Ok(new_page) => {
                         let mut selectors = self.setup_selectors();
-                        self.crawl_establish_chrome_one(client, &mut selectors, url, &new_page)
-                            .await;
+                        self.crawl_establish_chrome_one(
+                            client,
+                            &mut selectors,
+                            url,
+                            &new_page,
+                            &b.browser.0,
+                            &b.browser_dead,
+                        )
+                        .await;
                         self.subscription_guard().await;
                         b.dispose();
                     }
@@ -10270,8 +10673,15 @@ impl Website {
         {
             Ok(new_page) => {
                 let mut selectors = self.setup_selectors();
-                self.crawl_establish_chrome_one(client, &mut selectors, url, &new_page)
-                    .await;
+                self.crawl_establish_chrome_one(
+                    client,
+                    &mut selectors,
+                    url,
+                    &new_page,
+                    &b.browser.0,
+                    &b.browser_dead,
+                )
+                .await;
                 self.subscription_guard().await;
             }
             Err(err) => {

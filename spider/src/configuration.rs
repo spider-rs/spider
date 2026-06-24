@@ -2609,7 +2609,11 @@ impl Configuration {
     /// Connect to [Spider Browser Cloud](https://spider.cloud/docs/api#browser)
     /// via CDP over WebSocket using an API key.
     ///
-    /// Sets `chrome_connection_url` to `wss://browser.spider.cloud/v1/browser?token=API_KEY`.
+    /// Routes the browser path through the chrome failover. With a single peer
+    /// this sets `chrome_connection_url` to
+    /// `wss://browser.spider.cloud/v1/browser?token=API_KEY`; with multiple
+    /// peers (see [`SpiderBrowserConfig::with_wss_urls`]) it populates the
+    /// failover list so a healthy peer is selected like the crawler.
     #[cfg(all(feature = "spider_cloud", feature = "chrome"))]
     pub fn with_spider_browser(&mut self, api_key: &str) -> &mut Self {
         if is_placeholder_api_key(api_key) {
@@ -2617,7 +2621,20 @@ impl Configuration {
             return self;
         }
         let cfg = SpiderBrowserConfig::new(api_key);
-        self.chrome_connection_url = Some(cfg.connection_url());
+        let peers = cfg.connection_urls();
+        log::info!(
+            "[spider-browser] configured {} browser peer(s); healthy-peer failover {}",
+            peers.len(),
+            if peers.len() > 1 {
+                "enabled"
+            } else {
+                "disabled (single peer)"
+            }
+        );
+        // Route through the chrome failover so the browser path picks a healthy
+        // peer / fails over with cooldowns, exactly like the crawler. A single
+        // peer collapses to the single-endpoint path inside with_chrome_connections.
+        self.with_chrome_connections(peers);
         self.spider_browser = Some(Box::new(cfg));
         self
     }
@@ -2632,7 +2649,19 @@ impl Configuration {
     /// with full configuration (stealth, country, browser type, etc.).
     #[cfg(all(feature = "spider_cloud", feature = "chrome"))]
     pub fn with_spider_browser_config(&mut self, config: SpiderBrowserConfig) -> &mut Self {
-        self.chrome_connection_url = Some(config.connection_url());
+        let peers = config.connection_urls();
+        log::info!(
+            "[spider-browser] configured {} browser peer(s); healthy-peer failover {}",
+            peers.len(),
+            if peers.len() > 1 {
+                "enabled"
+            } else {
+                "disabled (single peer)"
+            }
+        );
+        // Route through the chrome failover (healthy-peer selection + cooldowns)
+        // just like the crawler; single peer → single-endpoint path.
+        self.with_chrome_connections(peers);
         self.spider_browser = Some(Box::new(config));
         self
     }
@@ -3108,6 +3137,17 @@ pub struct SpiderBrowserConfig {
         serde(default = "SpiderBrowserConfig::default_wss_url")
     )]
     pub wss_url: String,
+    /// Optional list of WSS peer base URLs for healthy-peer failover. When set
+    /// with two or more peers, the browser path routes through the crawler's
+    /// `ChromeConnectionFailover`: each peer is health-tracked independently, a
+    /// peer that times out is put on cooldown and skipped until it recovers, and
+    /// connections stick to the last good peer — exactly how the crawler scales
+    /// chrome across peers. Falls back to the single `wss_url` when unset.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub wss_urls: Option<Vec<String>>,
     /// Enable stealth mode (anti-fingerprinting). Sent as `stealth=true` query param.
     #[cfg_attr(feature = "serde", serde(default))]
     pub stealth: bool,
@@ -3128,6 +3168,7 @@ impl Default for SpiderBrowserConfig {
         Self {
             api_key: String::new(),
             wss_url: Self::default_wss_url(),
+            wss_urls: None,
             stealth: false,
             browser: None,
             country: None,
@@ -3149,6 +3190,17 @@ impl SpiderBrowserConfig {
     /// Set a custom WSS base URL.
     pub fn with_wss_url(mut self, url: impl Into<String>) -> Self {
         self.wss_url = url.into();
+        self
+    }
+
+    /// Set multiple WSS peer base URLs for healthy-peer failover.
+    ///
+    /// With two or more peers the browser path acquires a *healthy* peer via the
+    /// crawler's `ChromeConnectionFailover` (cooldown-tracked, sticky to the last
+    /// good peer) instead of hammering one possibly-cold endpoint. An empty or
+    /// single-element list collapses to the single-endpoint path.
+    pub fn with_wss_urls(mut self, urls: Vec<String>) -> Self {
+        self.wss_urls = Some(urls);
         self
     }
 
@@ -3181,7 +3233,32 @@ impl SpiderBrowserConfig {
     /// Returns a URL like:
     /// `wss://browser.spider.cloud/v1/browser?token=KEY&stealth=true&country=us`
     pub fn connection_url(&self) -> String {
-        let mut url = self.wss_url.clone();
+        self.build_connection_url(&self.wss_url)
+    }
+
+    /// Build the per-peer connection URLs used for healthy-peer failover.
+    ///
+    /// When [`wss_urls`](Self::wss_urls) holds one or more peer base URLs,
+    /// returns one fully-built connection URL per peer (auth + options applied
+    /// to each) so [`ChromeConnectionFailover`] can rotate across healthy peers
+    /// and cool down ones that time out. Falls back to a single-element vec
+    /// built from [`wss_url`](Self::wss_url) when no peer list is configured.
+    pub fn connection_urls(&self) -> Vec<String> {
+        match self.wss_urls {
+            Some(ref bases) if !bases.is_empty() => {
+                bases.iter().map(|b| self.build_connection_url(b)).collect()
+            }
+            _ => vec![self.connection_url()],
+        }
+    }
+
+    /// Apply auth + query options (`token`, `stealth`, `browser`, `country`,
+    /// `extra_params`) to a single WSS base URL. Shared by
+    /// [`connection_url`](Self::connection_url) and
+    /// [`connection_urls`](Self::connection_urls) so every peer is built
+    /// identically.
+    fn build_connection_url(&self, base: &str) -> String {
+        let mut url = base.to_string();
 
         // Start query string
         if url.contains('?') {
@@ -3457,5 +3534,65 @@ mod tests {
             config.chrome_connection_url.as_deref(),
             Some("wss://browser.spider.cloud/v1/browser?token=key&stealth=true&country=gb")
         );
+    }
+
+    #[cfg(all(feature = "spider_cloud", feature = "chrome"))]
+    #[test]
+    fn test_spider_browser_connection_urls_single_default() {
+        // No peer list -> one connection URL, identical to connection_url().
+        let cfg = SpiderBrowserConfig::new("sk-abc123");
+        assert_eq!(cfg.connection_urls(), vec![cfg.connection_url()]);
+        assert_eq!(cfg.connection_urls().len(), 1);
+    }
+
+    #[cfg(all(feature = "spider_cloud", feature = "chrome"))]
+    #[test]
+    fn test_spider_browser_connection_urls_multi_peer() {
+        // Each peer base gets the same auth + options applied.
+        let cfg = SpiderBrowserConfig::new("sk-abc123")
+            .with_stealth(true)
+            .with_wss_urls(vec![
+                "wss://browser-a.spider.cloud/v1/browser".into(),
+                "wss://browser-b.spider.cloud/v1/browser".into(),
+            ]);
+        assert_eq!(
+            cfg.connection_urls(),
+            vec![
+                "wss://browser-a.spider.cloud/v1/browser?token=sk-abc123&stealth=true".to_string(),
+                "wss://browser-b.spider.cloud/v1/browser?token=sk-abc123&stealth=true".to_string(),
+            ]
+        );
+    }
+
+    #[cfg(all(feature = "spider_cloud", feature = "chrome"))]
+    #[test]
+    fn test_with_spider_browser_config_multi_peer_uses_failover() {
+        // Two peers must populate the failover list, not the single-URL field.
+        let mut config = Configuration::default();
+        let browser_cfg = SpiderBrowserConfig::new("key").with_wss_urls(vec![
+            "wss://browser-a.spider.cloud/v1/browser".into(),
+            "wss://browser-b.spider.cloud/v1/browser".into(),
+        ]);
+        config.with_spider_browser_config(browser_cfg);
+        assert_eq!(
+            config.chrome_connection_urls.as_ref().map(|u| u.len()),
+            Some(2),
+            "multi-peer browser config must route through chrome_connection_urls (failover)"
+        );
+        assert!(
+            config.chrome_connection_url.is_none(),
+            "multi-peer config must not pin a single chrome_connection_url"
+        );
+        assert!(config.spider_browser.is_some());
+    }
+
+    #[cfg(all(feature = "spider_cloud", feature = "chrome"))]
+    #[test]
+    fn test_with_spider_browser_config_single_peer_single_path() {
+        // One peer stays on the single-endpoint path (no failover list).
+        let mut config = Configuration::default();
+        config.with_spider_browser_config(SpiderBrowserConfig::new("key"));
+        assert!(config.chrome_connection_url.is_some());
+        assert!(config.chrome_connection_urls.is_none());
     }
 }

@@ -452,6 +452,15 @@ lazy_static! {
     static ref CHROM_BASE: Option<String> = std::env::var("CHROME_URL").ok();
 }
 
+/// Default per-attempt connect timeout for the chrome failover.
+///
+/// Generous enough that a legitimately slow cold-start still connects, but
+/// bounded *under* the remote browser gateway's own ~35s acquisition timeout so
+/// a cold / over-subscribed peer that hangs on CDP session acquisition fails
+/// over to a healthy peer first instead of burning the full 35s. Tightened
+/// further when the caller sets a smaller `request_timeout`.
+const CHROME_FAILOVER_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Lock-free failover across multiple remote Chrome endpoints.
 ///
 /// Tracks per-endpoint consecutive errors with atomics. When an endpoint
@@ -635,6 +644,21 @@ impl ChromeConnectionFailover {
     ) -> Option<(Browser, chromiumoxide::Handler, String)> {
         let handler_config_base = create_handler_config(config);
 
+        // Bound each connect attempt so a hung peer fails over instead of
+        // blocking up to the remote gateway's own ~35s acquisition timeout.
+        let connect_timeout = config
+            .request_timeout
+            .map(|t| t.min(CHROME_FAILOVER_CONNECT_TIMEOUT))
+            .unwrap_or(CHROME_FAILOVER_CONNECT_TIMEOUT);
+
+        let started = std::time::Instant::now();
+        let total = self.urls.len();
+        log::debug!(
+            "[chrome-failover] acquiring a healthy chrome peer (peers={}, connect_timeout={}ms)",
+            total,
+            connect_timeout.as_millis()
+        );
+
         for pass in 0u8..2 {
             // Pass 0 honors cooldowns; pass 1 ignores them so we never
             // return None solely because every endpoint is in cooldown.
@@ -646,8 +670,9 @@ impl ChromeConnectionFailover {
                     let until = self.dead_until[idx].load(std::sync::atomic::Ordering::Acquire);
                     if until > now {
                         log::debug!(
-                            "[chrome-failover] endpoint {} ({}) skipped (cooldown {}ms remaining)",
-                            idx,
+                            "[chrome-failover] peer {}/{} ({}) skipped — unhealthy, {}ms cooldown remaining",
+                            idx + 1,
+                            total,
                             url,
                             until.saturating_sub(now)
                         );
@@ -658,10 +683,15 @@ impl ChromeConnectionFailover {
                 let err_count = &self.errors[idx];
 
                 for attempt in 0..=self.max_retries {
-                    match Browser::connect_with_config(url.as_str(), handler_config_base.clone())
-                        .await
-                    {
-                        Ok((browser, handler)) => {
+                    let attempt_started = std::time::Instant::now();
+                    let conn = tokio::time::timeout(
+                        connect_timeout,
+                        Browser::connect_with_config(url.as_str(), handler_config_base.clone()),
+                    )
+                    .await;
+
+                    match conn {
+                        Ok(Ok((browser, handler))) => {
                             // Reset error count and clear any cooldown on success.
                             err_count.store(0, std::sync::atomic::Ordering::Relaxed);
                             self.dead_until[idx].store(0, std::sync::atomic::Ordering::Release);
@@ -670,25 +700,29 @@ impl ChromeConnectionFailover {
                             // on subsequent chrome_fetch_params() calls).
                             self.last_idx
                                 .store(idx, std::sync::atomic::Ordering::Release);
-                            if idx > 0 {
-                                log::info!(
-                                    "[chrome-failover] connected to endpoint {} ({}) after skipping {}",
-                                    idx,
-                                    url,
-                                    idx
-                                );
-                            }
+                            log::info!(
+                                "[chrome-failover] connected peer {}/{} ({}) in {}ms (attempt {}/{}, {}ms total)",
+                                idx + 1,
+                                total,
+                                url,
+                                attempt_started.elapsed().as_millis(),
+                                attempt + 1,
+                                self.max_retries + 1,
+                                started.elapsed().as_millis()
+                            );
                             return Some((browser, handler, url.clone()));
                         }
-                        Err(e) => {
+                        Ok(Err(e)) => {
                             let n =
                                 err_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                             log::warn!(
-                                "[chrome-failover] endpoint {} ({}) attempt {}/{} failed: {:?}",
-                                idx,
+                                "[chrome-failover] peer {}/{} ({}) attempt {}/{} failed after {}ms: {:?}",
+                                idx + 1,
+                                total,
                                 url,
                                 attempt + 1,
                                 self.max_retries + 1,
+                                attempt_started.elapsed().as_millis(),
                                 e
                             );
                             if attempt < self.max_retries {
@@ -697,11 +731,38 @@ impl ChromeConnectionFailover {
                                 tokio::time::sleep(backoff).await;
                             } else {
                                 log::warn!(
-                                    "[chrome-failover] endpoint {} exhausted ({} errors), trying next",
-                                    idx,
+                                    "[chrome-failover] peer {}/{} ({}) exhausted ({} errors) — rotating to next peer",
+                                    idx + 1,
+                                    total,
+                                    url,
                                     n
                                 );
                             }
+                        }
+                        Err(_) => {
+                            // Connect exceeded `connect_timeout`: the peer is
+                            // hung on session acquisition. Cool it down so later
+                            // requests skip it (mirrors the render-timeout path)
+                            // and rotate straight to the next peer — no point
+                            // burning the retry budget on a hang.
+                            let n =
+                                err_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                            let cooldown_ms =
+                                connect_timeout.as_millis().min(u128::from(u64::MAX)) as u64;
+                            self.dead_until[idx].store(
+                                Self::now_millis().saturating_add(cooldown_ms),
+                                std::sync::atomic::Ordering::Release,
+                            );
+                            log::warn!(
+                                "[chrome-failover] peer {}/{} ({}) connect TIMED OUT after {}ms ({} errors) — cooled down {}ms, rotating to next peer",
+                                idx + 1,
+                                total,
+                                url,
+                                connect_timeout.as_millis(),
+                                n,
+                                cooldown_ms
+                            );
+                            break;
                         }
                     }
                 }
@@ -715,8 +776,9 @@ impl ChromeConnectionFailover {
         }
 
         log::error!(
-            "[chrome-failover] all {} endpoints exhausted",
-            self.urls.len()
+            "[chrome-failover] all {} peer(s) exhausted after {}ms — no healthy chrome peer available",
+            total,
+            started.elapsed().as_millis()
         );
         None
     }
@@ -797,20 +859,69 @@ pub async fn setup_browser_configuration(
             let max_retries = 10;
             let mut browser = None;
 
+            // Bound each connect so a hung remote (cold / over-subscribed pool)
+            // retries with backoff instead of blocking on the gateway's ~35s cap.
+            let connect_timeout = config
+                .request_timeout
+                .map(|t| t.min(CHROME_FAILOVER_CONNECT_TIMEOUT))
+                .unwrap_or(CHROME_FAILOVER_CONNECT_TIMEOUT);
+
             // Attempt reconnections for instances that may be on load balancers (LBs)
             // experiencing shutdowns or degradation. This logic implements a retry
             // mechanism to improve robustness by allowing multiple attempts to establish.
             while attempts <= max_retries {
-                match Browser::connect_with_config(v, create_handler_config(config)).await {
-                    Ok(b) => {
+                let attempt_started = std::time::Instant::now();
+                match tokio::time::timeout(
+                    connect_timeout,
+                    Browser::connect_with_config(v, create_handler_config(config)),
+                )
+                .await
+                {
+                    Ok(Ok(b)) => {
+                        log::info!(
+                            "[chrome-single] connected ({}) in {}ms (attempt {}/{})",
+                            v,
+                            attempt_started.elapsed().as_millis(),
+                            attempts + 1,
+                            max_retries + 1
+                        );
                         browser = Some(b);
                         break;
                     }
-                    Err(err) => {
-                        log::error!("{:?}", err);
+                    Ok(Err(err)) => {
+                        log::error!(
+                            "[chrome-single] connect ({}) attempt {}/{} failed after {}ms: {:?}",
+                            v,
+                            attempts + 1,
+                            max_retries + 1,
+                            attempt_started.elapsed().as_millis(),
+                            err
+                        );
                         attempts += 1;
                         if attempts > max_retries {
-                            log::error!("Exceeded maximum retry attempts");
+                            log::error!(
+                                "[chrome-single] exceeded maximum retry attempts for {}",
+                                v
+                            );
+                            break;
+                        }
+                        let backoff = crate::utils::backoff::backoff_delay(attempts, 100, 5_000);
+                        tokio::time::sleep(backoff).await;
+                    }
+                    Err(_) => {
+                        log::error!(
+                            "[chrome-single] connect ({}) attempt {}/{} TIMED OUT after {}ms",
+                            v,
+                            attempts + 1,
+                            max_retries + 1,
+                            connect_timeout.as_millis()
+                        );
+                        attempts += 1;
+                        if attempts > max_retries {
+                            log::error!(
+                                "[chrome-single] exceeded maximum retry attempts for {}",
+                                v
+                            );
                             break;
                         }
                         let backoff = crate::utils::backoff::backoff_delay(attempts, 100, 5_000);
@@ -1004,6 +1115,96 @@ pub async fn launch_browser_base(
         }
         _ => None,
     }
+}
+
+/// Re-acquire a browser by re-dialing `ws_url` and bringing up a fresh CDP
+/// session — handler task + isolated browser context.
+///
+/// Used by the in-request reconnect (e.g. `crawl_establish`) so a navigation
+/// that died on the gateway's ~35s pool-acquisition timeout gets a fresh
+/// acquisition. NOTE: in the cloud deployment `ws_url` (the primary's
+/// `websocket_address()`) is the **LB ingress**, not a direct backend — the
+/// gateway exposes no per-backend addresses — so this is a fresh LB
+/// acquisition, not a physical-peer pin. It still helps: the ~28%
+/// acquisition-timeout is roughly independent per attempt, so retrying cuts the
+/// compounded failure rate. Returns `None` when the re-acquire fails (caller
+/// gives up rather than loop). The handler `JoinHandle` is the caller's to abort
+/// when done.
+pub(crate) async fn relaunch_browser_at(
+    ws_url: String,
+    config: &Configuration,
+) -> Option<(
+    Browser,
+    tokio::task::JoinHandle<()>,
+    Option<BrowserContextId>,
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
+    Option<String>,
+)> {
+    use chromiumoxide::error::CdpError;
+
+    let handler_config = create_handler_config(config);
+
+    let (mut browser, mut handler) = match tokio::time::timeout(
+        CHROME_FAILOVER_CONNECT_TIMEOUT,
+        Browser::connect_with_config(ws_url.clone(), handler_config),
+    )
+    .await
+    {
+        Ok(Ok(pair)) => pair,
+        Ok(Err(e)) => {
+            log::warn!(
+                "[chrome-reacquire] gateway re-acquire to {} failed: {:?}",
+                ws_url,
+                e
+            );
+            return None;
+        }
+        Err(_) => {
+            log::warn!(
+                "[chrome-reacquire] gateway re-acquire to {} timed out ({}ms)",
+                ws_url,
+                CHROME_FAILOVER_CONNECT_TIMEOUT.as_millis()
+            );
+            return None;
+        }
+    };
+
+    let browser_dead = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let browser_dead_signal = browser_dead.clone();
+
+    // Mirror the primary's handler pattern: fatal CDP errors flip browser_dead;
+    // non-fatal continue; stream end => browser gone.
+    let handle = tokio::task::spawn(async move {
+        while let Some(k) = handler.next().await {
+            if let Err(e) = k {
+                match e {
+                    CdpError::Ws(_)
+                    | CdpError::LaunchExit(_, _)
+                    | CdpError::LaunchTimeout(_)
+                    | CdpError::LaunchIo(_, _) => {
+                        browser_dead_signal.store(true, std::sync::atomic::Ordering::Release);
+                        break;
+                    }
+                    _ => continue,
+                }
+            }
+        }
+        browser_dead_signal.store(true, std::sync::atomic::Ordering::Release);
+    });
+
+    // Isolated context so tabs don't collide with the (dead) primary's.
+    let mut create_ctx =
+        chromiumoxide::cdp::browser_protocol::target::CreateBrowserContextParams::default();
+    create_ctx.dispose_on_detach = Some(true);
+    let context_id = match browser.create_browser_context(create_ctx).await {
+        Ok(id) => {
+            let _ = browser.send_new_context(id.clone()).await;
+            Some(id)
+        }
+        Err(_) => None,
+    };
+
+    Some((browser, handle, context_id, browser_dead, Some(ws_url)))
 }
 
 /// Launch a chromium browser with configurations and wait until the instance is up.
@@ -1561,10 +1762,15 @@ impl HedgeBrowser {
 
     /// Open a fresh WS connection for the hedge request.
     ///
-    /// When `chrome_connection_urls` has a second entry, connects to that
-    /// URL so the load balancer can route to a **different** backend
-    /// instance.  Falls back to `chrome_connection_url` (re-enters the LB),
-    /// then to the primary browser's direct websocket address.
+    /// Open a second connection for the hedge to race on.
+    ///
+    /// When `chrome_connection_urls` has a second entry, dials that URL so the
+    /// load balancer can route to a (possibly) different backend; falls back to
+    /// `chrome_connection_url`, then to the primary's `websocket_address()`.
+    /// NOTE: in the cloud deployment all of these resolve to the LB ingress —
+    /// `websocket_address()` is the LB URL, not a direct backend (the gateway
+    /// exposes no per-backend addresses), so this is a fresh LB acquisition, not
+    /// a physical-peer pin.
     ///
     /// Captures the chosen URL on `connected_url` and creates a fresh
     /// `browser_dead` AtomicBool wired into the handler task — so when
