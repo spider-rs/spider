@@ -13,3 +13,10 @@ members = [
     "benches"]
 resolver = "2"
 
+# Unify the external `spider_transformations` crate onto this workspace's
+# `spider` instead of pulling a second copy from crates.io. This removes a
+# duplicate `spider` compile and keeps the whole tree on one (patched, audited)
+# quick-xml. Patch sections are local-only and ignored on publish.
+[patch.crates-io]
+spider = { path = "spider" }
+

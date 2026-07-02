@@ -16,4 +16,9 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked || true
       - name: Run audit
-        run: cargo audit
+        # RUSTSEC-2026-0187 (lopdf < 0.42 stack overflow): only reachable via
+        # memvid-rs 1.2.0, an optional dependency behind the `agent_full`/`full`
+        # feature. memvid-rs 1.2.0 is the latest release and hard-pins
+        # `lopdf = "^0.36"`, so there is no dependency-graph path to the fix.
+        # Remove this ignore once memvid-rs ships a release on lopdf >= 0.42.
+        run: cargo audit --ignore RUSTSEC-2026-0187
