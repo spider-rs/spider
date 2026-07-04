@@ -1107,7 +1107,7 @@ version = "0.0.0"
 dependencies = [
  "criterion",
  "spider",
- "spider_utils 2.52.6",
+ "spider_utils 2.52.7",
 ]
 
 [[package]]
@@ -9104,7 +9104,7 @@ dependencies = [
 
 [[package]]
 name = "spider"
-version = "2.52.6"
+version = "2.52.7"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -9244,7 +9244,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent"
-version = "2.52.6"
+version = "2.52.7"
 dependencies = [
  "aho-corasick",
  "async-openai 0.35.0",
@@ -9284,7 +9284,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_html"
-version = "2.52.6"
+version = "2.52.7"
 dependencies = [
  "aho-corasick",
  "lol_html",
@@ -9295,7 +9295,7 @@ dependencies = [
 
 [[package]]
 name = "spider_agent_types"
-version = "2.52.6"
+version = "2.52.7"
 dependencies = [
  "aho-corasick",
  "llm_models_spider",
@@ -9345,7 +9345,7 @@ dependencies = [
 
 [[package]]
 name = "spider_cli"
-version = "2.52.6"
+version = "2.52.7"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -9421,7 +9421,7 @@ dependencies = [
 
 [[package]]
 name = "spider_mcp"
-version = "2.52.6"
+version = "2.52.7"
 dependencies = [
  "clap",
  "dashmap",
@@ -9557,7 +9557,7 @@ dependencies = [
 
 [[package]]
 name = "spider_utils"
-version = "2.52.6"
+version = "2.52.7"
 dependencies = [
  "hashbrown 0.17.1",
  "indexmap",
@@ -9572,7 +9572,7 @@ dependencies = [
 
 [[package]]
 name = "spider_worker"
-version = "2.52.6"
+version = "2.52.7"
 dependencies = [
  "env_logger",
  "hyper",
