@@ -104,7 +104,11 @@ pub async fn run(params: CrawlParams, state: Arc<SharedState>) -> Result<String,
 
     let use_headless = params.headless.unwrap_or(false);
 
-    tokio::spawn(async move {
+    // Keep the crawl's abort handle so an inline request dropped by the client can
+    // cancel it, and a session can cancel it on eviction. Dropping the JoinHandle
+    // does not abort, so the crawl still runs detached exactly as before unless
+    // explicitly aborted.
+    let crawl_abort = tokio::spawn(async move {
         #[cfg(feature = "chrome")]
         {
             if use_headless {
@@ -118,9 +122,15 @@ pub async fn run(params: CrawlParams, state: Arc<SharedState>) -> Result<String,
             let _ = use_headless;
             website.crawl().await;
         }
-    });
+    })
+    .abort_handle();
 
     if limit <= INLINE_LIMIT {
+        // Cancel the crawl if this request future is dropped (client disconnect).
+        // No-op on success: the drain loop below only ends once the crawl has
+        // finished and closed the channel.
+        let _abort_on_drop = crate::state::AbortOnDrop(crawl_abort);
+
         let transform_conf = TransformConfig {
             return_format,
             ..Default::default()
@@ -164,6 +174,7 @@ pub async fn run(params: CrawlParams, state: Arc<SharedState>) -> Result<String,
                 status: CrawlSessionStatus::Running,
                 pages: Vec::new(),
                 started_at: Instant::now(),
+                abort: Some(crawl_abort),
             },
         );
 

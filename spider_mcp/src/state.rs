@@ -43,6 +43,7 @@ impl SharedState {
 
         // Pass 1: classify terminal sessions. TTL-expired ones are queued for
         // removal; the rest are recorded (key, start time) as cap candidates.
+        let running_ttl = running_session_ttl();
         let mut expired: Vec<String> = Vec::new();
         let mut terminal: Vec<(String, Instant)> = Vec::new();
         for entry in self.sessions.iter() {
@@ -56,12 +57,20 @@ impl SharedState {
                 } else {
                     terminal.push((entry.key().clone(), session.started_at));
                 }
+            } else if let Some(ttl) = running_ttl {
+                // Gated (default: None => skipped => byte-identical). When set,
+                // reclaim an in-flight session that has been `Running` past the
+                // TTL; its crawl is aborted on removal (see `abort_and_remove`),
+                // releasing any browser a stuck/unpolled crawl still holds.
+                if now.duration_since(session.started_at) >= ttl {
+                    expired.push(entry.key().clone());
+                }
             }
         }
         // `iter()` fully consumed and dropped above — safe to mutate now.
 
         for key in &expired {
-            self.sessions.remove(key);
+            self.abort_and_remove(key);
         }
 
         // Pass 2: enforce the hard cap by dropping the oldest terminal sessions.
@@ -70,7 +79,18 @@ impl SharedState {
             let overflow = len + 1 - MAX_SESSIONS;
             terminal.sort_by_key(|(_, started_at)| *started_at); // oldest first
             for (key, _) in terminal.into_iter().take(overflow) {
-                self.sessions.remove(&key);
+                self.abort_and_remove(&key);
+            }
+        }
+    }
+
+    /// Remove a session and abort its background crawl (releasing any browser it
+    /// holds). For terminal sessions the crawl has already finished, so the abort
+    /// is a no-op; the cleanup matters for gated `Running` eviction.
+    fn abort_and_remove(&self, key: &str) {
+        if let Some((_, session)) = self.sessions.remove(key) {
+            if let Some(handle) = session.abort {
+                handle.abort();
             }
         }
     }
@@ -86,6 +106,34 @@ pub struct CrawlSession {
     /// stable representation).
     #[serde(skip)]
     pub started_at: Instant,
+    /// Abort handle for the background crawl task. Aborting it on removal stops
+    /// the crawl and releases any browser it holds. Not serialized.
+    #[serde(skip)]
+    pub abort: Option<tokio::task::AbortHandle>,
+}
+
+/// Aborts the wrapped task when dropped. Used to cancel an inline MCP crawl if
+/// the request future is dropped (client disconnect) so the crawl doesn't keep
+/// running — and holding a browser — with no consumer. It is a no-op on success
+/// because the crawl has already finished by the time the inline drain returns.
+pub struct AbortOnDrop(pub tokio::task::AbortHandle);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Optional TTL after which an in-flight (`Running`) session is aborted and
+/// reclaimed, from `SPIDER_MCP_RUNNING_SESSION_TTL_SECS`. Unset or `0` = never
+/// (the historical behaviour: a Running session is retained until it completes),
+/// so this is byte-identical by default.
+fn running_session_ttl() -> Option<Duration> {
+    std::env::var("SPIDER_MCP_RUNNING_SESSION_TTL_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|&s| s > 0)
+        .map(Duration::from_secs)
 }
 
 #[derive(Serialize, Clone, PartialEq)]
@@ -114,6 +162,7 @@ mod tests {
             status,
             pages: Vec::new(),
             started_at,
+            abort: None,
         }
     }
 
