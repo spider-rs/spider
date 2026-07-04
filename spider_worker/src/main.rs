@@ -18,7 +18,73 @@ lazy_static! {
 }
 
 use hyper_util::service::TowerToHyperService;
+use spider::tokio::sync::Semaphore;
 use std::net::SocketAddr;
+use std::sync::Arc;
+
+/// Per-listener cap on concurrent in-flight connections. Without a bound the
+/// accept loop spawns an unbounded task (and up to ~1 GiB fetch) per connection,
+/// so a burst of connections can exhaust tasks / FDs / memory. Opt-in and
+/// **default `0` (unlimited — byte-identical to legacy behaviour)**; set
+/// `SPIDER_WORKER_MAX_CONCURRENCY` to a positive value to enable the bound.
+fn connection_semaphore() -> Arc<Semaphore> {
+    let limit = std::env::var("SPIDER_WORKER_MAX_CONCURRENCY")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(0);
+    // `0` = unlimited; clamp to MAX_PERMITS so an oversized env value can't make
+    // `Semaphore::new` panic.
+    let permits = if limit == 0 {
+        Semaphore::MAX_PERMITS
+    } else {
+        limit.min(Semaphore::MAX_PERMITS)
+    };
+    Arc::new(Semaphore::new(permits))
+}
+
+/// Best-effort SSRF guard. When `SPIDER_WORKER_BLOCK_PRIVATE_HOSTS` is enabled,
+/// reject fetch targets that resolve to loopback / private / link-local literals
+/// so a crafted `Host` header can't make the worker fetch internal endpoints.
+/// Default off, so trusted internal-network deployments are unchanged. Note: this
+/// checks literal IPs and `localhost` only — it does not resolve hostnames (no
+/// DNS-rebinding protection); pair it with network-level egress controls.
+fn target_host_blocked(host: &str) -> bool {
+    let enabled = std::env::var("SPIDER_WORKER_BLOCK_PRIVATE_HOSTS")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if !enabled {
+        return false;
+    }
+    let h = host.trim();
+    let h = h
+        .strip_prefix("http://")
+        .or_else(|| h.strip_prefix("https://"))
+        .unwrap_or(h);
+    let h = h.split('/').next().unwrap_or(h);
+    // Strip an optional :port, and IPv6 brackets.
+    let hostname = if h.starts_with('[') {
+        h.trim_start_matches('[')
+            .split(']')
+            .next()
+            .unwrap_or(h)
+    } else {
+        h.rsplit_once(':').map(|(a, _)| a).unwrap_or(h)
+    };
+    if hostname.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    match hostname.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(v4)) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+        }
+        Ok(std::net::IpAddr::V6(v6)) => v6.is_loopback() || v6.is_unspecified(),
+        Err(_) => false,
+    }
+}
 
 /// Serve warp routes on a TCP listener using hyper-util.
 async fn serve_plain(routes: warp::filters::BoxedFilter<(impl warp::Reply + 'static,)>, port: u16) {
@@ -27,14 +93,22 @@ async fn serve_plain(routes: warp::filters::BoxedFilter<(impl warp::Reply + 'sta
         .await
         .expect("failed to bind");
     let svc = TowerToHyperService::new(warp::service(routes));
+    let sem = connection_semaphore();
 
     loop {
         let (stream, _) = match listener.accept().await {
             Ok(conn) => conn,
             Err(_) => continue,
         };
+        // Backpressure: block the accept loop once the in-flight cap is reached
+        // instead of spawning an unbounded number of connection tasks.
+        let permit = match sem.clone().acquire_owned().await {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
         let svc = svc.clone();
         tokio::spawn(async move {
+            let _permit = permit;
             let io = hyper_util::rt::TokioIo::new(stream);
             let _ =
                 hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
@@ -82,15 +156,23 @@ async fn serve_tls(
         .await
         .expect("failed to bind");
     let svc = TowerToHyperService::new(warp::service(routes));
+    let sem = connection_semaphore();
 
     loop {
         let (stream, _) = match listener.accept().await {
             Ok(conn) => conn,
             Err(_) => continue,
         };
+        // Backpressure: block the accept loop once the in-flight cap is reached
+        // instead of spawning an unbounded number of connection tasks.
+        let permit = match sem.clone().acquire_owned().await {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
         let acceptor = tls_acceptor.clone();
         let svc = svc.clone();
         tokio::spawn(async move {
+            let _permit = permit;
             if let Ok(tls_stream) = acceptor.accept(stream).await {
                 let io = hyper_util::rt::TokioIo::new(tls_stream);
                 let _ = hyper_util::server::conn::auto::Builder::new(
@@ -139,7 +221,10 @@ async fn forward(
 
     let mut page = build("", Default::default());
 
-    let extracted = {
+    // Opt-in SSRF guard: skip the outbound fetch for blocked (internal) targets.
+    let extracted = if target_host_blocked(&host) {
+        Vec::new()
+    } else {
         let mut selectors = spider::page::get_page_selectors(&url_path, subdomains, tld);
 
         let mut links: spider::hashbrown::HashSet<spider::CaseInsensitiveString> =
@@ -242,7 +327,12 @@ async fn scrape(path: FullPath, host: String) -> Result<impl warp::Reply, Infall
         )
     };
 
-    let data = utils::fetch_page_html_raw(&url_path, &CLIENT).await;
+    // Opt-in SSRF guard: skip the outbound fetch for blocked (internal) targets.
+    let data = if target_host_blocked(&host) {
+        Default::default()
+    } else {
+        utils::fetch_page_html_raw(&url_path, &CLIENT).await
+    };
 
     #[cfg(feature = "headers")]
     fn pack(data: spider::utils::PageResponse) -> Result<impl warp::Reply, Infallible> {

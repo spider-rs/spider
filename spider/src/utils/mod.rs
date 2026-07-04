@@ -8652,11 +8652,13 @@ pub async fn openai_request(
 
 #[cfg(any(feature = "gemini", feature = "real_browser"))]
 lazy_static! {
+    /// Total permits held by [`GEMINI_SEM`]. Callers must never request more than
+    /// this at once — `Semaphore::acquire_many(n)` with `n` greater than the total
+    /// never resolves (permits are never added), which would hang the caller.
+    pub static ref GEMINI_SEM_PERMITS: usize = (num_cpus::get() * 2).max(8);
     /// Semaphore for Gemini rate limiting
-    pub static ref GEMINI_SEM: tokio::sync::Semaphore = {
-        let sem_limit = (num_cpus::get() * 2).max(8);
-        tokio::sync::Semaphore::const_new(sem_limit)
-    };
+    pub static ref GEMINI_SEM: tokio::sync::Semaphore =
+        tokio::sync::Semaphore::const_new(*GEMINI_SEM_PERMITS);
 }
 
 #[cfg(not(feature = "gemini"))]

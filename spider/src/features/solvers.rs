@@ -1121,10 +1121,19 @@ async fn solve_with_external_gemini(
     timeout_ms: u64,
 ) -> Result<Vec<u8>, RequestError> {
     if let Ok(api_key) = std::env::var("GEMINI_API_KEY") {
-        if let Ok(_sem) = crate::utils::GEMINI_SEM
-            .acquire_many(challenge.tiles.len().try_into().unwrap_or(1))
-            .await
-        {
+        // Clamp to the semaphore's total permits: `acquire_many(n)` with `n`
+        // greater than the total never resolves (permits are never added), which
+        // would hang the solve forever on a tile grid larger than the permit
+        // count. For tile counts <= the permit count `min` is a no-op, so this is
+        // byte-identical to the previous `acquire_many(tiles.len())`.
+        let want = challenge
+            .tiles
+            .len()
+            .min(*crate::utils::GEMINI_SEM_PERMITS)
+            .max(1)
+            .try_into()
+            .unwrap_or(1);
+        if let Ok(_sem) = crate::utils::GEMINI_SEM.acquire_many(want).await {
             let endpoint = format!("{}?key={}", *GEMINI_VISION_ENDPOINT, api_key);
 
             let target = challenge.target.unwrap_or("target object").to_string();

@@ -103,9 +103,17 @@ pub fn best_effort_parse_json_object(s: &str) -> EngineResult<Value> {
         }
     }
 
+    let preview_end = {
+        // Walk back to a char boundary so a multibyte char at byte 300 can't panic.
+        let mut end = s.len().min(300);
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        end
+    };
     log::warn!(
         "best_effort_parse_json_object failed on content (first 300 chars): {}",
-        &s[..s.len().min(300)]
+        &s[..preview_end]
     );
 
     Err(EngineError::InvalidField(

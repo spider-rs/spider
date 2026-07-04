@@ -255,6 +255,18 @@ where
     /// Clear the bucket.
     pub fn clear(&mut self) {
         self.links_visited.clear();
+        // Reclaim the interner: clearing only `links_visited` leaves every
+        // interned URL's bytes allocated in the `StringInterner` for the life of
+        // the bucket, so `clear()` would not actually free memory. Reassigning a
+        // fresh interner drops that backing storage.
+        #[cfg(any(
+            feature = "string_interner_bucket_backend",
+            feature = "string_interner_string_backend",
+            feature = "string_interner_buffer_backend",
+        ))]
+        {
+            self.interner = StringInterner::new();
+        }
         #[cfg(feature = "bloom")]
         {
             self.bloom.clear();

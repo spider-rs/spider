@@ -910,9 +910,14 @@ impl Agent {
         if html.len() <= self.config.html_max_bytes {
             html
         } else {
-            // Find a safe break point
-            let truncated = &html[..self.config.html_max_bytes];
-            // Try to break at a tag boundary
+            // Walk back to the nearest UTF-8 char boundary so slicing a page
+            // whose multibyte char straddles `html_max_bytes` cannot panic.
+            let mut end = self.config.html_max_bytes;
+            while end > 0 && !html.is_char_boundary(end) {
+                end -= 1;
+            }
+            let truncated = &html[..end];
+            // Try to break at a tag boundary ('<' is ASCII, always a boundary)
             if let Some(pos) = truncated.rfind('<') {
                 &truncated[..pos]
             } else {
@@ -958,9 +963,13 @@ impl Agent {
         // Try to find JSON object in content
         if let Some(start) = content.find('{') {
             if let Some(end) = content.rfind('}') {
-                let json_str = &content[start..=end];
-                if let Ok(json) = serde_json::from_str(json_str) {
-                    return Ok(json);
+                // Guard against `}`-before-`{` (e.g. "} text {"): `start > end`
+                // would make `content[start..=end]` panic.
+                if start <= end {
+                    let json_str = &content[start..=end];
+                    if let Ok(json) = serde_json::from_str(json_str) {
+                        return Ok(json);
+                    }
                 }
             }
         }
@@ -980,7 +989,12 @@ fn remove_tags(html: &str, tags: &[&str]) -> String {
         let open = format!("<{}", tag);
         let close = format!("</{}>", tag);
         let mut out = String::with_capacity(result.len());
-        let lower = result.to_lowercase();
+        // ASCII-lowercase preserves byte length 1:1, so offsets computed on
+        // `lower` map exactly onto `result`. `to_lowercase()` can change byte
+        // length (e.g. 'İ' -> 2 bytes -> 3), desyncing the offsets and panicking
+        // on the `result[..]` slices below. Tag names are ASCII, so this is
+        // equivalent for matching.
+        let lower = result.to_ascii_lowercase();
         let mut pos = 0;
         while pos < result.len() {
             if let Some(rel_start) = lower[pos..].find(&open) {
