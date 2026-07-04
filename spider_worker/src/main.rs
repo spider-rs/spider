@@ -63,10 +63,7 @@ fn target_host_blocked(host: &str) -> bool {
     let h = h.split('/').next().unwrap_or(h);
     // Strip an optional :port, and IPv6 brackets.
     let hostname = if h.starts_with('[') {
-        h.trim_start_matches('[')
-            .split(']')
-            .next()
-            .unwrap_or(h)
+        h.trim_start_matches('[').split(']').next().unwrap_or(h)
     } else {
         h.rsplit_once(':').map(|(a, _)| a).unwrap_or(h)
     };
