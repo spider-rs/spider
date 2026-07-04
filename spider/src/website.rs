@@ -1068,6 +1068,23 @@ lazy_static! {
             .unwrap_or(false);
 }
 
+#[cfg(all(
+    feature = "balance",
+    not(feature = "decentralized"),
+    any(feature = "chrome", feature = "spider_cloud")
+))]
+lazy_static! {
+    /// When set, retained scrape pages also drop their screenshot / content-map
+    /// bytes under memory pressure. Unlike HTML these cannot be spooled+restored
+    /// transparently (public fields, no accessor hook), so this is a lossy
+    /// last-resort valve for the retained copy — subscribers already received the
+    /// full page before it was retained. Default off = byte-identical. Read once.
+    static ref SHED_MEDIA_UNDER_PRESSURE: bool =
+        std::env::var("SPIDER_SHED_MEDIA_UNDER_PRESSURE")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+}
+
 #[cfg(feature = "decentralized")]
 lazy_static! {
     /// The global worker count.
@@ -7394,6 +7411,28 @@ impl Website {
             let html_len = page.html.as_ref().map_or(0, |b| b.len());
             if html_len > 0 && crate::utils::html_spool::should_spool(html_len) {
                 page.spool_html_to_disk_async().await;
+            }
+
+            // Opt-in (default off => byte-identical): under memory pressure also
+            // drop retained screenshot / content-map bytes. Reuses the same
+            // `should_spool` pressure+size heuristic as HTML; lossy for the
+            // retained copy only.
+            #[cfg(any(feature = "chrome", feature = "spider_cloud"))]
+            if *SHED_MEDIA_UNDER_PRESSURE {
+                #[cfg(feature = "chrome")]
+                if page
+                    .screenshot_bytes
+                    .as_ref()
+                    .is_some_and(|b| crate::utils::html_spool::should_spool(b.len()))
+                {
+                    page.screenshot_bytes = None;
+                }
+                #[cfg(feature = "spider_cloud")]
+                if page.content_map.as_ref().is_some_and(|m| {
+                    crate::utils::html_spool::should_spool(m.values().map(|b| b.len()).sum())
+                }) {
+                    page.content_map = None;
+                }
             }
         }
     }
