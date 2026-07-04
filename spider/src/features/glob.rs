@@ -16,6 +16,20 @@ lazy_static! {
     };
 }
 
+/// Optional cap on the number of URLs a single glob pattern may expand to, read
+/// from `SPIDER_GLOB_MAX_EXPANSION`. Unset or `0` = unlimited (byte-identical to
+/// the historical behaviour); a positive value refuses to materialize a larger
+/// expansion so a crafted range (e.g. `[0-2000000000]`) can't OOM before crawling.
+fn glob_max_expansion() -> Option<usize> {
+    match std::env::var("SPIDER_GLOB_MAX_EXPANSION")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    {
+        None | Some(0) => None,
+        Some(n) => Some(n),
+    }
+}
+
 /// expand a website url to a glob pattern set
 pub fn expand_url(url: &str) -> Vec<CaseInsensitiveString> {
     use itertools::Itertools;
@@ -106,6 +120,23 @@ pub fn expand_url(url: &str) -> Vec<CaseInsensitiveString> {
 
     if matches.is_empty() {
         return Vec::new();
+    }
+
+    // Optional expansion cap (see `glob_max_expansion`). Unset/0 => skipped =>
+    // byte-identical. `checked_mul` keeps the size computation itself from
+    // overflowing; an overflow is treated as "over cap".
+    if let Some(max) = glob_max_expansion() {
+        let total = matches
+            .iter()
+            .try_fold(1usize, |acc, m| acc.checked_mul(m.len()));
+        if total.map_or(true, |n| n > max) {
+            log::warn!(
+                "glob expansion of {:?} exceeds SPIDER_GLOB_MAX_EXPANSION={}; skipping expansion",
+                url,
+                max
+            );
+            return Vec::new();
+        }
     }
 
     matches

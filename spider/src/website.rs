@@ -7595,7 +7595,21 @@ impl Website {
         }
 
         if let Some(q) = q {
-            while let Ok(link) = q.try_recv() {
+            loop {
+                let link = match q.try_recv() {
+                    Ok(link) => link,
+                    // Lagged: the producer outran the drain and the broadcast ring
+                    // overwrote the oldest URLs. Log the loss and keep draining the
+                    // newer entries instead of aborting the drain, which previously
+                    // stranded everything still buffered behind the lag.
+                    Err(tokio::sync::broadcast::error::TryRecvError::Lagged(n)) => {
+                        log::warn!("crawl queue lagged; {n} queued URLs were dropped");
+                        continue;
+                    }
+                    // Empty (fully drained) or Closed (sender gone): done.
+                    Err(_) => break,
+                };
+
                 let s = link.into();
                 let allowed = self.is_allowed_budgetless(&s);
 
