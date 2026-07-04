@@ -461,24 +461,6 @@ lazy_static! {
 /// the caller sets a smaller `request_timeout`.
 const CHROME_FAILOVER_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// Runtime opt-out for the in-request gateway re-acquire path.
-///
-/// Enabled by default. Set `SPIDER_CHROME_REACQUIRE` to `0`, `false`, or `off`
-/// to restore the prior behavior where a browser that dies mid-request is not
-/// re-acquired within that request. Evaluated once and cached (lock-free), so
-/// it costs nothing on the hot path and is byte-identical when the variable is
-/// unset.
-pub(crate) fn chrome_reacquire_enabled() -> bool {
-    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ENABLED.get_or_init(|| match std::env::var("SPIDER_CHROME_REACQUIRE") {
-        Ok(v) => {
-            let v = v.trim();
-            !(v == "0" || v.eq_ignore_ascii_case("false") || v.eq_ignore_ascii_case("off"))
-        }
-        Err(_) => true,
-    })
-}
-
 /// Lock-free failover across multiple remote Chrome endpoints.
 ///
 /// Tracks per-endpoint consecutive errors with atomics. When an endpoint

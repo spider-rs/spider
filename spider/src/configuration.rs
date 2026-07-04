@@ -686,6 +686,13 @@ pub struct Configuration {
     /// Parallel crawl backend configuration. Race CDP / Servo backends alongside
     /// the primary crawl path. Requires the `parallel_backends` feature.
     pub parallel_backends: Option<ParallelBackendsConfig>,
+    /// Per-crawl control over the optional crawl enhancements (see
+    /// [`CrawlEnhancement`]). Empty by default, so every section follows its
+    /// `SPIDER_CHROME_*` env default — byte-identical to prior releases. Use
+    /// [`Configuration::with_enhancement`] / [`Configuration::with_all_enhancements`]
+    /// / [`Configuration::for_builtin_browser`] to override per section or
+    /// wholesale.
+    pub enhancements: EnhancementSettings,
     #[cfg(feature = "decentralized")]
     /// Per-`Website` remote Spider worker URLs used for crawl requests. When
     /// `None`, falls back to the process-wide `SPIDER_WORKER` env var (or its
@@ -698,6 +705,166 @@ pub struct Configuration {
     /// (or its default), preserving pre-2.51.x behavior. When `Some`,
     /// overrides the global pool for this `Website` only.
     pub scraper_worker_connection_urls: Option<Vec<String>>,
+}
+
+/// The optional, on-by-default crawl enhancements. Each is behaviour a browser
+/// with the same capability built in would otherwise duplicate, so each can be
+/// turned off per-`Website` (via [`Configuration::with_enhancement`]) or
+/// fleet-wide (via its `SPIDER_CHROME_*` env var) when the crawl is fronted by
+/// such a browser.
+///
+/// The discriminant doubles as a dense index into [`EnhancementSettings`], so
+/// keep the variants contiguous and in sync with [`CrawlEnhancement::ALL`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum CrawlEnhancement {
+    /// Re-fetch a thin HTTP response through a full browser render once the
+    /// SPA-shell upgrade score crosses its threshold. Env:
+    /// `SPIDER_CHROME_RENDER_UPGRADE`.
+    RenderUpgrade = 0,
+    /// Clear a small interactive interstitial with a synthetic in-page pointer
+    /// interaction. Env: `SPIDER_CHROME_POINTER_ASSIST`.
+    PointerAssist = 1,
+    /// Short-circuit chrome navigation for a host already cached as
+    /// unresolvable. Env: `SPIDER_CHROME_DNS_GUARD`.
+    DnsGuard = 2,
+    /// Re-acquire a browser/gateway connection within the same request when the
+    /// active one dies mid-flight. Env: `SPIDER_CHROME_REACQUIRE`.
+    GatewayReacquire = 3,
+    /// Race a local-DNS probe against chrome navigation to fail unresolvable
+    /// hosts fast. Env: `SPIDER_CHROME_HEDGE_DNS_DELAY_MS` (`0` disables).
+    DnsHedge = 4,
+}
+
+impl CrawlEnhancement {
+    /// Number of sections.
+    pub const COUNT: usize = 5;
+
+    /// Every section, in discriminant order. Whole-map operations iterate this.
+    pub const ALL: [CrawlEnhancement; Self::COUNT] = [
+        CrawlEnhancement::RenderUpgrade,
+        CrawlEnhancement::PointerAssist,
+        CrawlEnhancement::DnsGuard,
+        CrawlEnhancement::GatewayReacquire,
+        CrawlEnhancement::DnsHedge,
+    ];
+
+    /// Process-global defaults for every section, read from the matching
+    /// `SPIDER_CHROME_*` env var exactly once and cached lock-free. Absent or
+    /// unrecognised value ⇒ enabled (default-ON opt-out convention). The hedge
+    /// slot is always `true` here — its `SPIDER_CHROME_HEDGE_DNS_DELAY_MS`
+    /// handling stays inside the hedge itself, so a per-crawl override is the
+    /// only thing this layer forces for it.
+    #[cfg(feature = "chrome")]
+    #[inline]
+    fn env_defaults() -> [bool; Self::COUNT] {
+        static CELL: std::sync::OnceLock<[bool; CrawlEnhancement::COUNT]> =
+            std::sync::OnceLock::new();
+        *CELL.get_or_init(|| {
+            let env = |k: &str| crate::utils::opt_out_flag(std::env::var(k).ok().as_deref());
+            [
+                env("SPIDER_CHROME_RENDER_UPGRADE"),
+                env("SPIDER_CHROME_POINTER_ASSIST"),
+                env("SPIDER_CHROME_DNS_GUARD"),
+                env("SPIDER_CHROME_REACQUIRE"),
+                true,
+            ]
+        })
+    }
+
+    /// Process-global default for this section (see [`Self::env_defaults`]).
+    #[cfg(feature = "chrome")]
+    #[inline]
+    pub(crate) fn env_default(self) -> bool {
+        Self::env_defaults()[self as usize]
+    }
+}
+
+/// Per-`Website` overrides for the [`CrawlEnhancement`] sections.
+///
+/// Map-like but allocation-free: a fixed `[Option<bool>; N]` indexed by each
+/// section's discriminant. `None` ⇒ fall back to the section's process-global
+/// env default; `Some(v)` ⇒ force it on/off for this crawl. `Copy`, no heap, no
+/// `Drop` — cheap to copy into every fetch and impossible to leak.
+///
+/// Resolution precedence: per-crawl override → `SPIDER_CHROME_*` env → built-in
+/// default (ON). An untouched value (all `None`) is byte-identical to prior
+/// releases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct EnhancementSettings {
+    overrides: [Option<bool>; CrawlEnhancement::COUNT],
+}
+
+impl Default for EnhancementSettings {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EnhancementSettings {
+    /// All sections at their env/global default (no per-crawl override).
+    #[inline]
+    pub const fn new() -> Self {
+        Self {
+            overrides: [None; CrawlEnhancement::COUNT],
+        }
+    }
+
+    /// Every section forced off — the map a crawl fronted by a browser with
+    /// these behaviours built in should use so the two layers don't both act.
+    #[inline]
+    pub const fn all_off() -> Self {
+        Self {
+            overrides: [Some(false); CrawlEnhancement::COUNT],
+        }
+    }
+
+    /// Force a single section on/off for this crawl, overriding its env default.
+    #[inline]
+    pub fn set(&mut self, section: CrawlEnhancement, enabled: bool) -> &mut Self {
+        self.overrides[section as usize] = Some(enabled);
+        self
+    }
+
+    /// Force every section to the same state (off-complete / on-complete).
+    #[inline]
+    pub fn set_all(&mut self, enabled: bool) -> &mut Self {
+        self.overrides = [Some(enabled); CrawlEnhancement::COUNT];
+        self
+    }
+
+    /// Drop a section's override so it reverts to the env/global default.
+    #[inline]
+    pub fn clear(&mut self, section: CrawlEnhancement) -> &mut Self {
+        self.overrides[section as usize] = None;
+        self
+    }
+
+    /// The explicit per-crawl override for a section, if any.
+    #[inline]
+    pub fn get(&self, section: CrawlEnhancement) -> Option<bool> {
+        self.overrides[section as usize]
+    }
+
+    /// `true` if any section carries a per-crawl override.
+    #[inline]
+    pub fn is_customized(&self) -> bool {
+        self.overrides.iter().any(Option::is_some)
+    }
+
+    /// Resolve a section: the per-crawl override if set, else its env/global
+    /// default. The hot-path check every gated site calls — one array index
+    /// plus, on the `None` path, a lock-free cached env read.
+    #[cfg(feature = "chrome")]
+    #[inline]
+    pub(crate) fn enabled(&self, section: CrawlEnhancement) -> bool {
+        match self.overrides[section as usize] {
+            Some(v) => v,
+            None => section.env_default(),
+        }
+    }
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -1098,6 +1265,34 @@ impl Configuration {
     /// Include subdomains detection.
     pub fn with_subdomains(&mut self, subdomains: bool) -> &mut Self {
         self.subdomains = subdomains;
+        self
+    }
+
+    /// Force a single crawl enhancement on or off for this crawl, overriding its
+    /// process-global `SPIDER_CHROME_*` env default. See [`CrawlEnhancement`].
+    pub fn with_enhancement(&mut self, section: CrawlEnhancement, enabled: bool) -> &mut Self {
+        self.enhancements.set(section, enabled);
+        self
+    }
+
+    /// Force every crawl enhancement on or off at once (off-complete /
+    /// on-complete).
+    pub fn with_all_enhancements(&mut self, enabled: bool) -> &mut Self {
+        self.enhancements.set_all(enabled);
+        self
+    }
+
+    /// Replace the full per-crawl enhancement map.
+    pub fn with_enhancements(&mut self, enhancements: EnhancementSettings) -> &mut Self {
+        self.enhancements = enhancements;
+        self
+    }
+
+    /// Disable every enhancement a browser with these behaviours built in would
+    /// duplicate. Use when fronting the crawl with such a browser so the two
+    /// layers don't both act. Equivalent to `with_all_enhancements(false)`.
+    pub fn for_builtin_browser(&mut self) -> &mut Self {
+        self.enhancements.set_all(false);
         self
     }
 
@@ -2484,6 +2679,7 @@ impl Configuration {
                 .chrome_failover
                 .last_connected_url()
                 .or(self.chrome_connection_url.as_deref()),
+            enhancements: self.enhancements,
         }
     }
 
@@ -3594,5 +3790,90 @@ mod tests {
         config.with_spider_browser_config(SpiderBrowserConfig::new("key"));
         assert!(config.chrome_connection_url.is_some());
         assert!(config.chrome_connection_urls.is_none());
+    }
+
+    #[test]
+    fn enhancement_map_defaults_are_empty() {
+        let s = EnhancementSettings::new();
+        assert!(!s.is_customized());
+        for e in CrawlEnhancement::ALL {
+            assert_eq!(s.get(e), None, "{e:?} should have no override by default");
+        }
+        assert_eq!(EnhancementSettings::default(), s);
+    }
+
+    #[test]
+    fn enhancement_map_per_section_override() {
+        let mut s = EnhancementSettings::new();
+        s.set(CrawlEnhancement::DnsGuard, false)
+            .set(CrawlEnhancement::RenderUpgrade, true);
+        assert_eq!(s.get(CrawlEnhancement::DnsGuard), Some(false));
+        assert_eq!(s.get(CrawlEnhancement::RenderUpgrade), Some(true));
+        // Untouched sections stay unset (fall back to the env/global default).
+        assert_eq!(s.get(CrawlEnhancement::PointerAssist), None);
+        assert!(s.is_customized());
+        // Clearing an override reverts the section to its default.
+        s.clear(CrawlEnhancement::DnsGuard);
+        assert_eq!(s.get(CrawlEnhancement::DnsGuard), None);
+    }
+
+    #[test]
+    fn enhancement_map_set_all_and_all_off() {
+        let mut s = EnhancementSettings::new();
+        s.set_all(false);
+        for e in CrawlEnhancement::ALL {
+            assert_eq!(s.get(e), Some(false));
+        }
+        assert_eq!(EnhancementSettings::all_off(), s);
+        s.set_all(true);
+        for e in CrawlEnhancement::ALL {
+            assert_eq!(s.get(e), Some(true));
+        }
+    }
+
+    #[test]
+    fn enhancement_settings_is_copy() {
+        // Copy semantics: no heap, cheap to duplicate into every fetch.
+        let mut a = EnhancementSettings::new();
+        a.set(CrawlEnhancement::DnsHedge, false);
+        let b = a; // copy, not move — `a` is still usable below
+        assert_eq!(a.get(CrawlEnhancement::DnsHedge), Some(false));
+        assert_eq!(b.get(CrawlEnhancement::DnsHedge), Some(false));
+    }
+
+    #[cfg(feature = "chrome")]
+    #[test]
+    fn enhancement_override_wins_over_env_default() {
+        // An explicit per-crawl override resolves regardless of the env default.
+        let mut s = EnhancementSettings::new();
+        s.set(CrawlEnhancement::DnsGuard, false);
+        assert!(!s.enabled(CrawlEnhancement::DnsGuard));
+        s.set(CrawlEnhancement::DnsGuard, true);
+        assert!(s.enabled(CrawlEnhancement::DnsGuard));
+        // An unset section delegates to its env/global default.
+        assert_eq!(
+            EnhancementSettings::new().enabled(CrawlEnhancement::PointerAssist),
+            CrawlEnhancement::PointerAssist.env_default()
+        );
+    }
+
+    #[cfg(feature = "chrome")]
+    #[test]
+    fn opt_out_flag_disable_tokens() {
+        use crate::utils::opt_out_flag;
+        // Default-ON: unset or any non-disable value enables.
+        assert!(opt_out_flag(None));
+        assert!(opt_out_flag(Some("")));
+        assert!(opt_out_flag(Some("1")));
+        assert!(opt_out_flag(Some("true")));
+        assert!(opt_out_flag(Some("on")));
+        assert!(opt_out_flag(Some("anything")));
+        // Disable tokens, trimmed + case-insensitive.
+        assert!(!opt_out_flag(Some("0")));
+        assert!(!opt_out_flag(Some(" 0 ")));
+        assert!(!opt_out_flag(Some("false")));
+        assert!(!opt_out_flag(Some("FALSE")));
+        assert!(!opt_out_flag(Some("off")));
+        assert!(!opt_out_flag(Some("  Off  ")));
     }
 }

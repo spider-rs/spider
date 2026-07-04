@@ -341,7 +341,10 @@ macro_rules! chrome_page_fetch {
                 // the live tab past this scope, so a reconnected browser can't be
                 // disposed at scope exit without Page-level lifetime plumbing.
                 if !cfg!(feature = "chrome_store_page")
-                    && crate::features::chrome::chrome_reacquire_enabled()
+                    && $shared
+                        .6
+                        .enhancements
+                        .enabled(crate::configuration::CrawlEnhancement::GatewayReacquire)
                 {
                     let mut reacquire_budget: u32 = 2;
                     let mut reacquire_attempt: u32 = 0;
@@ -5040,7 +5043,10 @@ impl Website {
             // `chrome_store_page` (the subscriber keeps the live tab past this
             // scope).
             if !cfg!(feature = "chrome_store_page")
-                && crate::features::chrome::chrome_reacquire_enabled()
+                && self
+                    .configuration
+                    .enhancements
+                    .enabled(crate::configuration::CrawlEnhancement::GatewayReacquire)
             {
                 let mut reacquire_budget: u32 = 2;
                 let mut reacquire_attempt: u32 = 0;
@@ -5467,7 +5473,10 @@ impl Website {
             // `chrome_store_page` (the subscriber keeps the live tab past this
             // scope).
             if !cfg!(feature = "chrome_store_page")
-                && crate::features::chrome::chrome_reacquire_enabled()
+                && self
+                    .configuration
+                    .enhancements
+                    .enabled(crate::configuration::CrawlEnhancement::GatewayReacquire)
             {
                 let mut reacquire_budget: u32 = 2;
                 let mut reacquire_attempt: u32 = 0;
@@ -12921,6 +12930,41 @@ impl Website {
     /// Include subdomains detection.
     pub fn with_subdomains(&mut self, subdomains: bool) -> &mut Self {
         self.configuration.with_subdomains(subdomains);
+        self
+    }
+
+    /// Force a single crawl enhancement on or off for this crawl, overriding its
+    /// process-global `SPIDER_CHROME_*` env default. See
+    /// [`crate::configuration::CrawlEnhancement`].
+    pub fn with_enhancement(
+        &mut self,
+        section: crate::configuration::CrawlEnhancement,
+        enabled: bool,
+    ) -> &mut Self {
+        self.configuration.with_enhancement(section, enabled);
+        self
+    }
+
+    /// Force every crawl enhancement on or off at once (off-complete /
+    /// on-complete).
+    pub fn with_all_enhancements(&mut self, enabled: bool) -> &mut Self {
+        self.configuration.with_all_enhancements(enabled);
+        self
+    }
+
+    /// Replace the full per-crawl enhancement map.
+    pub fn with_enhancements(
+        &mut self,
+        enhancements: crate::configuration::EnhancementSettings,
+    ) -> &mut Self {
+        self.configuration.with_enhancements(enhancements);
+        self
+    }
+
+    /// Disable every enhancement a browser with these behaviours built in would
+    /// duplicate. Use when fronting the crawl with such a browser.
+    pub fn for_builtin_browser(&mut self) -> &mut Self {
+        self.configuration.for_builtin_browser();
         self
     }
 

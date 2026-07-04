@@ -5144,12 +5144,17 @@ impl Page {
         // (OnceLock empty + is_empty), no URL parse on a never-
         // populated cache. See `chrome_nxdomain_shortcircuit` and
         // `ChromeNxdomainCache` for the full safety + perf rationale.
-        if let Some(pr) = chrome_nxdomain_shortcircuit(url) {
-            let mut p = build(url, pr);
-            if cfg!(feature = "chrome_store_page") {
-                p.chrome_page = Some(page.clone());
+        if params
+            .enhancements
+            .enabled(crate::configuration::CrawlEnhancement::DnsGuard)
+        {
+            if let Some(pr) = chrome_nxdomain_shortcircuit(url) {
+                let mut p = build(url, pr);
+                if cfg!(feature = "chrome_store_page") {
+                    p.chrome_page = Some(page.clone());
+                }
+                return p;
             }
-            return p;
         }
 
         let page_resource = if seeded_resource.is_some() {
@@ -5238,10 +5243,17 @@ impl Page {
             // keeps the grown hedge frame on the heap, off the
             // enclosing crawl future — one alloc per chrome fetch,
             // negligible vs. the network round-trip.
-            let hedge_fut: std::pin::Pin<
-                Box<dyn std::future::Future<Output = crate::utils::PageResponse> + Send>,
-            > = Box::pin(chrome_navigation_with_dns_hedge(url, page, fetch_fut));
-            hedge_fut.await
+            if params
+                .enhancements
+                .enabled(crate::configuration::CrawlEnhancement::DnsHedge)
+            {
+                let hedge_fut: std::pin::Pin<
+                    Box<dyn std::future::Future<Output = crate::utils::PageResponse> + Send>,
+                > = Box::pin(chrome_navigation_with_dns_hedge(url, page, fetch_fut));
+                hedge_fut.await
+            } else {
+                fetch_fut.await
+            }
         };
         let mut p = build(url, page_resource);
 
@@ -8210,7 +8222,11 @@ impl Page {
                         score = SMART_UPGRADE_THRESHOLD;
                     }
 
-                    if score >= SMART_UPGRADE_THRESHOLD {
+                    if configuration
+                        .enhancements
+                        .enabled(crate::configuration::CrawlEnhancement::RenderUpgrade)
+                        && score >= SMART_UPGRADE_THRESHOLD
+                    {
                         if let Some(browser_controller) = browser
                             .get_or_init(|| {
                                 crate::website::Website::setup_browser_base(
@@ -8792,7 +8808,11 @@ impl Page {
                         score = SMART_UPGRADE_THRESHOLD;
                     }
 
-                    if score >= SMART_UPGRADE_THRESHOLD {
+                    if configuration
+                        .enhancements
+                        .enabled(crate::configuration::CrawlEnhancement::RenderUpgrade)
+                        && score >= SMART_UPGRADE_THRESHOLD
+                    {
                         if let Some(browser_controller) = browser
                             .get_or_init(|| {
                                 crate::website::Website::setup_browser_base(

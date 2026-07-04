@@ -3829,6 +3829,10 @@ pub struct ChromeFetchParams<'a> {
     /// first-byte watchdog passes this URL to
     /// `LazyChromeFailover::mark_url_bad` on timeout.
     pub chrome_endpoint_url: Option<&'a str>,
+    /// Per-crawl enhancement overrides, copied from `Configuration`. `Copy` and
+    /// allocation-free; resolved per gated site via `enabled(..)`. An untouched
+    /// (default) value makes every section follow its env/global default.
+    pub enhancements: crate::configuration::EnhancementSettings,
 }
 
 #[cfg(feature = "chrome")]
@@ -3852,6 +3856,21 @@ impl<'a> ChromeFetchParams<'a> {
     pub fn with_chrome_endpoint(mut self, url: Option<&'a str>) -> Self {
         self.chrome_endpoint_url = url;
         self
+    }
+}
+
+/// Parse a default-ON opt-out flag value: `0`, `false`, or `off` (trimmed,
+/// case-insensitive) disable it; every other value — including an absent
+/// variable — leaves it enabled. Shared by the `SPIDER_CHROME_*` runtime
+/// opt-outs so they all honour the same disable tokens.
+#[cfg(feature = "chrome")]
+pub(crate) fn opt_out_flag(value: Option<&str>) -> bool {
+    match value {
+        Some(v) => {
+            let v = v.trim();
+            !(v == "0" || v.eq_ignore_ascii_case("false") || v.eq_ignore_ascii_case("off"))
+        }
+        None => true,
     }
 }
 
@@ -4914,7 +4933,11 @@ pub async fn fetch_page_html_chrome_base<'h>(
                                     validate_cf = true;
                                 }
                             }
-                        } else if anti_bot_tech == AntiBotTech::Imperva {
+                        } else if anti_bot_tech == AntiBotTech::Imperva
+                            && params
+                                .enhancements
+                                .enabled(crate::configuration::CrawlEnhancement::PointerAssist)
+                        {
                             let imperva_match = crate::features::solvers::looks_like_imperva_verify(
                                 res.len(),
                                 &res,
