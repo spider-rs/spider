@@ -1057,6 +1057,17 @@ lazy_static! {
     };
 }
 
+#[cfg(feature = "sitemap")]
+lazy_static! {
+    /// When set, sitemap URLs are charged against the crawl budget so a large or
+    /// adversarial sitemap-index tree can't fetch unboundedly. Default off = the
+    /// historical budgetless sitemap traversal (byte-identical). Read once.
+    static ref SITEMAP_RESPECT_BUDGET: bool =
+        std::env::var("SPIDER_SITEMAP_RESPECT_BUDGET")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+}
+
 #[cfg(feature = "decentralized")]
 lazy_static! {
     /// The global worker count.
@@ -1949,6 +1960,19 @@ impl Website {
                 return ProcessLinkStatus::Blocked;
             }
             status
+        }
+    }
+
+    /// Budget check for sitemap URLs. When `SPIDER_SITEMAP_RESPECT_BUDGET` is set
+    /// the sitemap fetch is charged against the crawl budget (and traversal stops
+    /// once the budget is exhausted); default off keeps the historical budgetless
+    /// sitemap traversal, so the default path is byte-identical.
+    #[cfg(feature = "sitemap")]
+    pub(crate) fn is_allowed_sitemap(&mut self, link: &CaseInsensitiveString) -> ProcessLinkStatus {
+        if *SITEMAP_RESPECT_BUDGET {
+            self.is_allowed(link)
+        } else {
+            self.is_allowed_budgetless(link)
         }
     }
 
@@ -11778,10 +11802,16 @@ impl Website {
 
                     let link = <CompactString as Clone>::clone(&(*sitemap_url)).into();
 
-                    let allowed = self.is_allowed_budgetless(&link);
+                    let allowed = self.is_allowed_sitemap(&link);
 
                     if allowed.eq(&ProcessLinkStatus::Blocked) {
                         continue;
+                    }
+
+                    // Gated: only reachable when SPIDER_SITEMAP_RESPECT_BUDGET is
+                    // on (otherwise the check is budgetless and never returns this).
+                    if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                        break 'outer;
                     }
 
                     self.insert_link(&link).await;
@@ -12017,10 +12047,16 @@ impl Website {
 
                             let link = <CompactString as Clone>::clone(&(*sitemap_url)).into();
 
-                            let allowed = self.is_allowed_budgetless(&link);
+                            let allowed = self.is_allowed_sitemap(&link);
 
                             if allowed.eq(&ProcessLinkStatus::Blocked) {
                                 continue;
+                            }
+
+                            // Gated: only reachable when SPIDER_SITEMAP_RESPECT_BUDGET
+                            // is on (otherwise budgetless never returns this).
+                            if allowed.eq(&ProcessLinkStatus::BudgetExceeded) {
+                                break 'outer;
                             }
 
                             self.insert_link(&link).await;
