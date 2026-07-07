@@ -450,6 +450,25 @@ pub fn create_handler_config(config: &Configuration) -> HandlerConfig {
 
 lazy_static! {
     static ref CHROM_BASE: Option<String> = std::env::var("CHROME_URL").ok();
+    /// Per-endpoint connect retries for the multi-URL failover ring before
+    /// rotating to the next endpoint (`SPIDER_CHROME_FAILOVER_RETRIES`).
+    /// Default 3 — the prior hardcoded value, so unset is byte-identical.
+    /// Deployments fronting endpoints with an LB that already spreads across
+    /// healthy backends can lower this to fail over faster instead of
+    /// re-dialing a saturated endpoint.
+    static ref CHROME_FAILOVER_RETRIES: u32 = std::env::var("SPIDER_CHROME_FAILOVER_RETRIES")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(3);
+    /// Connect retries (with backoff) for the single-endpoint path
+    /// (`SPIDER_CHROME_SINGLE_RETRIES`). Default 10 — the prior hardcoded
+    /// value, so unset is byte-identical. Lower it when the endpoint is a
+    /// load balancer that returns fast 5xx under saturation: 11 sequential
+    /// attempts against a rejecting LB just burns the page budget.
+    static ref CHROME_SINGLE_RETRIES: u32 = std::env::var("SPIDER_CHROME_SINGLE_RETRIES")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(10);
 }
 
 /// Default per-attempt connect timeout for the chrome failover.
@@ -847,7 +866,9 @@ pub async fn setup_browser_configuration(
     // ── Multi-endpoint failover path (priority) ──
     if let Some(ref urls) = config.chrome_connection_urls {
         if !urls.is_empty() {
-            let failover = config.chrome_failover.get_or_init(urls, 3);
+            let failover = config
+                .chrome_failover
+                .get_or_init(urls, *CHROME_FAILOVER_RETRIES);
             return failover
                 .connect(config)
                 .await
@@ -865,7 +886,7 @@ pub async fn setup_browser_configuration(
     match chrome_connection {
         Some(v) => {
             let mut attempts = 0;
-            let max_retries = 10;
+            let max_retries = *CHROME_SINGLE_RETRIES;
             let mut browser = None;
 
             // Bound each connect so a hung remote (cold / over-subscribed pool)

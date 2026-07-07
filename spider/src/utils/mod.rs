@@ -4540,16 +4540,29 @@ pub async fn fetch_page_html_chrome_base<'h>(
                         }
                         // Mark the chrome endpoint bad on the failover so
                         // the next setup_browser_configuration call rotates
-                        // away from it. Cooldown matches the timeout (or
-                        // 30s, whichever is longer) so the dead endpoint
-                        // gets at least the watchdog's worth of recovery
-                        // time before being retried.
+                        // away from it. Cooldown matches the timeout or the
+                        // configured floor, whichever is longer, so the dead
+                        // endpoint gets recovery time before being retried.
+                        // Floor tunable via SPIDER_CHROME_MARK_DEAD_COOLDOWN_MS
+                        // (default 30_000 = prior hardcoded value): when the
+                        // endpoint is a load balancer over many backends, one
+                        // page's first-byte timeout says little about the
+                        // whole pool, and a 30s amputation of the entire
+                        // tier over-reacts — deployments like that want a
+                        // short floor instead.
                         if let (Some(ref failover), Some(ref endpoint_url)) =
                             (&chrome_failover_for_watchdog, &chrome_endpoint_for_watchdog)
                         {
+                            static MARK_DEAD_FLOOR_MS: std::sync::LazyLock<u64> =
+                                std::sync::LazyLock::new(|| {
+                                    std::env::var("SPIDER_CHROME_MARK_DEAD_COOLDOWN_MS")
+                                        .ok()
+                                        .and_then(|v| v.parse::<u64>().ok())
+                                        .unwrap_or(30_000)
+                                });
                             let cooldown_ms = std::cmp::max(
                                 timeout.as_millis().min(u128::from(u64::MAX)) as u64,
-                                30_000,
+                                *MARK_DEAD_FLOOR_MS,
                             );
                             failover.mark_url_bad(endpoint_url, cooldown_ms);
                         }
