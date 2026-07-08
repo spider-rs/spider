@@ -6193,19 +6193,35 @@ impl Utf8StreamValidator {
 
 /// Block streaming
 pub(crate) fn block_streaming(res: &Response, only_html: bool) -> bool {
-    let mut block_streaming = false;
+    block_streaming_headers(res.headers(), only_html)
+}
 
+/// Headers-only variant of [`block_streaming`], so producers that hold a
+/// [`reqwest::header::HeaderMap`] directly (e.g. the in-process fetch
+/// engine path) get the identical "should we skip streaming this body"
+/// decision without a `Response`.
+pub(crate) fn block_streaming_headers(
+    headers: &reqwest::header::HeaderMap,
+    only_html: bool,
+) -> bool {
     if only_html {
-        if let Some(content_type) = res.headers().get(crate::client::header::CONTENT_TYPE) {
+        if let Some(content_type) = headers.get(reqwest::header::CONTENT_TYPE) {
             if let Ok(content_type_str) = content_type.to_str() {
                 if IGNORE_CONTENT_TYPES.contains(content_type_str) {
-                    block_streaming = true;
+                    return true;
                 }
             }
         }
     }
 
-    block_streaming
+    false
+}
+
+/// Status-only variant of [`valid_parsing_status`] for producers that
+/// hold a [`StatusCode`] directly (e.g. the in-process fetch engine
+/// path). Kept in lockstep with [`valid_parsing_status`].
+pub(crate) fn valid_parsing_status_code(status: StatusCode) -> bool {
+    status.is_success() || status == StatusCode::NOT_FOUND
 }
 
 /// Handle the response bytes
@@ -6572,6 +6588,282 @@ pub(crate) async fn build_error_page_response(target_url: &str, err: RequestErro
     page_response
 }
 
+/// Build a [`PageResponse`] from a completed
+/// [`crate::fetch_engine::EngineResponse`], applying the same size caps,
+/// UTF-8 validation, and anti-bot detection spider applies to a streamed
+/// reqwest response. The engine returns a fully-decoded body, so the
+/// per-chunk idle timeout is the engine's own concern; everything visible
+/// at the spider boundary (`MAX_SIZE_BYTES` cap, 2 GB `Content-Length`
+/// reject, mismatch → `content_truncated`, binary short-circuit, UTF-8
+/// verdict, anti-bot classification) is reproduced here so the engine and
+/// reqwest paths stay in parity into [`crate::page::build`].
+pub async fn handle_engine_response_bytes(
+    resp: crate::fetch_engine::EngineResponse,
+    target_url: &str,
+    only_html: bool,
+) -> PageResponse {
+    let crate::fetch_engine::EngineResponse {
+        status_code,
+        final_url,
+        headers,
+        #[cfg(feature = "remote_addr")]
+        remote_addr,
+        #[cfg(feature = "cookies")]
+        response_cookies,
+        body,
+        declared_content_length,
+        anti_bot_tech: engine_anti_bot,
+        served: _served,
+    } = resp;
+
+    // Redirect detection parity: set `final_url` only when it differs from
+    // the requested URL (mirrors `res.url() != target_url`).
+    let rd = match final_url {
+        Some(ref u) if u != target_url => Some(u.clone()),
+        _ => None,
+    };
+
+    let limit = *MAX_SIZE_BYTES;
+
+    // Upfront oversize reject on the declared length, mirroring the
+    // reqwest path's `current_size > limit` guard (returns no content).
+    if limit > 0 {
+        if let Some(cap) = declared_content_length {
+            if cap as usize > limit {
+                let anti_bot_tech = engine_anti_bot.unwrap_or_else(|| {
+                    detect_anti_bot_tech_response(
+                        target_url,
+                        &HeaderSource::HeaderMap(&headers),
+                        &[],
+                        None,
+                    )
+                });
+                return PageResponse {
+                    headers: Some(headers),
+                    #[cfg(feature = "remote_addr")]
+                    remote_addr,
+                    #[cfg(feature = "cookies")]
+                    cookies: response_cookies,
+                    content: None,
+                    final_url: rd,
+                    status_code,
+                    anti_bot_tech,
+                    ..Default::default()
+                };
+            }
+        }
+    }
+
+    // Reject a body whose declared length blows the 2 GB ceiling.
+    if let Some(cap) = declared_content_length {
+        if cap > MAX_CONTENT_LENGTH {
+            log::warn!("{target_url} Content-Length {cap} exceeds 2 GB limit, rejecting");
+            return PageResponse {
+                headers: Some(headers),
+                #[cfg(feature = "remote_addr")]
+                remote_addr,
+                #[cfg(feature = "cookies")]
+                cookies: response_cookies,
+                content: None,
+                final_url: rd,
+                status_code,
+                anti_bot_tech: AntiBotTech::default(),
+                ..Default::default()
+            };
+        }
+    }
+
+    let mut content: Option<Vec<u8>> = None;
+    let mut anti_bot_tech = AntiBotTech::default();
+    let mut content_truncated = false;
+    let mut is_valid_utf8: Option<bool> = None;
+
+    // Binary short-circuit mirrors the reqwest path: on `only_html`, a
+    // binary leading run is dropped (empty body kept, no content stored
+    // beyond the empty vec) — the reqwest loop breaks before appending.
+    let binary = only_html && is_binary_body(&body);
+    let mut data = if binary { Vec::new() } else { body };
+
+    // Oversize → keep bytes up to the limit and flag truncation, matching
+    // the streaming loop's `data.len() + text.len() > limit` behavior.
+    if limit > 0 && data.len() > limit {
+        data.truncate(limit);
+        content_truncated = true;
+    }
+
+    // Content-Length mismatch (fewer bytes than promised) → truncated.
+    if !content_truncated && !binary {
+        if let Some(expected) = declared_content_length {
+            if (data.len() as u64) < expected {
+                log::warn!(
+                    "Content-Length mismatch for {target_url}: expected {expected} bytes, received {} bytes",
+                    data.len()
+                );
+                content_truncated = true;
+            }
+        }
+    }
+
+    if content_truncated && data.is_empty() {
+        log::warn!("discarding empty truncated response for {target_url}");
+    } else {
+        anti_bot_tech = engine_anti_bot.unwrap_or_else(|| {
+            detect_anti_bot_tech_response(
+                target_url,
+                &HeaderSource::HeaderMap(&headers),
+                &data,
+                None,
+            )
+        });
+        let mut utf8_state = Utf8StreamValidator::default();
+        utf8_state.feed(&data);
+        is_valid_utf8 = utf8_state.finish(Some(&data));
+        content = Some(data);
+    }
+
+    PageResponse {
+        headers: Some(headers),
+        #[cfg(feature = "remote_addr")]
+        remote_addr,
+        #[cfg(feature = "cookies")]
+        cookies: response_cookies,
+        is_valid_utf8,
+        content,
+        final_url: rd,
+        status_code,
+        anti_bot_tech,
+        content_truncated,
+        ..Default::default()
+    }
+}
+
+/// Engine-path counterpart to [`handle_response_bytes_writer`]: feed the
+/// engine's fully-decoded body through the streaming link-extraction
+/// rewriter in a single `write`, then apply the same UTF-8 /
+/// anti-bot / truncation semantics. Link extraction is
+/// chunk-boundary-independent, so a single write yields identical links.
+pub async fn handle_engine_response_bytes_writer<'h, O>(
+    resp: crate::fetch_engine::EngineResponse,
+    target_url: &str,
+    only_html: bool,
+    rewriter: &mut HtmlRewriter<'h, O>,
+    collected_bytes: &mut Vec<u8>,
+) -> (PageResponse, bool)
+where
+    O: OutputSink + Send + 'static,
+{
+    let crate::fetch_engine::EngineResponse {
+        status_code,
+        final_url,
+        headers,
+        #[cfg(feature = "remote_addr")]
+        remote_addr,
+        #[cfg(feature = "cookies")]
+        response_cookies,
+        body,
+        declared_content_length,
+        anti_bot_tech: engine_anti_bot,
+        served: _served,
+    } = resp;
+
+    let final_url = match final_url {
+        Some(ref u) if u != target_url => Some(u.clone()),
+        _ => None,
+    };
+
+    let mut anti_bot_tech = AntiBotTech::default();
+    let mut rewrite_error = false;
+    let mut content_truncated = false;
+    let mut utf8_state = Utf8StreamValidator::default();
+
+    let binary = only_html && is_binary_body(&body);
+
+    if !binary {
+        let limit = *MAX_SIZE_BYTES;
+        let mut data = body;
+
+        if limit > 0 && data.len() > limit {
+            data.truncate(limit);
+            content_truncated = true;
+        }
+
+        if !content_truncated {
+            if let Some(expected) = declared_content_length {
+                if (data.len() as u64) < expected {
+                    log::warn!(
+                        "Content-Length mismatch for {target_url}: expected {expected} bytes, received {} bytes",
+                        data.len()
+                    );
+                    content_truncated = true;
+                }
+            }
+        }
+
+        utf8_state.feed(&data);
+        if rewriter.write(&data).is_err() {
+            rewrite_error = true;
+        }
+        collected_bytes.extend_from_slice(&data);
+
+        anti_bot_tech = engine_anti_bot.unwrap_or_else(|| {
+            detect_anti_bot_tech_response(
+                target_url,
+                &HeaderSource::HeaderMap(&headers),
+                collected_bytes,
+                None,
+            )
+        });
+    }
+
+    (
+        PageResponse {
+            #[cfg(feature = "headers")]
+            headers: Some(headers),
+            #[cfg(feature = "remote_addr")]
+            remote_addr,
+            #[cfg(feature = "cookies")]
+            cookies: response_cookies,
+            is_valid_utf8: utf8_state.finish(Some(&collected_bytes[..])),
+            final_url,
+            status_code,
+            anti_bot_tech,
+            content_truncated,
+            ..Default::default()
+        },
+        rewrite_error,
+    )
+}
+
+/// Build an error [`PageResponse`] from a categorized
+/// [`crate::fetch_engine::EngineError`]. Mirrors
+/// [`build_error_page_response`] but is driven by the error category
+/// rather than a typed `reqwest::Error`: for a proxy tunnel failure it
+/// runs the same independent local-DNS confirmation (503 → 525 on
+/// NXDOMAIN, plus cross-transport cache insert); every other category
+/// maps directly onto its synthetic status. `error_for_status` stays
+/// `None`, so [`crate::page::build`] derives `should_retry` from the
+/// status alone — verified retry-equivalent to the reqwest path for the
+/// mapped 52x codes.
+pub(crate) async fn build_engine_error_page_response(
+    target_url: &str,
+    err: crate::fetch_engine::EngineError,
+) -> PageResponse {
+    log::info!("engine error fetching {target_url}: {err}");
+
+    let mut page_response = PageResponse::default();
+    page_response.status_code = if err.is_proxy_tunnel() {
+        crate::page::confirm_engine_tunnel_failure_with_local_dns(
+            target_url,
+            std::time::Duration::from_millis(1_500),
+        )
+        .await
+    } else {
+        err.to_status_code()
+    };
+    page_response.final_url = Some(target_url.to_string());
+    page_response
+}
+
 #[inline]
 /// Build a cached page response from HTML.
 pub(crate) fn build_cached_html_page_response(target_url: &str, html: &str) -> PageResponse {
@@ -6608,6 +6900,7 @@ async fn fetch_page_html_raw_base(
     only_html: bool,
     first_byte_timeout: Option<Duration>,
     first_byte_jitter: Option<Duration>,
+    engine: Option<crate::fetch_engine::EngineFetchCtx<'_>>,
 ) -> PageResponse {
     // Cross-feature NXDOMAIN cache shortcircuit (v2.51.189). The same
     // bounded cache that backs the chrome `Page::new_base` fast-fail
@@ -6630,7 +6923,106 @@ async fn fetch_page_html_raw_base(
         only_html: bool,
         first_byte_timeout: Option<Duration>,
         first_byte_jitter: Option<Duration>,
+        engine: Option<crate::fetch_engine::EngineFetchCtx<'_>>,
     ) -> Result<PageResponse, RequestError> {
+        // In-process fetch-engine branch. Wraps the engine call in the
+        // SAME first-byte watchdog as the reqwest path, maps the engine's
+        // typed error onto spider's synthetic statuses, and — on a TLS
+        // handshake failure — runs the same scheme-flip / strip-`www`
+        // retry ladder the reqwest path runs below. Falls through to
+        // reqwest when no engine is installed or `should_fetch` declines
+        // this URL.
+        if let Some(ctx) = engine {
+            if ctx.engine.should_fetch(url) {
+                // One engine send wrapped in the first-byte watchdog.
+                // `Ok` is a spider `PageResponse` (success or synthetic
+                // timeout); `Err` is a raw engine error kept so the caller
+                // can decide whether to run the handshake retry ladder.
+                async fn engine_send(
+                    ctx: crate::fetch_engine::EngineFetchCtx<'_>,
+                    url: &str,
+                    only_html: bool,
+                    first_byte_timeout: Option<Duration>,
+                    first_byte_jitter: Option<Duration>,
+                ) -> Result<PageResponse, crate::fetch_engine::EngineError> {
+                    let req = crate::fetch_engine::EngineRequest {
+                        url,
+                        method: crate::fetch_engine::EngineMethod::Get,
+                        configuration: ctx.configuration,
+                        only_html,
+                        attempt: 0,
+                        conditional_headers: None,
+                    };
+                    match timeout_first_byte(
+                        ctx.engine.fetch(req),
+                        first_byte_timeout,
+                        first_byte_jitter,
+                    )
+                    .await
+                    {
+                        HttpSendOutcome::Ok(Ok(resp)) => {
+                            Ok(handle_engine_response_bytes(resp, url, only_html).await)
+                        }
+                        HttpSendOutcome::Ok(Err(e)) => Err(e),
+                        HttpSendOutcome::FirstByteTimeout(_) => {
+                            Ok(build_first_byte_timeout_page_response(url))
+                        }
+                    }
+                }
+
+                let pr = match engine_send(
+                    ctx,
+                    url,
+                    only_html,
+                    first_byte_timeout,
+                    first_byte_jitter,
+                )
+                .await
+                {
+                    Ok(pr) => pr,
+                    Err(e) if e.is_handshake_failure() => {
+                        if let Some(flipped) = flip_http_https(url) {
+                            log::info!(
+                                "TLS handshake failure (engine) for {url}; retrying with flipped scheme: {flipped}"
+                            );
+                            match engine_send(
+                                ctx,
+                                &flipped,
+                                only_html,
+                                first_byte_timeout,
+                                first_byte_jitter,
+                            )
+                            .await
+                            {
+                                Ok(pr) => pr,
+                                Err(e2) => build_engine_error_page_response(&flipped, e2).await,
+                            }
+                        } else if let Some(no_www) = strip_www(url) {
+                            log::info!(
+                                "TLS handshake failure (engine) for {url}; retrying without www: {no_www}"
+                            );
+                            match engine_send(
+                                ctx,
+                                &no_www,
+                                only_html,
+                                first_byte_timeout,
+                                first_byte_jitter,
+                            )
+                            .await
+                            {
+                                Ok(pr) => pr,
+                                Err(e2) => build_engine_error_page_response(&no_www, e2).await,
+                            }
+                        } else {
+                            build_engine_error_page_response(url, e).await
+                        }
+                    }
+                    Err(e) => build_engine_error_page_response(url, e).await,
+                };
+                return Ok(pr);
+            }
+        }
+
         // Generic future-wrapper — works across reqwest / wreq /
         // reqwest_middleware backends because the inner `?` propagates
         // each variant's own `RequestError` type alias.
@@ -6661,6 +7053,7 @@ async fn fetch_page_html_raw_base(
         only_html,
         first_byte_timeout,
         first_byte_jitter,
+        engine,
     )
     .await
     {
@@ -6674,6 +7067,7 @@ async fn fetch_page_html_raw_base(
                     only_html,
                     first_byte_timeout,
                     first_byte_jitter,
+                    engine,
                 )
                 .await
                 {
@@ -6699,6 +7093,7 @@ async fn fetch_page_html_raw_base(
                         only_html,
                         first_byte_timeout,
                         first_byte_jitter,
+                        engine,
                     )
                     .await
                     {
@@ -6717,6 +7112,7 @@ async fn fetch_page_html_raw_base(
                         only_html,
                         first_byte_timeout,
                         first_byte_jitter,
+                        engine,
                     )
                     .await
                     {
@@ -6738,7 +7134,7 @@ async fn fetch_page_html_raw_base(
 
 /// Perform a network request to a resource extracting all content streaming.
 pub async fn fetch_page_html_raw(target_url: &str, client: &Client) -> PageResponse {
-    fetch_page_html_raw_base(target_url, client, false, None, None).await
+    fetch_page_html_raw_base(target_url, client, false, None, None, None).await
 }
 
 /// Same as [`fetch_page_html_raw`] but arms the HTTP first-byte
@@ -6761,6 +7157,7 @@ pub async fn fetch_page_html_raw_with_watchdog(
         false,
         first_byte_timeout,
         first_byte_jitter,
+        None,
     )
     .await
 }
@@ -6839,6 +7236,7 @@ pub async fn fetch_page_html_raw_cached(
     cache_options: Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
     cache_namespace: Option<&str>,
+    engine: Option<crate::fetch_engine::EngineFetchCtx<'_>>,
 ) -> PageResponse {
     let duration = if cfg!(feature = "time") {
         Some(tokio::time::Instant::now())
@@ -6859,7 +7257,7 @@ pub async fn fetch_page_html_raw_cached(
         return response;
     }
 
-    let response = fetch_page_html_raw_base(target_url, client, false, None, None).await;
+    let response = fetch_page_html_raw_base(target_url, client, false, None, None, engine).await;
 
     // On a cache miss, publish the fresh HTTP response to the shared
     // remote cache worker when the runtime flag is on. Best-effort —
@@ -6882,7 +7280,7 @@ pub async fn fetch_page_html_raw_cached(
 
 /// Perform a network request to a resource extracting all content streaming.
 pub async fn fetch_page_html_raw_only_html(target_url: &str, client: &Client) -> PageResponse {
-    fetch_page_html_raw_base(target_url, client, false, None, None).await
+    fetch_page_html_raw_base(target_url, client, false, None, None, None).await
 }
 
 /// Fetch a single page via the spider.cloud REST API.
@@ -7061,7 +7459,7 @@ pub async fn fetch_page_html_with_fallback(
     spider_cloud: &crate::configuration::SpiderCloudConfig,
     only_html: bool,
 ) -> PageResponse {
-    let resp = fetch_page_html_raw_base(target_url, client, only_html, None, None).await;
+    let resp = fetch_page_html_raw_base(target_url, client, only_html, None, None, None).await;
 
     let body_bytes = resp.content.as_deref();
     let should_fallback = spider_cloud.should_fallback(resp.status_code.as_u16(), body_bytes);
@@ -10777,9 +11175,15 @@ error was encountered while trying to use an ErrorDocument to handle the request
         let cache_options = Some(CacheOptions::Yes);
         let cache_policy = None;
 
-        let page =
-            fetch_page_html_raw_cached(target_url, &client, cache_options, &cache_policy, None)
-                .await;
+        let page = fetch_page_html_raw_cached(
+            target_url,
+            &client,
+            cache_options,
+            &cache_policy,
+            None,
+            None,
+        )
+        .await;
         assert_eq!(page.status_code, StatusCode::OK);
 
         let content = String::from_utf8_lossy(
@@ -10866,9 +11270,15 @@ error was encountered while trying to use an ErrorDocument to handle the request
         let cache_policy = None;
 
         let cached_start = tokio::time::Instant::now();
-        let cached_page =
-            fetch_page_html_raw_cached(&target_url, &client, cache_options, &cache_policy, None)
-                .await;
+        let cached_page = fetch_page_html_raw_cached(
+            &target_url,
+            &client,
+            cache_options,
+            &cache_policy,
+            None,
+            None,
+        )
+        .await;
         let cached_duration = cached_start.elapsed();
 
         assert_eq!(cached_page.status_code, StatusCode::OK);

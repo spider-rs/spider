@@ -1319,6 +1319,14 @@ pub struct Website {
     /// Default `None` means today's behavior verbatim — every existing
     /// fetch site still runs spider's reqwest path.
     pub remote_fetcher: Option<crate::fetcher::SharedRemoteFetcher>,
+    /// Optional in-process HTTP fetch engine. Unlike [`Self::remote_fetcher`]
+    /// (which replaces the whole crawl loop), this replaces only the inner
+    /// body-fetch step on the HTTP crawl paths, so spider's retry / cache /
+    /// watchdog / hedge machinery still wraps the engine call. Opt-in via
+    /// [`Self::with_fetch_engine`]; consulted per URL through
+    /// [`crate::fetch_engine::HttpFetchEngine::should_fetch`]. Default `None`
+    /// keeps every fetch site on spider's reqwest path.
+    pub fetch_engine: Option<crate::fetch_engine::SharedHttpFetchEngine>,
     /// Optional per-request proxy routing strategy.
     ///
     /// When set together with [`crate::configuration::Configuration::proxies_by_kind`],
@@ -4195,6 +4203,20 @@ impl Website {
 
             let mut domain_parsed = self.domain_parsed.take();
 
+            // In-process fetch engine for the seed fetch (raw path). Cloned
+            // into owned locals so the borrow never conflicts with the
+            // `&mut self` field access on the fetch calls below.
+            let engine_ref = self.fetch_engine.clone();
+            let engine_cfg = engine_ref
+                .as_ref()
+                .map(|_| std::sync::Arc::new((*self.configuration).clone()));
+            let engine_ctx = match (engine_ref.as_ref(), engine_cfg.as_ref()) {
+                (Some(e), Some(cfg)) => {
+                    Some(crate::fetch_engine::EngineFetchCtx::new(e, cfg.as_ref()))
+                }
+                _ => None,
+            };
+
             #[allow(unused_mut)]
             let mut page = if let Some(mut seeded_page) = self.build_seed_page() {
                 // Extract links and metadata from seeded HTML content if not binary
@@ -4221,7 +4243,7 @@ impl Website {
                 }
                 seeded_page
             } else {
-                Page::new_page_streaming(
+                Page::new_page_streaming_engine(
                     url,
                     client,
                     false,
@@ -4234,6 +4256,7 @@ impl Website {
                     &mut self.domain_parsed,
                     &mut links_pages,
                     self.configuration.auto_http_first_byte_args(),
+                    engine_ctx,
                 )
                 .await
             };
@@ -4315,7 +4338,7 @@ impl Website {
                     let mut domain_parsed_clone = self.domain_parsed.clone();
 
                     if let Err(elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                        page = Page::new_page_streaming(
+                        page = Page::new_page_streaming_engine(
                             url,
                             client,
                             false,
@@ -4328,6 +4351,7 @@ impl Website {
                             &mut domain_parsed_clone,
                             &mut links_pages,
                             (None, None),
+                            engine_ctx,
                         )
                         .await;
                     })
@@ -4342,7 +4366,7 @@ impl Website {
 
                     self.domain_parsed = domain_parsed_clone;
                 } else {
-                    page = Page::new_page_streaming(
+                    page = Page::new_page_streaming_engine(
                         url,
                         client,
                         false,
@@ -4355,6 +4379,7 @@ impl Website {
                         &mut self.domain_parsed,
                         &mut links_pages,
                         self.configuration.auto_http_first_byte_args(),
+                        engine_ctx,
                     )
                     .await;
                 }
@@ -6108,6 +6133,18 @@ impl Website {
 
         self.configuration.configure_allowlist();
 
+        // In-process fetch engine for the seed fetches (raw glob path).
+        let engine_ref = self.fetch_engine.clone();
+        let engine_cfg = engine_ref
+            .as_ref()
+            .map(|_| std::sync::Arc::new((*self.configuration).clone()));
+        let engine_ctx = match (engine_ref.as_ref(), engine_cfg.as_ref()) {
+            (Some(e), Some(cfg)) => {
+                Some(crate::fetch_engine::EngineFetchCtx::new(e, cfg.as_ref()))
+            }
+            _ => None,
+        };
+
         for url in expanded {
             #[cfg(feature = "regex")]
             let url_ref: &CaseInsensitiveString = &url;
@@ -6135,7 +6172,7 @@ impl Website {
 
                 let mut domain_parsed = self.domain_parsed.take();
 
-                let mut page = Page::new_page_streaming(
+                let mut page = Page::new_page_streaming_engine(
                     &url,
                     client,
                     false,
@@ -6148,6 +6185,7 @@ impl Website {
                     &mut self.domain_parsed,
                     &mut links_pages,
                     self.configuration.auto_http_first_byte_args(),
+                    engine_ctx,
                 )
                 .await;
 
@@ -6221,7 +6259,7 @@ impl Website {
                         let mut domain_parsed_clone = self.domain_parsed.clone();
 
                         if let Err(elapsed) = tokio::time::timeout(BACKOFF_MAX_DURATION, async {
-                            page = Page::new_page_streaming(
+                            page = Page::new_page_streaming_engine(
                                 &url,
                                 client,
                                 false,
@@ -6234,6 +6272,7 @@ impl Website {
                                 &mut domain_parsed_clone,
                                 &mut links_pages,
                                 (None, None),
+                                engine_ctx,
                             )
                             .await;
                         })
@@ -6246,7 +6285,7 @@ impl Website {
 
                         self.domain_parsed = domain_parsed_clone;
                     } else {
-                        page = Page::new_page_streaming(
+                        page = Page::new_page_streaming_engine(
                             &url,
                             client,
                             false,
@@ -6259,6 +6298,7 @@ impl Website {
                             &mut self.domain_parsed,
                             &mut links_pages,
                             self.configuration.auto_http_first_byte_args(),
+                            engine_ctx,
                         )
                         .await;
                     }
@@ -7966,6 +8006,14 @@ impl Website {
 
             let mut set: JoinSet<(HashSet<CaseInsensitiveString>, Option<u64>)> = JoinSet::new();
             let retry_strategy_ref = self.retry_strategy.clone();
+            // In-process HTTP fetch engine, cloned once per crawl; the full
+            // config is snapshotted into an `Arc` only when an engine is
+            // installed, so each spawned task borrows it to build a
+            // per-task `EngineFetchCtx`.
+            let engine_ref = self.fetch_engine.clone();
+            let engine_cfg = engine_ref
+                .as_ref()
+                .map(|_| std::sync::Arc::new((*self.configuration).clone()));
 
             #[cfg(feature = "auto_throttle")]
             let auto_throttle_arc = self.auto_throttle.clone();
@@ -8095,7 +8143,18 @@ impl Website {
                                 let pb_semaphore_ref = pb_semaphore_raw.clone();
                                 #[allow(unused_variables)]
                                 let retry_strategy_ref = retry_strategy_ref.clone();
+                                let engine_ref = engine_ref.clone();
+                                let engine_cfg = engine_cfg.clone();
                                 spawn_set("page_fetch", &mut set, async move {
+                                    // Per-task borrow-only engine context from the cloned
+                                    // handle + config snapshot (both task-local).
+                                    let engine_ctx = match (engine_ref.as_ref(), engine_cfg.as_ref())
+                                    {
+                                        (Some(e), Some(cfg)) => Some(
+                                            crate::fetch_engine::EngineFetchCtx::new(e, cfg.as_ref()),
+                                        ),
+                                        _ => None,
+                                    };
                                     let link_result = match &shared.9 {
                                         Some(cb) => cb(link, None),
                                         _ => (link, None),
@@ -8243,11 +8302,11 @@ impl Website {
                                                     let mut r_settings = shared.7;
                                                     r_settings.ssg_build = true;
                                                     let mut domain_parsed = None;
-                                                    let page = Page::new_page_streaming(
+                                                    let page = Page::new_page_streaming_engine(
                                                         target_url, primary_client, only_html,
                                                         &mut selectors, external_domains_caseless,
                                                         &r_settings, &mut links, None, &shared.8,
-                                                        &mut domain_parsed, &mut links_pages, (None, None)).await;
+                                                        &mut domain_parsed, &mut links_pages, (None, None), engine_ctx).await;
                                                     (page, links, links_pages)
                                                 };
 
@@ -8269,11 +8328,11 @@ impl Website {
                                                             let mut r_settings = shared.7;
                                                             r_settings.ssg_build = true;
                                                             let mut domain_parsed = None;
-                                                            let page = Page::new_page_streaming(
+                                                            let page = Page::new_page_streaming_engine(
                                                                 target_url, hedge_client, only_html,
                                                                 &mut selectors, external_domains_caseless,
                                                                 &r_settings, &mut links, None, &shared.8,
-                                                                &mut domain_parsed, &mut links_pages, (None, None)).await;
+                                                                &mut domain_parsed, &mut links_pages, (None, None), engine_ctx).await;
                                                             (page, links, links_pages)
                                                         };
 
@@ -8309,11 +8368,11 @@ impl Website {
                                                 let mut r_settings = shared.7;
                                                 r_settings.ssg_build = true;
                                                 let mut domain_parsed = None;
-                                                let page = Page::new_page_streaming(
+                                                let page = Page::new_page_streaming_engine(
                                                     target_url, primary_client, only_html,
                                                     &mut selectors, external_domains_caseless,
                                                     &r_settings, &mut links, None, &shared.8,
-                                                    &mut domain_parsed, &mut links_pages, (None, None)).await;
+                                                    &mut domain_parsed, &mut links_pages, (None, None), engine_ctx).await;
                                                 hedge_trk.record(fetch_start.elapsed());
                                                 if page.status_code.is_server_error() {
                                                     hedge_trk.record_error();
@@ -8334,11 +8393,11 @@ impl Website {
                                             let mut r_settings = shared.7;
                                             r_settings.ssg_build = true;
                                             let mut domain_parsed = None;
-                                            let page = Page::new_page_streaming(
+                                            let page = Page::new_page_streaming_engine(
                                                 target_url, client, only_html,
                                                 &mut selectors, external_domains_caseless,
                                                 &r_settings, &mut links, None, &shared.8,
-                                                &mut domain_parsed, &mut links_pages, (None, None)).await;
+                                                &mut domain_parsed, &mut links_pages, (None, None), engine_ctx).await;
                                             hedge_trk.record(fetch_start.elapsed());
                                             if page.status_code.is_server_error() {
                                                 hedge_trk.record_error();
@@ -8382,11 +8441,11 @@ impl Website {
                                                     let mut r_settings = shared.7;
                                                     r_settings.ssg_build = true;
                                                     let mut domain_parsed = None;
-                                                    let page = Page::new_page_streaming(
+                                                    let page = Page::new_page_streaming_engine(
                                                         target_url, client, only_html,
                                                         &mut selectors, external_domains_caseless,
                                                         &r_settings, &mut links, None, &shared.8,
-                                                        &mut domain_parsed, &mut links_pages, (None, None)).await;
+                                                        &mut domain_parsed, &mut links_pages, (None, None), engine_ctx).await;
                                                     (page, links, links_pages)
                                                 };
                                                 tokio::pin!(primary_fut);
@@ -8459,7 +8518,7 @@ impl Website {
                                             let mut r_settings = shared.7;
                                             r_settings.ssg_build = true;
                                             let mut domain_parsed = None;
-                                            let page = Page::new_page_streaming(
+                                            let page = Page::new_page_streaming_engine(
                                                 target_url,
                                                 client, only_html,
                                                 &mut relative_selectors,
@@ -8469,7 +8528,7 @@ impl Website {
                                                 None,
                                                 &shared.8,
                                                 &mut domain_parsed,
-                                                &mut links_pages, (None, None)).await;
+                                                &mut links_pages, (None, None), engine_ctx).await;
                                             (page, links, links_pages)
                                         }
                                     };
@@ -8529,7 +8588,7 @@ impl Website {
                                                 let mut domain_parsed = None;
                                                 let mut retry_r_settings = shared.7;
                                                 retry_r_settings.ssg_build = true;
-                                                let next_page = Page::new_page_streaming(
+                                                let next_page = Page::new_page_streaming_engine(
                                                     target_url,
                                                     retry_client, only_html,
                                                     &mut shared.1.clone(),
@@ -8539,7 +8598,7 @@ impl Website {
                                                     None,
                                                     &shared.8,
                                                     &mut domain_parsed,
-                                                    &mut links_pages, (None, None)).await;
+                                                    &mut links_pages, (None, None), engine_ctx).await;
 
                                                 page = next_page;
 
@@ -8552,7 +8611,7 @@ impl Website {
                                             let mut domain_parsed = None;
                                             let mut retry_r_settings = shared.7;
                                             retry_r_settings.ssg_build = true;
-                                            page = Page::new_page_streaming(
+                                            page = Page::new_page_streaming_engine(
                                                 target_url,
                                                 retry_client,
                                                 only_html,
@@ -8563,7 +8622,7 @@ impl Website {
                                                 None,
                                                 &shared.8,
                                                 &mut domain_parsed,
-                                                &mut links_pages, (None, None)).await;
+                                                &mut links_pages, (None, None), engine_ctx).await;
                                         }
 
                                         // Stamp profile key from strategy.
@@ -11385,6 +11444,14 @@ impl Website {
 
             let add_external = !self.configuration.external_domains_caseless.is_empty();
             let retry_strategy_ref = self.retry_strategy.clone();
+            // In-process HTTP fetch engine, cloned once per crawl. The full
+            // configuration is snapshotted into an `Arc` only when an engine
+            // is installed, so each spawned task can borrow it to build an
+            // `EngineFetchCtx` for parity with the reqwest path.
+            let engine_ref = self.fetch_engine.clone();
+            let engine_cfg = engine_ref
+                .as_ref()
+                .map(|_| std::sync::Arc::new((*self.configuration).clone()));
             let mut exceeded_budget = false;
             let concurrency = throttle.is_zero();
 
@@ -11451,19 +11518,31 @@ impl Website {
                                 let shared = shared.clone();
                                 let on_should_crawl_callback = on_should_crawl_callback.clone();
                                 let retry_strategy_ref = retry_strategy_ref.clone();
+                                let engine_ref = engine_ref.clone();
+                                let engine_cfg = engine_cfg.clone();
                                 spawn_set("page_fetch", &mut set, async move {
+                                    // Build a borrow-only engine context for this task from
+                                    // the cloned handle + config snapshot (both task-local).
+                                    let engine_ctx = match (engine_ref.as_ref(), engine_cfg.as_ref())
+                                    {
+                                        (Some(e), Some(cfg)) => Some(
+                                            crate::fetch_engine::EngineFetchCtx::new(e, cfg.as_ref()),
+                                        ),
+                                        _ => None,
+                                    };
                                     let link_result = match &shared.7 {
                                         Some(cb) => cb(link, None),
                                         _ => (link, None),
                                     };
 
                                     let url = link_result.0.as_ref();
-                                    let mut page = Page::new_page_with_cache(
+                                    let mut page = Page::new_page_with_cache_engine(
                                         url,
                                         &shared.0,
                                         shared.4.get_cache_options(),
                                         &shared.4.cache_policy,
                                         shared.4.cache_namespace_str(),
+                                        engine_ctx,
                                     )
                                     .await;
 
@@ -11529,12 +11608,13 @@ impl Website {
                                                     .await;
                                                     chrome_attempted = true;
                                                 } else {
-                                                    let next_page = Page::new_page_with_cache(
+                                                    let next_page = Page::new_page_with_cache_engine(
                                                         url,
                                                         &shared.0,
                                                         shared.4.get_cache_options(),
                                                         &shared.4.cache_policy,
                                             shared.4.cache_namespace_str(),
+                                                        engine_ctx,
                                                     )
                                                     .await;
 
@@ -11558,12 +11638,13 @@ impl Website {
                                             .await;
                                             chrome_attempted = true;
                                         } else {
-                                            page = Page::new_page_with_cache(
+                                            page = Page::new_page_with_cache_engine(
                                                     url,
                                                     &shared.0,
                                                     shared.4.get_cache_options(),
                                                     &shared.4.cache_policy,
                                             shared.4.cache_namespace_str(),
+                                                    engine_ctx,
                                                 )
                                                     .await;
                                         }
@@ -13465,6 +13546,33 @@ impl Website {
         fetcher: crate::fetcher::SharedRemoteFetcher,
     ) -> &mut Self {
         self.remote_fetcher = Some(fetcher);
+        self
+    }
+
+    /// Install an in-process HTTP fetch engine
+    /// ([`crate::fetch_engine::HttpFetchEngine`]). On the HTTP crawl paths
+    /// spider will call the engine in place of its inner
+    /// `client.get(url).send()` for every URL where
+    /// [`should_fetch`](crate::fetch_engine::HttpFetchEngine::should_fetch)
+    /// returns `true`, while keeping its retry / cache / watchdog / hedge
+    /// machinery wrapped around the call. Zero-cost and behavior-identical
+    /// when unset.
+    pub fn with_fetch_engine<F: crate::fetch_engine::HttpFetchEngine>(
+        &mut self,
+        engine: F,
+    ) -> &mut Self {
+        self.fetch_engine = Some(std::sync::Arc::new(engine));
+        self
+    }
+
+    /// Install a pre-`Arc`d fetch engine — handy when sharing one engine
+    /// across multiple `Website` instances (the common case, since the
+    /// engine's own state / connection pool is shared).
+    pub fn with_shared_fetch_engine(
+        &mut self,
+        engine: crate::fetch_engine::SharedHttpFetchEngine,
+    ) -> &mut Self {
+        self.fetch_engine = Some(engine);
         self
     }
 

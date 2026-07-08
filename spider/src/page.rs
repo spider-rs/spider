@@ -1434,6 +1434,36 @@ pub async fn confirm_tunnel_failure_with_local_dns(
     }
 }
 
+/// Fetch-engine counterpart to [`confirm_tunnel_failure_with_local_dns`].
+///
+/// The engine path reports a proxy tunnel / CONNECT failure as a
+/// categorized `EngineError::ProxyTunnel` rather than a typed
+/// `reqwest::Error`, so this variant takes no error argument. It runs the
+/// same second signal — an independent bounded local DNS lookup — and, on
+/// NXDOMAIN confirmation, upgrades 503 → 525 and populates the shared
+/// cross-transport NXDOMAIN cache so subsequent HTTP or chrome fetches
+/// short-circuit. Same zero-false-positive two-signal contract.
+pub(crate) async fn confirm_engine_tunnel_failure_with_local_dns(
+    target_url: &str,
+    timeout: std::time::Duration,
+) -> StatusCode {
+    let host = match url::Url::parse(target_url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+    {
+        Some(h) => h,
+        None => return *UNREACHABLE_REQUEST_ERROR,
+    };
+    match host_resolves_locally_cached(&host, timeout).await {
+        LocalDnsState::NxDomain => {
+            #[cfg(not(feature = "decentralized"))]
+            chrome_nxdomain_cache().insert(host);
+            *DNS_RESOLVE_ERROR
+        }
+        LocalDnsState::Resolved | LocalDnsState::TimedOut => *UNREACHABLE_REQUEST_ERROR,
+    }
+}
+
 /// Pair a chrome rendered-error tunnel/proxy CONNECT failure with an
 /// independent local DNS lookup. Chrome-side counterpart to
 /// [`confirm_tunnel_failure_with_local_dns`] — same two-signal contract:
@@ -4464,12 +4494,40 @@ impl Page {
         cache_policy: &Option<BasicCachePolicy>,
         cache_namespace: Option<&str>,
     ) -> Self {
+        Self::new_page_with_cache_engine(
+            url,
+            client,
+            cache_options,
+            cache_policy,
+            cache_namespace,
+            None,
+        )
+        .await
+    }
+
+    /// Same as [`new_page_with_cache`](Self::new_page_with_cache) but also
+    /// consults an optional in-process
+    /// [`HttpFetchEngine`](crate::fetch_engine::HttpFetchEngine): when
+    /// installed and [`should_fetch`](crate::fetch_engine::HttpFetchEngine::should_fetch)
+    /// accepts the URL, the body fetch is served by the engine (still
+    /// wrapped in spider's cache / retry / watchdog machinery). Passing
+    /// `None` is identical to [`new_page_with_cache`](Self::new_page_with_cache).
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    pub async fn new_page_with_cache_engine(
+        url: &str,
+        client: &Client,
+        cache_options: Option<CacheOptions>,
+        cache_policy: &Option<BasicCachePolicy>,
+        cache_namespace: Option<&str>,
+        engine: Option<crate::fetch_engine::EngineFetchCtx<'_>>,
+    ) -> Self {
         let page_resource: PageResponse = crate::utils::fetch_page_html_raw_cached(
             url,
             client,
             cache_options,
             cache_policy,
             cache_namespace,
+            engine,
         )
         .await;
 
@@ -4662,8 +4720,61 @@ impl Page {
         links_pages: &mut Option<hashbrown::HashSet<A>>,
         http_first_byte_args: (Option<std::time::Duration>, Option<std::time::Duration>),
     ) -> Self {
+        Self::new_page_streaming_engine(
+            url,
+            client,
+            only_html,
+            selectors,
+            external_domains_caseless,
+            r_settings,
+            map,
+            ssg_map,
+            prior_domain,
+            domain_parsed,
+            links_pages,
+            http_first_byte_args,
+            None,
+        )
+        .await
+    }
+
+    /// Same as [`new_page_streaming`](Self::new_page_streaming) but also
+    /// consults an optional in-process
+    /// [`HttpFetchEngine`](crate::fetch_engine::HttpFetchEngine): when
+    /// installed and [`should_fetch`](crate::fetch_engine::HttpFetchEngine::should_fetch)
+    /// accepts the URL, the body fetch (and inline link extraction) is
+    /// served by the engine, still wrapped in spider's watchdog / retry /
+    /// hedge machinery. Passing `None` is identical to
+    /// [`new_page_streaming`](Self::new_page_streaming).
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+    pub async fn new_page_streaming_engine<
+        A: PartialEq
+            + Eq
+            + Sync
+            + Send
+            + Clone
+            + Default
+            + std::hash::Hash
+            + From<String>
+            + for<'a> From<&'a str>,
+    >(
+        url: &str,
+        client: &Client,
+        only_html: bool,
+        selectors: &mut RelativeSelectors,
+        external_domains_caseless: &Arc<HashSet<CaseInsensitiveString>>,
+        r_settings: &PageLinkBuildSettings,
+        map: &mut hashbrown::HashSet<A>,
+        ssg_map: Option<&mut hashbrown::HashSet<A>>,
+        prior_domain: &Option<Box<Url>>,
+        domain_parsed: &mut Option<Box<Url>>,
+        links_pages: &mut Option<hashbrown::HashSet<A>>,
+        http_first_byte_args: (Option<std::time::Duration>, Option<std::time::Duration>),
+        engine: Option<crate::fetch_engine::EngineFetchCtx<'_>>,
+    ) -> Self {
         let (http_first_byte_timeout, http_first_byte_timeout_jitter) = http_first_byte_args;
         use crate::utils::{
+            handle_engine_response_bytes, handle_engine_response_bytes_writer,
             handle_response_bytes, handle_response_bytes_writer, modify_selectors,
             AllowedDomainTypes,
         };
@@ -4689,13 +4800,258 @@ impl Page {
         // synthesize the same `524 GATEWAY_TIMEOUT` PageResponse the
         // primary HTTP fetch path produces (`build_first_byte_timeout_page_response`)
         // so the caller's retry code rotates the proxy.
+        // Route this URL through the in-process fetch engine when one is
+        // installed and it accepts the URL; otherwise fall through to the
+        // reqwest streaming path unchanged. The engine arms mirror the
+        // reqwest arms below (streaming link-extraction on a parseable
+        // HTML body, buffered handling otherwise, categorized error
+        // mapping, and the same synthetic `524` on a first-byte timeout),
+        // sourced from an `EngineResponse` instead of a `reqwest::Response`
+        // — so spider's watchdog / retry / cache / hedge machinery wraps
+        // the engine identically.
+        let engine_ctx = engine.filter(|ctx| ctx.engine.should_fetch(url));
+
+        let mut page_response: PageResponse = if let Some(ctx) = engine_ctx {
+            let req = crate::fetch_engine::EngineRequest {
+                url,
+                method: crate::fetch_engine::EngineMethod::Get,
+                configuration: ctx.configuration,
+                only_html,
+                attempt: 0,
+                conditional_headers: None,
+            };
+            match crate::utils::timeout_first_byte(
+                ctx.engine.fetch(req),
+                http_first_byte_timeout,
+                http_first_byte_timeout_jitter,
+            )
+            .await
+            {
+                crate::utils::HttpSendOutcome::FirstByteTimeout(_) => {
+                    #[cfg(feature = "balance")]
+                    {
+                        crate::utils::vitals::request_error();
+                        crate::utils::vitals::request_end();
+                    }
+                    return build(
+                        url,
+                        crate::utils::build_first_byte_timeout_page_response(url),
+                    );
+                }
+                crate::utils::HttpSendOutcome::Ok(Err(engine_err)) => {
+                    #[cfg(feature = "balance")]
+                    crate::utils::vitals::request_error();
+                    crate::utils::build_engine_error_page_response(url, engine_err).await
+                }
+                crate::utils::HttpSendOutcome::Ok(Ok(resp))
+                    if crate::utils::valid_parsing_status_code(resp.status_code)
+                        && !crate::utils::block_streaming_headers(&resp.headers, only_html) =>
+                {
+                    let cell = if r_settings.ssg_build {
+                        Some(tokio::sync::OnceCell::new())
+                    } else {
+                        None
+                    };
+
+                    let base_input_url = tokio::sync::OnceCell::new();
+
+                    let (encoding, adjust_charset_on_meta_tag) =
+                        match get_charset_from_content_type(&resp.headers) {
+                            Some(h) => (h, false),
+                            _ => (AsciiCompatibleEncoding::utf_8(), true),
+                        };
+
+                    // Post-redirect URL from the engine (`final_url`), or the
+                    // requested URL when there was no redirect.
+                    let target_url_owned: String =
+                        resp.final_url.clone().unwrap_or_else(|| url.to_string());
+                    let target_url = target_url_owned.as_str();
+                    let declared_len = resp.declared_content_length;
+
+                    // handle initial redirects
+                    if ssg_map.is_some() && url != target_url && !exact_url_match(url, target_url) {
+                        let mut url = Box::new(CaseInsensitiveString::new(&url));
+
+                        modify_selectors(
+                            prior_domain,
+                            target_url,
+                            domain_parsed,
+                            &mut url,
+                            selectors,
+                            AllowedDomainTypes::new(r_settings.subdomains, r_settings.tld),
+                        );
+                    };
+
+                    let base = if domain_parsed.is_none() {
+                        prior_domain
+                    } else {
+                        domain_parsed
+                    };
+
+                    let original_page = Url::parse(url).ok();
+                    let xml_file = target_url.ends_with(".xml");
+
+                    let parent_host = &selectors.1[0];
+                    let parent_host_scheme = &selectors.1[1];
+                    let base_input_domain = &selectors.2;
+                    let sub_matcher = &selectors.0;
+
+                    let element_content_handlers = build_link_extract_handlers(
+                        LinkExtractCtx {
+                            selectors,
+                            external_domains_caseless,
+                            map,
+                            links_pages,
+                            base_input_url: &base_input_url,
+                            base: base.as_deref(),
+                            original_page: original_page.as_ref(),
+                            ssg_raw_src_cell: if r_settings.ssg_build && !r_settings.skip_links {
+                                cell.as_ref()
+                            } else {
+                                None
+                            },
+                            ssg_resolved_path_cell: None,
+                            xml_file,
+                            full_resources: r_settings.full_resources,
+                            skip_links: r_settings.skip_links,
+                        },
+                        &mut meta_title,
+                        &mut meta_description,
+                        &mut meta_og_image,
+                    );
+
+                    let settings = lol_html::send::Settings {
+                        element_content_handlers,
+                        adjust_charset_on_meta_tag,
+                        encoding,
+                        ..lol_html::send::Settings::new_for_handler_types()
+                    };
+
+                    let mut rewriter =
+                        lol_html::send::HtmlRewriter::new(settings, |_c: &[u8]| {});
+
+                    let mut collected_bytes = match declared_len {
+                        Some(cap) if cap > MAX_CONTENT_LENGTH => {
+                            log::warn!("{url} Content-Length {cap} exceeds 2 GB limit, rejecting");
+                            Vec::new()
+                        }
+                        Some(cap) if cap > 0 => {
+                            Vec::with_capacity((cap as usize).min(MAX_PREALLOC))
+                        }
+                        _ => Vec::with_capacity(MAX_PRE_ALLOCATED_HTML_PAGE_SIZE_USIZE),
+                    };
+
+                    let mut response = handle_engine_response_bytes_writer(
+                        resp,
+                        url,
+                        only_html,
+                        &mut rewriter,
+                        &mut collected_bytes,
+                    )
+                    .await;
+
+                    let rewrite_error = response.1;
+
+                    if !rewrite_error {
+                        let _ = rewriter.end();
+                    }
+
+                    if r_settings.normalize {
+                        response.0.signature = Some(hash_html(&collected_bytes).await);
+                    }
+
+                    response.0.content = if collected_bytes.is_empty() {
+                        None
+                    } else {
+                        Some(collected_bytes)
+                    };
+
+                    if r_settings.ssg_build {
+                        if let Some(ssg_map) = ssg_map {
+                            if let Some(cell) = &cell {
+                                if let Some(source) = cell.get() {
+                                    if let Some(url_base) = &base {
+                                        let build_ssg_path = convert_abs_path(url_base, source);
+                                        let build_page =
+                                            Page::new_page(build_ssg_path.as_str(), client).await;
+
+                                        for cap in SSG_CAPTURE
+                                            .captures_iter(build_page.get_html_bytes_u8())
+                                        {
+                                            if let Some(matched) = cap.get(1) {
+                                                let href = auto_encode_bytes(matched.as_bytes())
+                                                    .replace(r#"\u002F"#, "/");
+
+                                                let last_segment =
+                                                    crate::utils::get_last_segment(&href);
+
+                                                if !(last_segment.starts_with("[")
+                                                    && last_segment.ends_with("]"))
+                                                {
+                                                    let base = if relative_directory_url(&href)
+                                                        || base.is_none()
+                                                    {
+                                                        original_page.as_ref()
+                                                    } else {
+                                                        base.as_deref()
+                                                    };
+                                                    let base = if base_input_url.initialized() {
+                                                        base_input_url.get()
+                                                    } else {
+                                                        base
+                                                    };
+                                                    push_link(
+                                                        &base,
+                                                        &href,
+                                                        ssg_map,
+                                                        &selectors.0,
+                                                        parent_host,
+                                                        parent_host_scheme,
+                                                        base_input_domain,
+                                                        sub_matcher,
+                                                        external_domains_caseless,
+                                                        &mut None,
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    response.0
+                }
+                crate::utils::HttpSendOutcome::Ok(Ok(resp)) => {
+                    let pr = handle_engine_response_bytes(resp, url, only_html).await;
+                    if pr.content_truncated {
+                        log::warn!("Response truncated for {url}, retrying once");
+                        let retry_req = crate::fetch_engine::EngineRequest {
+                            url,
+                            method: crate::fetch_engine::EngineMethod::Get,
+                            configuration: ctx.configuration,
+                            only_html,
+                            attempt: 1,
+                            conditional_headers: None,
+                        };
+                        match ctx.engine.fetch(retry_req).await {
+                            Ok(resp2) => handle_engine_response_bytes(resp2, url, only_html).await,
+                            Err(_) => pr,
+                        }
+                    } else {
+                        pr
+                    }
+                }
+            }
+        } else {
         let send_outcome = crate::utils::timeout_first_byte(
             client.get(url).send(),
             http_first_byte_timeout,
             http_first_byte_timeout_jitter,
         )
         .await;
-        let mut page_response: PageResponse = match send_outcome {
+        match send_outcome {
             crate::utils::HttpSendOutcome::FirstByteTimeout(_) => {
                 // Balance the `vitals::request_start` counter that
                 // fires above before any early return — otherwise
@@ -4918,6 +5274,7 @@ impl Page {
                     crate::utils::build_error_page_response(url, err).await
                 }
             },
+        }
         };
 
         #[cfg(feature = "balance")]

@@ -399,6 +399,13 @@ pub mod features;
 /// [`Website::with_remote_fetcher`](crate::website::Website::with_remote_fetcher);
 /// default behavior unchanged when unset.
 pub mod fetcher;
+/// Pluggable in-process HTTP fetch engine. Replaces only spider's inner
+/// body-fetch step while keeping the surrounding retry / cache / watchdog
+/// / hedge machinery wrapped around it. Opt-in at runtime via
+/// [`Website::with_fetch_engine`](crate::website::Website::with_fetch_engine);
+/// default `None` keeps every fetch on spider's reqwest path (like the
+/// ungated [`fetcher`] hook).
+pub mod fetch_engine;
 /// Internal packages customized.
 pub mod packages;
 /// A page scraped.
