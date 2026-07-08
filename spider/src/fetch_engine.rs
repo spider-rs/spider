@@ -278,7 +278,10 @@ mod tests {
         assert_eq!(EngineError::ConnectRefused.to_status_code().as_u16(), 521);
         assert_eq!(EngineError::ConnectAborted.to_status_code().as_u16(), 522);
         assert_eq!(EngineError::ConnectReset.to_status_code().as_u16(), 523);
-        assert_eq!(EngineError::AddressUnreachable.to_status_code().as_u16(), 526);
+        assert_eq!(
+            EngineError::AddressUnreachable.to_status_code().as_u16(),
+            526
+        );
         assert_eq!(EngineError::ProxyTunnel.to_status_code().as_u16(), 503);
         assert_eq!(EngineError::Body.to_status_code().as_u16(), 400);
         assert_eq!(EngineError::Request.to_status_code().as_u16(), 400);

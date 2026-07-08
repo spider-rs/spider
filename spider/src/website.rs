@@ -6139,9 +6139,7 @@ impl Website {
             .as_ref()
             .map(|_| std::sync::Arc::new((*self.configuration).clone()));
         let engine_ctx = match (engine_ref.as_ref(), engine_cfg.as_ref()) {
-            (Some(e), Some(cfg)) => {
-                Some(crate::fetch_engine::EngineFetchCtx::new(e, cfg.as_ref()))
-            }
+            (Some(e), Some(cfg)) => Some(crate::fetch_engine::EngineFetchCtx::new(e, cfg.as_ref())),
             _ => None,
         };
 

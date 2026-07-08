@@ -29,7 +29,9 @@ impl HttpFetchEngine for MockEngine {
         let body = if req.url.starts_with(CHILD) {
             "<html><head><title>leaf</title></head><body>leaf</body></html>".to_string()
         } else {
-            format!(r#"<html><head><title>seed</title></head><body><a href="{CHILD}">child</a></body></html>"#)
+            format!(
+                r#"<html><head><title>seed</title></head><body><a href="{CHILD}">child</a></body></html>"#
+            )
         };
 
         let mut headers = reqwest::header::HeaderMap::new();
@@ -77,7 +79,10 @@ async fn engine_serves_raw_crawl_and_extracts_links() {
     assert!(
         has_child,
         "child link should have been extracted from engine HTML and visited: {:?}",
-        links.iter().map(|l| l.as_ref().to_string()).collect::<Vec<_>>()
+        links
+            .iter()
+            .map(|l| l.as_ref().to_string())
+            .collect::<Vec<_>>()
     );
 }
 
