@@ -54,16 +54,11 @@ use crate::configuration::Configuration;
 
 /// HTTP method the engine is asked to perform. Spider's crawl fetch is
 /// always `GET`; the enum leaves room without widening the trait later.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EngineMethod {
     /// HTTP GET.
+    #[default]
     Get,
-}
-
-impl Default for EngineMethod {
-    fn default() -> Self {
-        EngineMethod::Get
-    }
 }
 
 /// Per-request context handed to an [`HttpFetchEngine`]. Borrowed for the
