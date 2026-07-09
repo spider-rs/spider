@@ -9,6 +9,7 @@ keywords = ["crawler", "spider", "spider_cli"]
 categories = ["web-programming", "command-line-utilities"]
 license = "MIT"
 documentation = "https://docs.rs/spider"
+homepage = "https://spider.cloud/crates"
 include = ["src/*", "LICENSE", "README.md"]
 edition = "2021"
 resolver = "2"

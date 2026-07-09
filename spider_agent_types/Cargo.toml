@@ -9,6 +9,7 @@ keywords = ["agent", "llm", "automation", "web", "types"]
 categories = ["web-programming", "data-structures"]
 license = "MIT"
 documentation = "https://docs.rs/spider_agent_types"
+homepage = "https://spider.cloud/crates"
 edition = "2021"
 
 [badges]

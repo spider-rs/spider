@@ -9,6 +9,7 @@ keywords = ["agent", "llm", "automation", "web", "search"]
 categories = ["web-programming", "asynchronous"]
 license = "MIT"
 documentation = "https://docs.rs/spider_agent"
+homepage = "https://spider.cloud/crates"
 edition = "2021"
 
 [badges]

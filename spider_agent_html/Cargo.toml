@@ -9,6 +9,7 @@ keywords = ["html", "cleaning", "web", "scraping", "agent"]
 categories = ["web-programming", "text-processing"]
 license = "MIT"
 documentation = "https://docs.rs/spider_agent_html"
+homepage = "https://spider.cloud/crates"
 edition = "2021"
 
 [badges]
