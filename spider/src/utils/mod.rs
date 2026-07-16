@@ -3843,7 +3843,10 @@ pub struct ChromeFetchParams<'a> {
     /// `Content.getMarkdown`) when the connected browser supports it —
     /// copied from `Configuration::prefer_native_markdown`. Engines
     /// without the capability fall back to the standard HTML extraction
-    /// path, byte-identical to this flag being off.
+    /// path, byte-identical to this flag being off. Its constructor enables
+    /// it only for single-page runs with no page-link reporting and no
+    /// full-resource capture, so replacing the body can never eat link
+    /// discovery.
     pub prefer_native_markdown: bool,
 }
 
@@ -4855,6 +4858,10 @@ pub async fn fetch_page_html_chrome_base<'h>(
                 // `&mut res`, WAF / openai / multimodal inspect the full
                 // HTML content, XML uses a different API — so any of
                 // those conditions keeps the standard HTML path.
+                // `Configuration::chrome_fetch_params` additionally enables
+                // this only for single-page runs with no page-link reporting
+                // and no full-resource capture, so body replacement cannot
+                // bypass downstream link discovery.
                 // `Ok(None)` (the documented "not supported" response
                 // shape) and protocol errors both mean the engine does
                 // not offer the capability; the fallback below is then

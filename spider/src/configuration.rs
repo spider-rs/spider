@@ -2674,6 +2674,23 @@ impl Configuration {
         }
     }
 
+    /// Native Markdown may only replace the page body when nothing downstream
+    /// needs the page HTML: a single-page run (wildcard budget == 1 — at 1 no
+    /// further links are ever admitted), no page-link reporting, and no
+    /// full-resource capture. Mirrors the `single_page() && !return_page_links`
+    /// definition the `skip_links` fast path already trusts.
+    #[cfg(feature = "chrome")]
+    #[inline]
+    fn native_markdown_safe(&self) -> bool {
+        !self.return_page_links
+            && !self.full_resources
+            && self
+                .inner_budget
+                .as_ref()
+                .and_then(|b| b.get(&case_insensitive_string::CaseInsensitiveString::from("*")))
+                .is_some_and(|v| *v == 1)
+    }
+
     /// Build the borrowed chrome fetch parameter bundle.
     ///
     /// Zero-copy: all fields borrow directly from `self`. Build once at
@@ -2710,7 +2727,7 @@ impl Configuration {
                 .last_connected_url()
                 .or(self.chrome_connection_url.as_deref()),
             enhancements: self.enhancements,
-            prefer_native_markdown: self.prefer_native_markdown,
+            prefer_native_markdown: self.prefer_native_markdown && self.native_markdown_safe(),
         }
     }
 
@@ -3521,6 +3538,44 @@ impl SpiderBrowserConfig {
 
     fn default_wss_url() -> String {
         "wss://browser.spider.cloud/v1/browser".to_string()
+    }
+}
+
+#[cfg(all(test, feature = "chrome"))]
+mod native_markdown_gate_tests {
+    use super::*;
+
+    #[test]
+    fn native_markdown_gate_matrix() {
+        let mut no_budget = Configuration::default();
+        no_budget.prefer_native_markdown = true;
+        assert!(!no_budget.chrome_fetch_params().prefer_native_markdown);
+
+        let mut limit_five = Configuration::default();
+        limit_five.prefer_native_markdown = true;
+        limit_five.with_limit(5);
+        limit_five.configure_budget();
+        assert!(!limit_five.chrome_fetch_params().prefer_native_markdown);
+
+        let mut page_links = Configuration::default();
+        page_links.prefer_native_markdown = true;
+        page_links.with_limit(1);
+        page_links.return_page_links = true;
+        page_links.configure_budget();
+        assert!(!page_links.chrome_fetch_params().prefer_native_markdown);
+
+        let mut full_resources = Configuration::default();
+        full_resources.prefer_native_markdown = true;
+        full_resources.with_limit(1);
+        full_resources.full_resources = true;
+        full_resources.configure_budget();
+        assert!(!full_resources.chrome_fetch_params().prefer_native_markdown);
+
+        let mut clean = Configuration::default();
+        clean.prefer_native_markdown = true;
+        clean.with_limit(1);
+        clean.configure_budget();
+        assert!(clean.chrome_fetch_params().prefer_native_markdown);
     }
 }
 
