@@ -1435,10 +1435,9 @@ fn ssl_handshake_permanent_response() -> ChromeHTTPReqRes {
 /// Example: `https://www.docs.github.com/foo` → `https://docs.github.com/foo`
 pub fn strip_www(url: &str) -> Option<String> {
     // Find the scheme separator
-    let after_scheme = if let Some(pos) = url.find("://") {
+    let after_scheme = {
+        let pos = url.find("://")?;
         pos + 3
-    } else {
-        return None;
     };
     let rest = &url[after_scheme..];
     if let Some(stripped) = rest.strip_prefix("www.") {

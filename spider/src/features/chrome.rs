@@ -73,9 +73,9 @@ pub fn parse_cookies_with_jar(
                 if cookie_str.contains("HttpOnly") {
                     builder = builder.http_only(true);
                 }
-                match builder.build() {
-                    Ok(cookie_param) => cookies.push(cookie_param),
-                    Err(e) => return Err(e),
+                {
+                    let cookie_param = builder.build()?;
+                    cookies.push(cookie_param)
                 }
             } else {
                 return Err(format!("Invalid cookie pair: {}", pair));
