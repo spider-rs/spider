@@ -2489,6 +2489,13 @@ pub struct Page {
     /// Whether the response content was truncated due to a stream error,
     /// chunk idle timeout, or Content-Length mismatch.
     pub content_truncated: bool,
+    /// Whether the page content already holds the page rendered as
+    /// **Markdown** — produced natively by the connected browser engine
+    /// during the fetch (see
+    /// [`Configuration::prefer_native_markdown`](crate::configuration::Configuration))
+    /// instead of serialized HTML. Downstream consumers can skip local
+    /// HTML→Markdown conversion when set.
+    pub content_is_markdown: bool,
     /// Whether a proxy was configured for this request.
     /// When true, 401 responses are retried (proxy rotation may fix auth).
     pub proxy_configured: bool,
@@ -2705,6 +2712,10 @@ pub fn page_assign(page: &mut Page, mut new_page: Page) {
             page.html = std::mem::take(&mut new_page.html);
             page.is_valid_utf8 = new_page.is_valid_utf8;
             page.is_xml = new_page.is_xml;
+            #[cfg(not(feature = "decentralized"))]
+            {
+                page.content_is_markdown = new_page.content_is_markdown;
+            }
         }
     } else {
         // Chrome returned 200 with no content — mark for retry so the outer
@@ -3652,6 +3663,7 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
             anti_bot_tech: res.anti_bot_tech,
             metadata: res.metadata,
             content_truncated: res.content_truncated,
+            content_is_markdown: res.content_is_markdown,
             balance_bytes_tracked: false,
             base: None,
             external_domains_caseless: Default::default(),
@@ -3758,6 +3770,7 @@ pub fn build(url: &str, mut res: PageResponse) -> Page {
         anti_bot_tech: res.anti_bot_tech,
         metadata: res.metadata,
         content_truncated: res.content_truncated,
+        content_is_markdown: res.content_is_markdown,
         #[cfg(all(feature = "balance", not(feature = "decentralized")))]
         balance_bytes_tracked: balance_has_bytes,
         base: None,

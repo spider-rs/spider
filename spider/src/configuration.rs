@@ -554,6 +554,17 @@ pub struct Configuration {
     /// Dismiss dialogs.
     pub dismiss_dialogs: Option<bool>,
     #[cfg(feature = "chrome")]
+    /// Prefer fetching the rendered page directly as **Markdown** from the
+    /// connected browser engine when it supports native server-side
+    /// conversion (vendor `Content.getMarkdown` CDP method). Engines
+    /// without the capability are detected gracefully and the fetch falls
+    /// back to the standard HTML extraction path — byte-identical to this
+    /// flag being off. Pages fetched this way set
+    /// [`Page::content_is_markdown`](crate::page::Page::content_is_markdown)
+    /// so downstream consumers can skip local HTML→Markdown conversion.
+    /// Default `false`.
+    pub prefer_native_markdown: bool,
+    #[cfg(feature = "chrome")]
     /// Wait for options for the page.
     pub wait_for: Option<WaitFor>,
     #[cfg(feature = "chrome")]
@@ -1665,6 +1676,25 @@ impl Configuration {
         self
     }
 
+    /// Prefer engine-native Markdown for the page content when the connected
+    /// browser supports server-side conversion; engines without the
+    /// capability fall back to the standard HTML extraction path. This
+    /// method does nothing if the `chrome` feature is not enabled.
+    #[cfg(feature = "chrome")]
+    pub fn with_prefer_native_markdown(&mut self, prefer_native_markdown: bool) -> &mut Self {
+        self.prefer_native_markdown = prefer_native_markdown;
+        self
+    }
+
+    /// Prefer engine-native Markdown for the page content when the connected
+    /// browser supports server-side conversion; engines without the
+    /// capability fall back to the standard HTML extraction path. This
+    /// method does nothing if the `chrome` feature is not enabled.
+    #[cfg(not(feature = "chrome"))]
+    pub fn with_prefer_native_markdown(&mut self, _prefer_native_markdown: bool) -> &mut Self {
+        self
+    }
+
     /// Set the request emuluation. This method does nothing if the `wreq` flag is not enabled.
     #[cfg(feature = "wreq")]
     pub fn with_emulation(&mut self, emulation: Option<wreq_util::Emulation>) -> &mut Self {
@@ -2680,6 +2710,7 @@ impl Configuration {
                 .last_connected_url()
                 .or(self.chrome_connection_url.as_deref()),
             enhancements: self.enhancements,
+            prefer_native_markdown: self.prefer_native_markdown,
         }
     }
 

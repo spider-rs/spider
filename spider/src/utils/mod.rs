@@ -674,6 +674,12 @@ pub struct PageResponse {
     /// path. `None` means the producer did not commit to a value and the
     /// caller falls back to a one-shot validation.
     pub is_valid_utf8: Option<bool>,
+    /// Whether [`Self::content`] already holds the page rendered as
+    /// **Markdown** — produced natively by the connected browser engine
+    /// during the fetch (see `Configuration::prefer_native_markdown`)
+    /// instead of serialized HTML. Downstream consumers can skip local
+    /// HTML→Markdown conversion when set.
+    pub content_is_markdown: bool,
 }
 
 impl PageResponse {
@@ -3833,6 +3839,12 @@ pub struct ChromeFetchParams<'a> {
     /// allocation-free; resolved per gated site via `enabled(..)`. An untouched
     /// (default) value makes every section follow its env/global default.
     pub enhancements: crate::configuration::EnhancementSettings,
+    /// Prefer engine-native Markdown for the page content (vendor
+    /// `Content.getMarkdown`) when the connected browser supports it —
+    /// copied from `Configuration::prefer_native_markdown`. Engines
+    /// without the capability fall back to the standard HTML extraction
+    /// path, byte-identical to this flag being off.
+    pub prefer_native_markdown: bool,
 }
 
 #[cfg(feature = "chrome")]
@@ -4634,6 +4646,10 @@ pub async fn fetch_page_html_chrome_base<'h>(
     let mut validate_cf = false;
 
     let run_page_response = async move {
+        // Whether the response body was produced natively as Markdown by
+        // the engine (see the native-format fast path below). Stamped onto
+        // `page_response.content_is_markdown` once the body is final.
+        let mut native_markdown = false;
         let mut page_response = if run_events {
             if waf_check {
                 base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
@@ -4830,13 +4846,48 @@ pub async fn fetch_page_html_chrome_base<'h>(
                 // other post-navigate phase in this function.
                 let fallback_budget = base_timeout;
 
+                // ── Native-format fast path ────────────────────────────
+                // When the caller prefers Markdown output and the
+                // connected engine can serialize the page as Markdown
+                // server-side (vendor `Content.getMarkdown`), skip the
+                // HTML transfer entirely. Guarded by the same invariants
+                // as the direct-to-disk spool gate above — solvers mutate
+                // `&mut res`, WAF / openai / multimodal inspect the full
+                // HTML content, XML uses a different API — so any of
+                // those conditions keeps the standard HTML path.
+                // `Ok(None)` (the documented "not supported" response
+                // shape) and protocol errors both mean the engine does
+                // not offer the capability; the fallback below is then
+                // byte-identical to prior releases.
+                let native_md: Option<Vec<u8>> = if params.prefer_native_markdown
+                    && !xml_target
+                    && !asset
+                    && !waf_check
+                    && anti_bot_tech == AntiBotTech::None
+                    && remote_multimodal.is_none()
+                    && openai_config.is_none()
+                {
+                    match tokio::time::timeout(fallback_budget, page.content_markdown()).await {
+                        Ok(Ok(Some(md))) if !md.is_empty() => Some(md.into_bytes()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                native_markdown = native_md.is_some();
+
                 // When `extract` is `Some`, fold link extraction into the
                 // chrome chunk pump.  XML pages bypass the rewriter
                 // (chromey serializes XML differently and the existing
                 // post-pass via `links_stream_xml_links_stream_base`
                 // covers them) — preserves today's XML carve-out at
                 // chrome_page_post_process! exactly.
-                let mut res: Vec<u8> = if let Some(ext) = extract.as_deref_mut() {
+                let mut res: Vec<u8> = if let Some(md) = native_md {
+                    // Engine-produced Markdown replaces the HTML body; the
+                    // streaming extractor never ran, so the post-process
+                    // layer takes its legacy second-pass link walk.
+                    md
+                } else if let Some(ext) = extract.as_deref_mut() {
                     if !xml_target {
                         let mut collected: Vec<u8> = Vec::new();
                         let pump_fut =
@@ -4894,8 +4945,12 @@ pub async fn fetch_page_html_chrome_base<'h>(
 
                 #[cfg(feature = "real_browser")]
                 {
-                    // guard entry to real pages.
-                    if res.len() <= crate::page::TURNSTILE_WALL_PAGE_SIZE {
+                    // guard entry to real pages. The native-Markdown fast
+                    // path is excluded: the body is not HTML, so the
+                    // HTML-byte challenge detectors below don't apply (a
+                    // false match would let a solver overwrite the
+                    // Markdown body with challenge-flow HTML).
+                    if !native_markdown && res.len() <= crate::page::TURNSTILE_WALL_PAGE_SIZE {
                         // Any solver below may overwrite `res` with the
                         // post-challenge body — invalidate the streaming
                         // extractor up front so the post-process layer
@@ -5329,6 +5384,13 @@ pub async fn fetch_page_html_chrome_base<'h>(
 
             page_response
         };
+
+        // Stamp the native-format marker once the response body is final.
+        // Every later overwrite path (openai / multimodal refresh, the
+        // media-body race, solver rewrites) is excluded from the native
+        // fast path, so the marker is only `true` while `content` still
+        // holds the engine-produced Markdown.
+        page_response.content_is_markdown = native_markdown;
 
         if content {
             if let Some(final_url) = &page_response.final_url {

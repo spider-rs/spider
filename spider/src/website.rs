@@ -13757,6 +13757,16 @@ impl Website {
         self
     }
 
+    /// Prefer engine-native Markdown for the page content when the connected
+    /// browser supports server-side conversion; engines without the
+    /// capability fall back to the standard HTML extraction path. This
+    /// method does nothing if the `chrome` feature is not enabled.
+    pub fn with_prefer_native_markdown(&mut self, prefer_native_markdown: bool) -> &mut Self {
+        self.configuration
+            .with_prefer_native_markdown(prefer_native_markdown);
+        self
+    }
+
     /// Automatically setup geo-location configurations when using a proxy. This method does nothing if the `chrome` feature is not enabled.
     pub fn with_auto_geolocation(&mut self, enabled: bool) -> &mut Self {
         self.configuration.with_auto_geolocation(enabled);

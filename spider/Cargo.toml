@@ -120,7 +120,9 @@ tikv-jemallocator = { version = "0.6", optional = true }
 mimalloc = { version = "0.1", optional = true, default-features = false }
 
 [dependencies.chromey]
-version = "2"
+# 2.54 is the first release carrying the engine-native Markdown content
+# methods (`Page::content_markdown` & co.) that `prefer_native_markdown` uses.
+version = "2.54"
 optional = true
 default-features = false
 features = ["bytes", "stream"]
