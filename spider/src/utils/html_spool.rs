@@ -697,7 +697,17 @@ pub fn spool_max_write_bytes() -> usize {
     static VAL: OnceLock<usize> = OnceLock::new();
     *VAL.get_or_init(|| {
         const DEFAULT: usize = 1024 * 1024 * 1024; // 1 GiB
-        const HARD_CEILING: usize = 4 * 1024 * 1024 * 1024; // 4 GiB
+
+        // 4 GiB, saturating to `usize::MAX` on 32-bit targets where the
+        // literal itself would overflow `usize`.
+        const HARD_CEILING: usize = {
+            const CEILING_U64: u64 = 4 * 1024 * 1024 * 1024;
+            if CEILING_U64 > usize::MAX as u64 {
+                usize::MAX
+            } else {
+                CEILING_U64 as usize
+            }
+        };
         std::env::var("SPIDER_HTML_SPOOL_MAX_BYTES")
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
@@ -1380,16 +1390,22 @@ pub(crate) mod tests {
     /// triggering a cap in one test would change every later test's
     /// view of the world.  Instead we verify the parser behaviour,
     /// which is the only source-of-truth for the cap value.
+    // The 4 GiB hard ceiling only exceeds `usize::MAX` on 64-bit targets;
+    // on 32-bit, `usize::MAX` itself is the (lower) effective ceiling, so
+    // this scenario (an env override parsing above the ceiling) doesn't
+    // arise the same way there.
+    #[cfg(target_pointer_width = "64")]
     #[test]
     fn test_spool_max_write_bytes_hard_ceiling() {
+        const HARD_CEILING: usize = 4 * 1024 * 1024 * 1024;
         // Direct parse path, mirroring `spool_max_write_bytes()` body
         // but without touching the cached global.
         let parsed: usize = "99999999999999999".parse().unwrap_or(0);
-        assert!(parsed > 4 * 1024 * 1024 * 1024);
+        assert!(parsed > HARD_CEILING);
         // After `.min(HARD_CEILING)` the advertised cap never exceeds
         // 4 GiB regardless of env.
-        let capped = parsed.min(4 * 1024 * 1024 * 1024);
-        assert_eq!(capped, 4 * 1024 * 1024 * 1024);
+        let capped = parsed.min(HARD_CEILING);
+        assert_eq!(capped, HARD_CEILING);
     }
 
     /// Multi-byte UTF-8 spanning chunk boundaries is still validated
