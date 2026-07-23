@@ -2078,7 +2078,9 @@ impl Website {
 
         if let Some(segments) = get_path_from_url(link)
             .strip_prefix('/')
-            .map(|remainder| remainder.split('/'))
+            // Skip empty segments so a trailing slash ("/a/b/") counts the same
+            // depth as "/a/b" instead of an extra phantom level.
+            .map(|remainder| remainder.split('/').filter(|segment| !segment.is_empty()))
         {
             let mut depth: usize = 0;
 
@@ -2143,7 +2145,11 @@ impl Website {
                 if !skip_paths && !exceeded_wild_budget {
                     let path_segments = get_path_from_url(link)
                         .strip_prefix('/')
-                        .map(|remainder| remainder.split('/'));
+                        // Skip empty segments so a trailing slash does not inflate
+                        // the depth count or re-check the final budget key.
+                        .map(|remainder| {
+                            remainder.split('/').filter(|segment| !segment.is_empty())
+                        });
 
                     match path_segments {
                         Some(segments) => {
@@ -18134,4 +18140,29 @@ async fn shutdown_conserves_semaphore_permits() {
         PERMITS,
         "JoinSet::shutdown() must restore all owned permits without add_permits"
     );
+}
+
+#[test]
+fn depth_limit_ignores_trailing_slash() {
+    let mut website: Website = Website::new("https://example.com");
+    website.configuration.depth = 2;
+    website.configuration.depth_distance = 2;
+
+    // A trailing slash must not add a phantom depth level: "/a/b/" is the same
+    // logical depth as "/a/b" and both are within the depth-2 budget.
+    for url in ["https://example.com/a/b", "https://example.com/a/b/"] {
+        assert!(
+            !website.is_over_depth(&url.into()),
+            "{url} is within depth 2 and must be crawled"
+        );
+    }
+
+    // The fix must not over-permit: genuinely deeper paths are still dropped,
+    // with or without a trailing slash.
+    for url in ["https://example.com/a/b/c", "https://example.com/a/b/c/"] {
+        assert!(
+            website.is_over_depth(&url.into()),
+            "{url} exceeds depth 2 and must be dropped"
+        );
+    }
 }
