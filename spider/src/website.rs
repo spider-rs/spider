@@ -4629,9 +4629,7 @@ impl Website {
                     {
                         if !self.handle_process(handle, &mut interval, async {
                             emit_log_shutdown(link.inner());
-                            let permits = set.len();
                             set.shutdown().await;
-                            semaphore.add_permits(permits);
                         }).await {
                             while let Some(links) = stream.next().await {
                                 self.extra_links_insert(links);
@@ -8065,9 +8063,7 @@ impl Website {
                         Some(link) = stream.next(), if semaphore.available_permits() > 0 && !crawl_duration_expired(&self.configuration.crawl_timeout, &crawl_breaker) => {
                             if !self.handle_process(handle, &mut interval, async {
                                 emit_log_shutdown(link.inner());
-                                let permits = set.len();
                                 set.shutdown().await;
-                                semaphore.add_permits(permits);
                             }).await {
                                 while let Some(links) = stream.next().await {
                                     self.extra_links_insert(links);
@@ -9068,9 +9064,7 @@ impl Website {
                                                     &mut interval,
                                                     async {
                                                         emit_log_shutdown(link.inner());
-                                                        let permits = set.len();
                                                         set.shutdown().await;
-                                                        semaphore.add_permits(permits);
                                                     },
                                                 )
                                                 .await
@@ -9832,9 +9826,7 @@ impl Website {
                         Some(link) = stream.next(), if semaphore.available_permits() > 0 && !crawl_duration_expired(&self.configuration.crawl_timeout, &crawl_breaker)   => {
                             if !self.handle_process(handle, &mut interval, async {
                                 emit_log_shutdown(link.inner());
-                                let permits = set.len();
                                 set.shutdown().await;
-                                semaphore.add_permits(permits);
                             }).await {
                                 break 'outer;
                             }
@@ -10382,9 +10374,7 @@ impl Website {
                                                     &mut interval,
                                                     async {
                                                         emit_log_shutdown(link.inner());
-                                                        let permits = set.len();
                                                         set.shutdown().await;
-                                                        semaphore.add_permits(permits);
                                                     },
                                                 )
                                                 .await
@@ -10980,9 +10970,7 @@ impl Website {
                                             &mut interval,
                                             async {
                                                 emit_log_shutdown(link.inner());
-                                                let permits = set.len();
                                                 set.shutdown().await;
-                                                semaphore.add_permits(permits);
                                             },
                                         )
                                         .await
@@ -11484,9 +11472,7 @@ impl Website {
                                     &mut interval,
                                     async {
                                         emit_log_shutdown(link.inner());
-                                        let permits = set.len();
                                         set.shutdown().await;
-                                        semaphore.add_permits(permits);
 
                                     },
                                 )
@@ -18098,4 +18084,54 @@ async fn test_channel_guard_lock_waits_for_consumers() {
     tokio::time::timeout(std::time::Duration::from_millis(100), guard.lock())
         .await
         .expect("lock should resolve after all pages consumed");
+}
+
+/// Regression test for the crawl-loop manual-shutdown path.
+///
+/// Every fetch spawned during a crawl owns its `OwnedSemaphorePermit` for its
+/// lifetime (see the `semaphore.clone().acquire_owned()` + `spawn_set(...)`
+/// sites in the crawl loops). Aborting those tasks via `JoinSet::shutdown()`
+/// drops their futures, which drops the permits and returns them to the
+/// semaphore automatically.
+///
+/// The manual-shutdown branches previously also called
+/// `semaphore.add_permits(set.len())` afterwards, returning the same permits a
+/// *second* time. Under load `get_semaphore` hands out the process-global
+/// `SEM_SHARED`, so every mid-flight stop/pause permanently inflated that shared
+/// pool and let real in-flight concurrency drift above the configured cap.
+///
+/// This pins the invariant the fix relies on: `shutdown()` alone conserves
+/// permits, so a manual `add_permits` after it is incorrect.
+#[tokio::test]
+async fn shutdown_conserves_semaphore_permits() {
+    use tokio::sync::Semaphore;
+    use tokio::task::JoinSet;
+
+    const PERMITS: usize = 10;
+    let semaphore = std::sync::Arc::new(Semaphore::new(PERMITS));
+    let mut set: JoinSet<()> = JoinSet::new();
+
+    // Mirror the crawl loop: each in-flight task owns a permit until it ends.
+    let in_flight = 4;
+    for _ in 0..in_flight {
+        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        set.spawn(async move {
+            // A long-running "fetch" so the permit is still held at shutdown.
+            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+            drop(permit);
+        });
+    }
+    assert_eq!(semaphore.available_permits(), PERMITS - in_flight);
+
+    // The manual-shutdown branch: abort + join all in-flight tasks.
+    set.shutdown().await;
+    tokio::task::yield_now().await; // let the aborted tasks' Drop glue settle
+
+    // Permits are fully restored by Drop alone. A manual `add_permits` here
+    // would over-release and inflate the pool (the bug this test guards).
+    assert_eq!(
+        semaphore.available_permits(),
+        PERMITS,
+        "JoinSet::shutdown() must restore all owned permits without add_permits"
+    );
 }
