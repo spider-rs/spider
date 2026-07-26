@@ -2604,8 +2604,9 @@ impl Website {
     }
 
     /// SSRF guard for redirect targets. Refuses hops into loopback,
-    /// link-local (cloud-metadata), private, broadcast, or unspecified
-    /// addresses, and non-HTTP(S) schemes.
+    /// link-local (cloud-metadata), private, unique-local, broadcast,
+    /// unspecified or otherwise reserved addresses, and non-HTTP(S)
+    /// schemes.
     ///
     /// The configured seed URL is fetched directly and never passes
     /// through the redirect policy, so an intentionally-internal start
@@ -2614,7 +2615,29 @@ impl Website {
     /// attacker-controlled page uses (cf. GHSA-8v6v-g4rh-jmcm). Operates
     /// on the already-parsed `Url` so it adds no allocation per hop.
     fn is_ssrf_redirect(url: &Url) -> bool {
-        use std::net::IpAddr;
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+        fn is_internal_v4(v4: Ipv4Addr) -> bool {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                // RFC 1122 reserves all of 0.0.0.0/8 as "this network";
+                // `is_unspecified` only matches 0.0.0.0 itself.
+                || v4.octets()[0] == 0
+        }
+
+        fn is_internal_v6(v6: Ipv6Addr) -> bool {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                // fc00::/7 is the IPv6 side of RFC 1918, and where the
+                // cloud metadata service answers (fd00:ec2::254).
+                || v6.is_unique_local()
+                // fe80::/10 is the IPv6 side of 169.254.0.0/16.
+                || v6.is_unicast_link_local()
+                || v6.to_ipv4_mapped().is_some_and(is_internal_v4)
+        }
 
         let scheme = url.scheme();
         if scheme != "http" && scheme != "https" {
@@ -2645,26 +2668,8 @@ impl Website {
             .and_then(|h| h.strip_suffix(']'))
             .unwrap_or(host);
         match ip_host.parse::<IpAddr>() {
-            Ok(IpAddr::V4(v4)) => {
-                v4.is_loopback()
-                    || v4.is_private()
-                    || v4.is_link_local()
-                    || v4.is_unspecified()
-                    || v4.is_broadcast()
-            }
-            Ok(IpAddr::V6(v6)) => {
-                v6.is_loopback()
-                    || v6.is_unspecified()
-                    || v6
-                        .to_ipv4_mapped()
-                        .map(|v4| {
-                            v4.is_loopback()
-                                || v4.is_private()
-                                || v4.is_link_local()
-                                || v4.is_unspecified()
-                        })
-                        .unwrap_or(false)
-            }
+            Ok(IpAddr::V4(v4)) => is_internal_v4(v4),
+            Ok(IpAddr::V6(v6)) => is_internal_v6(v6),
             _ => false,
         }
     }
@@ -15876,9 +15881,10 @@ async fn test_cache_shortcircuit_crawl_smart() {
 mod tests {
 
     /// Redirect SSRF guard must refuse loopback, link-local (cloud
-    /// metadata), private, IPv6 / IPv4-mapped, localhost variants and
-    /// non-HTTP schemes, while still allowing ordinary public hosts so
-    /// legitimate cross-site redirects keep working.
+    /// metadata), private, unique-local, reserved, IPv6 / IPv4-mapped,
+    /// localhost variants and non-HTTP schemes, while still allowing
+    /// ordinary public hosts so legitimate cross-site redirects keep
+    /// working.
     #[test]
     fn test_is_ssrf_redirect_blocks_internal() {
         use url::Url;
@@ -15887,6 +15893,9 @@ mod tests {
             "http://localhost/admin",
             "http://sub.localhost/",
             "http://0.0.0.0/",
+            // 0.0.0.0/8 past the unspecified address itself.
+            "http://0.0.0.1/",
+            "http://0.1.2.3/",
             "http://169.254.169.254/latest/meta-data/",
             "http://metadata.google.internal/",
             "http://10.0.0.5/",
@@ -15894,6 +15903,11 @@ mod tests {
             "http://172.16.0.1/",
             "http://[::1]/",
             "http://[::ffff:127.0.0.1]/",
+            "http://[::ffff:255.255.255.255]/",
+            "http://[fc00::1]/",
+            // IPv6 endpoint of the cloud metadata service.
+            "http://[fd00:ec2::254]/latest/meta-data/",
+            "http://[fe80::1]/",
             "ftp://127.0.0.1/",
         ] {
             assert!(
@@ -15905,6 +15919,7 @@ mod tests {
             "http://example.com/",
             "https://api.github.com/repos",
             "http://93.184.216.34/",
+            "http://[2606:4700:4700::1111]/",
         ] {
             assert!(
                 !super::Website::is_ssrf_redirect(&Url::parse(allowed).unwrap()),
