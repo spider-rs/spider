@@ -1397,9 +1397,10 @@ pub struct Website {
     /// Round-robin client rotator for proxy rotation. Built when 2+ proxies are configured.
     client_rotator: Option<Arc<ClientRotator>>,
     /// Background proxy-DNS refresh task abort handle.
-    /// Shared via Arc so the Website stays Clone-able.
+    /// Shared via Arc so the Website stays Clone-able; the guard aborts the task
+    /// once the last clone drops it (see [`ProxyDnsAbortGuard`]).
     #[cfg(feature = "dns_cache")]
-    proxy_dns_abort: Option<Arc<tokio::task::AbortHandle>>,
+    proxy_dns_abort: Option<Arc<ProxyDnsAbortGuard>>,
     /// The disk handler to use.
     #[cfg(feature = "disk")]
     sqlite: Option<Box<DatabaseHandler>>,
@@ -1512,6 +1513,35 @@ impl fmt::Debug for Website {
         }
 
         ds.finish()
+    }
+}
+
+/// Owns the background proxy-DNS refresh task and aborts it on drop.
+///
+/// [`tokio::task::AbortHandle`] does not abort when dropped, so a `Website` that
+/// used proxies + `dns_cache` leaked its looping refresh task until process exit.
+/// The guard lives inside the `Arc` rather than `Website` implementing `Drop`
+/// directly: `Website` is `Clone` and is built with `..Default::default()` struct
+/// update syntax, which the compiler forbids on a type that implements `Drop`.
+/// Putting the `Drop` here also gives exactly the semantics we want for free —
+/// `Arc` runs it only when the last clone releases the handle, so dropping one
+/// clone can never abort a refresh task another owner is still crawling with.
+#[cfg(feature = "dns_cache")]
+#[derive(Debug)]
+pub(crate) struct ProxyDnsAbortGuard(tokio::task::AbortHandle);
+
+#[cfg(feature = "dns_cache")]
+impl ProxyDnsAbortGuard {
+    /// Abort the refresh task now, without waiting for the guard to drop.
+    fn abort(&self) {
+        self.0.abort();
+    }
+}
+
+#[cfg(feature = "dns_cache")]
+impl Drop for ProxyDnsAbortGuard {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 
@@ -3884,7 +3914,8 @@ impl Website {
                     });
                     // Adaptive refresh keeps proxy DNS warm for the crawl duration.
                     let handle = dns.spawn_proxy_dns_refresh(&addrs);
-                    self.proxy_dns_abort = Some(Arc::new(handle.abort_handle()));
+                    self.proxy_dns_abort =
+                        Some(Arc::new(ProxyDnsAbortGuard(handle.abort_handle())));
                 }
             }
         }

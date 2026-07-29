@@ -593,7 +593,10 @@ pub(crate) async fn prefilter_urls(
         return urls.clone();
     }
 
-    let batch_size = cfgs.cfg.url_prefilter_batch_size;
+    // `chunks(0)` panics ("chunk size must be non-zero"). `url_prefilter_batch_size`
+    // is a caller-settable field with no clamp, so floor it at 1 instead of
+    // crashing. No-op for every configured value >= 1.
+    let batch_size = cfgs.cfg.url_prefilter_batch_size.max(1);
     let max_tokens = cfgs.cfg.url_prefilter_max_tokens;
 
     // Partition URLs into cached and uncached

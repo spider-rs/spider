@@ -104,11 +104,21 @@ pub fn expand_url(url: &str) -> Vec<CaseInsensitiveString> {
                     }
                     // start and end are characters
                     _ => {
-                        let s = start_str.as_bytes()[0];
-                        let e = end_str.as_bytes()[0];
-                        let items = (s..e + 1)
-                            .map(|b| (String::from(b as char), substring))
-                            .collect::<Vec<(String, &str)>>();
+                        // Index-free access: an empty capture would panic on
+                        // `as_bytes()[0]`. `e + 1` overflows when the end byte is
+                        // 0xFF (debug panic / release wrap-to-empty), so build the
+                        // range inclusively instead. Identical output for every
+                        // range not ending at 0xFF; a 0xFF end now yields the
+                        // (at most 256) intended items rather than wrapping to
+                        // empty. Unlike the numeric arm there is no OOM risk here,
+                        // so the correct expansion is safe to produce.
+                        let items = match (start_str.as_bytes().first(), end_str.as_bytes().first())
+                        {
+                            (Some(&s), Some(&e)) => (s..=e)
+                                .map(|b| (String::from(b as char), substring))
+                                .collect::<Vec<(String, &str)>>(),
+                            _ => Vec::new(),
+                        };
 
                         matches.push(items);
                     }
