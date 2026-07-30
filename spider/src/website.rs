@@ -1037,6 +1037,92 @@ lazy_static! {
             _ => DEFAULT_LIMIT
         }
     };
+    /// The max pages to retain in [`Website::get_pages`].
+    ///
+    /// `0` — the default — keeps the historical unbounded behavior so the
+    /// default build is byte-identical. A malformed value also falls back to
+    /// the default rather than panicking.
+    pub(crate) static ref PAGES_MEMORY_LIMIT: usize = {
+        const DEFAULT_LIMIT: usize = 0;
+        match std::env::var("SPIDER_MAX_RETAINED_PAGES") {
+            Ok(limit) => limit.parse::<usize>().unwrap_or(DEFAULT_LIMIT),
+            _ => DEFAULT_LIMIT
+        }
+    };
+}
+
+/// Count of pages dropped because [`PAGES_MEMORY_LIMIT`] was reached.
+///
+/// Process-wide (concurrent [`Website`] instances share it) and drained by
+/// [`report_dropped_pages`] at crawl completion so the total is logged once per
+/// crawl instead of once per dropped page. Untouched while the cap is `0`.
+static PAGES_DROPPED: AtomicUsize = AtomicUsize::new(0);
+
+/// Push a page into a retained page buffer, honoring [`PAGES_MEMORY_LIMIT`].
+///
+/// The `0 == unlimited` default is checked first so the default build pays a
+/// single `usize` compare and then behaves exactly like `pages.push(page)`.
+#[inline]
+fn push_page_capped(pages: &mut Vec<Page>, page: Page) {
+    let limit = *PAGES_MEMORY_LIMIT;
+
+    if limit == 0 || pages.len() < limit {
+        pages.push(page);
+    } else {
+        PAGES_DROPPED.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Extend a retained page buffer, honoring [`PAGES_MEMORY_LIMIT`].
+///
+/// Mirrors [`push_page_capped`] for the bulk path; the unlimited default
+/// forwards straight to `Vec::extend`.
+#[cfg(feature = "sitemap")]
+#[inline]
+fn extend_pages_capped(pages: &mut Vec<Page>, incoming: Vec<Page>) {
+    let limit = *PAGES_MEMORY_LIMIT;
+
+    if limit == 0 {
+        pages.extend(incoming);
+        return;
+    }
+
+    // `saturating_sub` keeps the headroom math from underflowing when the
+    // buffer is already at (or past) the cap.
+    let room = limit.saturating_sub(pages.len());
+
+    if room >= incoming.len() {
+        pages.extend(incoming);
+    } else {
+        let dropped = incoming.len().saturating_sub(room);
+        pages.extend(incoming.into_iter().take(room));
+        PAGES_DROPPED.fetch_add(dropped, Ordering::Relaxed);
+    }
+}
+
+/// Log and reset the retained-page drop counter.
+///
+/// Called once per crawl from [`Website::set_crawl_status`]. Returns
+/// immediately when the cap is disabled so the default build never logs.
+fn report_dropped_pages() {
+    let limit = *PAGES_MEMORY_LIMIT;
+
+    if limit == 0 {
+        return;
+    }
+
+    let dropped = PAGES_DROPPED.swap(0, Ordering::Relaxed);
+
+    if dropped > 0 {
+        #[cfg(feature = "tracing")]
+        tracing::warn!(
+            "SPIDER_MAX_RETAINED_PAGES ({limit}) reached - dropped {dropped} retained page(s)"
+        );
+        #[cfg(not(feature = "tracing"))]
+        log::warn!(
+            "SPIDER_MAX_RETAINED_PAGES ({limit}) reached - dropped {dropped} retained page(s)"
+        );
+    }
 }
 
 #[cfg(not(feature = "decentralized"))]
@@ -1843,6 +1929,62 @@ impl Website {
         }
     }
 
+    /// Insert a URL that is already known to be absent from the visited set.
+    ///
+    /// Identical to [`Self::insert_link`] minus the `contains` guard. The
+    /// admission path already probes `links_visited` via
+    /// [`Self::is_allowed_budgetless`] and `links_visited` lives behind
+    /// `&mut self` on the driver task — spawned tasks only hand links back
+    /// through `set.join_next()` in that same loop — so nothing can insert
+    /// between the two calls and the second probe is provably always false.
+    ///
+    /// This is a design cleanup, not a throughput win: it saves one set lookup
+    /// (~20-30 ns, so ~0.3 ms per 10k links). It is worth slightly more under
+    /// `bloom`, where each probe is an mmap hit plus a set lookup that was
+    /// otherwise paid twice.
+    ///
+    /// Only call this immediately after an `is_allowed*` check on the same link.
+    #[cfg(feature = "disk")]
+    pub(crate) async fn insert_link_unchecked(&mut self, new_url: &CaseInsensitiveString) {
+        let mem_load = crate::utils::detect_system::get_global_memory_state_sync();
+        let beyond_memory_limits = self.links_visited.len() >= *LINKS_VISITED_MEMORY_LIMIT;
+        let seed_check = mem_load == 2 || mem_load == 1 || beyond_memory_limits;
+
+        if seed_check {
+            let mut seeded = false;
+            if let Some(sqlite) = &self.sqlite {
+                if !sqlite.ready() {
+                    let _ = self.seed().await;
+                    seeded = true;
+                }
+            }
+            if let Some(sqlite) = self.sqlite.as_mut() {
+                sqlite.set_seeded(seeded);
+            }
+        }
+
+        if mem_load == 2 || beyond_memory_limits || self.shared_disk_enabled() {
+            self.insert_url_disk(new_url).await
+        } else if mem_load == 1 {
+            if self.links_visited.len() <= 100 {
+                self.links_visited.insert(new_url.clone());
+            } else {
+                self.insert_url_disk(new_url).await
+            }
+        } else {
+            self.links_visited.insert(new_url.clone());
+        }
+    }
+
+    /// Insert a URL that is already known to be absent from the visited set.
+    ///
+    /// See the `disk` variant of [`Self::insert_link_unchecked`] for why the
+    /// `contains` guard is redundant on the admission path.
+    #[cfg(not(feature = "disk"))]
+    pub(crate) async fn insert_link_unchecked(&mut self, link: &CaseInsensitiveString) {
+        self.links_visited.insert(link.clone());
+    }
+
     /// Insert a new signature if it doesn't exist. This does nothing with `disk` flag enabled.
     #[cfg(feature = "disk")]
     pub async fn insert_signature(&mut self, new_signature: u64) {
@@ -2440,6 +2582,11 @@ impl Website {
     }
 
     /// Clear all pages and links stored in memory.
+    ///
+    /// Reusing a `Website` across runs accumulates: the retained pages buffer is
+    /// never reset by a crawl, so successive `scrape*` calls keep appending until
+    /// this (or [`Self::clear_all`]) is called. Set `SPIDER_MAX_RETAINED_PAGES`
+    /// to cap the buffer instead; it defaults to `0` (unlimited).
     pub fn clear(&mut self) {
         self.links_visited.clear();
         self.signatures.clear();
@@ -2453,6 +2600,11 @@ impl Website {
     }
 
     /// Page getter.
+    ///
+    /// Only populated by the `scrape*` entry points, which initialize the buffer
+    /// and never reset it — reusing the same `Website` accumulates pages across
+    /// runs until [`Self::clear`] / [`Self::clear_all`] is called. The buffer is
+    /// unbounded by default; set `SPIDER_MAX_RETAINED_PAGES` to cap it.
     pub fn get_pages(&self) -> Option<&Vec<Page>> {
         self.pages.as_ref()
     }
@@ -2600,6 +2752,41 @@ impl Website {
     /// Crawls commenced from fresh run.
     pub fn start(&mut self) {
         self.shutdown = false;
+        self.release_channel_backlog();
+    }
+
+    /// Release the broadcast ring backlog held by the internal placeholder receivers.
+    ///
+    /// [`Self::subscribe`] / [`Self::queue`] store an `Arc<broadcast::Receiver<_>>`
+    /// that is never read from — it exists so `Sender::send` never fails and so
+    /// [`Self::subscription_guard`] can tell "only us" (`receiver_count() == 1`)
+    /// apart from "a real subscriber is alive". Tokio keeps a slot's value alive
+    /// until every receiver has consumed it, so that placeholder pins up to
+    /// `capacity` full [`Page`]s (HTML + screenshot + content map) for the
+    /// lifetime of the `Website` — 512 of them when `warc` is on.
+    ///
+    /// Re-subscribing drops the stale cursor and starts a fresh one at the
+    /// current tail, which claims nothing. This is unobservable: a
+    /// `broadcast::Receiver` only ever yields values sent after it was created,
+    /// so no caller could have read the released backlog anyway.
+    ///
+    /// The new receiver is created *before* the old one is dropped so
+    /// `receiver_count()` never dips to zero — a zero count would make an
+    /// in-flight `Sender::send` fail. The whole body is synchronous and takes
+    /// `&mut self`, so it holds no borrow or lock across an `.await` and cannot
+    /// be re-entered while a crawl task is broadcasting.
+    ///
+    /// Only ring memory is touched: `links_visited` and `status` are left alone,
+    /// preserving the `crawl_sitemap().await.persist_links().crawl().await`
+    /// chaining contract.
+    pub(crate) fn release_channel_backlog(&mut self) {
+        if let Some((tx, rx)) = self.channel.as_mut() {
+            *rx = Arc::new(tx.subscribe());
+        }
+
+        if let Some((tx, rx)) = self.channel_queue.as_mut() {
+            *rx = Arc::new(tx.subscribe());
+        }
     }
 
     /// configure the robots parser on initial crawl attempt and run.
@@ -6733,7 +6920,17 @@ impl Website {
     }
 
     /// Set the crawl status depending on crawl state. The crawl that only changes if the state is Start or Active.
+    ///
+    /// This is the common completion point of every public `crawl*` entry point
+    /// (and therefore of every `scrape*`, which drives an inner `crawl*`), so it
+    /// also releases the broadcast backlog and reports any pages dropped by
+    /// `SPIDER_MAX_RETAINED_PAGES`. `subscription_guard` has already run by the
+    /// time we get here, so releasing the placeholder receiver cannot affect its
+    /// `receiver_count()` check.
     pub fn set_crawl_status(&mut self) {
+        self.release_channel_backlog();
+        report_dropped_pages();
+
         if self.status == CrawlStatus::Start || self.status == CrawlStatus::Active {
             self.status = if self.domain_parsed.is_none() {
                 CrawlStatus::Invalid
@@ -6880,7 +7077,7 @@ impl Website {
         {
             self.status = CrawlStatus::Active;
             let mut page_response =
-                crate::utils::build_cached_html_page_response(&target_url, &html);
+                crate::utils::build_cached_html_page_response(&target_url, html);
             self.apply_custom_antibot_check(&mut page_response);
             let page = build(&target_url, page_response);
             self.initial_status_code = page.status_code;
@@ -6946,7 +7143,7 @@ impl Website {
         let normalize = self.configuration.normalize;
 
         // Build page from cached HTML
-        let mut page_response = build_cached_html_page_response(&target_url, &html);
+        let mut page_response = build_cached_html_page_response(&target_url, html);
         self.apply_custom_antibot_check(&mut page_response);
         let mut page = build(&target_url, page_response);
 
@@ -7049,10 +7246,12 @@ impl Website {
                 {
                     Some(cached_html) => {
                         emit_log(&link_url);
-                        self.insert_link(&link).await;
+                        // `is_allowed` above already probed the visited set and
+                        // nothing between the two can insert (`&mut self`).
+                        self.insert_link_unchecked(&link).await;
 
                         let mut page_response =
-                            build_cached_html_page_response(&link_url, &cached_html);
+                            build_cached_html_page_response(&link_url, cached_html);
                         self.apply_custom_antibot_check(&mut page_response);
                         let mut page = build(&link_url, page_response);
 
@@ -7550,7 +7749,7 @@ impl Website {
                                 }
                                 { let url: CaseInsensitiveString = page.get_url().into(); self.insert_link(&url).await; }
                                 if let Some(p) = self.pages.as_mut() {
-                                    p.push(page);
+                                    push_page_capped(p, page);
                                     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                                     if crate::utils::detect_system::get_process_memory_state_sync() >= 1 {
                                         Self::shed_page_html(p).await;
@@ -7600,7 +7799,7 @@ impl Website {
                                 }
                                 { let url: CaseInsensitiveString = page.get_url().into(); self.insert_link(&url).await; }
                                 if let Some(p) = self.pages.as_mut() {
-                                    p.push(page);
+                                    push_page_capped(p, page);
                                     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                                     if crate::utils::detect_system::get_process_memory_state_sync() >= 1 {
                                         Self::shed_page_html(p).await;
@@ -7649,7 +7848,7 @@ impl Website {
                                 }
                                 { let url: CaseInsensitiveString = page.get_url().into(); self.insert_link(&url).await; }
                                 if let Some(p) = self.pages.as_mut() {
-                                    p.push(page);
+                                    push_page_capped(p, page);
                                     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                                     if crate::utils::detect_system::get_process_memory_state_sync() >= 1 {
                                         Self::shed_page_html(p).await;
@@ -7698,7 +7897,7 @@ impl Website {
                                 }
                                 { let url: CaseInsensitiveString = page.get_url().into(); self.insert_link(&url).await; }
                                 if let Some(p) = self.pages.as_mut() {
-                                    p.push(page);
+                                    push_page_capped(p, page);
                                     #[cfg(all(feature = "balance", not(feature = "decentralized")))]
                                     if crate::utils::detect_system::get_process_memory_state_sync() >= 1 {
                                         Self::shed_page_html(p).await;
@@ -8078,6 +8277,24 @@ impl Website {
             let mut exceeded_budget = false;
             let concurrency = throttle.is_zero();
 
+            // `self.url` is constant for the crawl, so the domain key used for the
+            // adaptive per-domain delay is resolved once here instead of being
+            // re-derived (and re-scanned) on every admitted link. `None` covers both
+            // "no auto-throttle installed" and "no domain in the base url", which is
+            // exactly the pair of conditions the per-link arm used to re-check.
+            #[cfg(feature = "auto_throttle")]
+            let auto_throttle_domain: Option<CompactString> = if auto_throttle_arc.is_some() {
+                let domain = crate::utils::get_domain_from_url(self.url.inner());
+
+                if domain.is_empty() {
+                    None
+                } else {
+                    Some(domain.into())
+                }
+            } else {
+                None
+            };
+
             self.dequeue(&mut q, &mut links, &mut exceeded_budget).await;
 
             if !concurrency && !links.is_empty() {
@@ -8125,7 +8342,9 @@ impl Website {
 
                             emit_log(link.inner());
 
-                            self.insert_link(&link).await;
+                            // `is_allowed` above already probed the visited set and
+                            // nothing between the two can insert (`&mut self`).
+                            self.insert_link_unchecked(&link).await;
 
                             if !concurrency {
                                 tokio::time::sleep(*throttle).await;
@@ -8133,13 +8352,12 @@ impl Website {
 
                             // Auto-throttle: apply adaptive per-domain delay on top of static delay.
                             #[cfg(feature = "auto_throttle")]
-                            if let Some(ref at) = auto_throttle_arc {
-                                let domain = crate::utils::get_domain_from_url(self.url.inner());
-                                if !domain.is_empty() {
-                                    let adaptive = at.delay_for(domain);
-                                    if adaptive > *throttle {
-                                        tokio::time::sleep(adaptive - *throttle).await;
-                                    }
+                            if let (Some(at), Some(domain)) =
+                                (auto_throttle_arc.as_ref(), auto_throttle_domain.as_ref())
+                            {
+                                let adaptive = at.delay_for(domain.as_str());
+                                if adaptive > *throttle {
+                                    tokio::time::sleep(adaptive - *throttle).await;
                                 }
                             }
 
@@ -8219,7 +8437,7 @@ impl Website {
                                         use crate::utils::{cache_skip_browser, get_cached_url, build_cached_html_page_response};
                                         if cache_skip_browser(&cache_opts) {
                                             if let Some(html) = get_cached_url(target_url, cache_opts.as_ref(), &cache_pol, cache_ns.as_deref()).await {
-                                                let mut page_response = build_cached_html_page_response(target_url, &html);
+                                                let mut page_response = build_cached_html_page_response(target_url, html);
                                                 if page_response.anti_bot_tech == AntiBotTech::None {
                                                     if let Some(ref custom) = custom_antibot {
                                                         let body = page_response.content.as_deref().unwrap_or(&[]);
@@ -9128,7 +9346,9 @@ impl Website {
 
                                             emit_log(link.inner());
 
-                                            self.insert_link(&link).await;
+                                            // `is_allowed` above already probed the visited
+                                            // set and nothing between the two can insert.
+                                            self.insert_link_unchecked(&link).await;
 
                                             if !concurrency {
                                                 tokio::time::sleep(*throttle).await;
@@ -9175,7 +9395,7 @@ impl Website {
                                                         let cache_options = shared.6.get_cache_options();
                                                         if cache_skip_browser(&cache_options) {
                                                             if let Some(html) = get_cached_url(&target_url_string, cache_options.as_ref(), &shared.6.cache_policy, shared.6.cache_namespace_str()).await {
-                                                                let mut page_response = build_cached_html_page_response(&target_url_string, &html);
+                                                                let mut page_response = build_cached_html_page_response(&target_url_string, html);
                                                                 if page_response.anti_bot_tech == AntiBotTech::None {
                                                                     if let Some(ref compiled) = compiled_custom_antibot {
                                                                         let body = page_response.content.as_deref().unwrap_or(&[]);
@@ -11924,10 +12144,13 @@ impl Website {
 
             let return_page_links = self.configuration.return_page_links;
 
-            let mut extra_links = self.extra_links.clone();
+            // `dequeue` needs `&mut self` alongside the frontier set, so the set has
+            // to be detached from `self` first. Taking it moves the allocation out
+            // and back instead of deep-copying the `HashSet` twice.
+            let mut extra_links = std::mem::take(&mut *self.extra_links);
             self.dequeue(&mut q, &mut extra_links, &mut exceeded_budget)
                 .await;
-            self.extra_links.clone_from(&extra_links);
+            *self.extra_links = extra_links;
 
             let whitelist_changes = self.configuration.add_sitemap_to_whitelist();
 
@@ -12082,7 +12305,7 @@ impl Website {
                         }
                         if scrape {
                             if let Some(p) = self.pages.as_mut() {
-                                p.extend(handle);
+                                extend_pages_capped(p, handle);
                             }
                         }
                     }
@@ -12573,7 +12796,7 @@ impl Website {
                                                 .await;
                                                 if scrape || persist_links {
                                                     if let Some(p) = self.pages.as_mut() {
-                                                        p.push(page);
+                                                        push_page_capped(p, page);
                                                     }
                                                 }
                                             }
@@ -12588,7 +12811,7 @@ impl Website {
                                             .await;
                                             if scrape || persist_links {
                                                 if let Some(p) = self.pages.as_mut() {
-                                                    p.push(page);
+                                                    push_page_capped(p, page);
                                                 }
                                             }
                                         }
@@ -12622,7 +12845,7 @@ impl Website {
                                         channel_send_page(&shared.0, page.clone(), &shared.1).await;
                                         if scrape || persist_links {
                                             if let Some(p) = self.pages.as_mut() {
-                                                p.push(page);
+                                                push_page_capped(p, page);
                                             }
                                         }
                                     }
@@ -12635,7 +12858,7 @@ impl Website {
                                     channel_send_page(&shared.0, page.clone(), &shared.1).await;
                                     if scrape || persist_links {
                                         if let Some(p) = self.pages.as_mut() {
-                                            p.push(page);
+                                            push_page_capped(p, page);
                                         }
                                     }
                                 }
@@ -17138,7 +17361,7 @@ impl crate::traits::CrawlerSubscription for Website {
     }
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[tokio::test]
 async fn test_shed_page_html() {
     let make_page = |url: &str| {
@@ -17160,7 +17383,7 @@ async fn test_shed_page_html() {
     assert_eq!(pages[49].url, "https://a.com/49");
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_spool_html_to_disk_and_reload() {
     let mut page = Page::default();
@@ -17188,7 +17411,7 @@ fn test_spool_html_to_disk_and_reload() {
     assert_eq!(page.get_html(), "<html><body>test content</body></html>");
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_spool_guard_clone_independence() {
     let mut page = Page::default();
@@ -17207,7 +17430,7 @@ fn test_spool_guard_clone_independence() {
     assert_eq!(cloned.get_html(), "clone test");
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_spool_drop_cleans_up_file() {
     let path;
@@ -17231,7 +17454,7 @@ fn test_spool_drop_cleans_up_file() {
 
 // ── Deep end-to-end spool tests ────────────────────────────────────────────
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_spool_empty_html_noop() {
     // Empty HTML should not be spooled.
@@ -17245,7 +17468,7 @@ fn test_spool_empty_html_noop() {
     assert!(!page2.spool_html_to_disk());
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_spool_double_spool_is_noop() {
     let mut page = Page::default();
@@ -17257,7 +17480,7 @@ fn test_spool_double_spool_is_noop() {
     assert_eq!(page.get_html(), "content");
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_spool_set_html_bytes_replaces_spool() {
     let mut page = Page::default();
@@ -17274,7 +17497,7 @@ fn test_spool_set_html_bytes_replaces_spool() {
     assert_eq!(page.get_html(), "replacement");
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_spool_set_html_bytes_none_clears_spool() {
     let mut page = Page::default();
@@ -17289,7 +17512,7 @@ fn test_spool_set_html_bytes_none_clears_spool() {
     assert!(page.is_empty());
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_spool_get_html_cow_from_disk() {
     let mut page = Page::default();
@@ -17302,7 +17525,7 @@ fn test_spool_get_html_cow_from_disk() {
     assert!(matches!(cow, std::borrow::Cow::Owned(_)));
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_page_size_basic() {
     let mut page = Page::default();
@@ -17332,7 +17555,7 @@ fn test_stream_html_bytes_from_memory() {
     assert_eq!(collected, b"abcdefghij");
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_stream_html_bytes_from_disk() {
     let mut page = Page::default();
@@ -17349,7 +17572,7 @@ fn test_stream_html_bytes_from_disk() {
     assert_eq!(collected, html);
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_stream_html_bytes_early_stop() {
     let mut page = Page::default();
@@ -17363,7 +17586,7 @@ fn test_stream_html_bytes_early_stop() {
     assert_eq!(chunks, 3);
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_stream_html_bytes_empty_page() {
     let page = Page::default();
@@ -17371,7 +17594,7 @@ fn test_stream_html_bytes_empty_page() {
     assert_eq!(total, 0);
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_page_size_in_memory_and_on_disk() {
     let mut page = Page::default();
@@ -17406,7 +17629,7 @@ fn test_page_size_in_memory_and_on_disk() {
     assert_eq!(page.size(), html2.len());
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[tokio::test]
 async fn test_page_size_async_spool() {
     let mut page = Page::default();
@@ -17419,7 +17642,7 @@ async fn test_page_size_async_spool() {
     assert_eq!(page.size(), html.len());
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_spool_concurrent_pages() {
     // Simulate many pages being spooled/unspooled concurrently.
@@ -17467,7 +17690,7 @@ fn test_spool_concurrent_pages() {
     }
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_spool_clone_byte_counter_consistency() {
     // Clones now share the same spool file via Arc — no file copy.
@@ -17580,7 +17803,7 @@ fn test_page_drop_no_double_subtract_on_clone() {
     assert_eq!(html_spool::total_bytes_in_memory(), before);
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_spool_large_html_link_extraction() {
     // Generate a large HTML page with many links, spool it, then extract
@@ -17632,7 +17855,7 @@ fn test_spool_large_html_link_extraction() {
     }
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_spool_page_through_channel() {
     // Simulate the scrape() pattern: send pages through a channel, receive
@@ -17704,7 +17927,7 @@ fn test_spool_page_through_channel() {
     });
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_spool_decision_logic() {
     // Small pages never spool.
@@ -17724,7 +17947,7 @@ fn test_spool_decision_logic() {
     );
 }
 
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[tokio::test]
 async fn test_spool_subscription_stream_from_disk() {
     // Simulate the subscription pattern: crawl sends pages via broadcast,
@@ -17800,7 +18023,7 @@ async fn test_spool_subscription_stream_from_disk() {
 /// Vitals computed at construction time must survive a disk spool so
 /// readers like `size()`, `is_empty()`, and `is_binary_spool_aware()`
 /// never need to touch the disk again.
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[test]
 fn test_spool_vitals_zero_disk_io() {
     use crate::page::build;
@@ -17843,7 +18066,7 @@ fn test_spool_vitals_zero_disk_io() {
 
 /// Link extraction from a spooled page must stay streaming — the spool
 /// must remain on disk and `self.html` must not be repopulated.
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[tokio::test]
 async fn test_spool_links_extraction_does_not_reload() {
     let mut html = String::from("<html><body>");
@@ -17879,7 +18102,7 @@ async fn test_spool_links_extraction_does_not_reload() {
 /// payload — otherwise signature-based dedup silently diverges between
 /// the in-memory and the disk-spooled path.  This test pins that
 /// invariant.
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[tokio::test]
 async fn test_compute_spool_signature_matches_hash_html() {
     use crate::utils::{
@@ -17930,7 +18153,7 @@ async fn test_compute_spool_signature_matches_hash_html() {
 /// `None` so the caller can fall back to the in-memory path and
 /// recompute the exact same signature there.  Verifies the abort path
 /// without needing a huge payload.
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[tokio::test]
 async fn test_compute_spool_signature_aborts_on_cap() {
     use crate::utils::{
@@ -17963,7 +18186,7 @@ async fn test_compute_spool_signature_aborts_on_cap() {
 /// full-file read, and the spool must still be on disk afterwards.
 /// Uses the Atom-style `<link>` tag format matched by
 /// `links_stream_xml_from_reader`.
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[tokio::test]
 async fn test_spool_xml_links_extraction_streams_from_disk() {
     let mut xml = String::from(r#"<?xml version="1.0" encoding="UTF-8"?>"#);
@@ -18006,7 +18229,7 @@ async fn test_spool_xml_links_extraction_streams_from_disk() {
 /// all cached vitals mirrored, and `balance_bytes_tracked=false` so the
 /// Drop impl does not double-subtract bytes that never entered the
 /// in-memory counter.
-#[cfg(all(test, feature = "balance"))]
+#[cfg(all(test, feature = "balance", not(feature = "decentralized")))]
 #[tokio::test]
 async fn test_page_build_consumes_content_spool() {
     use crate::page::build;

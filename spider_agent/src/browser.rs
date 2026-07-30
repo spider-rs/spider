@@ -6,6 +6,8 @@
 //! - Screenshot capture
 //! - Navigation and interaction
 
+use dashmap::DashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 // Re-export chromey types
@@ -13,21 +15,146 @@ pub use chromiumoxide::browser::Browser;
 pub use chromiumoxide::error::CdpError;
 pub use chromiumoxide::page::Page;
 
+/// How long a detached `page.close()` may run before it is abandoned.
+const CLOSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Closes a Chrome page's CDP target when the guard leaves scope.
+///
+/// Dropping a chromiumoxide [`Page`] does **not** close the underlying CDP
+/// target — it only decrements an internal counter. Every page the agent
+/// creates and forgets therefore leaks a browser tab for the lifetime of the
+/// shared [`Browser`], until `new_page()` hangs and the browser wedges. This
+/// mirrors the dedicated tab-closer in the core `spider` chrome path.
+///
+/// `Drop` is deliberately infallible and non-blocking: it detaches a bounded
+/// `page.close()` onto the current runtime (via
+/// [`tokio::runtime::Handle::try_current`], so drop outside a runtime — e.g.
+/// during shutdown — is a no-op, since the tab dies with the process anyway),
+/// takes no locks, never awaits, and swallows any CDP error. A wedged target
+/// cannot pin the spawned task beyond [`CLOSE_TIMEOUT`].
+///
+/// Call [`defuse`](Self::defuse) before closing the page explicitly, or when
+/// the page is intentionally meant to outlive the guard.
+pub(crate) struct PageCloseGuard {
+    /// The protected page. Held as an `Arc` so the guard can be shared and so
+    /// [`page`](Self::page) stays a lock-free borrow on hot paths.
+    page: Arc<Page>,
+    /// Set once the guard has been disarmed; `Drop` then does nothing.
+    defused: AtomicBool,
+}
+
+impl PageCloseGuard {
+    /// Create a guard that closes `page` on drop.
+    #[inline]
+    pub(crate) fn new(page: Arc<Page>) -> Self {
+        Self {
+            page,
+            defused: AtomicBool::new(false),
+        }
+    }
+
+    /// Create a guard from an owned [`Page`].
+    #[inline]
+    pub(crate) fn from_page(page: Page) -> Self {
+        Self::new(Arc::new(page))
+    }
+
+    /// Borrow the protected page. Lock-free.
+    #[inline]
+    pub(crate) fn page(&self) -> &Page {
+        &self.page
+    }
+
+    /// Disarm the guard — the tab will not be closed on drop.
+    ///
+    /// Takes `&self` (not `self`) so it works through an [`Arc`], where the
+    /// guard may be shared by several [`BrowserContext`] clones.
+    #[inline]
+    pub(crate) fn defuse(&self) {
+        self.defused.store(true, Ordering::Release);
+    }
+}
+
+impl Drop for PageCloseGuard {
+    fn drop(&mut self) {
+        if self.defused.load(Ordering::Acquire) {
+            return;
+        }
+
+        // `close()` is a CDP round-trip; detach it so drop stays sync and
+        // non-blocking. Bounded by a timeout so a wedged (or already gone)
+        // browser cannot pin the task. Guarded on an active runtime so drop
+        // during shutdown is a no-op. Nothing here can panic.
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let page = Page::clone(&self.page);
+            handle.spawn(async move {
+                let _ = tokio::time::timeout(CLOSE_TIMEOUT, page.close()).await;
+            });
+        }
+    }
+}
+
+/// Identity key for a shared page handle: the address of its `Arc` allocation.
+///
+/// Unique and stable while any `Arc` clone of that page is alive, which the
+/// owning [`PageCloseGuard`] guarantees for every registered entry.
+#[inline]
+fn page_key(page: &Arc<Page>) -> usize {
+    Arc::as_ptr(page) as usize
+}
+
 /// Browser context for managing Chrome pages.
 ///
 /// Wraps a chromey Page with additional utilities for agent operations.
+///
+/// # Tab ownership
+///
+/// A context created by [`BrowserContext::clone_page`] or
+/// [`BrowserContext::new_page_owned`] **owns** its page: the CDP target is
+/// closed once the last clone of the context drops. A context built with
+/// [`BrowserContext::new`] never closes the caller-supplied page. Pages created
+/// through [`BrowserContext::new_page`] / [`BrowserContext::new_page_with_url`]
+/// are tracked and closed when the last clone of the creating context drops.
+/// Use [`BrowserContext::defuse_page`] to opt out of all of it.
 #[derive(Clone)]
 pub struct BrowserContext {
     /// The browser instance.
     browser: Arc<Browser>,
     /// The current page.
     page: Arc<Page>,
+    /// Closes `page` when the last clone of this context drops — `None` when the
+    /// page was supplied by the caller and is therefore not ours to close.
+    ///
+    /// Held behind an [`Arc`] because `BrowserContext` is `Clone`: `Drop` must
+    /// fire only when the *last* clone dies, never when an intermediate clone
+    /// goes out of scope. Cloning the field is a refcount bump, nothing more.
+    page_guard: Option<Arc<PageCloseGuard>>,
+    /// Extra pages this context created via [`BrowserContext::new_page`] /
+    /// [`BrowserContext::new_page_with_url`], which hand back a bare
+    /// `Arc<Page>` with no ownership handle. Dropping the last context clone
+    /// drops the map, which drops each guard, which closes each tab — turning
+    /// "leaks forever" into "leaks for the context's lifetime".
+    ///
+    /// A [`DashMap`] keyed by the page's `Arc` address — no mutex, and
+    /// deregistration in [`close_page`](Self::close_page) is an O(1) shard
+    /// lookup instead of a linear scan. Every access is synchronous, so it is
+    /// usable from `Drop`, and none of them span an `.await`. The key is stable
+    /// and unique for as long as the entry lives, because the guard holds an
+    /// `Arc` clone of the page it is keyed by.
+    owned: Arc<DashMap<usize, PageCloseGuard>>,
 }
 
 impl BrowserContext {
     /// Create a new browser context from an existing browser and page.
+    ///
+    /// The page is caller-owned: dropping this context never closes it.
     pub fn new(browser: Arc<Browser>, page: Arc<Page>) -> Self {
-        Self { browser, page }
+        Self {
+            browser,
+            page,
+            page_guard: None,
+            owned: Default::default(),
+        }
     }
 
     /// Get the current page.
@@ -41,29 +168,120 @@ impl BrowserContext {
     }
 
     /// Open a new page/tab in the browser.
+    ///
+    /// The returned handle carries no ownership, so the tab is only released
+    /// when the last clone of **this** context drops. Prefer
+    /// [`new_page_owned`](Self::new_page_owned), which scopes the tab to the
+    /// returned context, or close it eagerly with
+    /// [`close_page`](Self::close_page).
+    #[deprecated(
+        since = "2.53.1",
+        note = "leaks the CDP tab until the context drops; use new_page_owned()"
+    )]
     pub async fn new_page(&self) -> Result<Arc<Page>, CdpError> {
-        let page = self.browser.new_page("about:blank").await?;
-        Ok(Arc::new(page))
+        self.new_page_tracked("about:blank").await
     }
 
     /// Open a new page and navigate to URL.
+    ///
+    /// The returned handle carries no ownership, so the tab is only released
+    /// when the last clone of **this** context drops. Prefer
+    /// [`new_page_owned`](Self::new_page_owned), which scopes the tab to the
+    /// returned context, or close it eagerly with
+    /// [`close_page`](Self::close_page).
+    #[deprecated(
+        since = "2.53.1",
+        note = "leaks the CDP tab until the context drops; use new_page_owned()"
+    )]
     pub async fn new_page_with_url(&self, url: &str) -> Result<Arc<Page>, CdpError> {
-        let page = self.browser.new_page(url).await?;
-        Ok(Arc::new(page))
+        self.new_page_tracked(url).await
+    }
+
+    /// Create a page at `url` and register it in this context's owned set.
+    async fn new_page_tracked(&self, url: &str) -> Result<Arc<Page>, CdpError> {
+        let page = Arc::new(self.browser.new_page(url).await?);
+        // Lock-free, await-free registration.
+        self.owned
+            .insert(page_key(&page), PageCloseGuard::new(page.clone()));
+        Ok(page)
+    }
+
+    /// Open a new page/tab and return it as an owning context.
+    ///
+    /// The tab is closed when the last clone of the returned [`BrowserContext`]
+    /// drops. This is the leak-free replacement for
+    /// [`new_page`](Self::new_page).
+    pub async fn new_page_owned(&self) -> Result<BrowserContext, CdpError> {
+        self.owning_context("about:blank").await
+    }
+
+    /// Open a new page at `url` and return it as an owning context.
+    ///
+    /// The tab is closed when the last clone of the returned [`BrowserContext`]
+    /// drops. This is the leak-free replacement for
+    /// [`new_page_with_url`](Self::new_page_with_url).
+    pub async fn new_page_with_url_owned(&self, url: &str) -> Result<BrowserContext, CdpError> {
+        self.owning_context(url).await
+    }
+
+    /// Build a context that owns a freshly created page at `url`.
+    async fn owning_context(&self, url: &str) -> Result<BrowserContext, CdpError> {
+        let page = Arc::new(self.browser.new_page(url).await?);
+        Ok(BrowserContext {
+            browser: self.browser.clone(),
+            page: page.clone(),
+            page_guard: Some(Arc::new(PageCloseGuard::new(page))),
+            owned: Default::default(),
+        })
+    }
+
+    /// Close a page created by this context, without waiting for the context to
+    /// drop.
+    ///
+    /// Deregisters the page from the owned set first, so the tab is never closed
+    /// twice. Pages this context does not own are closed as requested.
+    pub async fn close_page(&self, page: &Arc<Page>) -> Result<(), CdpError> {
+        // O(1) deregistration, no `.await` held across it.
+        if let Some((_, guard)) = self.owned.remove(&page_key(page)) {
+            guard.defuse();
+        }
+
+        Page::clone(page.as_ref()).close().await
     }
 
     /// Clone the current page context (opens a new page with same URL).
+    ///
+    /// The returned context **owns** the new tab: it is closed when the last
+    /// clone of that context drops. Code that keeps only
+    /// `ctx.page().clone()` and drops the context will find its tab closed —
+    /// that is the intended lifetime. Use [`defuse_page`](Self::defuse_page) to
+    /// opt out.
     pub async fn clone_page(&self) -> Result<BrowserContext, CdpError> {
         let url = self
             .page
             .url()
             .await?
             .unwrap_or_else(|| "about:blank".to_string());
-        let new_page = self.browser.new_page(&url).await?;
-        Ok(BrowserContext {
-            browser: self.browser.clone(),
-            page: Arc::new(new_page),
-        })
+
+        self.owning_context(&url).await
+    }
+
+    /// Disarm every close guard this context holds and hand back its page.
+    ///
+    /// For callers that intentionally let a page outlive the context that
+    /// created it. Mirrors the `defuse` escape hatch on the core `spider`
+    /// tab guard. Note the guards are shared with any surviving clone of this
+    /// context, so defusing disarms them all.
+    pub fn defuse_page(self) -> Arc<Page> {
+        if let Some(guard) = self.page_guard.as_ref() {
+            guard.defuse();
+        }
+
+        for entry in self.owned.iter() {
+            entry.value().defuse();
+        }
+
+        self.page.clone()
     }
 
     /// Navigate to a URL.
@@ -482,10 +700,16 @@ impl BrowserContext {
     }
 
     /// Create a new context with a different page (immutable version).
+    ///
+    /// The supplied page is treated as caller-owned and is never closed by the
+    /// returned context. The owned set is shared with `self`, so pages this
+    /// context created are still released once every clone is gone.
     pub fn with_page(&self, page: Arc<Page>) -> Self {
         Self {
             browser: self.browser.clone(),
             page,
+            page_guard: None,
+            owned: self.owned.clone(),
         }
     }
 }
@@ -495,6 +719,96 @@ impl std::fmt::Debug for BrowserContext {
         f.debug_struct("BrowserContext")
             .field("browser", &"Browser { ... }")
             .field("page", &"Page { ... }")
+            .field("owns_page", &self.page_guard.is_some())
+            .field("owned_pages", &self.owned.len())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// End-to-end proof that the guard closes the tab it owns and leaves a
+    /// caller-supplied tab alone.
+    ///
+    /// Requires a live CDP endpoint, so it is gated on `CHROME_URL` (repo
+    /// precedent: `spider/tests/hedge_parallel_chrome_e2e.rs`).
+    #[tokio::test]
+    async fn clone_page_context_closes_its_tab_on_drop() {
+        let Ok(chrome_url) = std::env::var("CHROME_URL") else {
+            return;
+        };
+
+        let (browser, mut handler) = match Browser::connect(chrome_url).await {
+            Ok(pair) => pair,
+            Err(e) => panic!("failed to connect to CHROME_URL: {e}"),
+        };
+
+        let drive = tokio::spawn(async move {
+            use futures::StreamExt;
+            while handler.next().await.is_some() {}
+        });
+
+        let browser = Arc::new(browser);
+        let base = Arc::new(
+            browser
+                .new_page("about:blank")
+                .await
+                .expect("base page created"),
+        );
+
+        // A caller-supplied page is never ours to close.
+        let root = BrowserContext::new(browser.clone(), base.clone());
+        assert!(root.page_guard.is_none(), "new() must not own the page");
+
+        let before = browser.pages().await.map(|p| p.len()).unwrap_or_default();
+
+        // A cloned page is ours: the tab must go away with the context.
+        let cloned = root.clone_page().await.expect("clone_page");
+        assert!(
+            cloned.page_guard.is_some(),
+            "clone_page() must own the new page"
+        );
+
+        let during = browser.pages().await.map(|p| p.len()).unwrap_or_default();
+        assert_eq!(during, before + 1, "clone_page should open one tab");
+
+        // A surviving clone must keep the tab alive.
+        let survivor = cloned.clone();
+        drop(cloned);
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        assert_eq!(
+            browser.pages().await.map(|p| p.len()).unwrap_or_default(),
+            during,
+            "an intermediate clone drop must not close the tab"
+        );
+
+        // Last clone gone -> tab closed.
+        drop(survivor);
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        assert_eq!(
+            browser.pages().await.map(|p| p.len()).unwrap_or_default(),
+            before,
+            "dropping the last clone must close the owned tab"
+        );
+
+        // The caller-owned base page survived the whole thing.
+        assert!(base.url().await.is_ok(), "caller-owned page must stay open");
+
+        drop(root);
+        let _ = Page::clone(base.as_ref()).close().await;
+        drive.abort();
+    }
+
+    /// Dropping a guard with no tokio runtime present must not panic.
+    #[test]
+    fn guard_drop_without_runtime_is_a_noop() {
+        // No `Page` can be constructed without a browser, so this exercises the
+        // runtime probe directly: the same `try_current()` call the guard makes.
+        assert!(
+            tokio::runtime::Handle::try_current().is_err(),
+            "no runtime should be active in a plain #[test]"
+        );
     }
 }

@@ -590,6 +590,11 @@ impl Agent {
     }
 
     /// Open a new page/tab in the browser.
+    ///
+    /// The returned [`BrowserContext`] **owns** the new tab: the CDP target is
+    /// closed once the last clone of that context drops. Code that keeps only
+    /// `ctx.page().clone()` and drops the context will find its tab closed —
+    /// call [`BrowserContext::defuse_page`] to let the page outlive the context.
     #[cfg(feature = "chrome")]
     pub async fn new_page(&self) -> AgentResult<crate::browser::BrowserContext> {
         // Check limits before proceeding
@@ -611,7 +616,16 @@ impl Agent {
     }
 
     /// Open a new page and navigate to URL.
+    ///
+    /// The bare page handle carries no ownership, so the tab is only released
+    /// when the agent's browser context drops. Prefer
+    /// [`Agent::new_page_with_url_owned`], which scopes the tab to the returned
+    /// context.
     #[cfg(feature = "chrome")]
+    #[deprecated(
+        since = "2.52.14",
+        note = "leaks the CDP tab until the agent's browser context drops; use new_page_with_url_owned()"
+    )]
     pub async fn new_page_with_url(
         &self,
         url: &str,
@@ -628,8 +642,37 @@ impl Agent {
 
         self.usage.increment_webbrowser_calls();
 
+        #[allow(deprecated)]
         browser
             .new_page_with_url(url)
+            .await
+            .map_err(|e| AgentError::Browser(e.to_string()))
+    }
+
+    /// Open a new page at `url` and return it as an owning context.
+    ///
+    /// The tab is closed when the last clone of the returned
+    /// [`BrowserContext`] drops. Leak-free replacement for
+    /// [`Agent::new_page_with_url`].
+    #[cfg(feature = "chrome")]
+    pub async fn new_page_with_url_owned(
+        &self,
+        url: &str,
+    ) -> AgentResult<crate::browser::BrowserContext> {
+        // Check limits before proceeding
+        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
+        let browser = self
+            .browser
+            .as_ref()
+            .ok_or(AgentError::NotConfigured("browser"))?;
+
+        self.usage.increment_webbrowser_calls();
+
+        browser
+            .new_page_with_url_owned(url)
             .await
             .map_err(|e| AgentError::Browser(e.to_string()))
     }

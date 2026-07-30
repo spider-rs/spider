@@ -165,13 +165,25 @@ impl Entry {
     }
 
     /// Prepare the user-agent string: strip version suffix, lowercase once.
+    ///
+    /// Returns a [`CompactString`] so the common short agents ("mozilla", "spider")
+    /// stay inline on the stack without a heap allocation per call.
     #[inline]
-    fn prepare_useragent(useragent: &str) -> String {
-        useragent
-            .split('/')
-            .next()
-            .unwrap_or_default()
-            .to_lowercase()
+    fn prepare_useragent(useragent: &str) -> CompactString {
+        let base = useragent.split('/').next().unwrap_or_default();
+
+        if base.is_ascii() {
+            // ASCII fast path: bulk-copy the bytes inline, then lowercase in place.
+            let mut prepared = CompactString::from(base);
+
+            prepared.as_mut_str().make_ascii_lowercase();
+
+            prepared
+        } else {
+            // Defer to `str::to_lowercase` so full Unicode rules (including the
+            // Greek final-sigma special case) stay identical to the prior behavior.
+            base.to_lowercase().into()
+        }
     }
 
     /// Check if this entry applies to a pre-prepared (lowercased, version-stripped) agent.
@@ -602,8 +614,12 @@ impl RobotFileParser {
     #[cfg(not(feature = "regex"))]
     pub fn entry_allowed<T: AsRef<str>>(&self, useragent: &T, url_str: &str) -> bool {
         let ua_lower = Entry::prepare_useragent(useragent.as_ref());
+        // Borrow once: `CompactString::deref` branches on its inline/heap
+        // discriminant, so it must not be repeated per entry.
+        let ua_lower = ua_lower.as_str();
+
         for entry in &self.entries {
-            if entry.applies_to_prepared(&ua_lower) {
+            if entry.applies_to_prepared(ua_lower) {
                 return entry.allowance(url_str);
             }
         }
@@ -628,8 +644,10 @@ impl RobotFileParser {
             let crawl_delay: Option<Duration> = match useragent.as_ref() {
                 Some(ua) => {
                     let ua_lower = Entry::prepare_useragent(ua);
+                    let ua_lower = ua_lower.as_str();
+
                     for entry in &self.entries {
-                        if entry.applies_to_prepared(&ua_lower) {
+                        if entry.applies_to_prepared(ua_lower) {
                             return entry.get_crawl_delay();
                         }
                     }
@@ -658,8 +676,10 @@ impl RobotFileParser {
             return None;
         }
         let ua_lower = Entry::prepare_useragent(useragent.as_ref());
+        let ua_lower = ua_lower.as_str();
+
         for entry in &self.entries {
-            if entry.applies_to_prepared(&ua_lower) {
+            if entry.applies_to_prepared(ua_lower) {
                 return entry.get_req_rate();
             }
         }

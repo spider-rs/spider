@@ -5414,49 +5414,13 @@ pub async fn run_spawn_pages_concurrent(
 ///
 /// Dropping a chromiumoxide [`Page`] does **not** close the underlying CDP
 /// target, so each URL processed by the spawn-pages helpers would otherwise
-/// leak a tab for the lifetime of the shared `Browser`. This guard mirrors the
-/// dedicated tab-closer in the core `spider` chrome path: on drop it detaches a
-/// bounded `page.close()` so the closure stays fully async, never blocks, holds
-/// no locks (no deadlock), and returns its result with identical timing — the
-/// only change is the freed tab.
+/// leak a tab for the lifetime of the shared `Browser`. This is the single
+/// in-crate tab guard ([`crate::browser::PageCloseGuard`]), aliased here under
+/// its original name: on drop it detaches a bounded `page.close()` so the
+/// closure stays fully async, never blocks, holds no locks (no deadlock), and
+/// returns its result with identical timing — the only change is the freed tab.
 #[cfg(feature = "chrome")]
-struct SpawnPageCloseGuard {
-    page: Option<Page>,
-}
-
-#[cfg(feature = "chrome")]
-impl SpawnPageCloseGuard {
-    #[inline]
-    fn new(page: Page) -> Self {
-        Self { page: Some(page) }
-    }
-
-    /// Borrow the live page. Always `Some` until the guard is dropped.
-    #[inline]
-    fn page(&self) -> &Page {
-        self.page
-            .as_ref()
-            .expect("spawn page present until guard drop")
-    }
-}
-
-#[cfg(feature = "chrome")]
-impl Drop for SpawnPageCloseGuard {
-    fn drop(&mut self) {
-        if let Some(page) = self.page.take() {
-            // `close()` is a CDP round-trip; detach it so drop stays sync and
-            // non-blocking. Bounded by a timeout so a wedged target cannot pin
-            // the task. Guarded on an active runtime so drop during shutdown is
-            // a no-op (the tab dies with the process anyway).
-            if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                handle.spawn(async move {
-                    let _ =
-                        tokio::time::timeout(std::time::Duration::from_secs(5), page.close()).await;
-                });
-            }
-        }
-    }
-}
+type SpawnPageCloseGuard = crate::browser::PageCloseGuard;
 
 /// Process spawn_pages URLs concurrently with custom options.
 ///
@@ -5541,7 +5505,7 @@ pub async fn run_spawn_pages_with_options(
             // browser target is released on every exit path (success, error,
             // panic) — dropping the `Page` alone does not close the tab.
             let new_page = match browser.new_page(&url_clone).await {
-                Ok(page) => SpawnPageCloseGuard::new(page),
+                Ok(page) => SpawnPageCloseGuard::from_page(page),
                 Err(e) => {
                     return SpawnedPageResult {
                         url: url_clone,
@@ -5768,7 +5732,7 @@ pub async fn run_spawn_pages_with_factory<E: std::fmt::Display + Send + 'static>
                 // Create new page using the factory. Wrapped in a close guard so
                 // the browser target is released on every exit path — dropping
                 // the `Page` alone does not close the tab.
-                let new_page = SpawnPageCloseGuard::new(
+                let new_page = SpawnPageCloseGuard::from_page(
                     page_factory(url_clone.clone())
                         .await
                         .map_err(|e| format!("Failed to create page: {}", e))?,

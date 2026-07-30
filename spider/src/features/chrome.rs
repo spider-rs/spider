@@ -2589,121 +2589,93 @@ mod tests {
         assert_eq!(pr.final_url, Some("https://x.example/".to_string()));
     }
 
-    /// Auto-arm gate: no proxies → never auto-arms.
+    /// `http_first_byte_timeout` is an explicit opt-in: once the field is set it
+    /// is honored regardless of proxy count or shape.
+    ///
+    /// These tests previously asserted the opposite — a gate on `balance` plus
+    /// >=2 HTTP-eligible proxies. That gate was deliberately removed (see the
+    /// contract documented on `Configuration::auto_http_first_byte_args`): a
+    /// single proxy still returns an upstream-DNS-shaped 5xx after ~15-22s and
+    /// `reqwest`'s `.timeout()` is not enforced through the proxy CONNECT
+    /// tunnel for that phase, so the watchdog is the only knob that fires
+    /// reliably. The tests were never updated because this test binary does not
+    /// compile under `--all-features` (balance + decentralized), so they were
+    /// unreachable rather than green.
     #[test]
-    fn test_auto_http_first_byte_args_no_proxies() {
+    fn test_auto_http_first_byte_args_honored_without_proxies() {
         let mut cfg = Configuration::default();
         cfg.with_http_first_byte_timeout(Some(std::time::Duration::from_secs(12)));
         cfg.with_http_first_byte_timeout_jitter(Some(std::time::Duration::from_secs(3)));
         let (base, jitter) = cfg.auto_http_first_byte_args();
-        assert_eq!(base, None, "no proxies → must not auto-arm");
-        assert_eq!(jitter, None);
-    }
-
-    /// Auto-arm gate: single HTTP-eligible proxy is not enough.
-    #[test]
-    fn test_auto_http_first_byte_args_single_proxy() {
-        use crate::configuration::{ProxyIgnore, RequestProxy};
-        let mut cfg = Configuration::default();
-        cfg.with_http_first_byte_timeout(Some(std::time::Duration::from_secs(12)));
-        cfg.with_http_first_byte_timeout_jitter(Some(std::time::Duration::from_secs(3)));
-        cfg.proxies = Some(vec![RequestProxy {
-            addr: "http://proxy-a".into(),
-            ignore: ProxyIgnore::No,
-        }]);
-        let (base, _) = cfg.auto_http_first_byte_args();
         assert_eq!(
-            base, None,
-            "single proxy → no rotation target, must not auto-arm"
+            base,
+            Some(std::time::Duration::from_secs(12)),
+            "an explicitly set timeout is honored even with no rotation target"
         );
-    }
-
-    /// Auto-arm gate: two HTTP-eligible proxies fire (under `balance`).
-    #[cfg(feature = "balance")]
-    #[test]
-    fn test_auto_http_first_byte_args_two_http_proxies_arm() {
-        use crate::configuration::{ProxyIgnore, RequestProxy};
-        let mut cfg = Configuration::default();
-        cfg.with_http_first_byte_timeout(Some(std::time::Duration::from_secs(12)));
-        cfg.with_http_first_byte_timeout_jitter(Some(std::time::Duration::from_secs(3)));
-        cfg.proxies = Some(vec![
-            RequestProxy {
-                addr: "http://proxy-a".into(),
-                ignore: ProxyIgnore::No,
-            },
-            RequestProxy {
-                addr: "http://proxy-b".into(),
-                ignore: ProxyIgnore::No,
-            },
-        ]);
-        let (base, jitter) = cfg.auto_http_first_byte_args();
-        assert_eq!(base, Some(std::time::Duration::from_secs(12)));
         assert_eq!(jitter, Some(std::time::Duration::from_secs(3)));
     }
 
-    /// Auto-arm gate: chrome-only proxies (`ignore = Http`) don't count.
-    #[cfg(feature = "balance")]
+    /// Unset timeout is the only thing that disables the watchdog.
     #[test]
-    fn test_auto_http_first_byte_args_chrome_only_proxies_ignored() {
-        use crate::configuration::{ProxyIgnore, RequestProxy};
-        let mut cfg = Configuration::default();
-        cfg.with_http_first_byte_timeout(Some(std::time::Duration::from_secs(12)));
-        cfg.proxies = Some(vec![
-            RequestProxy {
-                addr: "http://proxy-a".into(),
-                ignore: ProxyIgnore::Http,
-            },
-            RequestProxy {
-                addr: "http://proxy-b".into(),
-                ignore: ProxyIgnore::Http,
-            },
-        ]);
-        let (base, _) = cfg.auto_http_first_byte_args();
-        assert_eq!(
-            base, None,
-            "both proxies marked HTTP-ignore → no HTTP-eligible rotation target, must not auto-arm"
-        );
+    fn test_auto_http_first_byte_args_unset_is_passthrough() {
+        let cfg = Configuration::default();
+        let (base, jitter) = cfg.auto_http_first_byte_args();
+        assert_eq!(base, None, "unset timeout → no watchdog");
+        assert_eq!(jitter, None);
     }
 
-    /// Auto-arm gate: mixed list (one HTTP-only, one chrome-only) — only 1 HTTP-eligible.
-    #[cfg(feature = "balance")]
+    /// Proxy count and `ProxyIgnore` shape no longer gate the watchdog.
     #[test]
-    fn test_auto_http_first_byte_args_mixed_one_eligible() {
+    fn test_auto_http_first_byte_args_ignores_proxy_shape() {
         use crate::configuration::{ProxyIgnore, RequestProxy};
-        let mut cfg = Configuration::default();
-        cfg.with_http_first_byte_timeout(Some(std::time::Duration::from_secs(12)));
-        cfg.proxies = Some(vec![
-            RequestProxy {
-                addr: "http://proxy-a".into(),
-                ignore: ProxyIgnore::No,
-            },
-            RequestProxy {
-                addr: "http://proxy-b".into(),
-                ignore: ProxyIgnore::Http,
-            },
-        ]);
-        let (base, _) = cfg.auto_http_first_byte_args();
-        assert_eq!(base, None, "only 1 HTTP-eligible proxy → must not auto-arm");
-    }
 
-    /// Auto-arm gate: without `balance` feature, never arms regardless of proxy count.
-    #[cfg(not(feature = "balance"))]
-    #[test]
-    fn test_auto_http_first_byte_args_no_balance_feature() {
-        use crate::configuration::{ProxyIgnore, RequestProxy};
-        let mut cfg = Configuration::default();
-        cfg.with_http_first_byte_timeout(Some(std::time::Duration::from_secs(12)));
-        cfg.proxies = Some(vec![
-            RequestProxy {
+        let shapes = vec![
+            vec![RequestProxy {
                 addr: "http://proxy-a".into(),
                 ignore: ProxyIgnore::No,
-            },
-            RequestProxy {
-                addr: "http://proxy-b".into(),
-                ignore: ProxyIgnore::No,
-            },
-        ]);
-        let (base, _) = cfg.auto_http_first_byte_args();
-        assert_eq!(base, None, "without balance feature → must not auto-arm");
+            }],
+            vec![
+                RequestProxy {
+                    addr: "http://proxy-a".into(),
+                    ignore: ProxyIgnore::No,
+                },
+                RequestProxy {
+                    addr: "http://proxy-b".into(),
+                    ignore: ProxyIgnore::No,
+                },
+            ],
+            vec![
+                RequestProxy {
+                    addr: "http://proxy-a".into(),
+                    ignore: ProxyIgnore::Http,
+                },
+                RequestProxy {
+                    addr: "http://proxy-b".into(),
+                    ignore: ProxyIgnore::Http,
+                },
+            ],
+            vec![
+                RequestProxy {
+                    addr: "http://proxy-a".into(),
+                    ignore: ProxyIgnore::No,
+                },
+                RequestProxy {
+                    addr: "http://proxy-b".into(),
+                    ignore: ProxyIgnore::Http,
+                },
+            ],
+        ];
+
+        for (i, proxies) in shapes.into_iter().enumerate() {
+            let mut cfg = Configuration::default();
+            cfg.with_http_first_byte_timeout(Some(std::time::Duration::from_secs(12)));
+            cfg.proxies = Some(proxies);
+            let (base, _) = cfg.auto_http_first_byte_args();
+            assert_eq!(
+                base,
+                Some(std::time::Duration::from_secs(12)),
+                "proxy shape {i} must not affect an explicitly set timeout"
+            );
+        }
     }
 }

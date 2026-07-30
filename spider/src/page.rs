@@ -2886,7 +2886,10 @@ pub(crate) fn push_link<
         if abs.scheme() != parent_host_scheme.as_str() {
             let _ = abs.set_scheme(parent_host_scheme.as_str());
         }
-        map.insert(A::from(abs.as_str()));
+        // `abs` is dead after this, so hand its serialization buffer to the key instead of
+        // copying it: `String::from(Url)` returns the inner serialization by move, and
+        // `CompactString::from(String)` steals the pointer for anything over 24 bytes.
+        map.insert(A::from(String::from(abs)));
     }
 }
 
@@ -2922,9 +2925,9 @@ pub(crate) fn push_link_verify<
             let _ = abs.set_scheme(parent_host_scheme.as_str());
         }
         if verify {
-            push_link_check(&mut abs, map, full_resources, &mut true);
+            push_link_check(abs, map, full_resources, &mut true);
         } else {
-            map.insert(A::from(abs.as_str()));
+            map.insert(A::from(String::from(abs)));
         }
     }
 }
@@ -2943,7 +2946,7 @@ pub fn is_asset_url(url: &str) -> bool {
 pub(crate) fn push_link_check<
     A: PartialEq + Eq + std::hash::Hash + From<String> + for<'a> From<&'a str>,
 >(
-    abs: &mut Url,
+    abs: Url,
     map: &mut HashSet<A>,
     full_resources: bool,
     can_process: &mut bool,
@@ -2965,7 +2968,8 @@ pub(crate) fn push_link_check<
     }
 
     if *can_process {
-        map.insert(A::from(abs.as_str()));
+        // Same as `push_link`: move the serialization out of `abs` rather than copying it.
+        map.insert(A::from(String::from(abs)));
     }
 }
 

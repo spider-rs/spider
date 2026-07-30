@@ -134,6 +134,17 @@ fn bench_url_processing(c: &mut Criterion) {
         })
     });
 
+    // The two cases above always take the `Url::parse` / `base.join` path. These two are the
+    // only ones that exercise `LinkReturn::EarlyReturn`, where `convert_abs_path` clones the
+    // base URL instead of resolving anything.
+    group.bench_function("convert_abs_path/early_return_mailto", |b| {
+        b.iter(|| convert_abs_path(black_box(&base), black_box("mailto:someone@example.com")))
+    });
+
+    group.bench_function("convert_abs_path/early_return_fragment", |b| {
+        b.iter(|| convert_abs_path(black_box(&base), black_box("#section-overview")))
+    });
+
     group.bench_function("flip_http_https", |b| {
         b.iter(|| flip_http_https(black_box("https://example.com/page/123")))
     });
@@ -182,6 +193,31 @@ fn bench_interner(c: &mut Criterion) {
     group.bench_function("contains_miss/10k", |b| {
         let needle = CaseInsensitiveString::from("https://example.com/page/not-exists-99999");
         b.iter(|| populated.contains(black_box(&needle)))
+    });
+
+    // The admission path as the crawl driver actually runs it: `is_allowed_budgetless` probes
+    // `links_visited`, then `insert_link` probes it a second time before inserting. The
+    // `insert/10k` case above drives `ListBucket` directly and cannot see that redundancy.
+    group.bench_function("admission/10k_new", |b| {
+        let rt = spider::tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        b.iter_batched(
+            || spider::website::Website::new("https://example.com"),
+            |mut website| {
+                rt.block_on(async {
+                    for u in &urls_10k {
+                        if website.is_allowed_budgetless(black_box(u))
+                            == spider::website::ProcessLinkStatus::Allowed
+                        {
+                            website.insert_link(black_box(u)).await;
+                        }
+                    }
+                });
+                website
+            },
+            criterion::BatchSize::SmallInput,
+        )
     });
 
     group.bench_function("extend_links/1k_new_vs_10k_visited", |b| {

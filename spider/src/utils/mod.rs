@@ -6934,9 +6934,13 @@ pub(crate) async fn build_engine_error_page_response(
 
 #[inline]
 /// Build a cached page response from HTML.
-pub(crate) fn build_cached_html_page_response(target_url: &str, html: &str) -> PageResponse {
+/// Takes `html` by value so the body is *moved* into the response rather than
+/// copied. The cache path was previously `Vec<u8>` -> `String` -> `Vec<u8>` ->
+/// `Bytes`; `String::into_bytes` is O(1) and `Bytes::from(Vec)` is already a
+/// move, so this drops one full-body copy per cache hit.
+pub(crate) fn build_cached_html_page_response(target_url: &str, html: String) -> PageResponse {
     PageResponse {
-        content: Some(html.as_bytes().to_vec()),
+        content: Some(html.into_bytes()),
         status_code: StatusCode::OK,
         final_url: Some(target_url.to_string()),
         ..Default::default()
@@ -7320,7 +7324,7 @@ pub async fn fetch_page_html_raw_cached(
     )
     .await
     {
-        let mut response = build_cached_html_page_response(target_url, &cached_html);
+        let mut response = build_cached_html_page_response(target_url, cached_html);
         set_page_response_duration(&mut response, duration);
         return response;
     }
@@ -8575,7 +8579,7 @@ async fn _fetch_page_html_chrome<'h>(
     };
 
     let skip_browser = cache_skip_browser(&cache_options);
-    let cached_html = if resource.is_some() {
+    let mut cached_html = if resource.is_some() {
         resource
     } else {
         get_cached_url(
@@ -8588,7 +8592,10 @@ async fn _fetch_page_html_chrome<'h>(
     };
 
     if skip_browser {
-        if let Some(html) = cached_html.as_deref() {
+        // `take` rather than `as_deref` so the body is moved into the response
+        // instead of copied. Safe for the code below: this arm returns whenever
+        // the value was `Some`, so nothing downstream can observe the `None`.
+        if let Some(html) = cached_html.take() {
             let mut page_response = build_cached_html_page_response(target_url, html);
             set_page_response_duration(&mut page_response, duration);
             return page_response;
@@ -10045,6 +10052,66 @@ lazy_static! {
             .unwrap_or(false);
 }
 
+#[cfg(feature = "balance")]
+/// Monotonic epoch used to timestamp rebalance pauses. Avoids the wall clock so
+/// clock adjustments can never make the gate below misbehave.
+static REBALANCE_EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+
+#[cfg(feature = "balance")]
+/// Millis since [`REBALANCE_EPOCH`] at which the last rebalance pause *finished*.
+/// `0` is the "never paused" sentinel, so a stored timestamp is always `>= 1`.
+static LAST_REBALANCE_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Claim the right to take a rebalance pause, if one is due.
+///
+/// `get_semaphore` is called once per queued link from the crawl driver loop, so an
+/// unconditional `sleep(REBALANCE_TIME)` under critical load throttled the driver to
+/// `1 / REBALANCE_TIME` links per second regardless of the configured concurrency — the
+/// pause scaled with the link count instead of with time. This gates it so at most one
+/// pause is taken per `REBALANCE_TIME` window, measured from the end of the previous
+/// pause, which keeps the breather (and so the backpressure) while making its cost a
+/// function of elapsed time rather than of how many links are queued.
+///
+/// The claim is a CAS, so under concurrent crawls exactly one caller pauses per window
+/// instead of all of them. The gate is process-wide, matching the process-global
+/// `SEM_SHARED` pool this function hands out.
+///
+/// All arithmetic is saturating and the timestamp is monotonic, so this cannot panic,
+/// wrap, or block.
+#[cfg(feature = "balance")]
+fn claim_rebalance_pause() -> bool {
+    use std::sync::atomic::Ordering;
+
+    let epoch = REBALANCE_EPOCH.get_or_init(Instant::now);
+    // `as u64` after clamping: a run long enough to exceed u64 millis is ~584M years.
+    let now_ms = epoch.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    let window = REBALANCE_TIME.as_millis().min(u64::MAX as u128) as u64;
+    let last = LAST_REBALANCE_MS.load(Ordering::Relaxed);
+
+    // `saturating_sub` also covers the impossible-but-free case of `now_ms < last`.
+    if last != 0 && now_ms.saturating_sub(last) < window {
+        return false;
+    }
+
+    // Claim the window before sleeping so concurrent callers skip instead of piling up.
+    LAST_REBALANCE_MS
+        .compare_exchange(last, now_ms.max(1), Ordering::AcqRel, Ordering::Relaxed)
+        .is_ok()
+}
+
+/// Record that a rebalance pause has finished, so the next window is measured from now
+/// rather than from when the pause started. Without this the gate would re-open the
+/// instant the pause ended and degenerate back into a per-link tax.
+#[cfg(feature = "balance")]
+fn finish_rebalance_pause() {
+    use std::sync::atomic::Ordering;
+
+    if let Some(epoch) = REBALANCE_EPOCH.get() {
+        let now_ms = epoch.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        LAST_REBALANCE_MS.store(now_ms.max(1), Ordering::Release);
+    }
+}
+
 /// Return the semaphore that should be used.
 /// Takes the worse of CPU and process memory pressure to drive throttling.
 #[cfg(feature = "balance")]
@@ -10068,8 +10135,13 @@ pub async fn get_semaphore(semaphore: &Arc<Semaphore>, detect: bool) -> &Arc<Sem
 
     let load = cpu_load.max(mem_load);
 
-    if load == 2 {
+    // Time-gated: this used to sleep on *every* call, and since the driver loop calls
+    // this once per queued link it capped throughput at ~10 links/sec under critical
+    // load no matter how much concurrency was configured. Backpressure is preserved,
+    // it is just no longer proportional to the number of queued links.
+    if load == 2 && claim_rebalance_pause() {
         tokio::time::sleep(REBALANCE_TIME).await;
+        finish_rebalance_pause();
     }
 
     if load >= 1 {
@@ -10200,6 +10272,60 @@ pub fn emit_log_shutdown(link: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The rebalance pause must be claimable at most once per `REBALANCE_TIME`
+    /// window, not once per call. Before the gate, `get_semaphore` slept on every
+    /// call, and since the crawl driver calls it once per queued link that capped
+    /// throughput at ~`1 / REBALANCE_TIME` links per second under critical load.
+    ///
+    /// Kept as a single test: the gate is intentionally process-wide state, so
+    /// splitting these assertions across `#[test]` fns would let them race.
+    #[cfg(feature = "balance")]
+    #[test]
+    fn test_rebalance_pause_is_time_gated_not_per_call() {
+        use std::sync::atomic::Ordering;
+
+        // `0` is the "never paused" sentinel, so the first claim must succeed.
+        LAST_REBALANCE_MS.store(0, Ordering::Release);
+        assert!(
+            claim_rebalance_pause(),
+            "the first pause must be claimable when none has been taken"
+        );
+
+        // Claiming consumes the window, so concurrent callers skip instead of
+        // every one of them sleeping.
+        assert!(
+            !claim_rebalance_pause(),
+            "claiming must consume the window so concurrent callers skip"
+        );
+        assert!(
+            !claim_rebalance_pause(),
+            "repeated calls inside the window must all be refused"
+        );
+
+        // Finishing the pause moves the window forward to the *end* of the pause.
+        // If it recorded the start instead, the gate would reopen the instant the
+        // sleep returned and degenerate straight back into a per-link tax.
+        finish_rebalance_pause();
+        assert!(
+            !claim_rebalance_pause(),
+            "the window must still be closed right after the pause finishes"
+        );
+        assert_ne!(
+            LAST_REBALANCE_MS.load(Ordering::Acquire),
+            0,
+            "the sentinel 0 must never be stored as a real timestamp"
+        );
+
+        // Once the window has genuinely elapsed, a pause is claimable again.
+        // Uses real time rather than poking the timestamp, so it also proves the
+        // monotonic epoch arithmetic works.
+        std::thread::sleep(REBALANCE_TIME + std::time::Duration::from_millis(25));
+        assert!(
+            claim_rebalance_pause(),
+            "a pause must be claimable once the window has elapsed"
+        );
+    }
 
     /// Proves the `target_url` computation used inside
     /// `fetch_page_html_chrome_base` preserves behavior in navigate mode
