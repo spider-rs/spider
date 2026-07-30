@@ -807,50 +807,41 @@ impl RemoteMultimodalEngine {
         // Action feedback from previous round (injected when failures occurred)
         let mut last_action_feedback: Option<String> = None;
 
-        // Recall learned strategies from long-term experience memory.
-        // Uses spawn_blocking to contain !Send ffmpeg temporaries from memvid-rs.
+        // Recall learned strategies from long-term experience memory. The
+        // memory is owned by its own thread, so this is a plain await — no
+        // `spawn_blocking` needed to contain memvid's `!Send` ffmpeg
+        // temporaries, and no lock to acquire.
         #[cfg(feature = "memvid")]
         if let Some(ref exp_mem) = self.experience_memory {
-            let exp_mem = exp_mem.clone();
             let query = format!("{} {}", url_input, last_label);
-            let handle = tokio::runtime::Handle::current();
-            let recalled = tokio::task::spawn_blocking(move || {
-                handle.block_on(async move {
-                    {
-                        let mem = exp_mem.read().await;
-                        mem.clear_cache();
+            let max_recall = exp_mem.config().max_recall;
+            let max_context_chars = exp_mem.config().max_context_chars;
+
+            exp_mem.clear_cache().await;
+
+            let recalled = match exp_mem.recall(&query, max_recall).await {
+                Ok(experiences) if !experiences.is_empty() => {
+                    let ctx = super::long_term_memory::ExperienceMemory::recall_to_context(
+                        &experiences,
+                        max_context_chars,
+                    );
+                    if ctx.is_empty() {
+                        None
+                    } else {
+                        log::info!(
+                            "Recalled {} strategies ({} chars)",
+                            experiences.len(),
+                            ctx.len(),
+                        );
+                        Some(ctx)
                     }
-                    let mut mem = exp_mem.write().await;
-                    let max_recall = mem.config.max_recall;
-                    let max_context_chars = mem.config.max_context_chars;
-                    match mem.recall(&query, max_recall).await {
-                        Ok(experiences) if !experiences.is_empty() => {
-                            let ctx = super::long_term_memory::ExperienceMemory::recall_to_context(
-                                &experiences,
-                                max_context_chars,
-                            );
-                            if ctx.is_empty() {
-                                None
-                            } else {
-                                log::info!(
-                                    "Recalled {} strategies ({} chars)",
-                                    experiences.len(),
-                                    ctx.len(),
-                                );
-                                Some(ctx)
-                            }
-                        }
-                        Ok(_) => None,
-                        Err(e) => {
-                            log::warn!("Failed to recall experiences: {}", e);
-                            None
-                        }
-                    }
-                })
-            })
-            .await
-            .ok()
-            .flatten();
+                }
+                Ok(_) => None,
+                Err(e) => {
+                    log::warn!("Failed to recall experiences: {}", e);
+                    None
+                }
+            };
 
             if let Some(learned_context) = recalled {
                 let existing = effective_system_prompt_extra.take().unwrap_or_default();
@@ -2092,17 +2083,10 @@ impl RemoteMultimodalEngine {
                                 total_steps_executed,
                                 (round_idx + 1) as u32,
                             );
-                            let exp_mem = exp_mem.clone();
-                            let handle = tokio::runtime::Handle::current();
-                            let _ = tokio::task::spawn_blocking(move || {
-                                handle.block_on(async move {
-                                    let mut exp = exp_mem.write().await;
-                                    if let Err(e) = exp.store_experience(&record).await {
-                                        log::warn!("Failed to store experience: {}", e);
-                                    }
-                                })
-                            })
-                            .await;
+
+                            if let Err(e) = exp_mem.store_experience(&record).await {
+                                log::warn!("Failed to store experience: {}", e);
+                            }
                         }
                     }
                 }
@@ -2149,17 +2133,10 @@ impl RemoteMultimodalEngine {
                         total_steps_executed,
                         rounds as u32,
                     );
-                    let exp_mem = exp_mem.clone();
-                    let handle = tokio::runtime::Handle::current();
-                    let _ = tokio::task::spawn_blocking(move || {
-                        handle.block_on(async move {
-                            let mut exp = exp_mem.write().await;
-                            if let Err(e) = exp.store_experience(&record).await {
-                                log::warn!("Failed to store experience: {}", e);
-                            }
-                        })
-                    })
-                    .await;
+
+                    if let Err(e) = exp_mem.store_experience(&record).await {
+                        log::warn!("Failed to store experience: {}", e);
+                    }
                 }
             }
         }

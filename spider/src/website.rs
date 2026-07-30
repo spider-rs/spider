@@ -3953,7 +3953,8 @@ impl Website {
             let target_id = self.target_id();
 
             let join_handle = crate::utils::spawn_task("control_handler", async move {
-                let mut l = CONTROLLER.read().await.1.to_owned();
+                // Lock-free: cloning a `watch::Receiver` needs only `&self`.
+                let mut l = CONTROLLER.1.to_owned();
 
                 while l.changed().await.is_ok() {
                     let n = &*l.borrow();

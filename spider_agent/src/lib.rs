@@ -310,8 +310,8 @@ pub use search::TavilyProvider;
 
 #[cfg(feature = "memvid")]
 pub use automation::{
-    ExperienceMemory, ExperienceMemoryConfig, ExperienceOutcome, ExperienceRecord,
-    MemoryStats as ExperienceMemoryStats, RecalledExperience,
+    ExperienceMemory, ExperienceMemoryConfig, ExperienceMemoryHandle, ExperienceOutcome,
+    ExperienceRecord, MemoryStats as ExperienceMemoryStats, RecalledExperience,
 };
 
 #[cfg(feature = "chrome")]

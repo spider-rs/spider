@@ -9544,64 +9544,59 @@ pub enum Handler {
     Shutdown,
 }
 
+/// The crawl-control channel: a [`tokio::sync::watch`] sender paired with a
+/// receiver to clone subscriptions from.
+///
+/// Held bare rather than behind a lock. A `watch` channel is already internally
+/// synchronized, and both operations performed on this pair — `Sender::send`
+/// and cloning the `Receiver` — take `&self`, so there was never anything for
+/// an outer `RwLock` to exclude. Every control call previously paid an async
+/// writer-lock acquisition, and a paused crawl's `changed()` wait contended
+/// with the very senders trying to wake it.
+#[cfg(feature = "control")]
+pub type CrawlController = (
+    tokio::sync::watch::Sender<(String, Handler)>,
+    tokio::sync::watch::Receiver<(String, Handler)>,
+);
+
 #[cfg(feature = "control")]
 lazy_static! {
     /// control handle for crawls
-    pub static ref CONTROLLER: std::sync::Arc<tokio::sync::RwLock<(tokio::sync::watch::Sender<(String, Handler)>,
-        tokio::sync::watch::Receiver<(String, Handler)>)>> =
-            std::sync::Arc::new(tokio::sync::RwLock::new(tokio::sync::watch::channel(("handles".to_string(), Handler::Start))));
+    pub static ref CONTROLLER: std::sync::Arc<CrawlController> =
+        std::sync::Arc::new(tokio::sync::watch::channel(("handles".to_string(), Handler::Start)));
+}
+
+/// Broadcast a control transition to a target crawl.
+#[cfg(feature = "control")]
+#[inline]
+fn send_control(label: &str, target: &str, state: Handler) {
+    if let Err(e) = CONTROLLER.0.send((target.into(), state)) {
+        log::error!("{label}: {e:?}");
+    }
 }
 
 #[cfg(feature = "control")]
 /// Pause a target website running crawl. The crawl_id is prepended directly to the domain and required if set. ex: d22323edsd-https://mydomain.com
 pub async fn pause(target: &str) {
-    if let Err(e) = CONTROLLER
-        .write()
-        .await
-        .0
-        .send((target.into(), Handler::Pause))
-    {
-        log::error!("PAUSE: {:?}", e);
-    }
+    send_control("PAUSE", target, Handler::Pause);
 }
 
 #[cfg(feature = "control")]
 /// Resume a target website crawl. The crawl_id is prepended directly to the domain and required if set. ex: d22323edsd-https://mydomain.com
 pub async fn resume(target: &str) {
-    if let Err(e) = CONTROLLER
-        .write()
-        .await
-        .0
-        .send((target.into(), Handler::Resume))
-    {
-        log::error!("RESUME: {:?}", e);
-    }
+    send_control("RESUME", target, Handler::Resume);
 }
 
 #[cfg(feature = "control")]
 /// Shutdown a target website crawl. The crawl_id is prepended directly to the domain and required if set. ex: d22323edsd-https://mydomain.com
 pub async fn shutdown(target: &str) {
-    if let Err(e) = CONTROLLER
-        .write()
-        .await
-        .0
-        .send((target.into(), Handler::Shutdown))
-    {
-        log::error!("SHUTDOWN: {:?}", e);
-    }
+    send_control("SHUTDOWN", target, Handler::Shutdown);
 }
 
 #[cfg(feature = "control")]
 /// Reset a target website crawl. The crawl_id is prepended directly to the domain and required if set. ex: d22323edsd-https://mydomain.com
 pub async fn reset(target: &str) {
-    if let Err(e) = CONTROLLER
-        .write()
-        .await
-        .0
-        .send((target.into(), Handler::Start))
-    {
-        log::error!("RESET: {:?}", e);
-    }
+    send_control("RESET", target, Handler::Start);
 }
 
 /// Setup selectors for handling link targets.

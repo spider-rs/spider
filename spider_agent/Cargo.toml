@@ -1,6 +1,6 @@
 [package]
 name = "spider_agent"
-version = "2.53.2"
+version = "2.53.3"
 authors = ["j-mendez <jeff@spider.cloud>"]
 description = "A concurrent-safe multimodal agent for web automation and research."
 repository = "https://github.com/spider-rs/spider"
@@ -28,8 +28,8 @@ dashmap = "6"
 base64 = "0.22"
 
 # Extracted types and HTML processing
-spider_agent_types = { version = "2.53.2", path = "../spider_agent_types" }
-spider_agent_html = { version = "2.53.2", path = "../spider_agent_html" }
+spider_agent_types = { version = "2.53.3", path = "../spider_agent_types" }
+spider_agent_html = { version = "2.53.3", path = "../spider_agent_html" }
 
 # HTML processing (still needed for engine internals)
 lol_html = "2"
@@ -107,8 +107,10 @@ fs = ["dep:tempfile", "tokio/fs"]
 # Skills - dynamic skill loading for web challenge solving
 skills = ["dep:spider_skills"]
 
-# Long-term experience memory
-memvid = ["dep:memvid-rs"]
+# Long-term experience memory. The memvid retriever is !Send, so it is owned by
+# a dedicated thread and reached over flume + tokio::oneshot — no lock, no
+# `unsafe impl Send`.
+memvid = ["dep:memvid-rs", "dep:flume"]
 
 # S3 skill loading
 skills_s3 = ["skills", "dep:aws-sdk-s3", "dep:aws-config"]

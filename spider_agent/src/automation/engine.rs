@@ -81,9 +81,12 @@ pub struct RemoteMultimodalEngine {
     /// Optional long-term experience memory for learning from past sessions.
     /// When set, the engine recalls relevant past strategies before automation
     /// and stores successful outcomes after completion.
+    ///
+    /// A [`ExperienceMemoryHandle`](super::long_term_memory::ExperienceMemoryHandle)
+    /// is itself a cheap `Clone` over a channel into the thread that owns the
+    /// memory, so no `Arc` or lock is needed here.
     #[cfg(feature = "memvid")]
-    pub experience_memory:
-        Option<std::sync::Arc<tokio::sync::RwLock<super::long_term_memory::ExperienceMemory>>>,
+    pub experience_memory: Option<super::long_term_memory::ExperienceMemoryHandle>,
     /// Use Chrome's built-in LanguageModel API (Gemini Nano) for inference.
     ///
     /// When `true`, uses `page.evaluate()` + `LanguageModel.create()` instead of
@@ -223,9 +226,7 @@ impl RemoteMultimodalEngine {
     #[cfg(feature = "memvid")]
     pub fn with_experience_memory(
         &mut self,
-        memory: Option<
-            std::sync::Arc<tokio::sync::RwLock<super::long_term_memory::ExperienceMemory>>,
-        >,
+        memory: Option<super::long_term_memory::ExperienceMemoryHandle>,
     ) -> &mut Self {
         self.experience_memory = memory;
         self

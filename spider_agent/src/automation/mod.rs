@@ -224,8 +224,8 @@ pub use concurrent_chain::execute_graph;
 // Re-export long-term memory types (memvid feature)
 #[cfg(feature = "memvid")]
 pub use long_term_memory::{
-    ExperienceMemory, ExperienceMemoryConfig, ExperienceOutcome, ExperienceRecord, MemoryStats,
-    RecalledExperience,
+    ExperienceMemory, ExperienceMemoryConfig, ExperienceMemoryHandle, ExperienceOutcome,
+    ExperienceRecord, MemoryStats, RecalledExperience,
 };
 
 // Re-export browser functions (chrome feature)

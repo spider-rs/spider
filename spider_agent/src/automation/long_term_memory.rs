@@ -4,6 +4,23 @@
 //! and uses `memvid-rs` for semantic search over past strategies.
 //! The memvid video+index is rebuilt lazily when recall is needed after
 //! new experiences have been added.
+//!
+//! # Threading
+//!
+//! [`ExperienceMemory`] owns a `memvid_rs::MemvidRetriever`, whose interiors
+//! (ffmpeg raw pointers, rusqlite's `RefCell`) are `!Send` and `!Sync`. Rather
+//! than assert otherwise and guard it with a lock, the memory is **owned by a
+//! dedicated thread** and reached through [`ExperienceMemoryHandle`], which
+//! bridges requests over `flume` and replies over `tokio::sync::oneshot`.
+//!
+//! Consequences:
+//!
+//! - The value never crosses a thread boundary, so no `unsafe impl Send`/`Sync`
+//!   is needed — the compiler checks what a comment used to promise.
+//! - No `Mutex` or `RwLock` anywhere in this module. Requests serialize by
+//!   construction, because one thread processes them in order.
+//! - Callers no longer need `spawn_blocking` + `Handle::block_on` to contain
+//!   `!Send` temporaries; every handle method is a plain `async fn`.
 
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
@@ -202,12 +219,11 @@ pub struct ExperienceMemory {
     pub config: ExperienceMemoryConfig,
 }
 
-// SAFETY: ExperienceMemory is always accessed through Arc<tokio::sync::RwLock<>>,
-// which provides proper synchronization. The non-Send/Sync interiors (rusqlite's
-// RefCell and ffmpeg raw pointers inside MemvidRetriever) are never accessed
-// concurrently — the RwLock guards all access.
-unsafe impl Send for ExperienceMemory {}
-unsafe impl Sync for ExperienceMemory {}
+// Deliberately NOT `unsafe impl Send`/`Sync`. The `!Send` interiors (rusqlite's
+// `RefCell` and ffmpeg raw pointers inside `MemvidRetriever`) stay pinned to the
+// thread that owns them; cross-thread access goes through
+// [`ExperienceMemoryHandle`], so the compiler enforces the invariant that a
+// `SAFETY` comment used to assert by hand.
 
 impl std::fmt::Debug for ExperienceMemory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -486,6 +502,11 @@ impl ExperienceMemory {
         self.recall_cache.clear();
     }
 
+    /// Read-only view of this memory's configuration.
+    pub fn config(&self) -> &ExperienceMemoryConfig {
+        &self.config
+    }
+
     // ---- Internal helpers ----
 
     /// Rebuild the memvid video+index from the .jsonl log.
@@ -578,6 +599,268 @@ impl ExperienceMemory {
                 record_words.intersection(&search_words).count()
             })
             .cloned()
+    }
+}
+
+/// A boxed error that is safe to carry back across the bridge.
+type BridgeError = Box<dyn std::error::Error + Send + Sync>;
+
+/// Number of memory worker threads currently alive.
+///
+/// Incremented as a worker starts and decremented as it exits, so a leaked
+/// worker is observable rather than a matter of trust. See
+/// [`live_worker_count`].
+static LIVE_WORKERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How many experience-memory worker threads are currently running.
+///
+/// One per live [`ExperienceMemoryHandle`] family: every clone of a handle
+/// shares a worker, and the worker retires once the last clone drops. A count
+/// that does not fall back to its baseline after handles are dropped means a
+/// worker leaked.
+pub fn live_worker_count() -> usize {
+    LIVE_WORKERS.load(std::sync::atomic::Ordering::Acquire)
+}
+
+/// Decrements [`LIVE_WORKERS`] however the worker body leaves scope, including
+/// on panic — a leaked *count* would be as misleading as a leaked thread.
+struct WorkerCensus;
+
+impl Drop for WorkerCensus {
+    fn drop(&mut self) {
+        LIVE_WORKERS.fetch_sub(1, std::sync::atomic::Ordering::Release);
+    }
+}
+
+/// Work items accepted by the memory thread.
+///
+/// Each carries the `oneshot` the worker answers on. A dropped reply channel is
+/// not an error: it means the caller went away, and the worker just moves on.
+enum MemoryRequest {
+    /// Append an experience to the log.
+    Store(
+        Box<ExperienceRecord>,
+        tokio::sync::oneshot::Sender<std::io::Result<()>>,
+    ),
+    /// Semantic recall of up to `k` past experiences.
+    Recall(
+        String,
+        usize,
+        tokio::sync::oneshot::Sender<Result<Vec<RecalledExperience>, BridgeError>>,
+    ),
+    /// Drop experiences matching a query, returning how many were removed.
+    ReleaseByQuery(
+        String,
+        usize,
+        tokio::sync::oneshot::Sender<Result<usize, BridgeError>>,
+    ),
+    /// Delete every experience artifact.
+    ReleaseAll(tokio::sync::oneshot::Sender<std::io::Result<()>>),
+    /// Current memory statistics.
+    Stats(tokio::sync::oneshot::Sender<MemoryStats>),
+    /// Force an index rebuild.
+    Flush(tokio::sync::oneshot::Sender<Result<(), BridgeError>>),
+    /// Drop the recall cache. Fire-and-forget.
+    ClearCache,
+}
+
+/// A cheap, `Send + Sync + Clone` handle to a thread-owned [`ExperienceMemory`].
+///
+/// The memory itself lives on a dedicated thread with its own current-thread
+/// runtime, so its `!Send` memvid interiors never move. Cloning a handle clones
+/// a channel sender; every clone talks to the same memory, and requests are
+/// serviced one at a time in arrival order.
+///
+/// The worker shuts down when the last handle drops.
+#[derive(Clone, Debug)]
+pub struct ExperienceMemoryHandle {
+    /// Request channel into the owning thread.
+    tx: flume::Sender<MemoryRequest>,
+    /// Configuration copy, so `max_recall` / `max_context_chars` reads on the
+    /// hot path cost no round-trip.
+    config: ExperienceMemoryConfig,
+}
+
+impl ExperienceMemoryHandle {
+    /// Open (or create) an experience memory at `dir` on its own thread.
+    ///
+    /// The thread is named `experience-memory` and runs a current-thread
+    /// runtime. Returns the error from [`ExperienceMemory::new`] if the store
+    /// cannot be opened, in which case the thread exits immediately.
+    pub async fn spawn(
+        dir: impl Into<PathBuf>,
+        config: ExperienceMemoryConfig,
+    ) -> std::io::Result<Self> {
+        let dir = dir.into();
+        let worker_config = config.clone();
+        // Depth of 1 keeps a burst of stores from queueing without bound; the
+        // channel is async, so a full queue suspends the caller rather than
+        // blocking a runtime thread.
+        let (tx, rx) = flume::bounded::<MemoryRequest>(64);
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<std::io::Result<()>>();
+
+        let spawned = std::thread::Builder::new()
+            .name("experience-memory".into())
+            .spawn(move || {
+                LIVE_WORKERS.fetch_add(1, std::sync::atomic::Ordering::Release);
+                // Fires on every exit path below, panics included.
+                let _census = WorkerCensus;
+
+                let runtime = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(runtime) => runtime,
+                    Err(e) => {
+                        let _ = ready_tx.send(Err(e));
+                        return;
+                    }
+                };
+
+                runtime.block_on(async move {
+                    let mut memory = match ExperienceMemory::new(dir, worker_config).await {
+                        Ok(memory) => {
+                            if ready_tx.send(Ok(())).is_err() {
+                                // Caller vanished before we finished opening.
+                                return;
+                            }
+                            memory
+                        }
+                        Err(e) => {
+                            let _ = ready_tx.send(Err(e));
+                            return;
+                        }
+                    };
+
+                    // Ends when every sender drops, i.e. the last handle died.
+                    while let Ok(request) = rx.recv_async().await {
+                        memory.serve(request).await;
+                    }
+                });
+            })?;
+
+        // Keep the JoinHandle out of the returned type: the worker is detached
+        // and terminates on channel close, so there is nothing to join.
+        drop(spawned);
+
+        match ready_rx.await {
+            Ok(Ok(())) => Ok(Self { tx, config }),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(std::io::Error::other(
+                "experience memory thread died during startup",
+            )),
+        }
+    }
+
+    /// The configuration this memory was opened with.
+    pub fn config(&self) -> &ExperienceMemoryConfig {
+        &self.config
+    }
+
+    /// Send `request` and await its reply, mapping a dead worker to `Err`.
+    async fn call<T>(
+        &self,
+        request: MemoryRequest,
+        rx: tokio::sync::oneshot::Receiver<T>,
+    ) -> Result<T, BridgeError> {
+        self.tx
+            .send_async(request)
+            .await
+            .map_err(|_| -> BridgeError { "experience memory thread is gone".into() })?;
+
+        rx.await
+            .map_err(|_| -> BridgeError { "experience memory dropped the reply".into() })
+    }
+
+    /// Append an experience record to the log.
+    pub async fn store_experience(&self, record: &ExperienceRecord) -> std::io::Result<()> {
+        let (reply, rx) = tokio::sync::oneshot::channel();
+        let request = MemoryRequest::Store(Box::new(record.clone()), reply);
+
+        match self.call(request, rx).await {
+            Ok(result) => result,
+            Err(e) => Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, e)),
+        }
+    }
+
+    /// Recall up to `k` experiences relevant to `query`.
+    pub async fn recall(
+        &self,
+        query: &str,
+        k: usize,
+    ) -> Result<Vec<RecalledExperience>, BridgeError> {
+        let (reply, rx) = tokio::sync::oneshot::channel();
+        let request = MemoryRequest::Recall(query.to_string(), k, reply);
+
+        self.call(request, rx).await?
+    }
+
+    /// Remove experiences matching `query`, returning how many were removed.
+    pub async fn release_by_query(&self, query: &str, k: usize) -> Result<usize, BridgeError> {
+        let (reply, rx) = tokio::sync::oneshot::channel();
+        let request = MemoryRequest::ReleaseByQuery(query.to_string(), k, reply);
+
+        self.call(request, rx).await?
+    }
+
+    /// Delete all experience data.
+    pub async fn release_all(&self) -> std::io::Result<()> {
+        let (reply, rx) = tokio::sync::oneshot::channel();
+
+        match self.call(MemoryRequest::ReleaseAll(reply), rx).await {
+            Ok(result) => result,
+            Err(e) => Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, e)),
+        }
+    }
+
+    /// Statistics about the current memory state.
+    pub async fn stats(&self) -> Result<MemoryStats, BridgeError> {
+        let (reply, rx) = tokio::sync::oneshot::channel();
+
+        self.call(MemoryRequest::Stats(reply), rx).await
+    }
+
+    /// Force a rebuild of the memvid index.
+    pub async fn flush(&self) -> Result<(), BridgeError> {
+        let (reply, rx) = tokio::sync::oneshot::channel();
+
+        self.call(MemoryRequest::Flush(reply), rx).await?
+    }
+
+    /// Drop the recall cache. Fire-and-forget: a dead worker is not an error
+    /// worth surfacing for a cache hint.
+    pub async fn clear_cache(&self) {
+        let _ = self.tx.send_async(MemoryRequest::ClearCache).await;
+    }
+}
+
+impl ExperienceMemory {
+    /// Execute one bridged request, answering on its reply channel.
+    ///
+    /// A send failure means the caller is gone; the work is already done, so it
+    /// is dropped without ceremony.
+    async fn serve(&mut self, request: MemoryRequest) {
+        match request {
+            MemoryRequest::Store(record, reply) => {
+                let _ = reply.send(self.store_experience(&record).await);
+            }
+            MemoryRequest::Recall(query, k, reply) => {
+                let _ = reply.send(self.recall(&query, k).await);
+            }
+            MemoryRequest::ReleaseByQuery(query, k, reply) => {
+                let _ = reply.send(self.release_by_query(&query, k).await);
+            }
+            MemoryRequest::ReleaseAll(reply) => {
+                let _ = reply.send(self.release_all().await);
+            }
+            MemoryRequest::Stats(reply) => {
+                let _ = reply.send(self.stats().await);
+            }
+            MemoryRequest::Flush(reply) => {
+                let _ = reply.send(self.flush().await);
+            }
+            MemoryRequest::ClearCache => self.clear_cache(),
+        }
     }
 }
 
@@ -772,6 +1055,162 @@ mod tests {
         assert!(!stats.dirty);
 
         // Cleanup
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Compile-time proof that the handle is safe to share, without any
+    /// `unsafe impl` propping it up.
+    #[test]
+    fn handle_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<ExperienceMemoryHandle>();
+    }
+
+    fn sample_record(timestamp: u64) -> ExperienceRecord {
+        ExperienceRecord {
+            challenge_type: "bridge".to_string(),
+            url_pattern: "https://test.com/*".to_string(),
+            title_keywords: vec![],
+            html_signals: vec![],
+            strategy_summary: "Bridged store".to_string(),
+            steps_json: "[]".to_string(),
+            outcome: ExperienceOutcome::Success,
+            rounds_taken: 1,
+            timestamp,
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_stores_and_reports_stats() {
+        let dir = std::env::temp_dir().join(format!("spider_exp_bridge_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let handle = ExperienceMemoryHandle::spawn(&dir, ExperienceMemoryConfig::default())
+            .await
+            .expect("memory thread starts");
+
+        handle
+            .store_experience(&sample_record(1700000000))
+            .await
+            .expect("store succeeds through the bridge");
+
+        let stats = handle.stats().await.expect("stats reply");
+        assert_eq!(stats.experience_count, 1);
+        assert!(stats.dirty);
+
+        handle.release_all().await.expect("release succeeds");
+        let stats = handle.stats().await.expect("stats reply");
+        assert_eq!(stats.experience_count, 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The whole point of the redesign: a handle crosses threads on a
+    /// multi-thread runtime while the `!Send` memory stays put on its own.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn handle_is_usable_across_worker_threads() {
+        let dir = std::env::temp_dir().join(format!("spider_exp_mt_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let handle = ExperienceMemoryHandle::spawn(&dir, ExperienceMemoryConfig::default())
+            .await
+            .expect("memory thread starts");
+
+        let tasks: Vec<_> = (0..8)
+            .map(|i| {
+                let handle = handle.clone();
+                tokio::spawn(async move {
+                    handle
+                        .store_experience(&sample_record(1700000000 + i))
+                        .await
+                        .expect("store from a worker thread");
+                })
+            })
+            .collect();
+
+        for task in tasks {
+            task.await.expect("task completes");
+        }
+
+        // Requests serialize on the owning thread, so all 8 landed.
+        let stats = handle.stats().await.expect("stats reply");
+        assert_eq!(stats.experience_count, 8);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Spawn and drop many memories; every worker thread must retire.
+    ///
+    /// This is the leak check the old `Arc<RwLock<..>>` design had no way to
+    /// express: there was no thread to account for, only a lock nobody could
+    /// verify was sound.
+    #[tokio::test]
+    async fn workers_retire_when_handles_drop() {
+        let baseline = live_worker_count();
+
+        for i in 0..16 {
+            let dir =
+                std::env::temp_dir().join(format!("spider_exp_leak_{}_{i}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+
+            let handle = ExperienceMemoryHandle::spawn(&dir, ExperienceMemoryConfig::default())
+                .await
+                .expect("memory thread starts");
+            let clone = handle.clone();
+
+            handle
+                .store_experience(&sample_record(1700000000 + i))
+                .await
+                .expect("store succeeds");
+
+            // Both handles go out of scope here.
+            drop(handle);
+            drop(clone);
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        // Workers exit asynchronously once their channel closes; give them a
+        // bounded window rather than asserting on an instant.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while live_worker_count() > baseline && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+
+        assert_eq!(
+            live_worker_count(),
+            baseline,
+            "memory worker threads leaked after their handles dropped",
+        );
+    }
+
+    /// A clone outliving the original keeps the shared memory addressable —
+    /// the worker retires on the *last* handle drop, not the first.
+    #[tokio::test]
+    async fn clone_outlives_the_original_handle() {
+        let dir = std::env::temp_dir().join(format!("spider_exp_drop_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let handle = ExperienceMemoryHandle::spawn(&dir, ExperienceMemoryConfig::default())
+            .await
+            .expect("memory thread starts");
+        let clone = handle.clone();
+
+        handle
+            .store_experience(&sample_record(1700000000))
+            .await
+            .expect("store through the original");
+        drop(handle);
+
+        // Same memory, still serving.
+        clone
+            .store_experience(&sample_record(1700000001))
+            .await
+            .expect("clone still works after the original drops");
+
+        let stats = clone.stats().await.expect("stats reply");
+        assert_eq!(stats.experience_count, 2);
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
