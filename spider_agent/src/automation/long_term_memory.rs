@@ -1139,16 +1139,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Spawn and drop many memories; every worker thread must retire.
+    /// Spawn and drop many memories; workers must retire rather than pile up.
     ///
     /// This is the leak check the old `Arc<RwLock<..>>` design had no way to
     /// express: there was no thread to account for, only a lock nobody could
     /// verify was sound.
+    ///
+    /// The assertion is on *accumulation*, not on an exact count.
+    /// [`live_worker_count`] is process-global and the sibling bridge tests
+    /// spawn their own workers concurrently, so pinning the count to a
+    /// baseline sampled at entry is racy. A leak here is unmistakable
+    /// regardless: 16 undropped workers would leave the gauge at 16-plus,
+    /// where correct behavior keeps it near zero for the whole run.
     #[tokio::test]
     async fn workers_retire_when_handles_drop() {
-        let baseline = live_worker_count();
+        const CYCLES: usize = 16;
+        /// Headroom for workers belonging to concurrently running tests.
+        const CONCURRENT_SLACK: usize = 4;
 
-        for i in 0..16 {
+        let mut peak = 0;
+
+        for i in 0..CYCLES {
             let dir =
                 std::env::temp_dir().join(format!("spider_exp_leak_{}_{i}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
@@ -1159,28 +1170,35 @@ mod tests {
             let clone = handle.clone();
 
             handle
-                .store_experience(&sample_record(1700000000 + i))
+                .store_experience(&sample_record(1700000000 + i as u64))
                 .await
                 .expect("store succeeds");
 
-            // Both handles go out of scope here.
+            peak = peak.max(live_worker_count());
+
+            // Both handles go out of scope here, retiring this cycle's worker.
             drop(handle);
             drop(clone);
 
             let _ = std::fs::remove_dir_all(&dir);
         }
 
-        // Workers exit asynchronously once their channel closes; give them a
-        // bounded window rather than asserting on an instant.
+        // Workers exit asynchronously once their channel closes, so let the
+        // last few settle before reading the gauge.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while live_worker_count() > baseline && std::time::Instant::now() < deadline {
+        while live_worker_count() > CONCURRENT_SLACK && std::time::Instant::now() < deadline {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
 
-        assert_eq!(
+        assert!(
+            peak <= 1 + CONCURRENT_SLACK,
+            "workers accumulated across {CYCLES} spawn/drop cycles (peak {peak}); \
+             a retiring worker should never leave more than one of ours alive",
+        );
+        assert!(
+            live_worker_count() <= CONCURRENT_SLACK,
+            "memory worker threads leaked after their handles dropped ({} still live)",
             live_worker_count(),
-            baseline,
-            "memory worker threads leaked after their handles dropped",
         );
     }
 
