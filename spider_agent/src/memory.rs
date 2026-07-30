@@ -12,8 +12,8 @@
 //! DashMap for optimal concurrent performance.
 
 use dashmap::DashMap;
-use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 /// Maximum number of actions to keep in history.
@@ -30,6 +30,131 @@ const MAX_EXTRACTIONS: usize = 50;
 /// evicting one older entry per new key. This is DoS / leak protection, not a
 /// normal-use path.
 const MAX_DATA_ENTRIES: usize = 10_000;
+
+/// A bounded, insertion-ordered history with no lock of its own.
+///
+/// Backed by a [`DashMap`] keyed by a monotonic sequence number, so ordering is
+/// carried by the key rather than by a `Vec` behind an `RwLock`. Readers take
+/// no writer-blocking lock, and a push contends only with the shard it lands in.
+///
+/// Eviction scans for the lowest live key, which is `O(cap)` — with caps of 50
+/// to 100 entries that is a handful of integer comparisons, and it stays correct
+/// across interleaved [`clear`](Self::clear) calls, which a head cursor would
+/// not.
+///
+/// # Ordering under concurrency
+///
+/// Sequence assignment and insertion are two steps, so a reader racing a push
+/// may observe the history without the in-flight entry (never out of order, and
+/// never a torn value). For an LLM context buffer that is equivalent to the
+/// read having happened a moment earlier.
+#[derive(Debug)]
+struct History<T> {
+    /// Live entries keyed by their insertion sequence number.
+    entries: DashMap<u64, T>,
+    /// Next sequence number to hand out. Wrapping is unreachable in practice.
+    next_seq: AtomicU64,
+    /// Maximum number of retained entries.
+    cap: usize,
+}
+
+impl<T> History<T> {
+    /// Create an empty history bounded to `cap` entries.
+    fn new(cap: usize) -> Self {
+        Self {
+            entries: DashMap::new(),
+            next_seq: AtomicU64::new(0),
+            cap,
+        }
+    }
+
+    /// Create an empty history bounded to `cap`, pre-allocating for it.
+    fn with_capacity(cap: usize) -> Self {
+        Self {
+            entries: DashMap::with_capacity(cap),
+            next_seq: AtomicU64::new(0),
+            cap,
+        }
+    }
+
+    /// Append an entry, evicting the oldest ones once the cap is exceeded.
+    fn push(&self, value: T) {
+        self.entries
+            .insert(self.next_seq.fetch_add(1, Ordering::Relaxed), value);
+
+        // Loop rather than evict once: concurrent pushes can overshoot the cap
+        // together, and a lost race on `remove` must not leave the history over
+        // its bound.
+        while self.entries.len() > self.cap {
+            // Collect the victim key BEFORE removing so no shard guard is held
+            // across the mutation — DashMap would self-deadlock otherwise.
+            let victim = self.entries.iter().map(|entry| *entry.key()).min();
+
+            match victim {
+                Some(victim) => {
+                    self.entries.remove(&victim);
+                }
+                // Emptied by a concurrent `clear`; nothing left to evict.
+                None => break,
+            }
+        }
+    }
+
+    /// Every entry, oldest first.
+    fn to_vec(&self) -> Vec<T>
+    where
+        T: Clone,
+    {
+        let mut items: Vec<(u64, T)> = self
+            .entries
+            .iter()
+            .map(|entry| (*entry.key(), entry.value().clone()))
+            .collect();
+
+        items.sort_unstable_by_key(|(seq, _)| *seq);
+        items.into_iter().map(|(_, value)| value).collect()
+    }
+
+    /// The last `n` entries, **most recent first**.
+    fn recent(&self, n: usize) -> Vec<T>
+    where
+        T: Clone,
+    {
+        let mut items: Vec<(u64, T)> = self
+            .entries
+            .iter()
+            .map(|entry| (*entry.key(), entry.value().clone()))
+            .collect();
+
+        items.sort_unstable_by(|(a, _), (b, _)| b.cmp(a));
+        items.into_iter().take(n).map(|(_, value)| value).collect()
+    }
+
+    /// Whether any entry matches `needle`.
+    ///
+    /// Borrowed so a `History<String>` can be probed with a `&str` — no
+    /// allocation on the lookup path.
+    fn contains<Q>(&self, needle: &Q) -> bool
+    where
+        T: std::borrow::Borrow<Q>,
+        Q: PartialEq + ?Sized,
+    {
+        self.entries
+            .iter()
+            .any(|entry| entry.value().borrow() == needle)
+    }
+
+    /// Whether the history holds no entries.
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Drop every entry. The sequence counter keeps advancing, so entries added
+    /// afterwards still sort after anything a concurrent reader already saw.
+    fn clear(&self) {
+        self.entries.clear();
+    }
+}
 
 /// Session memory for storing state across operations.
 ///
@@ -57,16 +182,22 @@ const MAX_DATA_ENTRIES: usize = 10_000;
 /// // Generate context for LLM
 /// let context = memory.to_context_string();
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct AgentMemory {
     /// Lock-free concurrent key-value store.
     data: Arc<DashMap<String, serde_json::Value>>,
     /// History of visited URLs (most recent last).
-    visited_urls: Arc<RwLock<Vec<String>>>,
+    visited_urls: Arc<History<String>>,
     /// Brief summary of recent actions (most recent last).
-    action_history: Arc<RwLock<Vec<String>>>,
+    action_history: Arc<History<String>>,
     /// History of extracted data from pages (most recent last).
-    extractions: Arc<RwLock<Vec<serde_json::Value>>>,
+    extractions: Arc<History<serde_json::Value>>,
+}
+
+impl Default for AgentMemory {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AgentMemory {
@@ -74,9 +205,9 @@ impl AgentMemory {
     pub fn new() -> Self {
         Self {
             data: Arc::new(DashMap::new()),
-            visited_urls: Arc::new(RwLock::new(Vec::new())),
-            action_history: Arc::new(RwLock::new(Vec::new())),
-            extractions: Arc::new(RwLock::new(Vec::new())),
+            visited_urls: Arc::new(History::new(MAX_URL_HISTORY)),
+            action_history: Arc::new(History::new(MAX_ACTION_HISTORY)),
+            extractions: Arc::new(History::new(MAX_EXTRACTIONS)),
         }
     }
 
@@ -84,9 +215,9 @@ impl AgentMemory {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             data: Arc::new(DashMap::with_capacity(capacity)),
-            visited_urls: Arc::new(RwLock::new(Vec::with_capacity(MAX_URL_HISTORY))),
-            action_history: Arc::new(RwLock::new(Vec::with_capacity(MAX_ACTION_HISTORY))),
-            extractions: Arc::new(RwLock::new(Vec::with_capacity(MAX_EXTRACTIONS))),
+            visited_urls: Arc::new(History::with_capacity(MAX_URL_HISTORY)),
+            action_history: Arc::new(History::with_capacity(MAX_ACTION_HISTORY)),
+            extractions: Arc::new(History::with_capacity(MAX_EXTRACTIONS)),
         }
     }
 
@@ -193,32 +324,27 @@ impl AgentMemory {
     ///
     /// Keeps the most recent URLs up to the limit.
     pub fn add_visited_url(&self, url: impl Into<String>) {
-        let mut urls = self.visited_urls.write();
-        urls.push(url.into());
-        if urls.len() > MAX_URL_HISTORY {
-            urls.remove(0);
-        }
+        self.visited_urls.push(url.into());
     }
 
     /// Get the list of visited URLs.
     pub fn visited_urls(&self) -> Vec<String> {
-        self.visited_urls.read().clone()
+        self.visited_urls.to_vec()
     }
 
     /// Get the last N visited URLs.
     pub fn recent_urls(&self, n: usize) -> Vec<String> {
-        let urls = self.visited_urls.read();
-        urls.iter().rev().take(n).cloned().collect()
+        self.visited_urls.recent(n)
     }
 
     /// Check if a URL has been visited.
     pub fn has_visited(&self, url: &str) -> bool {
-        self.visited_urls.read().iter().any(|u| u == url)
+        self.visited_urls.contains(url)
     }
 
     /// Clear URL history.
     pub fn clear_urls(&self) {
-        self.visited_urls.write().clear();
+        self.visited_urls.clear();
     }
 
     // ========== Action History ==========
@@ -227,27 +353,22 @@ impl AgentMemory {
     ///
     /// Keeps the most recent actions up to the limit.
     pub fn add_action(&self, action: impl Into<String>) {
-        let mut actions = self.action_history.write();
-        actions.push(action.into());
-        if actions.len() > MAX_ACTION_HISTORY {
-            actions.remove(0);
-        }
+        self.action_history.push(action.into());
     }
 
     /// Get the list of actions.
     pub fn action_history(&self) -> Vec<String> {
-        self.action_history.read().clone()
+        self.action_history.to_vec()
     }
 
     /// Get the last N actions.
     pub fn recent_actions(&self, n: usize) -> Vec<String> {
-        let actions = self.action_history.read();
-        actions.iter().rev().take(n).cloned().collect()
+        self.action_history.recent(n)
     }
 
     /// Clear action history.
     pub fn clear_actions(&self) {
-        self.action_history.write().clear();
+        self.action_history.clear();
     }
 
     // ========== Extraction History ==========
@@ -256,52 +377,47 @@ impl AgentMemory {
     ///
     /// Keeps the most recent extractions up to the limit.
     pub fn add_extraction(&self, data: serde_json::Value) {
-        let mut extractions = self.extractions.write();
-        extractions.push(data);
-        if extractions.len() > MAX_EXTRACTIONS {
-            extractions.remove(0);
-        }
+        self.extractions.push(data);
     }
 
     /// Get all extractions.
     pub fn extractions(&self) -> Vec<serde_json::Value> {
-        self.extractions.read().clone()
+        self.extractions.to_vec()
     }
 
     /// Get the last N extractions.
     pub fn recent_extractions(&self, n: usize) -> Vec<serde_json::Value> {
-        let extractions = self.extractions.read();
-        extractions.iter().rev().take(n).cloned().collect()
+        self.extractions.recent(n)
     }
 
     /// Clear extraction history.
     pub fn clear_extractions(&self) {
-        self.extractions.write().clear();
+        self.extractions.clear();
     }
 
     // ========== Bulk Operations ==========
 
     /// Clear all history (URLs, actions, extractions) but keep key-value store.
     pub fn clear_history(&self) {
-        self.visited_urls.write().clear();
-        self.action_history.write().clear();
-        self.extractions.write().clear();
+        self.visited_urls.clear();
+        self.action_history.clear();
+        self.extractions.clear();
     }
 
     /// Clear everything including key-value store and all history.
     pub fn clear_all(&self) {
         self.data.clear();
-        self.visited_urls.write().clear();
-        self.action_history.write().clear();
-        self.extractions.write().clear();
+        self.visited_urls.clear();
+        self.action_history.clear();
+        self.extractions.clear();
     }
 
     /// Check if all memory is empty (store + all history).
     pub fn is_all_empty(&self) -> bool {
         self.data.is_empty()
-            && self.visited_urls.read().is_empty()
-            && self.action_history.read().is_empty()
-            && self.extractions.read().is_empty()
+            && self.visited_urls.is_empty()
+            && self.action_history.is_empty()
+            && self.extractions.is_empty()
     }
 
     // ========== Context Generation ==========
@@ -332,10 +448,10 @@ impl AgentMemory {
             }
         }
 
-        // Recent URLs
-        let urls = self.visited_urls.read();
-        if !urls.is_empty() {
-            let recent: Vec<_> = urls.iter().rev().take(10).collect();
+        // Recent URLs. `recent` yields newest-first; reverse back to
+        // chronological order for the numbered list.
+        let recent = self.visited_urls.recent(10);
+        if !recent.is_empty() {
             let url_list: String = recent
                 .iter()
                 .rev()
@@ -349,12 +465,10 @@ impl AgentMemory {
                 url_list
             ));
         }
-        drop(urls);
 
         // Recent extractions
-        let extractions = self.extractions.read();
-        if !extractions.is_empty() {
-            let recent: Vec<_> = extractions.iter().rev().take(5).collect();
+        let recent = self.extractions.recent(5);
+        if !recent.is_empty() {
             let json_strs: Vec<_> = recent
                 .iter()
                 .rev()
@@ -366,12 +480,10 @@ impl AgentMemory {
                 json_strs.join("\n")
             ));
         }
-        drop(extractions);
 
         // Recent actions
-        let actions = self.action_history.read();
-        if !actions.is_empty() {
-            let recent: Vec<_> = actions.iter().rev().take(10).collect();
+        let recent = self.action_history.recent(10);
+        if !recent.is_empty() {
             let action_list: String = recent
                 .iter()
                 .rev()
@@ -385,7 +497,6 @@ impl AgentMemory {
                 action_list
             ));
         }
-        drop(actions);
 
         parts.join("\n\n")
     }
@@ -576,5 +687,75 @@ mod tests {
         assert!(context.contains("example.com"));
         assert!(context.contains("Recent Actions"));
         assert!(context.contains("Logged in"));
+    }
+
+    #[test]
+    fn history_is_bounded_and_keeps_insertion_order() {
+        let memory = AgentMemory::new();
+
+        for i in 0..(MAX_URL_HISTORY + 25) {
+            memory.add_visited_url(format!("https://example.com/{i}"));
+        }
+
+        let urls = memory.visited_urls();
+        assert_eq!(urls.len(), MAX_URL_HISTORY);
+        // Oldest entries evicted, order preserved oldest-first.
+        assert_eq!(urls[0], "https://example.com/25");
+        assert_eq!(
+            urls[MAX_URL_HISTORY - 1],
+            format!("https://example.com/{}", MAX_URL_HISTORY + 24)
+        );
+        // The evicted prefix is really gone; the retained tail is still found.
+        assert!(!memory.has_visited("https://example.com/0"));
+        assert!(memory.has_visited("https://example.com/25"));
+    }
+
+    #[test]
+    fn history_recent_returns_newest_first() {
+        let memory = AgentMemory::new();
+
+        memory.add_action("first");
+        memory.add_action("second");
+        memory.add_action("third");
+
+        assert_eq!(memory.recent_actions(2), vec!["third", "second"]);
+        assert_eq!(memory.action_history(), vec!["first", "second", "third"]);
+    }
+
+    #[test]
+    fn history_clear_then_push_keeps_ordering() {
+        let memory = AgentMemory::new();
+
+        memory.add_action("stale");
+        memory.clear_actions();
+        assert!(memory.action_history().is_empty());
+
+        // Sequence numbers keep advancing past a clear, so post-clear entries
+        // still sort in insertion order rather than colliding with old keys.
+        memory.add_action("fresh-1");
+        memory.add_action("fresh-2");
+        assert_eq!(memory.action_history(), vec!["fresh-1", "fresh-2"]);
+    }
+
+    #[test]
+    fn history_stays_bounded_under_concurrent_pushes() {
+        let memory = AgentMemory::new();
+        let threads: Vec<_> = (0..8)
+            .map(|t| {
+                let memory = memory.clone();
+                std::thread::spawn(move || {
+                    for i in 0..200 {
+                        memory.add_visited_url(format!("https://example.com/{t}/{i}"));
+                    }
+                })
+            })
+            .collect();
+
+        for handle in threads {
+            handle.join().expect("push thread panicked");
+        }
+
+        // 1600 concurrent pushes must not leave the history over its bound.
+        assert_eq!(memory.visited_urls().len(), MAX_URL_HISTORY);
     }
 }
