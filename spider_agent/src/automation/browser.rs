@@ -261,13 +261,19 @@ impl RemoteMultimodalEngine {
         const TEXT_ONLY_INPUT_LINE: &str =
             "- No screenshot is provided this round; use URL/title/HTML context.\n";
 
-        if system_msg.contains(SCREENSHOT_INPUT_LINE) {
-            *system_msg = system_msg.replacen(SCREENSHOT_INPUT_LINE, TEXT_ONLY_INPUT_LINE, 1);
+        // Single scan + in-place splice instead of `contains` followed by
+        // `replacen`/`replace` (which each rescan and reallocate the prompt).
+        if let Some(pos) = system_msg.find(SCREENSHOT_INPUT_LINE) {
+            system_msg.replace_range(pos..pos + SCREENSHOT_INPUT_LINE.len(), TEXT_ONLY_INPUT_LINE);
         }
 
-        if system_msg.contains("→ visible in screenshot") {
-            *system_msg =
-                system_msg.replace("→ visible in screenshot", "→ visible in next round context");
+        const VISIBLE_FROM: &str = "→ visible in screenshot";
+        const VISIBLE_TO: &str = "→ visible in next round context";
+        let mut search_from = 0;
+        while let Some(rel) = system_msg[search_from..].find(VISIBLE_FROM) {
+            let pos = search_from + rel;
+            system_msg.replace_range(pos..pos + VISIBLE_FROM.len(), VISIBLE_TO);
+            search_from = pos + VISIBLE_TO.len();
         }
 
         if can_request_vision {
@@ -1912,7 +1918,7 @@ impl RemoteMultimodalEngine {
                 }
                 // Record this round's URL and action
                 mem.add_visited_url(&url_now);
-                mem.add_action(format!("Round {}: {}", round_idx + 1, &plan.label));
+                mem.add_action(format!("Round {}: {}", round_idx + 1, plan.label));
             }
 
             // Save relevance flag if present
@@ -2333,7 +2339,7 @@ impl RemoteMultimodalEngine {
             #[serde(skip_serializing_if = "Option::is_none")]
             system: Option<String>,
             #[serde(skip_serializing_if = "Option::is_none")]
-            tools: Option<Vec<serde_json::Value>>,
+            tools: Option<&'static [serde_json::Value]>,
             #[serde(skip_serializing_if = "Option::is_none")]
             tool_choice: Option<serde_json::Value>,
         }
@@ -2541,13 +2547,12 @@ impl RemoteMultimodalEngine {
             None
         };
 
+        // Pre-serialized once in a LazyLock — no per-request clone/serialize.
+        // Serde emits `&[Value]` identically to the old `Vec<Value>`, and
+        // `test_all_values_matches_per_request_serialization` (tool_calling.rs)
+        // pins `all_values()` to the previous per-request serialization.
         let tools = if use_tools {
-            Some(
-                ActionToolSchemas::all()
-                    .into_iter()
-                    .filter_map(|tool| serde_json::to_value(tool).ok())
-                    .collect::<Vec<_>>(),
-            )
+            Some(ActionToolSchemas::all_values())
         } else {
             None
         };
@@ -2707,14 +2712,13 @@ impl RemoteMultimodalEngine {
         });
 
         // Try to get extracted field, or fallback to the entire response when in extraction mode.
-        // Treat `extracted: {}` (empty object) the same as missing for recovery purposes.
-        let raw_extracted = parsed.get("extracted").cloned().and_then(|v| {
-            if v.as_object().is_some_and(|o| o.is_empty()) {
-                None // empty object → trigger fallback chain
-            } else {
-                Some(v)
-            }
-        });
+        // Treat `extracted: {}` (empty object) the same as missing for recovery purposes,
+        // so it falls through to the chain below. Filtering before the clone avoids
+        // copying a value we then discard.
+        let raw_extracted = parsed
+            .get("extracted")
+            .filter(|v| !v.as_object().is_some_and(|o| o.is_empty()))
+            .cloned();
 
         let extracted = raw_extracted.or_else(|| {
             // If no explicit "extracted" field but response looks like extracted data
@@ -3277,13 +3281,11 @@ return await s.prompt(msg);
             }
         });
 
-        let raw_extracted = parsed.get("extracted").cloned().and_then(|v| {
-            if v.as_object().is_some_and(|o| o.is_empty()) {
-                None
-            } else {
-                Some(v)
-            }
-        });
+        // Empty object counts as missing; filter before cloning to skip a discarded copy.
+        let raw_extracted = parsed
+            .get("extracted")
+            .filter(|v| !v.as_object().is_some_and(|o| o.is_empty()))
+            .cloned();
 
         let extracted = raw_extracted.or_else(|| {
             if parsed.get("label").is_none()

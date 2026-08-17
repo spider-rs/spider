@@ -89,18 +89,20 @@ impl AutomationMemory {
     /// cap this is a plain insert with no behavior change.
     pub fn set(&mut self, key: impl Into<String>, value: serde_json::Value) {
         let key = key.into();
-        let is_new = !self.store.contains_key(&key);
-        self.store.insert(key.clone(), value);
-        if is_new && self.store.len() > Self::MAX_STORE_ENTRIES {
+        // Evict before inserting a new key at capacity: the incoming key is
+        // not in the store yet, so any existing non-control key is a valid
+        // victim. This avoids cloning the key on every set.
+        if self.store.len() >= Self::MAX_STORE_ENTRIES && !self.store.contains_key(&key) {
             let victim = self
                 .store
                 .keys()
-                .find(|k| *k != &key && k.as_str() != Self::LEVEL_ATTEMPTS_KEY)
+                .find(|k| k.as_str() != Self::LEVEL_ATTEMPTS_KEY)
                 .cloned();
             if let Some(victim) = victim {
                 self.store.remove(&victim);
             }
         }
+        self.store.insert(key, value);
     }
 
     /// Get a value by key.

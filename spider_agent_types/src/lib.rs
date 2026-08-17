@@ -203,10 +203,12 @@ impl PromptUrlGate {
             None => return Some(None), // No map = allow all, no override
         };
 
-        let url_lower = url.to_lowercase();
+        // Lowercase lazily: URLs are usually already lowercase ASCII, in which
+        // case `to_lowercase` would be an identity allocation.
+        let url_lower = lowercase_cow(url);
 
         // Exact match first
-        if let Some(cfg) = map.get(&url_lower) {
+        if let Some(cfg) = map.get(url_lower.as_ref()) {
             return Some(Some(cfg));
         }
 
@@ -218,8 +220,8 @@ impl PromptUrlGate {
         // Path-prefix match
         if self.paths_map {
             for (pattern, cfg) in map.iter() {
-                let pattern_lower = pattern.to_lowercase();
-                if url_lower.starts_with(&pattern_lower) {
+                let pattern_lower = lowercase_cow(pattern);
+                if url_lower.starts_with(pattern_lower.as_ref()) {
                     return Some(Some(cfg));
                 }
             }
@@ -237,6 +239,19 @@ impl PromptUrlGate {
     /// Get the override config for a URL, if any.
     pub fn get_override(&self, url: &str) -> Option<&AutomationConfig> {
         self.match_url(url).flatten()
+    }
+}
+
+/// Lowercase a string without allocating when it is already lowercase ASCII.
+///
+/// Falls back to `to_lowercase` (full Unicode semantics) whenever the input
+/// contains uppercase ASCII or any non-ASCII byte, so the result is always
+/// byte-identical to `s.to_lowercase()`.
+fn lowercase_cow(s: &str) -> std::borrow::Cow<'_, str> {
+    if s.is_ascii() && !s.bytes().any(|b| b.is_ascii_uppercase()) {
+        std::borrow::Cow::Borrowed(s)
+    } else {
+        std::borrow::Cow::Owned(s.to_lowercase())
     }
 }
 
@@ -741,5 +756,30 @@ mod tests {
         assert!(gate.is_allowed("https://example.com/admin"));
         assert!(gate.is_allowed("https://example.com/ADMIN"));
         assert!(gate.is_allowed("https://example.com/Admin/Users"));
+    }
+
+    #[test]
+    fn test_lowercase_cow_matches_to_lowercase() {
+        for s in [
+            "",
+            "already-lowercase",
+            "https://example.com/admin",
+            "MiXeD-CaSe",
+            "ALLCAPS",
+            "with-ünïcode-ÄÖÜ",
+            "İstanbul", // dotted capital I lowercases to multi-byte
+        ] {
+            let cow = lowercase_cow(s);
+            assert_eq!(cow.as_ref(), s.to_lowercase(), "mismatch for {s:?}");
+        }
+        // The common (already-lowercase ASCII) case must not allocate.
+        assert!(matches!(
+            lowercase_cow("https://example.com/a"),
+            std::borrow::Cow::Borrowed(_)
+        ));
+        assert!(matches!(
+            lowercase_cow("Https://example.com/a"),
+            std::borrow::Cow::Owned(_)
+        ));
     }
 }

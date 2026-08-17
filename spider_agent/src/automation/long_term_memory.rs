@@ -587,6 +587,9 @@ impl ExperienceMemory {
         search_text: &str,
     ) -> Option<ExperienceRecord> {
         let search_lower = search_text.to_lowercase();
+        // Build the search word set once — not per record inside the closure.
+        let search_words: std::collections::HashSet<&str> =
+            search_lower.split_whitespace().collect();
         records
             .iter()
             .max_by_key(|r| {
@@ -594,8 +597,6 @@ impl ExperienceMemory {
                 // Simple overlap score: count shared words
                 let record_words: std::collections::HashSet<&str> =
                     record_text.split_whitespace().collect();
-                let search_words: std::collections::HashSet<&str> =
-                    search_lower.split_whitespace().collect();
                 record_words.intersection(&search_words).count()
             })
             .cloned()

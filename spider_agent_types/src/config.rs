@@ -1202,9 +1202,85 @@ impl RemoteMultimodalConfig {
 /// via GitHub Actions to fetch the latest model capabilities from
 /// OpenRouter, LiteLLM, and Chatbot Arena.
 pub use llm_models_spider::{
-    arena_rank, model_profile, supports_pdf, supports_video, supports_vision, ModelCapabilities,
-    ModelInfoEntry, ModelPricing, ModelProfile, ModelRanks, MODEL_INFO,
+    arena_rank, model_profile, supports_video, ModelCapabilities, ModelInfoEntry, ModelPricing,
+    ModelProfile, ModelRanks, MODEL_INFO,
 };
+
+/// Aho-Corasick matcher for current-generation model families the
+/// `llm_models_spider` tables don't know yet (case-insensitive).
+///
+/// The upstream crate's generated MODEL_INFO / VISION_MODELS data lags new
+/// releases (e.g. v0.1.95 has no entries for `claude-opus-5`,
+/// `claude-sonnet-5`, `claude-fable-5`, or `claude-opus-4-8`, and its pattern
+/// fallback only knows `claude-3`/`claude-4`). Without this override,
+/// [`supports_vision`] silently returns `false` for every current Claude
+/// model, which downstream strips screenshots for vision-capable models.
+///
+/// Family-name substrings are version-proof and survive provider prefixes
+/// (`anthropic.claude-opus-5`, `anthropic/claude-sonnet-5`,
+/// `claude-opus-4-5@20251101`). Entries can be dropped once upstream's
+/// generated tables cover the corresponding families.
+static CURRENT_VISION_OVERRIDE: std::sync::LazyLock<aho_corasick::AhoCorasick> =
+    std::sync::LazyLock::new(|| {
+        aho_corasick::AhoCorasick::builder()
+            .ascii_case_insensitive(true)
+            .build([
+                // Anthropic: all current claude-{family} models are vision-capable.
+                // (Legacy non-vision IDs like "claude-2"/"claude-3-sonnet" use the
+                // old "claude-<version>-<family>" order and never match these.)
+                "claude-opus",
+                "claude-sonnet",
+                "claude-haiku",
+                "claude-fable",
+                "claude-mythos",
+                // OpenAI
+                "gpt-5",
+                // AI2 Molmo: a vision-language family upstream 0.1.95
+                // dropped from its generated vision list.
+                "molmo",
+            ])
+            .expect("valid patterns")
+    });
+
+/// Check if a model supports vision/image input.
+///
+/// Delegates to [`llm_models_spider::supports_vision`] (auto-updated model
+/// tables), with a local override for current-generation families the
+/// upstream tables don't cover yet — see [`CURRENT_VISION_OVERRIDE`] for why.
+pub fn supports_vision(model: &str) -> bool {
+    CURRENT_VISION_OVERRIDE.is_match(model) || llm_models_spider::supports_vision(model)
+}
+
+/// Aho-Corasick matcher for current-generation families that accept PDF/file
+/// input but are missing from upstream's MODEL_INFO table (case-insensitive).
+///
+/// Same rationale as [`CURRENT_VISION_OVERRIDE`], restricted to the families
+/// that actually accept PDF input (vision-only families like Molmo are
+/// excluded). Entries can be dropped once upstream catches up.
+static CURRENT_PDF_OVERRIDE: std::sync::LazyLock<aho_corasick::AhoCorasick> =
+    std::sync::LazyLock::new(|| {
+        aho_corasick::AhoCorasick::builder()
+            .ascii_case_insensitive(true)
+            .build([
+                "claude-opus",
+                "claude-sonnet",
+                "claude-haiku",
+                "claude-fable",
+                "claude-mythos",
+                "gpt-5",
+            ])
+            .expect("valid patterns")
+    });
+
+/// Check if a model supports PDF/file input.
+///
+/// Delegates to [`llm_models_spider::supports_pdf`], with a local override for
+/// current-generation families ([`CURRENT_PDF_OVERRIDE`]): upstream resolves
+/// PDF support solely from its MODEL_INFO table, which lags new releases, and
+/// the override families (current Claude models, gpt-5) all accept PDF input.
+pub fn supports_pdf(model: &str) -> bool {
+    CURRENT_PDF_OVERRIDE.is_match(model) || llm_models_spider::supports_pdf(model)
+}
 
 /// Merge a base config with an override config.
 ///
@@ -1602,6 +1678,69 @@ mod tests {
         assert!(supports_vision("GPT-4O"));
         assert!(supports_vision("Claude-3-Sonnet"));
         assert!(supports_vision("QWEN2-VL"));
+    }
+
+    #[test]
+    fn test_supports_vision_current_anthropic_models() {
+        // Current-generation IDs the upstream llm_models_spider tables lag on.
+        for model in [
+            "claude-fable-5",
+            "claude-mythos-5",
+            "claude-opus-5",
+            "claude-opus-4-8",
+            "claude-opus-4-7",
+            "claude-opus-4-6",
+            "claude-sonnet-5",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5",
+            // Provider-prefixed / suffixed forms
+            "anthropic.claude-opus-5",
+            "anthropic/claude-sonnet-5",
+            "claude-opus-4-5@20251101",
+            // Case-insensitive
+            "Claude-Opus-5",
+        ] {
+            assert!(supports_vision(model), "should support vision: {model}");
+        }
+    }
+
+    #[test]
+    fn test_supports_vision_current_openai_models() {
+        assert!(supports_vision("gpt-5"));
+        assert!(supports_vision("gpt-5-mini"));
+        assert!(supports_vision("gpt-4o"));
+
+        // The override must not leak onto non-vision models.
+        assert!(!supports_vision("gpt-3.5-turbo"));
+    }
+
+    #[test]
+    fn test_supports_pdf_current_models() {
+        for model in [
+            "claude-opus-5",
+            "claude-sonnet-5",
+            "claude-haiku-4-5",
+            "claude-fable-5",
+            "anthropic/claude-sonnet-5",
+            "gpt-5",
+        ] {
+            assert!(supports_pdf(model), "should support pdf: {model}");
+        }
+        assert!(!supports_pdf("gpt-3.5-turbo"));
+        assert!(!supports_pdf("llama-3-70b-instruct"));
+        // Vision-only override families must not leak into PDF support.
+        assert!(!supports_pdf("molmo-2-8b"));
+    }
+
+    #[test]
+    fn test_vision_override_does_not_false_positive() {
+        // Legacy non-vision Claude IDs use "claude-<version>-<family>" order
+        // and must stay non-vision.
+        assert!(!supports_vision("claude-2"));
+        assert!(!supports_vision("claude-2.1"));
+        assert!(!supports_vision("claude-instant-1.2"));
+        // Unrelated models
+        assert!(!supports_vision("mistral-7b-instruct"));
     }
 
     #[test]

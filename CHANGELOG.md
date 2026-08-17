@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v2.53.5
+
+1. fix(agent_types): `ToolCallingMode::Auto` matched no current Claude model — it tested for `claude-3`/`claude-4`, which never match the hyphenated point-release IDs (`claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `claude-haiku-4-5`). Auto silently fell back to free-form JSON parsing on every current model. Now matched on version-proof family names, plus `gpt-5` and the o-series.
+1. fix(agent_types): `supports_vision`/`supports_pdf` returned false for the current Claude families because the upstream `llm_models_spider` table lags new releases — screenshots were being silently filtered out. Added a local override layer that still delegates upstream for everything else.
+1. perf(agent_types): cache the 41 action tool schemas in a `LazyLock` instead of rebuilding the `json!` trees per request; new zero-copy `all_static`/`common_static`/`all_values` accessors.
+1. perf(agent): single-pass Aho-Corasick prompt classifier in the model router (1 alloc + ~19 substring scans -> 1 scan, per round).
+1. perf(agent): `remove_tags` no longer lowercases and rebuilds the whole document per tag (~17 full-document allocations -> 1-3, per page).
+1. perf(agent_html): parse the 19 cleaning selectors once into statics instead of re-parsing per page; byte-identical output.
+1. perf(agent_types): drop per-round `format!` allocations and a retained full-page-HTML clone from the page-diff path.
+1. chore: fix clippy warnings and formatting across the agent crates.
+
 ## v2.47.93
 
 1. feat(cli): add `--return-format` flag for content transformation (markdown, commonmark, text, xml)

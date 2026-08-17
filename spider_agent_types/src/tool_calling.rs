@@ -4,8 +4,67 @@
 //! enabling structured tool calling instead of free-form JSON parsing.
 //! This can reduce parse errors by ~30%.
 
+use aho_corasick::AhoCorasick;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::sync::LazyLock;
+
+/// Aho-Corasick pattern matcher for model families known to support tool
+/// calling well (case-insensitive). One pass over the model name replaces
+/// a lowercase allocation plus a chain of substring scans.
+///
+/// Anthropic entries match on the *family* name (`claude-opus`, `claude-sonnet`,
+/// ...) rather than version numbers, so new point releases (`claude-opus-4-8`,
+/// `claude-opus-5`) and provider-prefixed forms (`anthropic.claude-opus-5`,
+/// `anthropic/claude-sonnet-5`, `claude-opus-4-5@20251101`) all match without
+/// updates. The legacy `claude-3`/`claude-4` patterns remain for old dated IDs.
+/// OpenAI o-series models are handled separately (see [`is_openai_o_series`])
+/// because bare `o1`/`o3`/`o4` substrings would false-positive.
+static TOOL_CAPABLE_MODEL_MATCHER: LazyLock<AhoCorasick> = LazyLock::new(|| {
+    AhoCorasick::builder()
+        .ascii_case_insensitive(true)
+        .build([
+            // OpenAI
+            "gpt-4",
+            "gpt-3.5-turbo",
+            "gpt-5",
+            // Anthropic (family names are version-proof)
+            "claude-3",
+            "claude-4",
+            "claude-opus",
+            "claude-sonnet",
+            "claude-haiku",
+            "claude-fable",
+            "claude-mythos",
+            // Google
+            "gemini",
+            // Other providers with solid tool-calling support
+            "mistral",
+            "llama-3",
+            "llama-4",
+            "qwen",
+            "deepseek",
+            "grok",
+            "command-r",
+        ])
+        .expect("valid patterns")
+});
+
+/// Check for OpenAI o-series reasoning models (`o1`/`o3`/`o4` families).
+///
+/// Matches the final path segment exactly (`o3`, `openai/o3`) or with a
+/// version/variant suffix (`o1-mini`, `o4-mini-2025-04-16`), so unrelated
+/// names that merely contain `o1`/`o3`/`o4` as a substring (e.g.
+/// `phi-3-medium-4k`, `yolo1-8b`) never false-positive.
+fn is_openai_o_series(model_name: &str) -> bool {
+    // Only consider the final path segment (e.g. "openai/o3-mini").
+    let seg = model_name.rsplit('/').next().unwrap_or(model_name);
+    let b = seg.as_bytes();
+    if b.len() < 2 || !b[0].eq_ignore_ascii_case(&b'o') {
+        return false;
+    }
+    matches!(b[1], b'1' | b'3' | b'4') && (b.len() == 2 || matches!(b[2], b'-' | b':' | b'@'))
+}
 
 /// Mode for how actions should be formatted in LLM requests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -27,14 +86,9 @@ impl ToolCallingMode {
             ToolCallingMode::JsonObject => false,
             ToolCallingMode::ToolCalling => true,
             ToolCallingMode::Auto => {
-                // Models known to support tool calling well
-                let lower = model_name.to_lowercase();
-                lower.contains("gpt-4")
-                    || lower.contains("gpt-3.5-turbo")
-                    || lower.contains("claude-3")
-                    || lower.contains("claude-4")
-                    || lower.contains("gemini")
-                    || lower.contains("mistral")
+                // Models known to support tool calling well (single
+                // case-insensitive Aho-Corasick pass, no allocation).
+                TOOL_CAPABLE_MODEL_MATCHER.is_match(model_name) || is_openai_o_series(model_name)
             }
         }
     }
@@ -224,9 +278,60 @@ impl FunctionCall {
 /// Generator for automation action tool schemas.
 pub struct ActionToolSchemas;
 
+/// All automation tool definitions, built once (the schema set is static).
+static ALL_TOOLS: LazyLock<Vec<ToolDefinition>> = LazyLock::new(ActionToolSchemas::build_all);
+
+/// Common-subset tool definitions, built once.
+static COMMON_TOOLS: LazyLock<Vec<ToolDefinition>> = LazyLock::new(ActionToolSchemas::build_common);
+
+/// All tool definitions pre-serialized to `serde_json::Value`, built once.
+///
+/// Request builders that embed the tool list in an API payload can reference
+/// these directly instead of re-serializing every definition per request.
+static ALL_TOOL_VALUES: LazyLock<Vec<Value>> = LazyLock::new(|| {
+    ALL_TOOLS
+        .iter()
+        .filter_map(|tool| serde_json::to_value(tool).ok())
+        .collect()
+});
+
 impl ActionToolSchemas {
     /// Get all tool definitions for automation actions.
+    ///
+    /// Definitions are built once and cached; this returns a clone. Use
+    /// [`ActionToolSchemas::all_static`] to borrow without cloning.
     pub fn all() -> Vec<ToolDefinition> {
+        ALL_TOOLS.clone()
+    }
+
+    /// Borrow the cached tool definitions without cloning.
+    pub fn all_static() -> &'static [ToolDefinition] {
+        &ALL_TOOLS
+    }
+
+    /// Borrow the cached tool definitions pre-serialized as JSON values.
+    ///
+    /// Avoids per-request `serde_json::to_value` calls when building API
+    /// payloads.
+    pub fn all_values() -> &'static [Value] {
+        &ALL_TOOL_VALUES
+    }
+
+    /// Get a subset of commonly used tools.
+    ///
+    /// Definitions are built once and cached; this returns a clone. Use
+    /// [`ActionToolSchemas::common_static`] to borrow without cloning.
+    pub fn common() -> Vec<ToolDefinition> {
+        COMMON_TOOLS.clone()
+    }
+
+    /// Borrow the cached common-subset tool definitions without cloning.
+    pub fn common_static() -> &'static [ToolDefinition] {
+        &COMMON_TOOLS
+    }
+
+    /// Build all tool definitions (called once by the cache).
+    fn build_all() -> Vec<ToolDefinition> {
         vec![
             // Click actions
             Self::click(),
@@ -282,8 +387,8 @@ impl ActionToolSchemas {
         ]
     }
 
-    /// Get a subset of commonly used tools.
-    pub fn common() -> Vec<ToolDefinition> {
+    /// Build the common-subset tool definitions (called once by the cache).
+    fn build_common() -> Vec<ToolDefinition> {
         vec![
             Self::click(),
             Self::click_point(),
@@ -986,6 +1091,77 @@ mod tests {
     }
 
     #[test]
+    fn test_auto_mode_detects_current_anthropic_models() {
+        let auto = ToolCallingMode::Auto;
+        for model in [
+            "claude-fable-5",
+            "claude-mythos-5",
+            "claude-opus-5",
+            "claude-opus-4-8",
+            "claude-opus-4-7",
+            "claude-opus-4-6",
+            "claude-sonnet-5",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5",
+            // Provider-prefixed / suffixed forms seen in the wild
+            "anthropic.claude-opus-5",
+            "anthropic/claude-sonnet-5",
+            "claude-opus-4-5@20251101",
+            // Legacy dated IDs must keep matching
+            "claude-3-5-sonnet-20241022",
+        ] {
+            assert!(auto.should_use_tools(model), "should match: {model}");
+        }
+    }
+
+    #[test]
+    fn test_auto_mode_detects_current_openai_models() {
+        let auto = ToolCallingMode::Auto;
+        for model in [
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-4o",
+            "o1",
+            "o1-mini",
+            "o3",
+            "o3-mini-2025-01-31",
+            "o4-mini",
+            "openai/o3",
+            "openai/o1:free",
+        ] {
+            assert!(auto.should_use_tools(model), "should match: {model}");
+        }
+    }
+
+    #[test]
+    fn test_auto_mode_case_insensitive_no_alloc_path() {
+        let auto = ToolCallingMode::Auto;
+        assert!(auto.should_use_tools("GPT-4-Turbo"));
+        assert!(auto.should_use_tools("Claude-Opus-5"));
+        assert!(auto.should_use_tools("GEMINI-2.0-FLASH"));
+        assert!(auto.should_use_tools("O3-Mini"));
+    }
+
+    #[test]
+    fn test_auto_mode_negative_cases() {
+        let auto = ToolCallingMode::Auto;
+        for model in [
+            // o-series substrings must not false-positive
+            "phi-3-medium-4k",
+            "mytho-13b",
+            "yolo1-8b",
+            "turbo3-instruct",
+            // Legacy / unknown models
+            "llama-2-70b",
+            "claude-2.1",
+            "gpt2-xl",
+            "",
+        ] {
+            assert!(!auto.should_use_tools(model), "should NOT match: {model}");
+        }
+    }
+
+    #[test]
     fn test_tool_definition_creation() {
         let tool = ToolDefinition::function(
             "Click",
@@ -1090,6 +1266,40 @@ mod tests {
         let common = ActionToolSchemas::common();
         assert!(common.len() < ActionToolSchemas::all().len());
         assert!(common.len() >= 5); // Should have at least the basics
+    }
+
+    #[test]
+    fn test_cached_schemas_match_fresh_builds() {
+        // The cached (LazyLock) definitions must be identical to freshly
+        // built ones, compared through their serialized JSON.
+        let cached = serde_json::to_value(ActionToolSchemas::all()).unwrap();
+        let fresh = serde_json::to_value(ActionToolSchemas::build_all()).unwrap();
+        assert_eq!(cached, fresh);
+
+        let cached = serde_json::to_value(ActionToolSchemas::common()).unwrap();
+        let fresh = serde_json::to_value(ActionToolSchemas::build_common()).unwrap();
+        assert_eq!(cached, fresh);
+
+        // Static accessors expose the same definitions.
+        assert_eq!(
+            ActionToolSchemas::all_static().len(),
+            ActionToolSchemas::all().len()
+        );
+        assert_eq!(
+            ActionToolSchemas::common_static().len(),
+            ActionToolSchemas::common().len()
+        );
+    }
+
+    #[test]
+    fn test_all_values_matches_per_request_serialization() {
+        // Pre-serialized values must equal what a per-request
+        // `serde_json::to_value` pass over `all()` would produce.
+        let per_request: Vec<Value> = ActionToolSchemas::all()
+            .into_iter()
+            .filter_map(|tool| serde_json::to_value(tool).ok())
+            .collect();
+        assert_eq!(ActionToolSchemas::all_values(), per_request.as_slice());
     }
 
     #[test]

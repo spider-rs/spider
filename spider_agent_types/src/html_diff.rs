@@ -40,8 +40,6 @@ impl HtmlDiffMode {
 pub struct PageStateDiff {
     /// Hashes of elements by their pseudo-selector/path.
     element_hashes: HashMap<String, u64>,
-    /// Previous full HTML (for diff computation).
-    previous_html: Option<String>,
     /// Previous URL.
     previous_url: Option<String>,
     /// Previous title.
@@ -61,7 +59,6 @@ impl PageStateDiff {
     pub fn new() -> Self {
         Self {
             element_hashes: HashMap::new(),
-            previous_html: None,
             previous_url: None,
             previous_title: None,
             round: 0,
@@ -71,7 +68,6 @@ impl PageStateDiff {
     /// Reset the tracker to initial state.
     pub fn reset(&mut self) {
         self.element_hashes.clear();
-        self.previous_html = None;
         self.previous_url = None;
         self.previous_title = None;
         self.round = 0;
@@ -92,7 +88,6 @@ impl PageStateDiff {
 
         // Update stored state
         self.element_hashes = new_hashes;
-        self.previous_html = Some(html.to_string());
         self.previous_url = Some(url.to_string());
         self.previous_title = Some(title.to_string());
         self.round += 1;
@@ -173,33 +168,43 @@ impl PageStateDiff {
 
     /// Compute hashes for significant elements in HTML.
     fn compute_element_hashes(html: &str) -> HashMap<String, u64> {
-        let mut hashes = HashMap::new();
+        // 8 section tags + up to 101 entries per element type below.
+        let mut hashes = HashMap::with_capacity(64);
 
         // Use a simple approach: hash content by tag type and position
         // This is a simplified version - a full implementation would parse the DOM
 
-        // Hash major sections
-        for tag in &[
-            "body", "main", "article", "section", "nav", "header", "footer", "form",
+        // Hash major sections (open/close patterns precomputed as literals so
+        // no per-call format! allocations are needed)
+        for (tag, open, close) in &[
+            ("body", "<body", "</body>"),
+            ("main", "<main", "</main>"),
+            ("article", "<article", "</article>"),
+            ("section", "<section", "</section>"),
+            ("nav", "<nav", "</nav>"),
+            ("header", "<header", "</header>"),
+            ("footer", "<footer", "</footer>"),
+            ("form", "<form", "</form>"),
         ] {
-            if let Some((start, end)) = Self::find_tag_bounds(html, tag) {
+            if let Some((start, end)) = Self::find_tag_bounds(html, open, close) {
                 let content = &html[start..end];
                 let hash = fnv1a64(content.as_bytes());
                 hashes.insert(tag.to_string(), hash);
             }
         }
 
-        // Hash individual elements by index within their type
-        for (tag, prefix) in &[
-            ("input", "input"),
-            ("button", "btn"),
-            ("a", "link"),
-            ("div", "div"),
-            ("p", "para"),
+        // Hash individual elements by index within their type (open patterns
+        // as literals: the old per-iteration format! allocated on every find)
+        for (open, prefix) in &[
+            ("<input", "input"),
+            ("<button", "btn"),
+            ("<a", "link"),
+            ("<div", "div"),
+            ("<p", "para"),
         ] {
             let mut idx = 0;
             let mut search_start = 0;
-            while let Some(pos) = html[search_start..].find(&format!("<{}", tag)) {
+            while let Some(pos) = html[search_start..].find(open) {
                 let abs_pos = search_start + pos;
                 if let Some(end) = html[abs_pos..].find('>') {
                     let tag_content = &html[abs_pos..abs_pos + end + 1];
@@ -219,13 +224,11 @@ impl PageStateDiff {
         hashes
     }
 
-    /// Find the bounds of a tag in HTML.
-    fn find_tag_bounds(html: &str, tag: &str) -> Option<(usize, usize)> {
-        let open = format!("<{}", tag);
-        let close = format!("</{}>", tag);
-
-        let start = html.find(&open)?;
-        let end = html.rfind(&close).map(|i| i + close.len())?;
+    /// Find the bounds of a tag in HTML given its open/close patterns
+    /// (e.g. `"<body"` / `"</body>"`).
+    fn find_tag_bounds(html: &str, open: &str, close: &str) -> Option<(usize, usize)> {
+        let start = html.find(open)?;
+        let end = html.rfind(close).map(|i| i + close.len())?;
 
         if end > start {
             Some((start, end))
@@ -254,12 +257,13 @@ impl PageStateDiff {
         let mut current_idx = 0;
         let mut search_start = 0;
         let open_tag = format!("<{}", tag);
+        let close_tag = format!("</{}>", tag);
 
         while let Some(pos) = html[search_start..].find(&open_tag) {
             let abs_pos = search_start + pos;
             if idx.is_none_or(|i| i == current_idx) {
                 // Find the end of this element
-                if let Some(end_pos) = html[abs_pos..].find(&format!("</{}>", tag)) {
+                if let Some(end_pos) = html[abs_pos..].find(&close_tag) {
                     let content = &html[abs_pos..abs_pos + end_pos + tag.len() + 3];
                     // Truncate if too long
                     if content.len() > 500 {
@@ -357,6 +361,8 @@ impl HtmlDiffResult {
 
     /// Build a condensed context string for the LLM.
     fn build_condensed_context(&self, url: &str, title: &str) -> String {
+        use std::fmt::Write;
+
         let mut out = String::with_capacity(2048);
 
         out.push_str("[HTML DIFF - Changes from previous round]\n\n");
@@ -376,7 +382,7 @@ impl HtmlDiffResult {
         if !self.changed.is_empty() {
             out.push_str("\nCHANGED ELEMENTS:\n");
             for change in &self.changed {
-                out.push_str(&format!("- {} ({:?}):\n", change.path, change.change_type));
+                let _ = writeln!(out, "- {} ({:?}):", change.path, change.change_type);
                 if let Some(content) = &change.content {
                     out.push_str(content);
                     out.push('\n');
@@ -403,10 +409,7 @@ impl HtmlDiffResult {
         }
 
         if self.unchanged_count > 0 {
-            out.push_str(&format!(
-                "\n[{} elements unchanged]\n",
-                self.unchanged_count
-            ));
+            let _ = writeln!(out, "\n[{} elements unchanged]", self.unchanged_count);
         }
 
         out

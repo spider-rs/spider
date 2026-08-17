@@ -14,7 +14,79 @@
 //! Users can also define custom rank/priority overrides.
 
 use super::{CostTier, ModelPolicy};
+use aho_corasick::AhoCorasick;
+use std::sync::LazyLock;
 use std::time::Duration;
+
+/// Keyword groups for prompt classification, in [`PromptSignals`] field order:
+/// reasoning, code generation, structured output, multi-step, vision, audio.
+///
+/// Kept adjacent to [`PROMPT_KEYWORD_MATCHER`] (which flattens this table at
+/// build time) so the pattern list and the group mapping cannot drift apart.
+const PROMPT_KEYWORD_GROUPS: [&[&str]; 6] = [
+    // requires_reasoning
+    &["analyze", "compare", "explain", "why"],
+    // requires_code_generation
+    &["code", "implement", "function", "script"],
+    // requires_structured_output
+    &["json", "extract", "list"],
+    // multi_step
+    &["then", "step", "first", "next"],
+    // requires_vision
+    &["screenshot", "image", "picture", "visual"],
+    // requires_audio
+    &["audio", "voice", "speech"],
+];
+
+/// Aho-Corasick matcher over every pattern in [`PROMPT_KEYWORD_GROUPS`],
+/// flattened in group order (case-insensitive).
+///
+/// One pass over the prompt replaces ~20 separate `.contains()` scans plus a
+/// `to_lowercase()` allocation. All patterns are pure-ASCII, so ASCII
+/// case-insensitive matching on the original prompt is equivalent to matching
+/// against a Unicode-lowercased copy.
+static PROMPT_KEYWORD_MATCHER: LazyLock<AhoCorasick> = LazyLock::new(|| {
+    AhoCorasick::builder()
+        .ascii_case_insensitive(true)
+        .build(
+            PROMPT_KEYWORD_GROUPS
+                .iter()
+                .flat_map(|group| group.iter().copied()),
+        )
+        .expect("valid patterns")
+});
+
+/// Map a flattened pattern index from [`PROMPT_KEYWORD_MATCHER`] back to the
+/// index of its group in [`PROMPT_KEYWORD_GROUPS`].
+#[inline]
+fn prompt_keyword_group(pattern_idx: usize) -> usize {
+    let mut offset = 0;
+    for (group_idx, group) in PROMPT_KEYWORD_GROUPS.iter().enumerate() {
+        offset += group.len();
+        if pattern_idx < offset {
+            return group_idx;
+        }
+    }
+    // Unreachable: the matcher is built from exactly these groups.
+    PROMPT_KEYWORD_GROUPS.len() - 1
+}
+
+/// Which keyword groups fired for a prompt, in [`PROMPT_KEYWORD_GROUPS`] order.
+type PromptSignals = [bool; PROMPT_KEYWORD_GROUPS.len()];
+
+/// Detect all keyword groups in `prompt` with a single case-insensitive
+/// Aho-Corasick pass (overlapping, so nothing a plain `.contains()` chain
+/// would find is ever skipped).
+fn detect_prompt_signals(prompt: &str) -> PromptSignals {
+    let mut signals = PromptSignals::default();
+    for mat in PROMPT_KEYWORD_MATCHER.find_overlapping_iter(prompt) {
+        signals[prompt_keyword_group(mat.pattern().as_usize())] = true;
+        if signals.iter().all(|&s| s) {
+            break;
+        }
+    }
+    signals
+}
 
 /// Smart router for selecting optimal models.
 ///
@@ -677,34 +749,20 @@ impl TaskAnalysis {
     /// Create analysis from a prompt.
     pub fn from_prompt(prompt: &str) -> Self {
         let estimated_tokens = estimate_tokens(prompt);
-        let lower = prompt.to_lowercase();
+        // Single case-insensitive Aho-Corasick pass instead of ~20 `.contains()`
+        // scans over a lowercased copy of the prompt.
+        let signals = detect_prompt_signals(prompt);
 
         Self {
             estimated_tokens,
-            requires_reasoning: lower.contains("analyze")
-                || lower.contains("compare")
-                || lower.contains("explain")
-                || lower.contains("why"),
-            requires_code_generation: lower.contains("code")
-                || lower.contains("implement")
-                || lower.contains("function")
-                || lower.contains("script"),
-            requires_structured_output: lower.contains("json")
-                || lower.contains("extract")
-                || lower.contains("list"),
-            multi_step: lower.contains("then")
-                || lower.contains("step")
-                || lower.contains("first")
-                || lower.contains("next"),
+            requires_reasoning: signals[0],
+            requires_code_generation: signals[1],
+            requires_structured_output: signals[2],
+            multi_step: signals[3],
             max_latency: None,
             category: TaskCategory::General,
-            requires_vision: lower.contains("screenshot")
-                || lower.contains("image")
-                || lower.contains("picture")
-                || lower.contains("visual"),
-            requires_audio: lower.contains("audio")
-                || lower.contains("voice")
-                || lower.contains("speech"),
+            requires_vision: signals[4],
+            requires_audio: signals[5],
         }
     }
 
@@ -1750,6 +1808,101 @@ mod tests {
         assert!(!analysis.requires_reasoning);
         assert!(!analysis.multi_step);
         assert!(analysis.requires_structured_output);
+    }
+
+    // ── Prompt keyword matcher (Aho-Corasick) ──────────────────────────
+
+    #[test]
+    fn test_prompt_matcher_and_groups_stay_in_sync() {
+        // The flattened matcher must contain exactly the patterns from
+        // PROMPT_KEYWORD_GROUPS, in group order.
+        let flattened: Vec<&str> = PROMPT_KEYWORD_GROUPS
+            .iter()
+            .flat_map(|g| g.iter().copied())
+            .collect();
+        assert_eq!(
+            PROMPT_KEYWORD_MATCHER.patterns_len(),
+            flattened.len(),
+            "matcher pattern count must match flattened group table"
+        );
+        // Every pattern index must map back to the group that contains it.
+        let mut idx = 0;
+        for (group_idx, group) in PROMPT_KEYWORD_GROUPS.iter().enumerate() {
+            for pat in group.iter() {
+                assert_eq!(
+                    prompt_keyword_group(idx),
+                    group_idx,
+                    "pattern '{pat}' (index {idx}) must map to group {group_idx}"
+                );
+                idx += 1;
+            }
+        }
+        // PromptSignals width must match the group count.
+        assert_eq!(PromptSignals::default().len(), PROMPT_KEYWORD_GROUPS.len());
+    }
+
+    /// Reference implementation: the original lowercase + `.contains()` chain.
+    fn reference_signals(prompt: &str) -> [bool; 6] {
+        let lower = prompt.to_lowercase();
+        let hit = |pats: &[&str]| pats.iter().any(|p| lower.contains(p));
+        [
+            hit(&["analyze", "compare", "explain", "why"]),
+            hit(&["code", "implement", "function", "script"]),
+            hit(&["json", "extract", "list"]),
+            hit(&["then", "step", "first", "next"]),
+            hit(&["screenshot", "image", "picture", "visual"]),
+            hit(&["audio", "voice", "speech"]),
+        ]
+    }
+
+    #[test]
+    fn test_prompt_signals_match_reference_contains_chain() {
+        let cases = [
+            // Positive, single group
+            "please analyze this page",
+            "EXPLAIN the results",
+            // Mixed case
+            "Implement a FUNCTION that returns JSON",
+            "ScreenShot the page and LIST the items",
+            // Negative
+            "hello world",
+            "",
+            "click the button",
+            // Keywords embedded inside larger words (contains semantics)
+            "functionality and scripting", // code group via substring
+            "listen to nextdoor",          // structured + multi_step via substring
+            // Overlapping occurrences that a non-overlapping scan could miss:
+            // "list" (0..4) overlaps "then" (3..7)
+            "listhen",
+            // All groups at once
+            "analyze code json then screenshot audio",
+            // Unicode content
+            "\u{4f60}\u{597d} explain \u{65e5}\u{672c}\u{8a9e} image",
+        ];
+        for prompt in cases {
+            assert_eq!(
+                detect_prompt_signals(prompt),
+                reference_signals(prompt),
+                "signal mismatch for prompt {prompt:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_prompt_signals_populate_task_analysis_fields() {
+        // Each group must still drive the same TaskAnalysis field as before.
+        let a = TaskAnalysis::from_prompt("compare these");
+        assert!(a.requires_reasoning && !a.requires_code_generation);
+        let a = TaskAnalysis::from_prompt("write a script");
+        assert!(a.requires_code_generation && !a.requires_reasoning);
+        let a = TaskAnalysis::from_prompt("extract the data");
+        assert!(a.requires_structured_output);
+        let a = TaskAnalysis::from_prompt("first do this");
+        assert!(a.multi_step);
+        let a = TaskAnalysis::from_prompt("describe the picture");
+        assert!(a.requires_vision && !a.requires_audio);
+        let a = TaskAnalysis::from_prompt("transcribe the voice memo");
+        assert!(a.requires_audio && !a.requires_vision);
     }
 
     #[test]

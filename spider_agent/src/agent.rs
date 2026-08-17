@@ -1023,41 +1023,87 @@ impl Agent {
     }
 }
 
+/// Tags that [`remove_tags`] can strip, in a fixed lookup order.
+const STRIPPABLE_TAGS: [&str; 8] = [
+    "script", "style", "noscript", "svg", "canvas", "video", "audio", "iframe",
+];
+
+/// Build a single-pattern, ASCII case-insensitive matcher.
+fn tag_matcher(pattern: &str) -> aho_corasick::AhoCorasick {
+    aho_corasick::AhoCorasick::builder()
+        .ascii_case_insensitive(true)
+        .build([pattern])
+        .expect("valid pattern")
+}
+
+/// Pre-built `<tag` / `</tag>` matchers for every strippable tag.
+///
+/// Matching case-insensitively on the original bytes replaces the full-document
+/// `to_ascii_lowercase()` allocation each tag pass previously required.
+static TAG_MATCHERS: std::sync::LazyLock<
+    [(&str, aho_corasick::AhoCorasick, aho_corasick::AhoCorasick); STRIPPABLE_TAGS.len()],
+> = std::sync::LazyLock::new(|| {
+    STRIPPABLE_TAGS.map(|tag| {
+        (
+            tag,
+            tag_matcher(&format!("<{tag}")),
+            tag_matcher(&format!("</{tag}>")),
+        )
+    })
+});
+
 /// Remove specified HTML tags (and their content) from HTML.
 ///
 /// Single-pass per tag — avoids O(n²) from repeated `find()` + concatenation.
+/// Tags absent from the document cost one scan and no rebuild.
 fn remove_tags(html: &str, tags: &[&str]) -> String {
-    let mut result = html.to_string();
+    let mut result = std::borrow::Cow::Borrowed(html);
     for tag in tags {
-        let open = format!("<{}", tag);
-        let close = format!("</{}>", tag);
-        let mut out = String::with_capacity(result.len());
-        // ASCII-lowercase preserves byte length 1:1, so offsets computed on
-        // `lower` map exactly onto `result`. `to_lowercase()` can change byte
-        // length (e.g. 'İ' -> 2 bytes -> 3), desyncing the offsets and panicking
-        // on the `result[..]` slices below. Tag names are ASCII, so this is
-        // equivalent for matching.
-        let lower = result.to_ascii_lowercase();
+        // Case-insensitive matchers make offsets valid on the original bytes
+        // directly (per-tag `to_ascii_lowercase()` copies desync on nothing
+        // and are pure allocation overhead). Tag names are ASCII, so ASCII
+        // case-insensitivity is equivalent to the lowercased-haystack search.
+        let prebuilt = TAG_MATCHERS.iter().find(|(t, _, _)| t == tag);
+        let adhoc;
+        let (open, close) = match prebuilt {
+            Some((_, open, close)) => (open, close),
+            None => {
+                adhoc = (
+                    tag_matcher(&format!("<{tag}")),
+                    tag_matcher(&format!("</{tag}>")),
+                );
+                (&adhoc.0, &adhoc.1)
+            }
+        };
+
+        let cur: &str = &result;
+        // Tag not present — skip the rebuild entirely.
+        let Some(first) = open.find(cur) else {
+            continue;
+        };
+
+        let mut out = String::with_capacity(cur.len());
         let mut pos = 0;
-        while pos < result.len() {
-            if let Some(rel_start) = lower[pos..].find(&open) {
-                let start = pos + rel_start;
-                out.push_str(&result[pos..start]);
-                if let Some(rel_end) = lower[start..].find(&close) {
-                    pos = start + rel_end + close.len();
+        let mut next_start = Some(first.start());
+        while pos < cur.len() {
+            if let Some(start) = next_start {
+                out.push_str(&cur[pos..start]);
+                if let Some(c) = close.find(&cur[start..]) {
+                    pos = start + c.end();
                 } else {
                     // No closing tag — keep remaining text as-is
-                    out.push_str(&result[start..]);
-                    pos = result.len();
+                    out.push_str(&cur[start..]);
+                    pos = cur.len();
                 }
+                next_start = open.find(&cur[pos..]).map(|m| pos + m.start());
             } else {
-                out.push_str(&result[pos..]);
+                out.push_str(&cur[pos..]);
                 break;
             }
         }
-        result = out;
+        result = std::borrow::Cow::Owned(out);
     }
-    result
+    result.into_owned()
 }
 
 /// Result from fetching a URL.
@@ -1653,5 +1699,80 @@ mod tests {
         // Both sets of tools registered.
         assert!(agent.has_custom_tool("spider_cloud_crawl"));
         assert!(agent.has_custom_tool("spider_browser_navigate"));
+    }
+
+    /// Verbatim copy of the pre-Aho-Corasick `remove_tags` — the byte-identity
+    /// oracle for the optimized implementation.
+    fn remove_tags_reference(html: &str, tags: &[&str]) -> String {
+        let mut result = html.to_string();
+        for tag in tags {
+            let open = format!("<{}", tag);
+            let close = format!("</{}>", tag);
+            let mut out = String::with_capacity(result.len());
+            let lower = result.to_ascii_lowercase();
+            let mut pos = 0;
+            while pos < result.len() {
+                if let Some(rel_start) = lower[pos..].find(&open) {
+                    let start = pos + rel_start;
+                    out.push_str(&result[pos..start]);
+                    if let Some(rel_end) = lower[start..].find(&close) {
+                        pos = start + rel_end + close.len();
+                    } else {
+                        out.push_str(&result[start..]);
+                        pos = result.len();
+                    }
+                } else {
+                    out.push_str(&result[pos..]);
+                    break;
+                }
+            }
+            result = out;
+        }
+        result
+    }
+
+    #[test]
+    fn remove_tags_matches_reference_byte_for_byte() {
+        let inputs = [
+            "",
+            "plain text with no tags at all",
+            "<p>keep</p><script>drop()</script><p>keep2</p>",
+            "<SCRIPT src=x>UP</SCRIPT><Style>.a{}</Style><p>ok</p>",
+            "<script>no close tag here",
+            "<div><script>a</script><style>b</style><noscript>c</noscript></div>",
+            "<svg><circle/></svg><canvas></canvas><video src=v></video><audio></audio>",
+            "<iframe src=f></iframe>tail",
+            "<script>first</script>mid<script>second</script>",
+            "<scriptx>prefix-match removes to close</script><p>after</p>",
+            "text<style>s1<script>nested</script>s2</style>done",
+            "unicode é–中<script>x</script>文ü tail",
+            "<script>unterminated<style>both</style>",
+            "</script>orphan close<p>x</p>",
+        ];
+        let tag_sets: [&[&str]; 3] = [
+            &["script"],
+            &["script", "style", "noscript"],
+            &[
+                "script", "style", "noscript", "svg", "canvas", "video", "audio", "iframe",
+            ],
+        ];
+        for html in inputs {
+            for tags in tag_sets {
+                assert_eq!(
+                    remove_tags(html, tags),
+                    remove_tags_reference(html, tags),
+                    "divergence for {html:?} with tags {tags:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn remove_tags_handles_unknown_tag_fallback() {
+        // Not in STRIPPABLE_TAGS — exercises the ad-hoc matcher path.
+        assert_eq!(
+            remove_tags("<marquee>old</marquee><p>x</p>", &["marquee"]),
+            remove_tags_reference("<marquee>old</marquee><p>x</p>", &["marquee"])
+        );
     }
 }
