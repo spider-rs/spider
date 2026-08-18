@@ -310,6 +310,25 @@ pub fn truncate_utf8_tail(s: &str, max_bytes: usize) -> String {
     out
 }
 
+/// Take the first `max_bytes` of a UTF-8 string without splitting code points.
+///
+/// Borrows the input — no allocation — and is the head-side counterpart to
+/// [`truncate_utf8_tail`]. Use it for log previews and short summaries instead
+/// of `&s[..n]`, which panics whenever `n` lands inside a multi-byte character
+/// (page titles with emoji or CJK text hit that constantly).
+pub fn truncate_utf8_head(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+
+    &s[..end]
+}
+
 /// FNV-1a 64-bit hash function for cheap content hashing.
 ///
 /// Processes 8 bytes at a time for long inputs, matching the scalar result
@@ -374,6 +393,30 @@ mod tests {
         let s = "Some text before {\"key\": \"value\"} and after";
         let json = extract_last_json_object(s);
         assert_eq!(json, Some("{\"key\": \"value\"}"));
+    }
+
+    #[test]
+    fn test_truncate_utf8_head() {
+        let s = "Hello, World!";
+        assert_eq!(truncate_utf8_head(s, 100), s);
+        assert_eq!(truncate_utf8_head(s, 5), "Hello");
+
+        // A cut landing inside a multi-byte char must back off to the boundary,
+        // never panic.
+        let emoji = "ab🎉cd";
+        assert_eq!(truncate_utf8_head(emoji, 3), "ab");
+        assert_eq!(truncate_utf8_head(emoji, 4), "ab");
+        assert_eq!(truncate_utf8_head(emoji, 6), "ab🎉");
+
+        // Every byte offset of a fully multi-byte string is safe.
+        let cjk = "日本語テキスト";
+        for n in 0..=cjk.len() {
+            let out = truncate_utf8_head(cjk, n);
+            assert!(out.len() <= n);
+            assert!(cjk.starts_with(out));
+        }
+
+        assert_eq!(truncate_utf8_head("🎉", 0), "");
     }
 
     #[test]

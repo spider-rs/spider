@@ -86,7 +86,7 @@ pub use content::ContentAnalysis;
 pub use helpers::{
     extract_assistant_content, extract_last_code_block, extract_last_json_array,
     extract_last_json_boundaries, extract_last_json_object, extract_thinking_content,
-    extract_usage, fnv1a64, truncate_utf8_tail,
+    extract_usage, fnv1a64, truncate_utf8_head, truncate_utf8_tail,
 };
 
 // Re-export HTML diff types

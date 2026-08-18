@@ -205,7 +205,7 @@ pub use automation::{EngineError, EngineResult};
 pub use automation::{
     best_effort_parse_json_object, extract_assistant_content, extract_last_code_block,
     extract_last_json_array, extract_last_json_boundaries, extract_last_json_object, extract_usage,
-    fnv1a64, truncate_utf8_tail,
+    fnv1a64, truncate_utf8_head, truncate_utf8_tail,
 };
 
 // Automation re-exports - HTML cleaning

@@ -14,10 +14,10 @@ use chromiumoxide::{
 use futures::StreamExt;
 
 use super::{
-    clean_html_with_profile, parse_tool_calls, tool_calls_to_steps, truncate_utf8_tail, ActResult,
-    ActionToolSchemas, AutomationMemory, AutomationResult, AutomationUsage, CaptureProfile,
-    EngineError, EngineResult, HtmlCleaningProfile, MemoryOperation, PageObservation,
-    RemoteMultimodalConfig, RemoteMultimodalEngine,
+    clean_html_with_profile, parse_tool_calls, tool_calls_to_steps, truncate_utf8_head,
+    truncate_utf8_tail, ActResult, ActionToolSchemas, AutomationMemory, AutomationResult,
+    AutomationUsage, CaptureProfile, EngineError, EngineResult, HtmlCleaningProfile,
+    MemoryOperation, PageObservation, RemoteMultimodalConfig, RemoteMultimodalEngine,
 };
 
 /// State signature for stagnation detection.
@@ -953,8 +953,8 @@ impl RemoteMultimodalEngine {
                         if !new_title.is_empty() && new_title != title_now {
                             log::info!(
                                 "Pre-evaluate updated title: '{}' -> '{}'",
-                                &title_now[..title_now.len().min(80)],
-                                &new_title[..new_title.len().min(80)]
+                                truncate_utf8_head(&title_now, 80),
+                                truncate_utf8_head(&new_title, 80)
                             );
                             title_now = new_title.clone();
 
@@ -1089,7 +1089,7 @@ impl RemoteMultimodalEngine {
                                             log::info!(
                                                 "TTT loop (game {}): '{}'",
                                                 games_played + 1,
-                                                &updated[..updated.len().min(80)]
+                                                truncate_utf8_head(&updated, 80)
                                             );
                                             title_now = updated;
                                         }

@@ -75,6 +75,7 @@ pub use spider_agent_types::{
     supports_vision,
     thinking_payload,
     tool_calls_to_steps,
+    truncate_utf8_head,
     truncate_utf8_tail,
     // Observation types
     ActResult,

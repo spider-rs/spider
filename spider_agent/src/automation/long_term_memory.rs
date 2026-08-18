@@ -103,7 +103,10 @@ impl ExperienceRecord {
         } else {
             let action_summary = actions.join(" → ");
             if action_summary.len() > 300 {
-                format!("{}...", &action_summary[..297])
+                format!(
+                    "{}...",
+                    spider_agent_types::truncate_utf8_head(&action_summary, 297)
+                )
             } else {
                 action_summary
             }
