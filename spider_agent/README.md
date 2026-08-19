@@ -21,7 +21,7 @@ A concurrent-safe multimodal agent for web automation and research.
 - **Self-Healing Selectors**: Auto-repair failed selectors with LLM diagnosis
 - **Schema Generation**: Auto-generate JSON schemas from example outputs
 - **Concurrent Chains**: Execute independent actions in parallel with dependency graphs
-- **Embedded Scripting**: LLM-callable pure-Rust Python (`rustpython-vm`) and JavaScript (`boa_engine`) interpreters via the `scripting` feature — dedicated thread pool off tokio's blocking pool, no mutexes, no deadlocks, sandboxed filesystem and opt-in HTTP
+- **Embedded Scripting**: LLM-callable pure-Rust Python (`rustpython-vm`) and JavaScript (`boa_engine`) interpreters via the `scripting` feature. Runs on a dedicated thread pool off tokio's blocking pool, with no mutexes, no deadlocks, a sandboxed filesystem, and opt-in HTTP
 
 ## Installation
 
@@ -129,23 +129,23 @@ println!("Summary: {}", research.summary.unwrap());
 
 ### Scripting
 
-With `features = ["scripting"]`, the agent embeds pure-Rust [`rustpython-vm`] (with the frozen pure-Python stdlib — `json`, `re`, `urllib.parse`, etc.) and [`boa_engine`] JavaScript interpreters and exposes them as two LLM-callable actions: `RunPython` and `RunJavaScript`.
+With `features = ["scripting"]`, the agent embeds pure-Rust [`rustpython-vm`] (with the frozen pure-Python stdlib, so `json`, `re`, `urllib.parse`, and friends are available) and [`boa_engine`] JavaScript interpreters and exposes them as two LLM-callable actions: `RunPython` and `RunJavaScript`.
 
 **Design constraints honored:**
 
-- **No `spawn_blocking`** — workers run on dedicated `std::thread`s, fully isolated from tokio's blocking pool (no contention with reqwest / file I/O / DB drivers).
-- **No mutexes in our code** — `OutputBuffer` uses a thread-local `RefCell<Vec<u8>>`; JS per-call state lives in a thread-local; channels are lock-free (`flume` MPMC + `tokio::oneshot`).
-- **No deadlocks** — async caller only awaits lock-free primitives (semaphore acquire, flume `send_async`, oneshot, timeout); worker `Handle::block_on` parks an OS thread on a futex without consuming a runtime worker.
-- **No panics escape** — every script invocation is wrapped in `catch_unwind`; a bad script cannot tear down a worker thread. All `unwrap`/`expect` removed from the worker path.
-- **Sandboxed filesystem** — `cap-std::fs::Dir` rooted at a per-call tmpdir; path escapes (`..`, absolute paths, symlinks) are structurally impossible.
+- **No `spawn_blocking`.** Workers run on dedicated `std::thread`s, isolated from tokio's blocking pool, so they never contend with reqwest, file I/O, or DB drivers.
+- **No mutexes in our code.** `OutputBuffer` uses a thread-local `RefCell<Vec<u8>>`; JS per-call state lives in a thread-local; channels are lock-free (`flume` MPMC + `tokio::oneshot`).
+- **No deadlocks.** The async caller only awaits lock-free primitives (semaphore acquire, flume `send_async`, oneshot, timeout); worker `Handle::block_on` parks an OS thread on a futex without consuming a runtime worker.
+- **No panics escape.** Every script invocation runs inside `catch_unwind`, so a bad script cannot tear down a worker thread. The worker path contains no `unwrap`/`expect`.
+- **Sandboxed filesystem.** `cap-std::fs::Dir` rooted at a per-call tmpdir; path escapes (`..`, absolute paths, symlinks) are structurally impossible.
 
 **Scripts get an `agent` object:**
 
-- `agent.url`, `agent.title`, `agent.html`, `agent.memory`, `agent.tmpdir` — read-only context
-- `agent.log(...)`, `print(...)`, `console.log(...)` — captured to `stdout`
-- `agent.fetch(url, opts?)` — reuses the shared reqwest client (gated by `allow_network`)
-- `agent.read_file(rel)` / `agent.write_file(rel, content)` — sandboxed I/O
-- `agent.check_interrupted()` — cooperative cancel poll (timeouts flip an `AtomicBool` the script polls)
+- `agent.url`, `agent.title`, `agent.html`, `agent.memory`, `agent.tmpdir` hold read-only context
+- `agent.log(...)`, `print(...)`, and `console.log(...)` write to `stdout`
+- `agent.fetch(url, opts?)` reuses the shared reqwest client, gated by `allow_network`
+- `agent.read_file(rel)` and `agent.write_file(rel, content)` do sandboxed I/O
+- `agent.check_interrupted()` polls for cancellation; a timeout flips an `AtomicBool` the script reads
 
 ```rust,ignore
 use spider_agent::scripting::{ScriptConfig, ScriptContext, ScriptEngine};
@@ -243,7 +243,7 @@ Agent::builder()
 
 ### Spider Cloud Tool Inheritance
 
-You can register Spider Cloud routes as custom tools directly from the builder.
+Register Spider Cloud routes as custom tools from the builder.
 
 ```rust
 use spider_agent::Agent;
@@ -312,7 +312,7 @@ SPIDER_CLOUD_API_KEY=your-key cargo run -p spider_agent --example spider_cloud_j
 Notes:
 - For markdown/text/raw/commonmark/bytes, use route-level `return_format`; transform is optional.
 - For binary assets (PDF/images/files), `return_format: "bytes"` preserves fidelity.
-- Run transform only when you explicitly need post-processing (`SPIDER_CLOUD_INCLUDE_TRANSFORM=1` in the examples).
+- Run transform only when you need post-processing (`SPIDER_CLOUD_INCLUDE_TRANSFORM=1` in the examples).
 
 You can also point this at any compatible endpoint (not only `api.spider.cloud`) and
 use your own naming convention:
@@ -327,7 +327,7 @@ let spider_cloud = SpiderCloudToolConfig::new("provider-key")
 
 ### RemoteMultimodalConfig
 
-Configure automation features. Use preset configurations for optimal performance:
+Configure automation features. Two presets cover the common setups:
 
 ```rust
 use spider_agent::RemoteMultimodalConfig;
@@ -419,7 +419,7 @@ let schema = generate_schema(&request);
 | Self-Healing | `None` | `None` | Higher success rate on failures |
 | Concurrent Execution | `false` | `true` | Parallel action execution |
 
-**Recommended**: Use `RemoteMultimodalConfig::fast()` for optimal performance.
+`RemoteMultimodalConfig::fast()` turns on every performance-positive feature in the table above.
 
 All features are opt-in with zero overhead when disabled.
 

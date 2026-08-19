@@ -1,10 +1,10 @@
 # Spider Agent HTML
 
-Streaming HTML processing utilities for `spider_agent` — cleaning, content-aware profile selection, and intent-based optimization.
+Streaming HTML processing utilities for `spider_agent`: cleaning, content-aware profile selection, and intent-based optimization.
 
 ## Overview
 
-This crate provides fast, single-pass HTML cleaning using `lol_html`'s streaming rewriter. No full DOM parsing required — O(n) processing with constant memory overhead.
+Single-pass HTML cleaning using `lol_html`'s streaming rewriter. There is no full DOM parse, so processing is O(n) with constant memory overhead.
 
 ## Installation
 
@@ -50,7 +50,7 @@ let result = clean_html_with_profile(html, HtmlCleaningProfile::Slim);
 
 ## Smart Cleaning
 
-`smart_clean_html()` runs content analysis first, then picks the lightest profile that achieves good token reduction:
+`smart_clean_html()` runs content analysis first, then picks the lightest profile that still cuts tokens:
 
 ```rust
 use spider_agent_html::smart_clean_html;

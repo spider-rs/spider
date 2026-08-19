@@ -1,6 +1,6 @@
 # spider_utils
 
-Utilities to use to help with getting the most out of spider.
+Utilities to help you get more out of spider.
 
 ## CSS Scraping
 

@@ -4,7 +4,7 @@ Pure data types and constants for `spider_agent` automation with zero heavy runt
 
 ## Overview
 
-This crate extracts all type definitions, system prompts, and helper utilities from `spider_agent` into a lightweight, dependency-minimal package. Use it when you need automation types without the full agent runtime (no `tokio`, `reqwest`, `dashmap`, or `chromey`).
+This crate holds the type definitions, system prompts, and helper utilities split out of `spider_agent`. Use it when you need automation types without the full agent runtime (no `tokio`, `reqwest`, `dashmap`, or `chromey`).
 
 ## Installation
 
@@ -15,23 +15,23 @@ spider_agent_types = "0.1"
 
 ## What's Included
 
-- **Action Types** — `ActionType` (30+ variants), `ActionResult`, `ActionRecord`
-- **Chain Execution** — `ChainStep`, `ChainCondition`, `ChainBuilder` for sequential action chains
-- **Concurrent Chains** — `DependencyGraph`, `DependentStep` for parallel execution with dependency ordering
-- **Confidence Tracking** — `ConfidenceTracker`, `ConfidenceRetryStrategy` for smarter retry decisions
-- **Configuration** — `RemoteMultimodalConfig`, `AutomationConfig`, `ModelProfile`, `ModelCapabilities`
-- **Content Analysis** — `ContentAnalysis` with aho-corasick for fast HTML structure detection
-- **HTML Diff** — `PageStateDiff`, `HtmlDiffResult` for 50-70% token reduction between rounds
-- **Memory Operations** — `AutomationMemory`, `MemoryOperation` for session state
-- **Page Observation** — `PageObservation`, `InteractiveElement`, `FormInfo`
-- **Planning** — `PlanningModeConfig`, `ExecutionPlan`, `PlannedStep` with checkpoints
-- **System Prompts** — `DEFAULT_SYSTEM_PROMPT`, `CHROME_AI_SYSTEM_PROMPT`, and 6 more
-- **Schema Generation** — `generate_schema()`, `infer_schema()`, `SchemaCache`
-- **Selector Cache** — `SelectorCache` with LRU eviction and reliability scoring
-- **Self-Healing** — `SelfHealingConfig`, `HealingRequest`, `HealedSelectorCache`
-- **Synthesis** — `SynthesisConfig`, `MultiPageContext` for multi-page analysis
-- **Tool Calling** — `ToolCallingMode`, `ToolDefinition`, `parse_tool_calls()` for OpenAI-compatible function calling
-- **Helpers** — JSON extraction, LLM response parsing, FNV hashing, UTF-8 truncation
+- **Action Types:** `ActionType` (30+ variants), `ActionResult`, `ActionRecord`
+- **Chain Execution:** `ChainStep`, `ChainCondition`, `ChainBuilder` for sequential action chains
+- **Concurrent Chains:** `DependencyGraph`, `DependentStep` for parallel execution with dependency ordering
+- **Confidence Tracking:** `ConfidenceTracker`, `ConfidenceRetryStrategy` for smarter retry decisions
+- **Configuration:** `RemoteMultimodalConfig`, `AutomationConfig`, `ModelProfile`, `ModelCapabilities`
+- **Content Analysis:** `ContentAnalysis` with aho-corasick for fast HTML structure detection
+- **HTML Diff:** `PageStateDiff`, `HtmlDiffResult` for 50-70% token reduction between rounds
+- **Memory Operations:** `AutomationMemory`, `MemoryOperation` for session state
+- **Page Observation:** `PageObservation`, `InteractiveElement`, `FormInfo`
+- **Planning:** `PlanningModeConfig`, `ExecutionPlan`, `PlannedStep` with checkpoints
+- **System Prompts:** `DEFAULT_SYSTEM_PROMPT`, `CHROME_AI_SYSTEM_PROMPT`, and 6 more
+- **Schema Generation:** `generate_schema()`, `infer_schema()`, `SchemaCache`
+- **Selector Cache:** `SelectorCache` with LRU eviction and reliability scoring
+- **Self-Healing:** `SelfHealingConfig`, `HealingRequest`, `HealedSelectorCache`
+- **Synthesis:** `SynthesisConfig`, `MultiPageContext` for multi-page analysis
+- **Tool Calling:** `ToolCallingMode`, `ToolDefinition`, `parse_tool_calls()` for OpenAI-compatible function calling
+- **Helpers:** JSON extraction, LLM response parsing, FNV hashing, UTF-8 truncation
 
 ## Quick Start
 

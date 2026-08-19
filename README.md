@@ -26,7 +26,7 @@
 
 ---
 
-Spider is a concurrency-first crawling engine built in Rust. It streams pages the moment they arrive, renders JavaScript only when a page demands it, and scales from a single script to a distributed fleet without changing your code. The same engine powers [Spider Cloud](https://spider.cloud?utm_source=github&utm_medium=readme&utm_campaign=spider_rs), so you can prototype locally and move to managed infrastructure with one config change.
+Spider is a concurrency-first crawling engine written in Rust. It streams pages as they arrive, renders JavaScript only on pages that need it, and scales from a single script to a distributed fleet without changing your code. The same engine runs [Spider Cloud](https://spider.cloud?utm_source=github&utm_medium=readme&utm_campaign=spider_rs), so you can prototype locally and move to managed infrastructure with one config change.
 
 ## Start in the cloud
 
@@ -51,7 +51,7 @@ let mut website = Website::new("https://example.com")
     .build()?;
 ```
 
-`Smart` mode routes through proxies first and escalates to the unblocker only on pages that fight back, so you pay for bypass exactly when it's needed and never when it isn't.
+`Smart` mode routes through proxies first and escalates to the unblocker only on pages that fight back, so you pay for bypass only where it's needed.
 
 ## Or run it locally
 
@@ -81,11 +81,11 @@ async fn main() {
 }
 ```
 
-Pages stream in as they're fetched. The crawler discovers links, respects boundaries, and stops on its own.
+Pages stream in as they're fetched. The crawler finds the links, stays inside the limits you set, and stops on its own.
 
 ## How it works
 
-Spider runs HTTP-first and only launches headless Chrome when a page actually needs JavaScript. Streaming is built into both the HTTP and Chrome paths, so pages flow back the moment they're fetched instead of batching at the end. That design delivers best-in-class concurrency throughput, sustaining extremely high request volumes that scale from a single async task to a distributed worker fleet on the same API. Proxies, retries, rate limiting, and stealth are built in.
+Spider runs HTTP-first and launches headless Chrome only when a page needs JavaScript. Both the HTTP and Chrome paths stream, so pages come back as they're fetched instead of batching at the end. The same API drives one async task or a distributed worker fleet, and the concurrency model doesn't change between them. Proxies, retries, rate limiting, and stealth are built in.
 
 ## Install
 
@@ -125,10 +125,10 @@ Teams use Spider to feed the open web into vector stores for LLM and RAG pipelin
 
 ## Learn more
 
-- 📚 [Guides](https://spider.cloud/guides?utm_source=github&utm_medium=readme&utm_campaign=spider_rs): recipes and integrations
-- 📖 [API docs](https://docs.rs/spider): every option and method
-- 💬 [Discord](https://discord.spider.cloud): questions and ideas
-- 🐛 [Issues](https://github.com/spider-rs/spider/issues): bugs and feature requests
+- [Guides](https://spider.cloud/guides?utm_source=github&utm_medium=readme&utm_campaign=spider_rs) for recipes and integrations
+- [API docs](https://docs.rs/spider) for every option and method
+- [Discord](https://discord.spider.cloud) for questions and ideas
+- [Issues](https://github.com/spider-rs/spider/issues) for bugs and feature requests
 
 ## Contributing
 

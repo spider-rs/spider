@@ -2,7 +2,7 @@
 
 ![crate version](https://img.shields.io/crates/v/spider.svg)
 
-A fast command-line spider (web crawler) for high-performance website scraping.
+A fast command-line spider (web crawler) for scraping websites.
 
 ## Dependencies
 
@@ -10,7 +10,7 @@ On Linux
 
 - OpenSSL 1.0.1, 1.0.2, 1.1.0, or 1.1.1
 
-Note: You need to have `pkg-config` installed otherwise `openssl` will not be recognized by cargo.
+Note: install `pkg-config` too, or cargo will not find `openssl`.
 
 ```bash
 # On Ubuntu:
@@ -30,7 +30,7 @@ cargo install -F smart spider_cli
 
 ## Cli
 
-Run crawls with explicit runtime mode control:
+Pick the runtime mode per crawl.
 
 ```sh
 # HTTP mode (default)
@@ -53,7 +53,7 @@ Crawl and output all links visited to a file.
 spider --url https://choosealicense.com crawl -o > spider_choosealicense.json
 ```
 
-Download all html to local destination. Use the option `-t` to pass in the target destination folder.
+Download all HTML to a local destination. Pass the target folder with `-t`.
 
 ```sh
 spider --url https://choosealicense.com download -t _temp_spider_downloads
@@ -77,7 +77,7 @@ Get all the resources for the page.
 spider --url https://choosealicense.com --full-resources crawl -o
 ```
 
-Scrape a page and return content as Markdown (great for LLMs and RAG pipelines).
+Scrape a page and return the content as Markdown, the usual input format for LLM and RAG pipelines.
 
 ```sh
 spider --url https://choosealicense.com --return-format markdown scrape --output-html

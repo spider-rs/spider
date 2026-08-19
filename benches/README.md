@@ -2,7 +2,7 @@
 
 [![Benches](https://github.com/madeindjs/spider/actions/workflows/bench.yml/badge.svg)](https://github.com/madeindjs/spider/actions/workflows/bench.yml)
 
-This folder consists of benches between different cases within the library and including comparison between other choices.
+This folder holds benches comparing cases within the library, and comparing the library against other crawlers.
 
 ## Initial benchmarks
 
@@ -21,7 +21,7 @@ How fast can we crawl all pages on a medium sized website. Tests are ordered bet
 
 ## Notes
 
-1. nodejs takes the cpu to 100% when crawling and performance suffers drastically when concurrent.
-1. wget under performs when latency is being considered. 
+1. nodejs takes the cpu to 100% when crawling and performance suffers when concurrent.
+1. wget under performs once you account for latency.
 
 You can view the latest [benches here](./BENCHMARKS.md)

@@ -1,6 +1,6 @@
 # spider_mcp
 
-MCP (Model Context Protocol) server that exposes [Spider](https://github.com/spider-rs/spider) web crawler capabilities as tools for AI assistants.
+MCP (Model Context Protocol) server that exposes the [Spider](https://github.com/spider-rs/spider) web crawler as tools an AI assistant can call.
 
 ## Tools
 
@@ -23,7 +23,7 @@ Or build from source:
 cargo build -p spider_mcp --release
 ```
 
-### Feature Flags
+### Feature flags
 
 | Feature | Default | Description |
 |---------|---------|-------------|
@@ -108,7 +108,7 @@ Point to a running Chrome instance:
 }
 ```
 
-## CLI Options
+## CLI options
 
 ```
 spider-mcp [OPTIONS]
@@ -119,7 +119,7 @@ Options:
 
 Logs go to stderr (stdout is the MCP transport channel).
 
-## Tool Examples
+## Tool examples
 
 ### spider_scrape
 
