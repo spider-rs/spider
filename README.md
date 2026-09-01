@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://spider.cloud?utm_source=github&utm_medium=readme&utm_campaign=spider_rs" target="_blank">
-    <img src="https://avatars.githubusercontent.com/u/112983871?s=400&u=e03cc05523f015dd1f2a5ab9e6158de8a30821c2&v=4" alt="Spider" width="140" height="140">
+    <img src="assets/spider-mark.png" alt="Spider" width="140" height="140">
   </a>
 </p>
 
