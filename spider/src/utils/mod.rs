@@ -146,10 +146,6 @@ pub(crate) type RequestError = wreq::Error;
 #[cfg(feature = "cache_request")]
 pub(crate) type RequestError = reqwest_middleware::Error;
 
-/// The request response.
-#[cfg(not(feature = "decentralized"))]
-pub(crate) type RequestResponse = Response;
-
 /// The wait for duration timeouts.
 #[cfg(feature = "chrome")]
 const WAIT_TIMEOUTS: [u64; 6] = [0, 20, 50, 100, 100, 500];
