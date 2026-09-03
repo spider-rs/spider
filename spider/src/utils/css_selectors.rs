@@ -114,6 +114,35 @@ pub(crate) fn compiled_base_element_selector() -> &'static lol_html::Selector {
     COMPILED_BASE_ELEMENT_SELECTOR.get_or_init(|| "base".parse().unwrap())
 }
 
+// Pre-compiled selectors for the three page-metadata handlers. These run on
+// every page, and `lol_html::element!`/`text!` parse their selector string on
+// every call, so without these the crawler re-parsed three selectors per page.
+static COMPILED_HEAD_TITLE_SELECTOR: std::sync::OnceLock<lol_html::Selector> =
+    std::sync::OnceLock::new();
+static COMPILED_META_DESCRIPTION_SELECTOR: std::sync::OnceLock<lol_html::Selector> =
+    std::sync::OnceLock::new();
+static COMPILED_META_OG_IMAGE_SELECTOR: std::sync::OnceLock<lol_html::Selector> =
+    std::sync::OnceLock::new();
+
+/// Get the pre-compiled `head title` selector.
+#[inline]
+pub(crate) fn compiled_head_title_selector() -> &'static lol_html::Selector {
+    COMPILED_HEAD_TITLE_SELECTOR.get_or_init(|| "head title".parse().unwrap())
+}
+
+/// Get the pre-compiled `meta[name="description"]` selector.
+#[inline]
+pub(crate) fn compiled_meta_description_selector() -> &'static lol_html::Selector {
+    COMPILED_META_DESCRIPTION_SELECTOR
+        .get_or_init(|| r#"meta[name="description"]"#.parse().unwrap())
+}
+
+/// Get the pre-compiled `meta[property="og:image"]` selector.
+#[inline]
+pub(crate) fn compiled_meta_og_image_selector() -> &'static lol_html::Selector {
+    COMPILED_META_OG_IMAGE_SELECTOR.get_or_init(|| r#"meta[property="og:image"]"#.parse().unwrap())
+}
+
 /// Base css selector to use for getting valid web pages including xml files. We may remove this for general xml including links always.
 pub(crate) const BASE_CSS_SELECTORS_WITH_XML: &str = concat!(
     "a[href]",

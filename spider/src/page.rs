@@ -46,6 +46,24 @@ macro_rules! element_precompiled {
     }};
 }
 
+/// Construct a text content handler tuple using a pre-compiled `&'static Selector`.
+/// Same as `lol_html::text!` but uses `Cow::Borrowed` to avoid re-parsing.
+macro_rules! text_precompiled {
+    ($selector:expr, $handler:expr) => {{
+        #[inline(always)]
+        const fn type_hint<'h, T>(h: T) -> T
+        where
+            T: FnMut(&mut lol_html::html_content::TextChunk<'_>) -> lol_html::HandlerResult + 'h,
+        {
+            h
+        }
+        (
+            std::borrow::Cow::Borrowed($selector),
+            lol_html::send::ElementContentHandlers::default().text(type_hint($handler)),
+        )
+    }};
+}
+
 /// Allocate up to 128kb upfront for small pages.
 pub(crate) const MAX_PRE_ALLOCATED_HTML_PAGE_SIZE: u64 = 128 * 1024;
 /// Allocate up to 128kb upfront for small pages.
@@ -3969,30 +3987,39 @@ pub(crate) fn metadata_handlers<'h>(
     lol_html::send::ElementContentHandlers<'h>,
 )> {
     vec![
-        lol_html::text!("head title", |el| {
-            let t = el.as_str();
-            if !t.is_empty() {
-                *meta_title = Some(t.into());
-            }
+        text_precompiled!(
+            crate::utils::css_selectors::compiled_head_title_selector(),
+            |el| {
+                let t = el.as_str();
+                if !t.is_empty() {
+                    *meta_title = Some(t.into());
+                }
 
-            Ok(())
-        }),
-        lol_html::element!(r#"meta[name="description"]"#, |el| {
-            if let Some(content) = el.get_attribute("content") {
-                if !content.is_empty() {
-                    *meta_description = Some(content.into());
-                }
+                Ok(())
             }
-            Ok(())
-        }),
-        lol_html::element!(r#"meta[property="og:image"]"#, |el| {
-            if let Some(content) = el.get_attribute("content") {
-                if !content.is_empty() {
-                    *meta_og_image = Some(content.into());
+        ),
+        element_precompiled!(
+            crate::utils::css_selectors::compiled_meta_description_selector(),
+            |el| {
+                if let Some(content) = el.get_attribute("content") {
+                    if !content.is_empty() {
+                        *meta_description = Some(content.into());
+                    }
                 }
+                Ok(())
             }
-            Ok(())
-        }),
+        ),
+        element_precompiled!(
+            crate::utils::css_selectors::compiled_meta_og_image_selector(),
+            |el| {
+                if let Some(content) = el.get_attribute("content") {
+                    if !content.is_empty() {
+                        *meta_og_image = Some(content.into());
+                    }
+                }
+                Ok(())
+            }
+        ),
     ]
 }
 
@@ -4864,7 +4891,14 @@ impl Page {
                     if crate::utils::valid_parsing_status_code(resp.status_code)
                         && !crate::utils::block_streaming_headers(&resp.headers, only_html) =>
                 {
-                    let cell = if r_settings.ssg_build {
+                    // Only worth collecting when something can read it back.
+                    // The consumer below is gated on `ssg_map` being `Some`,
+                    // and the per-page crawl path always passes `None`, so
+                    // without this check every page installed a `script`
+                    // handler, parsed its selector, ran it against every start
+                    // tag, and allocated a `String` per `<script src>` to fill
+                    // a cell nothing would ever read.
+                    let cell = if r_settings.ssg_build && ssg_map.is_some() {
                         Some(tokio::sync::OnceCell::new())
                     } else {
                         None
@@ -5088,7 +5122,10 @@ impl Page {
                         if crate::utils::valid_parsing_status(&res)
                             && !crate::utils::block_streaming(&res, only_html) =>
                     {
-                        let cell = if r_settings.ssg_build {
+                        // See the engine arm above: without the `ssg_map`
+                        // check this installs a `script` handler per page
+                        // whose result is unreachable.
+                        let cell = if r_settings.ssg_build && ssg_map.is_some() {
                             Some(tokio::sync::OnceCell::new())
                         } else {
                             None
