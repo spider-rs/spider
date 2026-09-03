@@ -3383,72 +3383,69 @@ fn h2_permanent_reason_status(err: &crate::client::Error) -> Option<StatusCode> 
 #[cfg(not(feature = "decentralized"))]
 fn get_error_status_base(
     should_retry: &mut bool,
-    error_for_status: Option<Result<crate::utils::RequestResponse, RequestError>>,
+    error_for_status: Option<RequestError>,
     pre_classified_status: StatusCode,
 ) -> Option<RequestError> {
     match error_for_status {
-        Some(e) => match e {
-            Ok(_) => None,
-            Err(er) => {
-                // **Respect upstream classification (v2.51.172)**. If the
-                // caller already classified this error to a non-retryable
-                // status — typically via the async
-                // `confirm_tunnel_failure_with_local_dns` layer that pairs
-                // the proxy tunnel signal with a local DNS lookup — don't
-                // re-evaluate the raw error and risk overriding
-                // `*should_retry` back to true. The raw error itself is
-                // still a connect-class transport error, so the
-                // `is_retryable_status(get_error_http_status_code(&er))`
-                // check below would always set should_retry=true, undoing
-                // the async upgrade. Returning early preserves
-                // `*should_retry` at whatever build()'s heuristics decided
-                // (which already correctly excludes permanent codes via
-                // `should_retry_status`).
-                if !is_retryable_status(pre_classified_status) {
-                    return Some(er);
-                }
-
-                // Compute the mapped status once and reuse it across every
-                // branch below. Previously this was computed up to twice
-                // per error (once through `is_dns_error` in the connect
-                // fast-path, once in the catch-all fallback) — folding
-                // them into one call keeps the error path cheap when the
-                // full chain walk + io-error downcast get run.
-                //
-                // `is_retryable_status` (a few u16 compares) supersedes
-                // the earlier `!is_dns_error` gate: it covers DNS (525),
-                // address-unreachable (526), and redirect-cap (310) in a
-                // single check, so adding new permanent codes to
-                // `is_retryable_status` automatically propagates here.
-                let mapped_status = get_error_http_status_code(&er);
-                if er.is_timeout() || (er.is_connect() && is_retryable_status(mapped_status)) {
-                    *should_retry = true;
-                }
-                if !*should_retry && should_attempt_retry(&er) {
-                    *should_retry = true;
-                }
-                if let Some(status_code) = er.status() {
-                    let retry = matches!(
-                        status_code,
-                        StatusCode::TOO_MANY_REQUESTS
-                            | StatusCode::INTERNAL_SERVER_ERROR
-                            | StatusCode::BAD_GATEWAY
-                            | StatusCode::SERVICE_UNAVAILABLE
-                            | StatusCode::GATEWAY_TIMEOUT
-                    );
-                    if retry {
-                        *should_retry = true;
-                    }
-                }
-                // Catch-all: errors that neither set `is_timeout` /
-                // `is_connect` / `er.status()` nor matched an h2 reason
-                // can still map to a retryable status (e.g. 598/599).
-                if !*should_retry && is_retryable_status(mapped_status) {
-                    *should_retry = true;
-                }
-                Some(er)
+        Some(er) => {
+            // **Respect upstream classification (v2.51.172)**. If the
+            // caller already classified this error to a non-retryable
+            // status — typically via the async
+            // `confirm_tunnel_failure_with_local_dns` layer that pairs
+            // the proxy tunnel signal with a local DNS lookup — don't
+            // re-evaluate the raw error and risk overriding
+            // `*should_retry` back to true. The raw error itself is
+            // still a connect-class transport error, so the
+            // `is_retryable_status(get_error_http_status_code(&er))`
+            // check below would always set should_retry=true, undoing
+            // the async upgrade. Returning early preserves
+            // `*should_retry` at whatever build()'s heuristics decided
+            // (which already correctly excludes permanent codes via
+            // `should_retry_status`).
+            if !is_retryable_status(pre_classified_status) {
+                return Some(er);
             }
-        },
+
+            // Compute the mapped status once and reuse it across every
+            // branch below. Previously this was computed up to twice
+            // per error (once through `is_dns_error` in the connect
+            // fast-path, once in the catch-all fallback) — folding
+            // them into one call keeps the error path cheap when the
+            // full chain walk + io-error downcast get run.
+            //
+            // `is_retryable_status` (a few u16 compares) supersedes
+            // the earlier `!is_dns_error` gate: it covers DNS (525),
+            // address-unreachable (526), and redirect-cap (310) in a
+            // single check, so adding new permanent codes to
+            // `is_retryable_status` automatically propagates here.
+            let mapped_status = get_error_http_status_code(&er);
+            if er.is_timeout() || (er.is_connect() && is_retryable_status(mapped_status)) {
+                *should_retry = true;
+            }
+            if !*should_retry && should_attempt_retry(&er) {
+                *should_retry = true;
+            }
+            if let Some(status_code) = er.status() {
+                let retry = matches!(
+                    status_code,
+                    StatusCode::TOO_MANY_REQUESTS
+                        | StatusCode::INTERNAL_SERVER_ERROR
+                        | StatusCode::BAD_GATEWAY
+                        | StatusCode::SERVICE_UNAVAILABLE
+                        | StatusCode::GATEWAY_TIMEOUT
+                );
+                if retry {
+                    *should_retry = true;
+                }
+            }
+            // Catch-all: errors that neither set `is_timeout` /
+            // `is_connect` / `er.status()` nor matched an h2 reason
+            // can still map to a retryable status (e.g. 598/599).
+            if !*should_retry && is_retryable_status(mapped_status) {
+                *should_retry = true;
+            }
+            Some(er)
+        }
         _ => None,
     }
 }
@@ -3460,7 +3457,7 @@ fn get_error_status_base(
 /// Get the error status of the page.
 fn get_error_status(
     should_retry: &mut bool,
-    error_for_status: Option<Result<crate::utils::RequestResponse, RequestError>>,
+    error_for_status: Option<RequestError>,
     pre_classified_status: StatusCode,
 ) -> Option<String> {
     get_error_status_base(should_retry, error_for_status, pre_classified_status)
@@ -3471,7 +3468,7 @@ fn get_error_status(
 /// Get the error status of the page.
 fn get_error_status(
     should_retry: &mut bool,
-    error_for_status: Option<Result<crate::utils::RequestResponse, RequestError>>,
+    error_for_status: Option<RequestError>,
     pre_classified_status: StatusCode,
 ) -> Option<std::sync::Arc<reqwest::Error>> {
     get_error_status_base(should_retry, error_for_status, pre_classified_status)
@@ -3824,13 +3821,7 @@ pub fn build(_: &str, res: PageResponse) -> Page {
         metadata: res.metadata,
         spawn_pages: res.spawn_pages,
         content_truncated: res.content_truncated,
-        error_status: match res.error_for_status {
-            Some(e) => match e {
-                Ok(_) => None,
-                Err(er) => Some(er.to_string()),
-            },
-            _ => None,
-        },
+        error_status: res.error_for_status.map(|er| er.to_string()),
         ..Default::default()
     }
 }
@@ -11821,7 +11812,7 @@ async fn test_build_respects_pre_classified_525_does_not_force_retry() {
     let wrapped_err = err;
     let res = PageResponse {
         status_code: *DNS_RESOLVE_ERROR,
-        error_for_status: Some(Err(wrapped_err)),
+        error_for_status: Some(wrapped_err),
         ..Default::default()
     };
 
@@ -11886,7 +11877,7 @@ async fn test_build_transient_503_still_retries() {
     let wrapped_err = err;
     let res = PageResponse {
         status_code: *UNREACHABLE_REQUEST_ERROR, // 503, transient
-        error_for_status: Some(Err(wrapped_err)),
+        error_for_status: Some(wrapped_err),
         ..Default::default()
     };
 

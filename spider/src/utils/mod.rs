@@ -618,8 +618,14 @@ pub struct PageResponse {
     pub status_code: StatusCode,
     /// The final url destination after any redirects.
     pub final_url: Option<String>,
-    /// The message of the response error if any.
-    pub error_for_status: Option<Result<Response, RequestError>>,
+    /// The response error, if the request failed.
+    ///
+    /// This was `Option<Result<Response, RequestError>>`. The `Ok` half was
+    /// never constructed anywhere, and both readers matched it as
+    /// `Ok(_) => None`, so it only ever contributed its size: a `Response` is
+    /// 136 bytes against 8 for the error, and `PageResponse` is built once per
+    /// fetch and moved through the whole pipeline by value.
+    pub error_for_status: Option<RequestError>,
     #[cfg(feature = "chrome")]
     /// The screenshot bytes of the page. The ScreenShotConfig bytes boolean needs to be set to true.
     pub screenshot_bytes: Option<Vec<u8>>,
@@ -6652,7 +6658,7 @@ pub(crate) async fn build_error_page_response(target_url: &str, err: RequestErro
         std::time::Duration::from_millis(1_500),
     )
     .await;
-    page_response.error_for_status = Some(Err(err));
+    page_response.error_for_status = Some(err);
     page_response
 }
 
@@ -7754,7 +7760,7 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
             )
             .await;
 
-            page_response.error_for_status = Some(Err(err));
+            page_response.error_for_status = Some(err);
             page_response
         }
     }
@@ -7951,7 +7957,7 @@ pub async fn fetch_page_html<'h>(
                                 )
                                 .await;
 
-                            page_response.error_for_status = Some(Err(err));
+                            page_response.error_for_status = Some(err);
                             page_response
                         }
                     }
@@ -8706,7 +8712,7 @@ async fn _fetch_page_html_chrome<'h>(
                                 )
                                 .await;
 
-                            page_response.error_for_status = Some(Err(err));
+                            page_response.error_for_status = Some(err);
                             page_response
                         }
                     }
