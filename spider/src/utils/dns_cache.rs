@@ -13,9 +13,12 @@ const PROXY_REFRESH_MAX_SECS: u64 = 240;
 /// Cached DNS entry with TTL tracking.
 pub(crate) struct DnsEntry {
     /// Pre-computed socket addresses (port 0) — avoids per-hit IpAddr→SocketAddr conversion.
+    ///
+    /// This is the only stored copy of the addresses. `DnsCache::resolve`
+    /// projects `IpAddr` back out with `SocketAddr::ip()`, which is exact:
+    /// every entry is built as `SocketAddr::new(ip, 0)`, and the port and the
+    /// v6 flowinfo/scope_id are not part of `ip()`.
     sockaddrs: Arc<[SocketAddr]>,
-    /// Original IP addresses for the public `resolve()` API.
-    addrs: Vec<IpAddr>,
     expires: Instant,
 }
 
@@ -140,7 +143,7 @@ impl DnsCache {
         // Check cache first.
         if let Some(entry) = self.cache.get(host) {
             if entry.expires > Instant::now() {
-                return Some(entry.addrs.clone());
+                return Some(entry.sockaddrs.iter().map(|s| s.ip()).collect());
             }
         }
 
@@ -176,7 +179,6 @@ impl DnsCache {
             host.to_string(),
             DnsEntry {
                 sockaddrs: sockaddrs.into(),
-                addrs: ips.clone(),
                 expires: Instant::now() + self.ttl,
             },
         );
@@ -198,16 +200,15 @@ impl DnsCache {
                 }
                 let sockaddrs: Vec<SocketAddr> =
                     ips.iter().map(|ip| SocketAddr::new(*ip, 0)).collect();
-                Some((host, sockaddrs, ips, ttl))
+                Some((host, sockaddrs, ttl))
             });
         }
         // Collect results back into the cache on the calling task.
-        while let Some(Ok(Some((host, sockaddrs, ips, ttl)))) = set.join_next().await {
+        while let Some(Ok(Some((host, sockaddrs, ttl)))) = set.join_next().await {
             self.cache.insert(
                 host,
                 DnsEntry {
                     sockaddrs: sockaddrs.into(),
-                    addrs: ips,
                     expires: Instant::now() + ttl,
                 },
             );
@@ -277,14 +278,16 @@ pub struct DnsCacheResolver(pub Arc<DnsCache>);
 
 impl crate::client::dns::Resolve for DnsCacheResolver {
     fn resolve(&self, name: crate::client::dns::Name) -> crate::client::dns::Resolving {
-        let host = name.as_str().to_string();
         let cache = self.0.clone();
 
         Box::pin(async move {
+            // Borrowed for the lookup: `DashMap<String, _>` probes by `&str`
+            // through `Borrow`, so only the insert below needs an owned key.
+            let host = name.as_str();
             let now = Instant::now();
 
             // Fast path: cache hit — Arc clone only, zero alloc for the address list.
-            if let Some(entry) = cache.cache.get(&host) {
+            if let Some(entry) = cache.cache.get(host) {
                 if entry.expires > now {
                     let addrs = entry.sockaddrs.clone();
                     let iter: crate::client::dns::Addrs = Box::new(ArcSocketAddrIter {
@@ -310,7 +313,7 @@ impl crate::client::dns::Resolve for DnsCacheResolver {
                 async_resolver().ok_or_else(|| -> Box<dyn std::error::Error + Send + Sync> {
                     Box::new(std::io::Error::other("hickory resolver unavailable"))
                 })?;
-            let lookup = resolver.lookup_ip(&host).await.map_err(
+            let lookup = resolver.lookup_ip(host).await.map_err(
                 |e| -> Box<dyn std::error::Error + Send + Sync> {
                     if e.is_no_records_found() {
                         Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, e))
@@ -340,10 +343,9 @@ impl crate::client::dns::Resolve for DnsCacheResolver {
                 .into();
 
             cache.cache.insert(
-                host,
+                host.to_string(),
                 DnsEntry {
                     sockaddrs: sockaddrs.clone(),
-                    addrs: ips,
                     expires: Instant::now() + cache.ttl,
                 },
             );
