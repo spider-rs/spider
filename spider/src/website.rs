@@ -5196,7 +5196,10 @@ impl Website {
                     && page.is_empty()
                     && page.proxy_configured
                 {
-                    page.error_status = Some("Invalid proxy configuration.".into());
+                    #[cfg(not(feature = "page_error_status_details"))]
+                    {
+                        page.error_status = Some("Invalid proxy configuration.".into());
+                    }
                     page.should_retry = true;
                     page.status_code = *crate::page::CHROME_UNKNOWN_STATUS_ERROR;
                 }
@@ -5315,7 +5318,10 @@ impl Website {
                         && page.is_empty()
                         && self.configuration.proxies.is_some()
                     {
-                        page.error_status = Some("Invalid proxy configuration.".into());
+                        #[cfg(not(feature = "page_error_status_details"))]
+                        {
+                            page.error_status = Some("Invalid proxy configuration.".into());
+                        }
                         page.should_retry = true;
                         page.status_code = *crate::page::CHROME_UNKNOWN_STATUS_ERROR;
                     }
@@ -5627,7 +5633,10 @@ impl Website {
                     && page.is_empty()
                     && page.proxy_configured
                 {
-                    page.error_status = Some("Invalid proxy configuration.".into());
+                    #[cfg(not(feature = "page_error_status_details"))]
+                    {
+                        page.error_status = Some("Invalid proxy configuration.".into());
+                    }
                     page.should_retry = true;
                     page.status_code = *crate::page::CHROME_UNKNOWN_STATUS_ERROR;
                 }
@@ -5745,7 +5754,10 @@ impl Website {
                         && page.is_empty()
                         && self.configuration.proxies.is_some()
                     {
-                        page.error_status = Some("Invalid proxy configuration.".into());
+                        #[cfg(not(feature = "page_error_status_details"))]
+                        {
+                            page.error_status = Some("Invalid proxy configuration.".into());
+                        }
                         page.should_retry = true;
                         page.status_code = *crate::page::CHROME_UNKNOWN_STATUS_ERROR;
                     }
@@ -16285,6 +16297,7 @@ mod tests {
         assert_eq!(*website.get_status(), super::CrawlStatus::ConnectError);
     }
 
+    #[cfg(not(feature = "page_error_status_details"))]
     #[test]
     fn test_crawl_status_598_with_error_status_and_content_is_server_error() {
         let mut website = crate::website::Website::new("http://example.com");
@@ -16296,6 +16309,7 @@ mod tests {
         assert_eq!(*website.get_status(), super::CrawlStatus::ServerError);
     }
 
+    #[cfg(not(feature = "page_error_status_details"))]
     #[test]
     fn test_crawl_status_598_with_error_status_empty_is_connect_error() {
         let mut website = crate::website::Website::new("http://example.com");
@@ -16306,6 +16320,7 @@ mod tests {
         assert_eq!(*website.get_status(), super::CrawlStatus::ConnectError);
     }
 
+    #[cfg(not(feature = "page_error_status_details"))]
     #[test]
     fn test_crawl_status_599_with_content_and_error_status_is_server_error() {
         let mut website = crate::website::Website::new("http://example.com");
