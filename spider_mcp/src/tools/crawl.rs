@@ -138,7 +138,8 @@ pub async fn run(params: CrawlParams, state: Arc<SharedState>) -> Result<String,
 
         let mut pages = Vec::new();
 
-        while let Ok(page) = rx.recv().await {
+        let mut failed = false;
+        while let Some(page) = next_crawl_page(&mut rx, &mut failed).await {
             let input = TransformInput {
                 url: page.get_url_parsed_ref().as_ref(),
                 content: page.get_html_bytes_u8(),
@@ -160,6 +161,10 @@ pub async fn run(params: CrawlParams, state: Arc<SharedState>) -> Result<String,
                 "content": content,
                 "links": links,
             }));
+        }
+
+        if failed {
+            return Err("Crawl receiver lagged and lost pages".to_string());
         }
 
         serde_json::to_string_pretty(&json!({ "pages": pages })).map_err(|e| e.to_string())
@@ -187,7 +192,8 @@ pub async fn run(params: CrawlParams, state: Arc<SharedState>) -> Result<String,
                 ..Default::default()
             };
 
-            while let Ok(page) = rx.recv().await {
+            let mut failed = false;
+            while let Some(page) = next_crawl_page(&mut rx, &mut failed).await {
                 let input = TransformInput {
                     url: page.get_url_parsed_ref().as_ref(),
                     content: page.get_html_bytes_u8(),
@@ -214,7 +220,11 @@ pub async fn run(params: CrawlParams, state: Arc<SharedState>) -> Result<String,
             }
 
             if let Some(mut session) = state2.sessions.get_mut(&id2) {
-                session.status = CrawlSessionStatus::Complete;
+                session.status = if failed {
+                    CrawlSessionStatus::Failed
+                } else {
+                    CrawlSessionStatus::Complete
+                };
             }
         });
 
@@ -224,5 +234,48 @@ pub async fn run(params: CrawlParams, state: Arc<SharedState>) -> Result<String,
             "message": format!("Crawl started. Use spider_crawl_status tool or read resource crawl://{crawl_id}/summary to check progress."),
         }))
         .map_err(|e| e.to_string())
+    }
+}
+
+/// Keep draining after lag so the producer does not run detached without a
+/// consumer, but remember data loss so callers cannot report success.
+async fn next_crawl_page<T: Clone>(
+    rx: &mut tokio::sync::broadcast::Receiver<T>,
+    failed: &mut bool,
+) -> Option<T> {
+    loop {
+        match rx.recv().await {
+            Ok(page) => return Some(page),
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => *failed = true,
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn lag_is_reported_and_remaining_pages_are_drained() {
+        let (tx, mut rx) = tokio::sync::broadcast::channel(1);
+        tx.send(1).unwrap();
+        tx.send(2).unwrap();
+        drop(tx);
+        let mut failed = false;
+        assert_eq!(next_crawl_page(&mut rx, &mut failed).await, Some(2));
+        assert!(failed);
+        assert_eq!(next_crawl_page(&mut rx, &mut failed).await, None);
+    }
+
+    #[tokio::test]
+    async fn clean_close_preserves_success() {
+        let (tx, mut rx) = tokio::sync::broadcast::channel(1);
+        tx.send(1).unwrap();
+        drop(tx);
+        let mut failed = false;
+        assert_eq!(next_crawl_page(&mut rx, &mut failed).await, Some(1));
+        assert_eq!(next_crawl_page(&mut rx, &mut failed).await, None);
+        assert!(!failed);
     }
 }

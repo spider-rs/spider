@@ -9213,6 +9213,7 @@ dependencies = [
  "cookie",
  "criterion",
  "cron 0.16.0",
+ "crossbeam-queue",
  "dashmap",
  "env_logger",
  "fast_html2md",

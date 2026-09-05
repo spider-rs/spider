@@ -65,14 +65,13 @@ fn cleanup_sender() -> &'static tokio::sync::mpsc::UnboundedSender<PathBuf> {
     CLEANUP_TX.get_or_init(|| {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PathBuf>();
 
-        std::thread::Builder::new()
+        let _ = std::thread::Builder::new()
             .name("spider-spool-cleanup".into())
             .spawn(move || {
                 while let Some(path) = rx.blocking_recv() {
                     let _ = std::fs::remove_file(&path);
                 }
-            })
-            .expect("failed to spawn spool cleanup thread");
+            });
 
         tx
     })
@@ -80,10 +79,12 @@ fn cleanup_sender() -> &'static tokio::sync::mpsc::UnboundedSender<PathBuf> {
 
 /// Queue a spool file for background deletion.  Non-blocking — just a
 /// channel send.  If the cleanup task has exited (channel closed),
-/// the path is silently dropped (OS temp cleanup handles it).
+/// deletion is attempted synchronously so a failed thread spawn cannot leak files.
 #[inline]
 pub fn queue_spool_delete(path: PathBuf) {
-    let _ = cleanup_sender().send(path);
+    if let Err(error) = cleanup_sender().send(path) {
+        let _ = std::fs::remove_file(error.0);
+    }
 }
 
 /// Wait for the cleanup task to process all pending deletes.
@@ -130,7 +131,7 @@ static SPOOL_DIR: OnceLock<SpoolDirHandle> = OnceLock::new();
 /// the `PathBuf` for fast access.
 struct SpoolDirHandle {
     /// Must be kept alive — dropping this would remove the directory.
-    _dir: tempfile::TempDir,
+    _dir: Option<tempfile::TempDir>,
     path: PathBuf,
 }
 
@@ -408,42 +409,38 @@ pub fn should_spool(html_len: usize) -> bool {
 pub fn spool_dir() -> &'static Path {
     &SPOOL_DIR
         .get_or_init(|| {
-            // If the user set an explicit spool dir, use that.
-            if let Ok(custom) = std::env::var("SPIDER_HTML_SPOOL_DIR") {
-                let dir = PathBuf::from(&custom);
-                let _ = std::fs::create_dir_all(&dir);
-                // Create a TempDir inside the custom path so we still get
-                // auto-cleanup semantics.
-                match tempfile::Builder::new()
-                    .prefix("spider_html_")
-                    .tempdir_in(&dir)
-                {
-                    Ok(td) => {
-                        let path = td.path().to_path_buf();
-                        return SpoolDirHandle { _dir: td, path };
-                    }
-                    Err(_) => {
-                        // Fallback: use the custom dir directly.
-                        return SpoolDirHandle {
-                            _dir: tempfile::Builder::new()
-                                .prefix("spider_html_fallback_")
-                                .tempdir()
-                                .expect("failed to create temp dir"),
-                            path: dir,
-                        };
-                    }
-                }
-            }
-
-            // Default: OS temp directory via tempfile crate.
-            let td = tempfile::Builder::new()
-                .prefix("spider_html_")
-                .tempdir()
-                .expect("failed to create temp dir for HTML spool");
-            let path = td.path().to_path_buf();
-            SpoolDirHandle { _dir: td, path }
+            let base = std::env::var_os("SPIDER_HTML_SPOOL_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(std::env::temp_dir);
+            make_spool_dir(&base)
         })
         .path
+}
+
+fn make_spool_dir(base: &Path) -> SpoolDirHandle {
+    let _ = std::fs::create_dir_all(base);
+    match tempfile::Builder::new()
+        .prefix("spider_html_")
+        .tempdir_in(base)
+    {
+        Ok(dir) => SpoolDirHandle {
+            path: dir.path().to_path_buf(),
+            _dir: Some(dir),
+        },
+        Err(_) => {
+            // Keep the infallible path API: subsequent I/O returns its normal
+            // error and callers retain HTML in memory. Never fall back to the
+            // user's directory itself, since cleanup removes this path recursively.
+            let id = SPOOL_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+            SpoolDirHandle {
+                _dir: None,
+                path: base.join(format!(
+                    "spider_html_unavailable_{}_{id}",
+                    std::process::id()
+                )),
+            }
+        }
+    }
 }
 
 /// Generate a unique spool file path for a page.
@@ -1057,6 +1054,20 @@ where
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn spool_directory_failure_is_not_a_panic_or_parent_cleanup() {
+        let parent = tempfile::tempdir().unwrap();
+        let blocked = parent.path().join("not-a-directory");
+        std::fs::write(&blocked, b"keep").unwrap();
+        let handle = make_spool_dir(&blocked);
+        assert!(handle._dir.is_none());
+        assert_ne!(handle.path, blocked);
+        assert!(handle.path.starts_with(&blocked));
+        assert!(spool_write(&handle.path.join("page.sphtml"), b"content").is_err());
+        drop(handle);
+        assert_eq!(std::fs::read(&blocked).unwrap(), b"keep");
+    }
 
     /// Expose base_per_page_threshold for cross-module tests.
 

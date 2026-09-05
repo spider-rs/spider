@@ -1,14 +1,43 @@
-/// Pool of reusable Chrome CDP tabs.
-///
-/// Lock-free design: uses a DashMap as a concurrent stack (push/pop by
-/// atomic index). No Mutex, no RwLock.
+/// Pool of reusable Chrome CDP tabs backed by a bounded lock-free queue.
+/// Idle tabs are reused in FIFO order. Browser I/O happens outside the queue.
 pub struct TabPool {
-    /// Tabs stored by slot index. DashMap provides lock-free per-shard access.
-    slots: dashmap::DashMap<usize, chromiumoxide::Page>,
-    /// Next slot to write into (monotonically increasing).
-    head: std::sync::atomic::AtomicUsize,
-    /// Maximum pool capacity.
+    slots: PoolSlots<chromiumoxide::Page>,
+}
+
+struct PoolSlots<T> {
+    // ArrayQueue requires nonzero capacity; None represents disabled pooling.
+    values: Option<crossbeam_queue::ArrayQueue<T>>,
     max_size: usize,
+}
+
+impl<T> PoolSlots<T> {
+    fn new(max_size: usize) -> Self {
+        Self {
+            values: (max_size > 0).then(|| crossbeam_queue::ArrayQueue::new(max_size)),
+            max_size,
+        }
+    }
+
+    fn pop(&self) -> Option<T> {
+        self.values.as_ref().and_then(|queue| queue.pop())
+    }
+
+    fn push(&self, value: T) -> Result<(), T> {
+        match &self.values {
+            Some(queue) => queue.push(value),
+            None => Err(value),
+        }
+    }
+
+    fn drain(&self) -> Vec<T> {
+        // Bound the sweep so concurrent producers cannot keep clear running
+        // indefinitely. Releases racing the sweep may remain for later reuse.
+        (0..self.len()).filter_map(|_| self.pop()).collect()
+    }
+
+    fn len(&self) -> usize {
+        self.values.as_ref().map_or(0, |queue| queue.len())
+    }
 }
 
 /// Hand a pooled tab off to actually be closed.
@@ -46,130 +75,132 @@ impl TabPool {
     /// Create a new tab pool with the given maximum size.
     pub fn new(max_size: usize) -> Self {
         Self {
-            slots: dashmap::DashMap::with_capacity(max_size),
-            head: std::sync::atomic::AtomicUsize::new(0),
-            max_size,
+            slots: PoolSlots::new(max_size),
         }
     }
 
-    /// Acquire a tab from the pool or create a new one.
-    ///
-    /// Pops the most recently pooled tab (LIFO) if available, otherwise
-    /// creates a fresh tab via `browser.new_page("about:blank")`.
+    /// Acquire an idle tab, or create a new one.
     pub async fn acquire(
         &self,
         browser: &chromiumoxide::Browser,
     ) -> Result<chromiumoxide::Page, chromiumoxide::error::CdpError> {
-        // Try to pop from the stack (LIFO).
-        loop {
-            let current = self.head.load(std::sync::atomic::Ordering::Acquire);
-            if current == 0 {
-                break; // pool empty
-            }
-            let target = current - 1;
-            // CAS to claim this slot.
-            if self
-                .head
-                .compare_exchange(
-                    current,
-                    target,
-                    std::sync::atomic::Ordering::AcqRel,
-                    std::sync::atomic::Ordering::Relaxed,
-                )
-                .is_ok()
-            {
-                // We won the slot — remove and return the tab.
-                if let Some((_, page)) = self.slots.remove(&target) {
-                    return Ok(page);
-                }
-                // Slot was empty (shouldn't happen), continue to create new.
-                break;
-            }
-            // CAS failed — another thread popped; retry.
+        if let Some(page) = self.slots.pop() {
+            return Ok(page);
         }
         browser.new_page("about:blank").await
     }
 
-    /// Release a tab back to the pool.
-    ///
-    /// Navigates the tab to `about:blank` to clear state before pooling.
-    /// If the navigation hangs for more than 5 seconds the tab is closed.
-    /// If the pool is already at capacity the tab is closed instead of pooled.
+    /// Clear page state and return it to the pool, closing surplus tabs.
     pub async fn release(&self, page: chromiumoxide::Page) {
-        let current = self.head.load(std::sync::atomic::Ordering::Relaxed);
-        if current >= self.max_size {
-            close_pooled_tab(page); // at capacity — close, don't just drop
+        if self.slots.len() >= self.slots.max_size {
+            close_pooled_tab(page);
             return;
         }
-
-        // Navigate to about:blank with a 5s timeout to clear state.
+        // Own cleanup across cancellation while navigation is pending.
+        let guard = PendingTab(Some(page));
+        let Some(page) = guard.0.as_ref() else {
+            return;
+        };
         let ok = matches!(
             tokio::time::timeout(std::time::Duration::from_secs(5), page.goto("about:blank")).await,
             Ok(Ok(_))
         );
-
         if !ok {
-            close_pooled_tab(page); // navigation failed/timed out — close it
             return;
         }
-
-        // Try to push onto the stack.
-        loop {
-            let current = self.head.load(std::sync::atomic::Ordering::Acquire);
-            if current >= self.max_size {
-                close_pooled_tab(page); // pool filled while we were navigating
-                return;
-            }
-            if self
-                .head
-                .compare_exchange(
-                    current,
-                    current + 1,
-                    std::sync::atomic::Ordering::AcqRel,
-                    std::sync::atomic::Ordering::Relaxed,
-                )
-                .is_ok()
-            {
-                self.slots.insert(current, page);
-                return;
-            }
-            // CAS failed — another thread pushed; retry.
-        }
-    }
-
-    /// Close all pooled tabs and empty the pool.
-    ///
-    /// Takes ownership of each tab so it can be routed to the closer;
-    /// `DashMap::clear` alone would only drop the `Page` handles, which leaves the
-    /// CDP tabs open in the browser.
-    pub fn clear(&self) {
-        self.head.store(0, std::sync::atomic::Ordering::Release);
-
-        // Collect keys first so the iteration (and its shard guards) finishes before
-        // any `remove` — iterating a `DashMap` while mutating it can deadlock.
-        let keys: Vec<usize> = self.slots.iter().map(|entry| *entry.key()).collect();
-
-        for key in keys {
-            if let Some((_, page)) = self.slots.remove(&key) {
+        let mut guard = guard;
+        if let Some(page) = guard.0.take() {
+            if let Err(page) = self.slots.push(page) {
                 close_pooled_tab(page);
             }
         }
-
-        // Sweep anything a concurrent `release` inserted while we were draining.
-        // These handles are dropped rather than closed, which is the pre-existing
-        // behavior for a tab that races a `clear`; the window is a single insert wide.
-        self.slots.clear();
     }
 
-    /// Returns the approximate number of pooled (idle) tabs.
+    /// Close all tabs idle at the moment of the drain. Concurrent releases
+    /// after the drain remain in the pool for subsequent reuse or cleanup.
+    pub fn clear(&self) {
+        for page in self.slots.drain() {
+            close_pooled_tab(page);
+        }
+    }
+
+    /// Return the number of idle tabs.
     pub fn pool_size(&self) -> usize {
-        self.head.load(std::sync::atomic::Ordering::Relaxed)
+        self.slots.len()
+    }
+}
+
+struct PendingTab(Option<chromiumoxide::Page>);
+impl Drop for PendingTab {
+    fn drop(&mut self) {
+        if let Some(page) = self.0.take() {
+            close_pooled_tab(page);
+        }
+    }
+}
+
+impl Drop for TabPool {
+    fn drop(&mut self) {
+        self.clear();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concurrent_pool_operations_never_lose_values() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        // Count explicit recoveries, not Drop: dropping a Page handle silently
+        // would leak the remote tab even though its Rust value was destroyed.
+        let recovered = Arc::new((0..8000).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>());
+        let pool = Arc::new(PoolSlots::new(8));
+        let handles: Vec<_> = (0..8)
+            .map(|worker| {
+                let pool = pool.clone();
+                let recovered = recovered.clone();
+                std::thread::spawn(move || {
+                    for i in 0..1000 {
+                        if let Err(value) = pool.push(worker * 1000 + i) {
+                            recovered[value].fetch_add(1, Ordering::Relaxed);
+                        }
+                        assert!(pool.len() <= 8);
+                        if (worker + i) % 3 == 0 {
+                            for value in pool.drain() {
+                                recovered[value].fetch_add(1, Ordering::Relaxed);
+                            }
+                        } else if let Some(value) = pool.pop() {
+                            recovered[value].fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        for value in pool.drain() {
+            recovered[value].fetch_add(1, Ordering::Relaxed);
+        }
+        assert!(recovered
+            .iter()
+            .all(|count| count.load(Ordering::Relaxed) == 1));
+    }
+
+    #[test]
+    fn pool_reuses_fifo_and_rejects_overflow() {
+        let pool = PoolSlots::new(2);
+        assert_eq!(pool.push(1), Ok(()));
+        assert_eq!(pool.push(2), Ok(()));
+        assert_eq!(pool.push(3), Err(3));
+        assert_eq!(pool.pop(), Some(1));
+        assert_eq!(pool.pop(), Some(2));
+        assert_eq!(pool.pop(), None);
+    }
 
     #[test]
     fn test_new_pool_is_empty() {
@@ -180,10 +211,10 @@ mod tests {
     #[test]
     fn test_pool_max_size() {
         let pool = TabPool::new(0);
-        assert_eq!(pool.max_size, 0);
+        assert_eq!(pool.slots.max_size, 0);
 
         let pool = TabPool::new(100);
-        assert_eq!(pool.max_size, 100);
+        assert_eq!(pool.slots.max_size, 100);
     }
 
     #[test]

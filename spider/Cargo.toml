@@ -16,6 +16,7 @@ edition = "2021"
 maintenance = { status = "as-is" }
 
 [dependencies]
+crossbeam-queue = { version = "0.3", optional = true }
 url = "2"
 tokio-stream = "0.1"
 hashbrown = { version = "0.17", default-features = true }
@@ -292,7 +293,7 @@ cache_chrome_hybrid_mem = [
     "dep:http-cache",
     "dep:http",
 ]
-chrome = ["dep:chromey", "dep:base64", "dep:rand", "serde", "dep:fastrand", "dep:which", "dep:home", "cookies", "reqwest_json"]
+chrome = ["dep:crossbeam-queue", "dep:chromey", "dep:base64", "dep:rand", "serde", "dep:fastrand", "dep:which", "dep:home", "cookies", "reqwest_json"]
 chrome_headed = ["chrome"]
 chrome_cpu = ["chrome"]
 chrome_stealth = ["chrome"]

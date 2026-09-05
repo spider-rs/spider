@@ -375,7 +375,7 @@ mod inner {
         ring: &mut io_uring::IoUring,
         addr: std::net::SocketAddr,
     ) -> io::Result<std::net::TcpStream> {
-        use std::os::unix::io::FromRawFd;
+        use std::os::fd::{FromRawFd, OwnedFd};
 
         let domain = match addr {
             std::net::SocketAddr::V4(_) => libc::AF_INET,
@@ -403,6 +403,10 @@ mod inner {
             return Err(io::Error::from_raw_os_error(-fd));
         }
 
+        // Own the descriptor immediately so every early return closes it.
+        // SAFETY: the successful Socket completion returned a fresh owned fd.
+        let socket = unsafe { OwnedFd::from_raw_fd(fd) };
+
         // ── TCP Fast Open ────────────────────────────────────────────────────
         // Set TCP_FASTOPEN_CONNECT before connect — saves 1 RTT for repeat hosts.
         #[cfg(feature = "tcp_fastopen")]
@@ -423,9 +427,13 @@ mod inner {
 
         // ── Connect ─────────────────────────────────────────────────────────
         // Build sockaddr on the stack — must live until submit_and_reap returns.
+        // The storage must be outside the match arms: returning a raw pointer
+        // to an arm-local value leaves Connect reading dead stack storage.
+        let sa_v4;
+        let sa_v6;
         let (sa_ptr, sa_len) = match addr {
             std::net::SocketAddr::V4(v4) => {
-                let sa = libc::sockaddr_in {
+                sa_v4 = libc::sockaddr_in {
                     sin_family: libc::AF_INET as libc::sa_family_t,
                     sin_port: v4.port().to_be(),
                     sin_addr: libc::in_addr {
@@ -433,12 +441,12 @@ mod inner {
                     },
                     sin_zero: [0; 8],
                 };
-                // SAFETY: sa lives on the stack until after submit_and_reap.
-                let ptr = &sa as *const libc::sockaddr_in as *const libc::sockaddr;
+                // SAFETY: sa_v4 lives until after submit_and_reap below.
+                let ptr = &sa_v4 as *const libc::sockaddr_in as *const libc::sockaddr;
                 (ptr, std::mem::size_of::<libc::sockaddr_in>() as u32)
             }
             std::net::SocketAddr::V6(v6) => {
-                let sa = libc::sockaddr_in6 {
+                sa_v6 = libc::sockaddr_in6 {
                     sin6_family: libc::AF_INET6 as libc::sa_family_t,
                     sin6_port: v6.port().to_be(),
                     sin6_flowinfo: v6.flowinfo(),
@@ -447,7 +455,7 @@ mod inner {
                     },
                     sin6_scope_id: v6.scope_id(),
                 };
-                let ptr = &sa as *const libc::sockaddr_in6 as *const libc::sockaddr;
+                let ptr = &sa_v6 as *const libc::sockaddr_in6 as *const libc::sockaddr;
                 (ptr, std::mem::size_of::<libc::sockaddr_in6>() as u32)
             }
         };
@@ -458,11 +466,9 @@ mod inner {
 
         // SAFETY: sockaddr struct on the stack is alive until submit_and_reap returns.
         unsafe {
-            ring.submission().push(&connect_e).map_err(|_| {
-                // Close the socket on error.
-                libc::close(fd);
-                io::Error::other("io_uring: SQ full on connect")
-            })?;
+            ring.submission()
+                .push(&connect_e)
+                .map_err(|_| io::Error::other("io_uring: SQ full on connect"))?;
         }
 
         let res = submit_and_reap(ring)?;
@@ -471,14 +477,10 @@ mod inner {
         // it before returning the CQE, so res==0 means connected.
         // Any other negative value is an error.
         if res < 0 && res != -libc::EINPROGRESS {
-            // Close the fd we created.
-            let _ = uring_close(ring, fd);
             return Err(io::Error::from_raw_os_error(-res));
         }
 
-        // SAFETY: we own this fd, it's a valid connected TCP socket.
-        let stream = unsafe { std::net::TcpStream::from_raw_fd(fd) };
-        Ok(stream)
+        Ok(std::net::TcpStream::from(socket))
     }
 
     // ── io_uring TCP send/recv ────────────────────────────────────────────

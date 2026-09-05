@@ -39,11 +39,13 @@ mod inner {
     pub struct CoalesceGuard {
         url: CompactString,
         in_flight: Arc<DashMap<CompactString, InFlightEntry>>,
+        generation: Arc<()>,
         completed: bool,
     }
 
     struct InFlightEntry {
         sender: broadcast::Sender<()>,
+        generation: Arc<()>,
         created_at: Instant,
     }
 
@@ -59,8 +61,9 @@ mod inner {
             }
             self.completed = true;
 
-            if let Some((_, entry)) = self.in_flight.remove(&self.url) {
-                // Notify all waiters. Ignore send errors (no active receivers is fine).
+            if let Some((_, entry)) = self.in_flight.remove_if(&self.url, |_, entry| {
+                Arc::ptr_eq(&entry.generation, &self.generation)
+            }) {
                 let _ = entry.sender.send(());
             }
         }
@@ -74,8 +77,8 @@ mod inner {
 
     /// Deduplicates concurrent requests for the same URL.
     ///
-    /// Thread-safe, lock-free at the shard level. The `DashMap` shard lock is
-    /// never held across an `.await` point, so deadlocks are impossible.
+    /// Thread-safe through short-lived DashMap shard locks. No guard is held
+    /// across an await or a second map operation.
     pub struct RequestCoalescer {
         in_flight: Arc<DashMap<CompactString, InFlightEntry>>,
     }
@@ -97,30 +100,42 @@ mod inner {
         pub fn try_start(&self, url: &str) -> CoalesceResult {
             let key = CompactString::new(url);
 
-            // Check for an existing in-flight entry first (read path, cheaper).
             if let Some(entry) = self.in_flight.get(&key) {
-                // Check for stale entries — if the guard has been held too long,
-                // treat it as abandoned and let this caller take over.
                 if entry.created_at.elapsed() < Duration::from_secs(STALE_TIMEOUT_SECS) {
-                    let rx = entry.sender.subscribe();
-                    return CoalesceResult::Wait(rx);
+                    return CoalesceResult::Wait(entry.sender.subscribe());
                 }
-                // Entry is stale — fall through to replace it.
-                drop(entry); // Release the DashMap shard lock before mutating.
-                self.in_flight.remove(&key);
             }
 
-            // No in-flight entry (or it was stale). Insert a new one.
-            let (tx, _) = broadcast::channel(CHANNEL_CAPACITY);
-            let entry = InFlightEntry {
-                sender: tx,
-                created_at: Instant::now(),
+            use dashmap::mapref::entry::Entry;
+            // Decide ownership while holding one shard lock. A read followed by
+            // insert lets concurrent misses both become the fetch owner.
+            let generation = Arc::new(());
+            match self.in_flight.entry(key.clone()) {
+                Entry::Occupied(mut entry) => {
+                    if entry.get().created_at.elapsed() < Duration::from_secs(STALE_TIMEOUT_SECS) {
+                        return CoalesceResult::Wait(entry.get().sender.subscribe());
+                    }
+                    let (sender, _) = broadcast::channel(CHANNEL_CAPACITY);
+                    entry.insert(InFlightEntry {
+                        sender,
+                        generation: generation.clone(),
+                        created_at: Instant::now(),
+                    });
+                }
+                Entry::Vacant(entry) => {
+                    let (sender, _) = broadcast::channel(CHANNEL_CAPACITY);
+                    entry.insert(InFlightEntry {
+                        sender,
+                        generation: generation.clone(),
+                        created_at: Instant::now(),
+                    });
+                }
             };
-            self.in_flight.insert(key.clone(), entry);
 
             CoalesceResult::Proceed(CoalesceGuard {
                 url: key,
                 in_flight: Arc::clone(&self.in_flight),
+                generation,
                 completed: false,
             })
         }
@@ -148,6 +163,55 @@ mod inner {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn simultaneous_misses_have_one_owner() {
+            let coalescer = Arc::new(RequestCoalescer::new());
+            let barrier = Arc::new(std::sync::Barrier::new(16));
+            let handles: Vec<_> = (0..16)
+                .map(|_| {
+                    let c = coalescer.clone();
+                    let b = barrier.clone();
+                    std::thread::spawn(move || {
+                        b.wait();
+                        c.try_start("same-url")
+                    })
+                })
+                .collect();
+            // Keep owners alive until all contenders have returned.
+            let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+            assert_eq!(
+                results
+                    .iter()
+                    .filter(|r| matches!(r, CoalesceResult::Proceed(_)))
+                    .count(),
+                1
+            );
+        }
+
+        #[test]
+        fn stale_owner_cannot_remove_replacement() {
+            let c = RequestCoalescer::new();
+            let old = match c.try_start("url") {
+                CoalesceResult::Proceed(g) => g,
+                _ => unreachable!(),
+            };
+            c.in_flight.get_mut("url").unwrap().created_at =
+                Instant::now() - Duration::from_secs(STALE_TIMEOUT_SECS + 1);
+            let new = match c.try_start("url") {
+                CoalesceResult::Proceed(g) => g,
+                _ => unreachable!(),
+            };
+            drop(old);
+            assert_eq!(c.in_flight_count(), 1);
+            let mut waiter = match c.try_start("url") {
+                CoalesceResult::Wait(rx) => rx,
+                _ => unreachable!(),
+            };
+            drop(new);
+            assert!(waiter.try_recv().is_ok());
+            assert_eq!(c.in_flight_count(), 0);
+        }
 
         #[test]
         fn test_first_caller_proceeds() {

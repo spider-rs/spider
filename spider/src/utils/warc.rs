@@ -488,16 +488,24 @@ mod inner {
         /// unreadable on disk indefinitely, and I/O errors from the writer task were
         /// discarded entirely.
         ///
-        /// Returns `Ok(())` if the writer task has already finished — its `BufWriter`
-        /// is flushed on the way out, so there is nothing left owing.
+        /// Returns an error if the writer exited before acknowledging the flush;
+        /// a closed channel can indicate a failed disk write.
         pub async fn flush(&self) -> io::Result<()> {
             let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
 
             if self.tx.send(WarcOp::Flush(ack_tx)).is_err() {
-                return Ok(());
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "WARC writer stopped before flush",
+                ));
             }
 
-            ack_rx.await.unwrap_or(Ok(()))
+            ack_rx.await.unwrap_or_else(|_| {
+                Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "WARC writer stopped during flush",
+                ))
+            })
         }
 
         /// Number of records written so far.
@@ -575,6 +583,44 @@ mod inner {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[tokio::test]
+        async fn flush_reports_a_dead_writer() {
+            let (tx, rx) = mpsc::unbounded_channel();
+            drop(rx);
+            let writer = WarcWriter {
+                tx,
+                record_count: std::sync::Arc::new(AtomicU64::new(0)),
+                path: std::sync::Arc::new(PathBuf::new()),
+                queued_bytes: std::sync::Arc::new(AtomicUsize::new(0)),
+                drained: std::sync::Arc::new(tokio::sync::Notify::new()),
+            };
+            assert_eq!(
+                writer.flush().await.unwrap_err().kind(),
+                io::ErrorKind::BrokenPipe
+            );
+        }
+
+        #[tokio::test]
+        async fn flush_reports_dropped_acknowledgement() {
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            let writer = WarcWriter {
+                tx,
+                record_count: std::sync::Arc::new(AtomicU64::new(0)),
+                path: std::sync::Arc::new(PathBuf::new()),
+                queued_bytes: std::sync::Arc::new(AtomicUsize::new(0)),
+                drained: std::sync::Arc::new(tokio::sync::Notify::new()),
+            };
+            let consumer = tokio::spawn(async move {
+                drop(rx.recv().await);
+            });
+            assert_eq!(
+                writer.flush().await.unwrap_err().kind(),
+                io::ErrorKind::BrokenPipe
+            );
+            consumer.await.unwrap();
+        }
+
         use reqwest::StatusCode;
 
         /// Helper to create a minimal Page for testing.
