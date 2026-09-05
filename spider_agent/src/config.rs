@@ -565,6 +565,7 @@ impl UsageStats {
         })
     }
 
+    #[cfg(any(feature = "search", test))]
     pub(crate) fn reserve_search_call(&self, limits: &UsageLimits) -> Result<(), LimitType> {
         Self::reserve_call(
             &self.search_calls,
@@ -579,6 +580,7 @@ impl UsageStats {
         })
     }
 
+    #[cfg(any(feature = "chrome", test))]
     pub(crate) fn reserve_webbrowser_call(&self, limits: &UsageLimits) -> Result<(), LimitType> {
         Self::reserve_call(
             &self.webbrowser_calls,

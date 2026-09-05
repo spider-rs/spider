@@ -13,11 +13,14 @@ use chromiumoxide::{
 #[cfg(feature = "chrome")]
 use futures::StreamExt;
 
+#[cfg(feature = "skills")]
+use super::truncate_utf8_head;
+
 use super::{
-    clean_html_with_profile, parse_tool_calls, tool_calls_to_steps, truncate_utf8_head,
-    truncate_utf8_tail, ActResult, ActionToolSchemas, AutomationMemory, AutomationResult,
-    AutomationUsage, CaptureProfile, EngineError, EngineResult, HtmlCleaningProfile,
-    MemoryOperation, PageObservation, RemoteMultimodalConfig, RemoteMultimodalEngine,
+    clean_html_with_profile, parse_tool_calls, tool_calls_to_steps, truncate_utf8_tail, ActResult,
+    ActionToolSchemas, AutomationMemory, AutomationResult, AutomationUsage, CaptureProfile,
+    EngineError, EngineResult, HtmlCleaningProfile, MemoryOperation, PageObservation,
+    RemoteMultimodalConfig, RemoteMultimodalEngine,
 };
 
 /// State signature for stagnation detection.
