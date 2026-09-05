@@ -5459,7 +5459,7 @@ pub async fn run_spawn_pages_with_options(
     let base_cfgs = Arc::new(base_cfgs.clone());
     let sem = Arc::new(tokio::sync::Semaphore::new(options.max_concurrency.max(1)));
     let options = Arc::new(options);
-    let mut handles = Vec::with_capacity(urls.len());
+    let mut handles = super::executor::TaskBatch::with_capacity(urls.len());
 
     // Spawn all pages concurrently (semaphore limits in-flight work)
     for url in urls {
@@ -5469,7 +5469,7 @@ pub async fn run_spawn_pages_with_options(
         let url_clone = url.clone();
         let sem = sem.clone();
 
-        handles.push(tokio::spawn(async move {
+        handles.tasks.push(tokio::spawn(async move {
             // Acquire concurrency permit before doing real work
             let _permit = match sem.acquire().await {
                 Ok(p) => p,
@@ -5540,6 +5540,9 @@ pub async fn run_spawn_pages_with_options(
             } else {
                 None
             };
+            let _tracking_guard = tracking_handle
+                .as_ref()
+                .map(|task| super::executor::AbortOnDrop(task.abort_handle()));
 
             // Build page-specific config from the full base config to preserve
             // routing, schemas, relevance gates, and other production knobs.
@@ -5569,6 +5572,7 @@ pub async fn run_spawn_pages_with_options(
             // Stop bytes tracking
             if let Some(handle) = tracking_handle {
                 handle.abort();
+                let _ = handle.await;
             }
 
             // Collect bytes data
@@ -5602,8 +5606,8 @@ pub async fn run_spawn_pages_with_options(
     }
 
     // Collect all results (concurrent execution, wait for all)
-    let mut results = Vec::with_capacity(handles.len());
-    for handle in handles {
+    let mut results = Vec::with_capacity(handles.tasks.len());
+    for handle in &mut handles.tasks {
         match handle.await {
             Ok(spawn_result) => results.push(spawn_result),
             Err(e) => {
@@ -5686,7 +5690,7 @@ pub async fn run_spawn_pages_with_factory<E: std::fmt::Display + Send + 'static>
     let base_cfgs = Arc::new(base_cfgs.clone());
     let sem = Arc::new(tokio::sync::Semaphore::new(options.max_concurrency.max(1)));
     let options = Arc::new(options);
-    let mut handles = Vec::with_capacity(urls.len());
+    let mut handles = super::executor::TaskBatch::with_capacity(urls.len());
 
     // Spawn all pages concurrently (semaphore limits in-flight work)
     for url in urls {
@@ -5696,7 +5700,7 @@ pub async fn run_spawn_pages_with_factory<E: std::fmt::Display + Send + 'static>
         let url_clone = url.clone();
         let sem = sem.clone();
 
-        handles.push(tokio::spawn(async move {
+        handles.tasks.push(tokio::spawn(async move {
             // Acquire concurrency permit before doing real work
             let _permit = match sem.acquire().await {
                 Ok(p) => p,
@@ -5765,8 +5769,8 @@ pub async fn run_spawn_pages_with_factory<E: std::fmt::Display + Send + 'static>
     }
 
     // Collect all results (concurrent execution, wait for all)
-    let mut results = Vec::with_capacity(handles.len());
-    for handle in handles {
+    let mut results = Vec::with_capacity(handles.tasks.len());
+    for handle in &mut handles.tasks {
         match handle.await {
             Ok(spawn_result) => results.push(spawn_result),
             Err(e) => {
@@ -5881,6 +5885,49 @@ async fn run_embedded_script(
 mod tests {
     use super::*;
     use crate::automation::DEFAULT_SYSTEM_PROMPT;
+
+    #[tokio::test]
+    async fn cancelling_spawn_pages_releases_factory_and_workers() {
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        for _ in 0..32 {
+            let started = Arc::new(tokio::sync::Notify::new());
+            let worker_started = started.clone();
+            let factory: Arc<PageFactory<String>> = Arc::new(Box::new(move |_| {
+                let started = worker_started.clone();
+                Box::pin(async move {
+                    started.notify_one();
+                    std::future::pending::<Result<Page, String>>().await
+                })
+            }));
+            let weak = Arc::downgrade(&factory);
+            let parent = tokio::spawn(async move {
+                run_spawn_pages_with_factory(
+                    factory,
+                    vec![
+                        "https://example.com/1".into(),
+                        "https://example.com/2".into(),
+                    ],
+                    &super::super::RemoteMultimodalConfigs::default(),
+                    SpawnPageOptions::new().with_max_concurrency(1),
+                )
+                .await
+            });
+            tokio::time::timeout(Duration::from_secs(2), started.notified())
+                .await
+                .unwrap();
+            parent.abort();
+            assert!(parent.await.unwrap_err().is_cancelled());
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while weak.upgrade().is_some() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("cancelled workers retained the page factory");
+        }
+    }
 
     #[test]
     fn test_spawn_page_options_default() {

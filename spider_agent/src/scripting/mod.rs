@@ -277,6 +277,15 @@ pub(crate) struct Job {
     pub usage: Arc<ScriptUsage>,
 }
 
+// A dropped caller must signal cooperative cancellation just like a timeout.
+struct InterruptOnDrop(Arc<AtomicBool>);
+
+impl Drop for InterruptOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
 /// Public scripting engine — clone-safe handle around the worker pool.
 #[derive(Clone)]
 pub struct ScriptEngine {
@@ -483,6 +492,7 @@ impl ScriptEngine {
 
         let (reply_tx, reply_rx) = oneshot::channel();
         let interrupt = Arc::new(AtomicBool::new(false));
+        let _interrupt_on_drop = InterruptOnDrop(interrupt.clone());
         let runtime = tokio::runtime::Handle::current();
 
         let job = Job {
@@ -553,6 +563,9 @@ fn worker_loop(rx: flume::Receiver<Job>) {
         std::thread::current().name()
     );
     while let Ok(job) = rx.recv() {
+        if job.reply.is_closed() {
+            continue;
+        }
         let started_at = job.started_at;
         let language = job.language;
 
@@ -615,6 +628,41 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cancelling_script_signals_worker_and_releases_permit() {
+        // Receive submitted jobs directly so the test observes the cancellation
+        // protocol without relying on interpreter startup or script timing.
+        let (tx, rx) = flume::bounded(1);
+        let engine = ScriptEngine {
+            config: Arc::new(ScriptConfig {
+                enabled: true,
+                ..Default::default()
+            }),
+            tx,
+            permits: Arc::new(Semaphore::new(1)),
+            default_client: reqwest::Client::new(),
+            usage: Arc::new(ScriptUsage::default()),
+        };
+        for _ in 0..32 {
+            let caller_engine = engine.clone();
+            let caller = tokio::spawn(async move {
+                caller_engine
+                    .run_python("pass".into(), ScriptContext::default(), None)
+                    .await
+            });
+            let job = tokio::time::timeout(Duration::from_secs(2), rx.recv_async())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(!job.interrupt.load(Ordering::Relaxed));
+            caller.abort();
+            assert!(caller.await.unwrap_err().is_cancelled());
+            assert!(job.interrupt.load(Ordering::Relaxed));
+            assert!(job.reply.is_closed());
+            assert_eq!(engine.permits.available_permits(), 1);
+        }
+    }
 
     #[test]
     fn truncate_utf8_safe() {

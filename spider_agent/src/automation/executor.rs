@@ -14,12 +14,12 @@ use tokio::sync::Semaphore;
 
 // JoinHandle detaches on drop. Keep ownership until completion and abort any
 // remaining tasks when the caller cancels a chain or batch.
-struct TaskBatch<T> {
-    tasks: Vec<tokio::task::JoinHandle<T>>,
+pub(super) struct TaskBatch<T> {
+    pub(super) tasks: Vec<tokio::task::JoinHandle<T>>,
 }
 
 impl<T> TaskBatch<T> {
-    fn with_capacity(capacity: usize) -> Self {
+    pub(super) fn with_capacity(capacity: usize) -> Self {
         Self {
             tasks: Vec::with_capacity(capacity),
         }
@@ -31,6 +31,17 @@ impl<T> Drop for TaskBatch<T> {
         for task in &self.tasks {
             task.abort();
         }
+    }
+}
+
+#[cfg(feature = "chrome")]
+// Stack-owned cancellation guard for a single task; no collection allocation.
+pub(super) struct AbortOnDrop(pub(super) tokio::task::AbortHandle);
+
+#[cfg(feature = "chrome")]
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 
@@ -829,6 +840,29 @@ mod tests {
             BatchExecutor::with_settings(1, usize::MAX).max_concurrent,
             Semaphore::MAX_PERMITS
         );
+    }
+
+    #[cfg(feature = "chrome")]
+    #[tokio::test]
+    async fn listener_guard_releases_detached_task_state() {
+        for _ in 0..32 {
+            let state = Arc::new(vec![0u8; 1024]);
+            let weak = Arc::downgrade(&state);
+            let task = tokio::spawn(async move {
+                let _state = state;
+                std::future::pending::<()>().await;
+            });
+            let guard = AbortOnDrop(task.abort_handle());
+            drop(task);
+            drop(guard);
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while weak.upgrade().is_some() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("listener task retained state after guard drop");
+        }
     }
 
     #[tokio::test]

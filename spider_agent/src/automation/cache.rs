@@ -15,8 +15,8 @@ use dashmap::DashMap;
 
 /// Size-aware LRU cache with automatic cleanup.
 ///
-/// Uses `DashMap` for lock-free concurrent reads. Writes are per-shard
-/// and do not block readers on other shards.
+/// Uses `DashMap` with short-lived shard locks for concurrent reads and writes.
+/// Operations on separate shards do not block each other.
 #[derive(Debug)]
 pub struct SmartCache<V: CacheValue> {
     entries: Arc<DashMap<String, CacheEntry<V>>>,
@@ -417,12 +417,17 @@ impl<V: CacheValue> SmartCache<V> {
 
     /// Start a background cleanup task.
     ///
-    /// Runs cleanup every `interval` duration.
+    /// Runs cleanup every `interval` duration until the cache is dropped.
+    /// The task holds only a weak reference between cleanup passes.
     pub fn start_cleanup_task(self: Arc<Self>, interval: Duration) -> tokio::task::JoinHandle<()> {
+        let cache = Arc::downgrade(&self);
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(interval).await;
-                self.cleanup_expired().await;
+                let Some(cache) = cache.upgrade() else {
+                    break;
+                };
+                cache.cleanup_expired().await;
             }
         })
     }
@@ -453,6 +458,22 @@ pub fn json_cache(max_entries: usize, max_mb: usize) -> JsonCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cleanup_task_releases_cache_and_exits() {
+        for _ in 0..32 {
+            let cache = Arc::new(SmartCache::<String>::new());
+            cache.set("payload", "x".repeat(1024)).await;
+            let weak = Arc::downgrade(&cache);
+            let task = cache.clone().start_cleanup_task(Duration::from_millis(1));
+            drop(cache);
+            assert!(weak.upgrade().is_none(), "cleanup task retained cache");
+            tokio::time::timeout(Duration::from_secs(2), task)
+                .await
+                .expect("cleanup task did not exit")
+                .unwrap();
+        }
+    }
 
     #[tokio::test]
     async fn rejects_values_larger_than_byte_budget() {
