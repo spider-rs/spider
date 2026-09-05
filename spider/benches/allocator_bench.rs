@@ -10,20 +10,29 @@
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
-#[cfg(feature = "bench_mimalloc")]
+// Prefer jemalloc when both allocator features are enabled (including --all-features).
+#[cfg(all(feature = "bench_mimalloc", not(feature = "bench_jemalloc")))]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
+#[cfg(not(feature = "decentralized"))]
+use criterion::BatchSize;
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+#[cfg(not(feature = "decentralized"))]
 use spider::case_insensitive_string::compact_str::CompactString;
 use spider::case_insensitive_string::CaseInsensitiveString;
 use spider::hashbrown::HashSet;
+#[cfg(not(feature = "decentralized"))]
 use spider::page::Page;
+#[cfg(not(feature = "decentralized"))]
 use spider::smallvec::smallvec;
+#[cfg(not(feature = "decentralized"))]
 use spider::RelativeSelectors;
+#[cfg(not(feature = "decentralized"))]
 use std::sync::Arc;
 
 /// Generate a realistic HTML page with N links and ~4KB of body content
+#[cfg(not(feature = "decentralized"))]
 fn make_html(num_links: usize) -> String {
     let mut html = String::with_capacity(num_links * 100 + 6000);
     html.push_str("<!DOCTYPE html><html><head><title>Bench Page — Performance Test</title>");
@@ -56,6 +65,7 @@ fn make_html(num_links: usize) -> String {
     html
 }
 
+#[cfg(not(feature = "decentralized"))]
 fn make_selectors() -> RelativeSelectors {
     (
         CompactString::from("example.com"),
@@ -70,6 +80,7 @@ fn make_selectors() -> RelativeSelectors {
 // ---------------------------------------------------------------------------
 // 1. Link extraction at various page sizes
 // ---------------------------------------------------------------------------
+#[cfg(not(feature = "decentralized"))]
 fn bench_link_extraction(c: &mut Criterion) {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(8)
@@ -232,6 +243,7 @@ fn bench_concurrent_stress(c: &mut Criterion) {
 // ---------------------------------------------------------------------------
 // 4. Mixed workload — interleaved small/large allocations like real crawl
 // ---------------------------------------------------------------------------
+#[cfg(not(feature = "decentralized"))]
 fn bench_mixed_workload(c: &mut Criterion) {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(8)
@@ -289,6 +301,7 @@ fn bench_mixed_workload(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(not(feature = "decentralized"))]
 criterion_group!(
     benches,
     bench_link_extraction,
@@ -296,4 +309,7 @@ criterion_group!(
     bench_concurrent_stress,
     bench_mixed_workload
 );
+// Decentralized pages do not expose local HTML extraction APIs.
+#[cfg(feature = "decentralized")]
+criterion_group!(benches, bench_hashset_churn, bench_concurrent_stress);
 criterion_main!(benches);

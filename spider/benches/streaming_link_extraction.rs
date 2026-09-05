@@ -45,18 +45,27 @@
 //! Run with:
 //!   cargo bench --bench streaming_link_extraction --features chrome
 
+#[cfg(not(feature = "decentralized"))]
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+#[cfg(not(feature = "decentralized"))]
 use spider::case_insensitive_string::compact_str::CompactString;
+#[cfg(not(feature = "decentralized"))]
 use spider::case_insensitive_string::CaseInsensitiveString;
+#[cfg(not(feature = "decentralized"))]
 use spider::hashbrown::HashSet;
+#[cfg(not(feature = "decentralized"))]
 use spider::page::Page;
+#[cfg(not(feature = "decentralized"))]
 use spider::smallvec::smallvec;
+#[cfg(not(feature = "decentralized"))]
 use spider::RelativeSelectors;
+#[cfg(not(feature = "decentralized"))]
 use std::hint::black_box;
 
 /// Realistic HTML page with N anchor links + ~4 KB of body content,
 /// shaped to match `allocator_bench::make_html` so cross-bench numbers
 /// are comparable.
+#[cfg(not(feature = "decentralized"))]
 fn make_html(num_links: usize) -> String {
     let mut html = String::with_capacity(num_links * 100 + 6000);
     html.push_str("<!DOCTYPE html><html><head><title>Bench Page — Streaming</title>");
@@ -89,6 +98,7 @@ fn make_html(num_links: usize) -> String {
     html
 }
 
+#[cfg(not(feature = "decentralized"))]
 fn make_selectors() -> RelativeSelectors {
     (
         CompactString::from("example.com"),
@@ -111,6 +121,7 @@ const SIZES: [usize; 4] = [50, 200, 500, 2000];
 //    chunks → assembled Vec<u8> (CDP→Vec materialisation) →
 //    `links_stream_base` (post-fetch second walk).
 // ---------------------------------------------------------------------------
+#[cfg(not(feature = "decentralized"))]
 fn bench_two_pass(c: &mut Criterion) {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(8)
@@ -169,6 +180,7 @@ fn bench_two_pass(c: &mut Criterion) {
 //    path. Gap to `two_pass_baseline` = the work the streaming refactor
 //    eliminates per page.
 // ---------------------------------------------------------------------------
+#[cfg(not(feature = "decentralized"))]
 fn bench_single_pass(c: &mut Criterion) {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(8)
@@ -218,5 +230,11 @@ fn bench_single_pass(c: &mut Criterion) {
 // fail in `cargo test -p spider`. No additional parity check needed
 // here.
 
+#[cfg(not(feature = "decentralized"))]
 criterion_group!(streaming_benches, bench_two_pass, bench_single_pass);
+#[cfg(not(feature = "decentralized"))]
 criterion_main!(streaming_benches);
+
+// Decentralized pages do not expose local HTML extraction APIs.
+#[cfg(feature = "decentralized")]
+fn main() {}
