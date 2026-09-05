@@ -23,6 +23,28 @@ use crate::utils::{
     spawn_set, AllowedDomainTypes,
 };
 
+/// Cancels the control task when its owning operation completes or is dropped.
+/// An abort handle keeps public setup return types unchanged and never blocks in Drop.
+struct ControlHandlerGuard(Option<tokio::task::AbortHandle>);
+
+impl ControlHandlerGuard {
+    fn new(handle: &tokio::task::JoinHandle<()>) -> Self {
+        Self(Some(handle.abort_handle()))
+    }
+
+    fn disarm(mut self) {
+        self.0.take();
+    }
+}
+
+impl Drop for ControlHandlerGuard {
+    fn drop(&mut self) {
+        if let Some(handle) = self.0.take() {
+            handle.abort();
+        }
+    }
+}
+
 /// Run a future with an optional hard wall-clock timeout.
 /// When `timeout` is `None`, the future runs without any timer overhead.
 /// When the timeout fires, the future is dropped (cancelling all in-flight work).
@@ -3941,6 +3963,7 @@ impl Website {
     }
 
     /// Setup atomic controller. This does nothing without the 'control' feature flag enabled.
+    /// The caller owns the returned task and must abort it when no longer needed.
     #[cfg(feature = "control")]
     pub fn configure_handler(&self) -> Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)> {
         use crate::utils::{Handler, CONTROLLER};
@@ -4140,6 +4163,10 @@ impl Website {
         &mut self,
     ) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
         let setup = self.setup_base();
+        let guard = setup
+            .1
+            .as_ref()
+            .map(|(_, task)| ControlHandlerGuard::new(task));
         if self.status != CrawlStatus::Active {
             self.clear_all().await;
         } else {
@@ -4150,6 +4177,9 @@ impl Website {
         // true when robot_file_parser is None, so this is safe.
         if !self.single_page() {
             self.configure_robots_parser(&setup.0).await;
+        }
+        if let Some(guard) = guard {
+            guard.disarm();
         }
         setup
     }
@@ -7347,8 +7377,8 @@ impl Website {
                     return;
                 }
                 let (client, handle) = self.setup().await;
-                let (handle, join_handle) = match handle {
-                    Some(h) => (Some(h.0), Some(h.1)),
+                let (handle, control_guard) = match handle {
+                    Some(h) => (Some(h.0), Some(ControlHandlerGuard::new(&h.1))),
                     _ => (None, None),
                 };
                 let crawl_timeout = self.configuration.crawl_timeout;
@@ -7359,9 +7389,7 @@ impl Website {
                 })
                 .await;
                 self.set_crawl_status();
-                if let Some(h) = join_handle {
-                    h.abort()
-                }
+                drop(control_guard);
                 self.client.replace(client);
             }
         };
@@ -7385,8 +7413,8 @@ impl Website {
                     return;
                 }
                 let (client, handle) = self.setup().await;
-                let (handle, join_handle) = match handle {
-                    Some(h) => (Some(h.0), Some(h.1)),
+                let (handle, control_guard) = match handle {
+                    Some(h) => (Some(h.0), Some(ControlHandlerGuard::new(&h.1))),
                     _ => (None, None),
                 };
                 let crawl_timeout = self.configuration.crawl_timeout;
@@ -7396,9 +7424,7 @@ impl Website {
                 })
                 .await;
                 self.set_crawl_status();
-                if let Some(h) = join_handle {
-                    h.abort()
-                }
+                drop(control_guard);
                 self.client.replace(client);
             }
         };
@@ -7423,8 +7449,8 @@ impl Website {
             if !self.status.eq(&CrawlStatus::FirewallBlocked) {
                 self.start();
                 let (client, handle) = self.setup().await;
-                let (handle, join_handle) = match handle {
-                    Some(h) => (Some(h.0), Some(h.1)),
+                let (handle, control_guard) = match handle {
+                    Some(h) => (Some(h.0), Some(ControlHandlerGuard::new(&h.1))),
                     _ => (None, None),
                 };
                 let crawl_timeout = self.configuration.crawl_timeout;
@@ -7434,9 +7460,7 @@ impl Website {
                 })
                 .await;
                 self.set_crawl_status();
-                if let Some(h) = join_handle {
-                    h.abort()
-                }
+                drop(control_guard);
                 self.client.replace(client);
             }
         };
@@ -7484,8 +7508,8 @@ impl Website {
                     },
                     self.configure_handler(),
                 );
-                let (handle, join_handle) = match handle {
-                    Some(h) => (Some(h.0), Some(h.1)),
+                let (handle, control_guard) = match handle {
+                    Some(h) => (Some(h.0), Some(ControlHandlerGuard::new(&h.1))),
                     _ => (None, None),
                 };
                 let crawl_timeout = self.configuration.crawl_timeout;
@@ -7494,9 +7518,7 @@ impl Website {
                     self.crawl_concurrent_raw_send(&client, &handle, &url).await;
                 })
                 .await;
-                if let Some(h) = join_handle {
-                    h.abort()
-                }
+                drop(control_guard);
             }
         };
         #[cfg(feature = "balance")]
@@ -7523,8 +7545,8 @@ impl Website {
                     },
                     self.configure_handler(),
                 );
-                let (handle, join_handle) = match handle {
-                    Some(h) => (Some(h.0), Some(h.1)),
+                let (handle, control_guard) = match handle {
+                    Some(h) => (Some(h.0), Some(ControlHandlerGuard::new(&h.1))),
                     _ => (None, None),
                 };
                 let crawl_timeout = self.configuration.crawl_timeout;
@@ -7533,9 +7555,7 @@ impl Website {
                     self.crawl_concurrent_send(&client, &handle, &url).await;
                 })
                 .await;
-                if let Some(h) = join_handle {
-                    h.abort()
-                }
+                drop(control_guard);
             }
         };
         #[cfg(feature = "balance")]
@@ -7561,14 +7581,12 @@ impl Website {
                 },
                 self.configure_handler(),
             );
-            let (_handle, join_handle) = match handle {
-                Some(h) => (Some(h.0), Some(h.1)),
+            let (_handle, control_guard) = match handle {
+                Some(h) => (Some(h.0), Some(ControlHandlerGuard::new(&h.1))),
                 _ => (None, None),
             };
             self._fetch_chrome(&client, &url).await;
-            if let Some(h) = join_handle {
-                h.abort()
-            }
+            drop(control_guard);
         }
     }
 
@@ -7587,14 +7605,12 @@ impl Website {
                 },
                 self.configure_handler(),
             );
-            let (_handle, join_handle) = match handle {
-                Some(h) => (Some(h.0), Some(h.1)),
+            let (_handle, control_guard) = match handle {
+                Some(h) => (Some(h.0), Some(ControlHandlerGuard::new(&h.1))),
                 _ => (None, None),
             };
             self._fetch_chrome_persisted(&client, &url, browser).await;
-            if let Some(h) = join_handle {
-                h.abort()
-            }
+            drop(control_guard);
         }
     }
 
@@ -7623,8 +7639,8 @@ impl Website {
                     return;
                 }
                 let (client, handle) = self.setup().await;
-                let (handle, join_handle) = match handle {
-                    Some(h) => (Some(h.0), Some(h.1)),
+                let (handle, control_guard) = match handle {
+                    Some(h) => (Some(h.0), Some(ControlHandlerGuard::new(&h.1))),
                     _ => (None, None),
                 };
                 let crawl_timeout = self.configuration.crawl_timeout;
@@ -7634,9 +7650,7 @@ impl Website {
                 })
                 .await;
                 self.set_crawl_status();
-                if let Some(h) = join_handle {
-                    h.abort()
-                }
+                drop(control_guard);
                 self.client.replace(client);
             }
         };
@@ -7666,8 +7680,8 @@ impl Website {
                     return;
                 }
                 let (client, handle) = self.setup().await;
-                let (handle, join_handle) = match handle {
-                    Some(h) => (Some(h.0), Some(h.1)),
+                let (handle, control_guard) = match handle {
+                    Some(h) => (Some(h.0), Some(ControlHandlerGuard::new(&h.1))),
                     _ => (None, None),
                 };
                 let crawl_timeout = self.configuration.crawl_timeout;
@@ -7678,9 +7692,7 @@ impl Website {
                 })
                 .await;
                 self.set_crawl_status();
-                if let Some(h) = join_handle {
-                    h.abort()
-                }
+                drop(control_guard);
                 self.client.replace(client);
             }
         };
@@ -18449,5 +18461,108 @@ fn depth_limit_ignores_trailing_slash() {
             website.is_over_depth(&url.into()),
             "{url} exceeds depth 2 and must be dropped"
         );
+    }
+}
+
+#[cfg(all(test, feature = "control"))]
+mod control_handler_lifetime_tests {
+    use super::*;
+    use std::future::Future;
+
+    async fn assert_handler_released(state: &Arc<AtomicI8>) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while Arc::strong_count(state) != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("control handler must release its state after cancellation");
+    }
+
+    #[tokio::test]
+    async fn control_handler_guard_preserves_commands_and_opt_out() {
+        let mut website = Website::new("https://control-commands.invalid");
+        let (state, task) = website.configure_handler().expect("control enabled");
+        let guard = ControlHandlerGuard::new(&task);
+        // Let the handler subscribe before publishing the first command.
+        tokio::task::yield_now().await;
+        for (command, expected) in [
+            (crate::utils::Handler::Pause, 1),
+            (crate::utils::Handler::Resume, 0),
+            (crate::utils::Handler::Shutdown, 2),
+        ] {
+            crate::utils::CONTROLLER
+                .0
+                .send((website.target_id().into(), command))
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while state.load(Ordering::Relaxed) != expected {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("control command must still be applied");
+        }
+        drop(guard);
+        assert!(task
+            .await
+            .expect_err("task must be cancelled")
+            .is_cancelled());
+        assert_handler_released(&state).await;
+        website.configuration.no_control_thread = true;
+        assert!(website.configure_handler().is_none());
+    }
+
+    #[tokio::test]
+    async fn control_handler_guard_cancels_on_future_drop() {
+        let website = Website::new("https://control-cancellation.invalid");
+        let (state, task) = website.configure_handler().expect("control enabled");
+        let guard = ControlHandlerGuard::new(&task);
+        let mut operation = Box::pin(async move {
+            let _guard = guard;
+            std::future::pending::<()>().await;
+        });
+        assert!(
+            std::future::poll_fn(|cx| std::task::Poll::Ready(operation.as_mut().poll(cx)))
+                .await
+                .is_pending()
+        );
+        drop(operation);
+        assert!(task
+            .await
+            .expect_err("task must be cancelled")
+            .is_cancelled());
+        assert_handler_released(&state).await;
+    }
+
+    #[tokio::test]
+    async fn control_handler_guard_cancels_on_completion() {
+        let website = Website::new("https://control-completion.invalid");
+        let (state, task) = website.configure_handler().expect("control enabled");
+        async {
+            let _guard = ControlHandlerGuard::new(&task);
+            tokio::task::yield_now().await;
+        }
+        .await;
+        assert!(task
+            .await
+            .expect_err("task must be cancelled")
+            .is_cancelled());
+        assert_handler_released(&state).await;
+    }
+
+    #[tokio::test]
+    async fn control_handler_guard_disarm_preserves_public_ownership() {
+        let website = Website::new("https://control-transfer.invalid");
+        let (state, task) = website.configure_handler().expect("control enabled");
+        ControlHandlerGuard::new(&task).disarm();
+        tokio::task::yield_now().await;
+        assert!(!task.is_finished());
+        task.abort();
+        assert!(task
+            .await
+            .expect_err("task must be cancelled")
+            .is_cancelled());
+        assert_handler_released(&state).await;
     }
 }
