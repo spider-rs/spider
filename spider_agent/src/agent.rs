@@ -80,7 +80,7 @@ pub struct Agent {
     #[cfg(feature = "fs")]
     temp_storage: Option<TempStorage>,
 
-    /// Session memory (lock-free via DashMap).
+    /// Session memory backed by DashMap.
     memory: AgentMemory,
 
     /// Concurrency semaphore for LLM calls.
@@ -123,17 +123,14 @@ impl Agent {
         query: &str,
         options: SearchOptions,
     ) -> AgentResult<SearchResults> {
-        // Check limits before proceeding
-        if let Some(limit) = self.usage.check_search_limit(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-
         let provider = self
             .search_provider
             .as_ref()
             .ok_or(AgentError::NotConfigured("search provider"))?;
 
-        self.usage.increment_search_calls();
+        self.usage
+            .reserve_search_call(&self.config.limits)
+            .map_err(AgentError::LimitExceeded)?;
 
         provider
             .search(query, &options, &self.client)
@@ -151,14 +148,6 @@ impl Agent {
 
     /// Send a completion request with full options.
     pub async fn complete(&self, messages: Vec<Message>) -> AgentResult<CompletionResponse> {
-        // Check limits before proceeding
-        if let Some(limit) = self.usage.check_llm_limit(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-        if let Some(limit) = self.usage.check_token_limits(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-
         let llm = self
             .llm
             .as_ref()
@@ -170,13 +159,19 @@ impl Agent {
             .await
             .map_err(|_| AgentError::Llm("Failed to acquire semaphore".to_string()))?;
 
+        if let Some(limit) = self.usage.check_token_limits(&self.config.limits) {
+            return Err(AgentError::LimitExceeded(limit));
+        }
+
         let options = CompletionOptions {
             temperature: self.config.temperature,
             max_tokens: self.config.max_tokens,
             json_mode: self.config.json_mode,
         };
 
-        self.usage.increment_llm_calls();
+        self.usage
+            .reserve_llm_call(&self.config.limits)
+            .map_err(AgentError::LimitExceeded)?;
 
         let response = llm.complete(messages, &options, &self.client).await?;
 
@@ -238,12 +233,9 @@ impl Agent {
 
     /// Fetch a URL and return the HTML content.
     pub async fn fetch(&self, url: &str) -> AgentResult<FetchResult> {
-        // Check limits before proceeding
-        if let Some(limit) = self.usage.check_fetch_limit(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-
-        self.usage.increment_fetch_calls();
+        self.usage
+            .reserve_fetch_call(&self.config.limits)
+            .map_err(AgentError::LimitExceeded)?;
 
         let response = self.client.get(url).send().await?;
 
@@ -396,17 +388,17 @@ impl Agent {
 
     // ==================== Memory Methods ====================
 
-    /// Get a value from memory (lock-free).
+    /// Get a value from memory.
     pub fn memory_get(&self, key: &str) -> Option<serde_json::Value> {
         self.memory.get(key)
     }
 
-    /// Set a value in memory (lock-free).
+    /// Set a value in memory.
     pub fn memory_set(&self, key: &str, value: serde_json::Value) {
         self.memory.set(key, value);
     }
 
-    /// Clear all memory (lock-free).
+    /// Clear all memory.
     pub fn memory_clear(&self) {
         self.memory.clear();
     }
@@ -469,13 +461,9 @@ impl Agent {
         query: Option<&[(&str, &str)]>,
         body: Option<&str>,
     ) -> AgentResult<CustomToolResult> {
-        // Check limits before proceeding
-        if let Some(limit) = self.usage.check_custom_tool_limit(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-
-        // Track the call
-        self.usage.increment_custom_tool_calls(name);
+        self.usage
+            .reserve_custom_tool_call(name, &self.config.limits)
+            .map_err(AgentError::LimitExceeded)?;
 
         // Execute the tool
         self.custom_tools
@@ -529,17 +517,14 @@ impl Agent {
     /// Navigate to a URL using the browser.
     #[cfg(feature = "chrome")]
     pub async fn navigate(&self, url: &str) -> AgentResult<()> {
-        // Check limits before proceeding
-        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-
         let browser = self
             .browser
             .as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
 
-        self.usage.increment_webbrowser_calls();
+        self.usage
+            .reserve_webbrowser_call(&self.config.limits)
+            .map_err(AgentError::LimitExceeded)?;
 
         browser
             .navigate(url)
@@ -550,17 +535,14 @@ impl Agent {
     /// Get HTML from the current browser page.
     #[cfg(feature = "chrome")]
     pub async fn browser_html(&self) -> AgentResult<String> {
-        // Check limits before proceeding
-        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-
         let browser = self
             .browser
             .as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
 
-        self.usage.increment_webbrowser_calls();
+        self.usage
+            .reserve_webbrowser_call(&self.config.limits)
+            .map_err(AgentError::LimitExceeded)?;
 
         browser
             .html()
@@ -571,17 +553,14 @@ impl Agent {
     /// Take a screenshot of the current browser page.
     #[cfg(feature = "chrome")]
     pub async fn screenshot(&self) -> AgentResult<Vec<u8>> {
-        // Check limits before proceeding
-        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-
         let browser = self
             .browser
             .as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
 
-        self.usage.increment_webbrowser_calls();
+        self.usage
+            .reserve_webbrowser_call(&self.config.limits)
+            .map_err(AgentError::LimitExceeded)?;
 
         browser
             .screenshot()
@@ -597,17 +576,14 @@ impl Agent {
     /// call [`BrowserContext::defuse_page`] to let the page outlive the context.
     #[cfg(feature = "chrome")]
     pub async fn new_page(&self) -> AgentResult<crate::browser::BrowserContext> {
-        // Check limits before proceeding
-        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-
         let browser = self
             .browser
             .as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
 
-        self.usage.increment_webbrowser_calls();
+        self.usage
+            .reserve_webbrowser_call(&self.config.limits)
+            .map_err(AgentError::LimitExceeded)?;
 
         browser
             .clone_page()
@@ -630,17 +606,14 @@ impl Agent {
         &self,
         url: &str,
     ) -> AgentResult<std::sync::Arc<crate::browser::Page>> {
-        // Check limits before proceeding
-        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-
         let browser = self
             .browser
             .as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
 
-        self.usage.increment_webbrowser_calls();
+        self.usage
+            .reserve_webbrowser_call(&self.config.limits)
+            .map_err(AgentError::LimitExceeded)?;
 
         #[allow(deprecated)]
         browser
@@ -659,17 +632,14 @@ impl Agent {
         &self,
         url: &str,
     ) -> AgentResult<crate::browser::BrowserContext> {
-        // Check limits before proceeding
-        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-
         let browser = self
             .browser
             .as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
 
-        self.usage.increment_webbrowser_calls();
+        self.usage
+            .reserve_webbrowser_call(&self.config.limits)
+            .map_err(AgentError::LimitExceeded)?;
 
         browser
             .new_page_with_url_owned(url)
@@ -680,17 +650,14 @@ impl Agent {
     /// Click an element in the browser.
     #[cfg(feature = "chrome")]
     pub async fn click(&self, selector: &str) -> AgentResult<()> {
-        // Check limits before proceeding
-        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-
         let browser = self
             .browser
             .as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
 
-        self.usage.increment_webbrowser_calls();
+        self.usage
+            .reserve_webbrowser_call(&self.config.limits)
+            .map_err(AgentError::LimitExceeded)?;
 
         browser
             .click(selector)
@@ -701,17 +668,14 @@ impl Agent {
     /// Type text into an element in the browser.
     #[cfg(feature = "chrome")]
     pub async fn type_text(&self, selector: &str, text: &str) -> AgentResult<()> {
-        // Check limits before proceeding
-        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-
         let browser = self
             .browser
             .as_ref()
             .ok_or(AgentError::NotConfigured("browser"))?;
 
-        self.usage.increment_webbrowser_calls();
+        self.usage
+            .reserve_webbrowser_call(&self.config.limits)
+            .map_err(AgentError::LimitExceeded)?;
 
         browser
             .type_text(selector, text)
@@ -737,17 +701,14 @@ impl Agent {
     /// Navigate using WebDriver.
     #[cfg(feature = "webdriver")]
     pub async fn webdriver_navigate(&self, url: &str) -> AgentResult<()> {
-        // Check limits before proceeding
-        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-
         let driver = self
             .webdriver
             .as_ref()
             .ok_or(AgentError::NotConfigured("webdriver"))?;
 
-        self.usage.increment_webbrowser_calls();
+        self.usage
+            .reserve_webbrowser_call(&self.config.limits)
+            .map_err(AgentError::LimitExceeded)?;
 
         driver
             .navigate(url)
@@ -758,17 +719,14 @@ impl Agent {
     /// Get HTML from WebDriver.
     #[cfg(feature = "webdriver")]
     pub async fn webdriver_html(&self) -> AgentResult<String> {
-        // Check limits before proceeding
-        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-
         let driver = self
             .webdriver
             .as_ref()
             .ok_or(AgentError::NotConfigured("webdriver"))?;
 
-        self.usage.increment_webbrowser_calls();
+        self.usage
+            .reserve_webbrowser_call(&self.config.limits)
+            .map_err(AgentError::LimitExceeded)?;
 
         driver
             .html()
@@ -779,17 +737,14 @@ impl Agent {
     /// Take a screenshot using WebDriver.
     #[cfg(feature = "webdriver")]
     pub async fn webdriver_screenshot(&self) -> AgentResult<Vec<u8>> {
-        // Check limits before proceeding
-        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-
         let driver = self
             .webdriver
             .as_ref()
             .ok_or(AgentError::NotConfigured("webdriver"))?;
 
-        self.usage.increment_webbrowser_calls();
+        self.usage
+            .reserve_webbrowser_call(&self.config.limits)
+            .map_err(AgentError::LimitExceeded)?;
 
         driver
             .screenshot()
@@ -800,17 +755,14 @@ impl Agent {
     /// Click an element using WebDriver.
     #[cfg(feature = "webdriver")]
     pub async fn webdriver_click(&self, selector: &str) -> AgentResult<()> {
-        // Check limits before proceeding
-        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-
         let driver = self
             .webdriver
             .as_ref()
             .ok_or(AgentError::NotConfigured("webdriver"))?;
 
-        self.usage.increment_webbrowser_calls();
+        self.usage
+            .reserve_webbrowser_call(&self.config.limits)
+            .map_err(AgentError::LimitExceeded)?;
 
         driver
             .click(selector)
@@ -821,17 +773,14 @@ impl Agent {
     /// Type text into an element using WebDriver.
     #[cfg(feature = "webdriver")]
     pub async fn webdriver_type_text(&self, selector: &str, text: &str) -> AgentResult<()> {
-        // Check limits before proceeding
-        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-
         let driver = self
             .webdriver
             .as_ref()
             .ok_or(AgentError::NotConfigured("webdriver"))?;
 
-        self.usage.increment_webbrowser_calls();
+        self.usage
+            .reserve_webbrowser_call(&self.config.limits)
+            .map_err(AgentError::LimitExceeded)?;
 
         driver
             .type_text(selector, text)
@@ -850,17 +799,14 @@ impl Agent {
     /// Open a new tab using WebDriver.
     #[cfg(feature = "webdriver")]
     pub async fn webdriver_new_tab(&self) -> AgentResult<crate::webdriver::WindowHandle> {
-        // Check limits before proceeding
-        if let Some(limit) = self.usage.check_webbrowser_limit(&self.config.limits) {
-            return Err(AgentError::LimitExceeded(limit));
-        }
-
         let driver = self
             .webdriver
             .as_ref()
             .ok_or(AgentError::NotConfigured("webdriver"))?;
 
-        self.usage.increment_webbrowser_calls();
+        self.usage
+            .reserve_webbrowser_call(&self.config.limits)
+            .map_err(AgentError::LimitExceeded)?;
 
         driver
             .new_tab()
@@ -1442,6 +1388,12 @@ impl AgentBuilder {
 
     /// Build the agent.
     pub fn build(self) -> AgentResult<Agent> {
+        if self.config.max_concurrent_llm_calls == 0
+            || self.config.max_concurrent_llm_calls > Semaphore::MAX_PERMITS
+        {
+            return Err(AgentError::InvalidField("max_concurrent_llm_calls"));
+        }
+
         let client = if let Some(client) = self.client {
             client
         } else {
@@ -1508,6 +1460,104 @@ impl Default for AgentBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct StubLlm;
+
+    #[async_trait::async_trait]
+    impl LLMProvider for StubLlm {
+        async fn complete(
+            &self,
+            _messages: Vec<Message>,
+            _options: &CompletionOptions,
+            _client: &reqwest::Client,
+        ) -> AgentResult<CompletionResponse> {
+            tokio::task::yield_now().await;
+            Ok(CompletionResponse {
+                content: "ok".into(),
+                usage: crate::llm::TokenUsage::default(),
+            })
+        }
+
+        fn provider_name(&self) -> &'static str {
+            "stub"
+        }
+        fn is_configured(&self) -> bool {
+            true
+        }
+    }
+
+    fn limited_agent(limits: crate::config::UsageLimits) -> Agent {
+        let mut builder = Agent::builder().with_config(
+            AgentConfig::new()
+                .with_max_concurrent_llm_calls(1)
+                .with_limits(limits),
+        );
+        builder.llm = Some(Box::new(StubLlm));
+        builder.build().unwrap()
+    }
+
+    #[test]
+    fn invalid_concurrency_returns_error_instead_of_hanging_or_panicking() {
+        for n in [0, Semaphore::MAX_PERMITS + 1] {
+            assert!(matches!(
+                Agent::builder().with_max_concurrent_llm_calls(n).build(),
+                Err(AgentError::InvalidField("max_concurrent_llm_calls"))
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn queued_completions_respect_call_limit() {
+        let agent = limited_agent(crate::config::UsageLimits::new().with_max_llm_calls(1));
+        let permit = agent.llm_semaphore.acquire().await.unwrap();
+        let first = agent.complete(vec![]);
+        let second = agent.complete(vec![]);
+        tokio::pin!(first, second);
+        assert!(futures::poll!(&mut first).is_pending());
+        assert!(futures::poll!(&mut second).is_pending());
+        drop(permit);
+        let (first, second) = tokio::join!(first, second);
+        assert!(first.is_ok());
+        assert!(matches!(
+            second,
+            Err(AgentError::LimitExceeded(
+                crate::config::LimitType::LlmCalls { .. }
+            ))
+        ));
+        assert_eq!(agent.usage().llm_calls, 1);
+    }
+
+    #[tokio::test]
+    async fn queued_completion_rechecks_tokens_after_admission() {
+        let agent = limited_agent(crate::config::UsageLimits::new().with_max_total_tokens(1));
+        let permit = agent.llm_semaphore.acquire().await.unwrap();
+        let completion = agent.complete(vec![]);
+        tokio::pin!(completion);
+        assert!(futures::poll!(&mut completion).is_pending());
+        agent.usage.add_tokens(1, 0);
+        drop(permit);
+        assert!(matches!(
+            completion.await,
+            Err(AgentError::LimitExceeded(
+                crate::config::LimitType::TotalTokens { .. }
+            ))
+        ));
+        assert_eq!(agent.usage().llm_calls, 0);
+    }
+
+    #[tokio::test]
+    async fn cancelled_waiter_does_not_consume_a_call() {
+        let agent = limited_agent(crate::config::UsageLimits::new().with_max_llm_calls(1));
+        let permit = agent.llm_semaphore.acquire().await.unwrap();
+        {
+            let completion = agent.complete(vec![]);
+            tokio::pin!(completion);
+            assert!(futures::poll!(&mut completion).is_pending());
+        }
+        drop(permit);
+        assert!(agent.complete(vec![]).await.is_ok());
+        assert_eq!(agent.usage().llm_calls, 1);
+    }
 
     #[test]
     fn test_builder_registers_spider_cloud_default_routes() {

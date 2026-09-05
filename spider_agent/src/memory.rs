@@ -1,9 +1,9 @@
 //! Session memory for spider_agent.
 //!
-//! Uses DashMap for lock-free concurrent access.
+//! Uses DashMap for concurrent access with shard-level locking.
 //!
 //! # Features
-//! - **Key-Value Store**: Lock-free concurrent storage for arbitrary JSON values
+//! - **Key-Value Store**: Concurrent storage for arbitrary JSON values
 //! - **URL History**: Track visited URLs for navigation context
 //! - **Action History**: Record actions taken for debugging and context
 //! - **Extraction History**: Accumulate extracted data across pages
@@ -27,15 +27,14 @@ const MAX_EXTRACTIONS: usize = 50;
 /// A deliberately generous bound: normal sessions stay far below it, so it is
 /// invisible in practice. It engages only under pathological key churn (e.g. an
 /// agent looping and writing a unique key every round), where it caps memory by
-/// evicting one older entry per new key. This is DoS / leak protection, not a
+/// evicting arbitrary entries after writes. This is DoS / leak protection, not a
 /// normal-use path.
 const MAX_DATA_ENTRIES: usize = 10_000;
 
 /// A bounded, insertion-ordered history with no lock of its own.
 ///
 /// Backed by a [`DashMap`] keyed by a monotonic sequence number, so ordering is
-/// carried by the key rather than by a `Vec` behind an `RwLock`. Readers take
-/// no writer-blocking lock, and a push contends only with the shard it lands in.
+/// carried by the key. Reads and writes acquire DashMap shard guards.
 ///
 /// Eviction scans for the lowest live key, which is `O(cap)` — with caps of 50
 /// to 100 entries that is a handful of integer comparisons, and it stays correct
@@ -158,8 +157,7 @@ impl<T> History<T> {
 
 /// Session memory for storing state across operations.
 ///
-/// Uses DashMap internally for lock-free concurrent reads and writes.
-/// This is optimal for high-concurrency scenarios.
+/// Uses DashMap internally for concurrent reads and writes.
 ///
 /// # Example
 /// ```
@@ -184,7 +182,7 @@ impl<T> History<T> {
 /// ```
 #[derive(Debug, Clone)]
 pub struct AgentMemory {
-    /// Lock-free concurrent key-value store.
+    /// Concurrent key-value store.
     data: Arc<DashMap<String, serde_json::Value>>,
     /// History of visited URLs (most recent last).
     visited_urls: Arc<History<String>>,
@@ -230,26 +228,26 @@ impl AgentMemory {
         self.data.get(key).map(|v| v.value().clone())
     }
 
-    /// Set a value in memory.
-    ///
-    /// The number of distinct keys is bounded by [`MAX_DATA_ENTRIES`]. Updating
-    /// an existing key never grows the store; once the cap is reached, adding a
-    /// *new* key evicts one arbitrary older entry (the just-set key is always
-    /// kept). Below the cap this is a plain insert with no behavior change.
+    /// Set a value in memory, evicting arbitrary other keys above the entry cap.
     pub fn set(&self, key: impl Into<String>, value: serde_json::Value) {
         let key = key.into();
-        let is_new = !self.data.contains_key(&key);
         self.data.insert(key.clone(), value);
-        if is_new && self.data.len() > MAX_DATA_ENTRIES {
-            // Collect a victim key BEFORE removing so no shard guard is held
-            // across the mutation — DashMap would self-deadlock otherwise.
+        self.enforce_data_limit(&key);
+    }
+
+    fn enforce_data_limit(&self, keep: &str) {
+        while self.data.len() > MAX_DATA_ENTRIES {
+            // Drop the iterator and its shard guard before removing anything.
             let victim = self
                 .data
                 .iter()
-                .find(|entry| entry.key() != &key)
+                .find(|entry| entry.key().as_str() != keep)
                 .map(|entry| entry.key().clone());
-            if let Some(victim) = victim {
-                self.data.remove(&victim);
+            match victim {
+                Some(victim) => {
+                    self.data.remove(&victim);
+                }
+                None => break,
             }
         }
     }
@@ -289,20 +287,22 @@ impl AgentMemory {
     /// Set a typed value in memory.
     pub fn set_value<T: Serialize>(&self, key: impl Into<String>, value: &T) {
         if let Ok(json) = serde_json::to_value(value) {
-            self.data.insert(key.into(), json);
+            self.set(key, json);
         }
     }
 
-    /// Update a value atomically using a closure.
+    /// Update a value using a snapshot of the current value.
     ///
-    /// The closure receives the current value (if any) and returns the new value.
+    /// The callback runs without a shard guard and may access this memory.
+    /// Concurrent writes can be overwritten; this is not a compare-and-swap.
     pub fn update<F>(&self, key: impl Into<String>, f: F)
     where
         F: FnOnce(Option<&serde_json::Value>) -> serde_json::Value,
     {
         let key = key.into();
-        let new_value = f(self.data.get(&key).as_deref());
-        self.data.insert(key, new_value);
+        let current = self.get(&key);
+        let new_value = f(current.as_ref());
+        self.set(key, new_value);
     }
 
     /// Get or insert a value.
@@ -311,11 +311,15 @@ impl AgentMemory {
         key: impl Into<String>,
         default: serde_json::Value,
     ) -> serde_json::Value {
-        self.data
-            .entry(key.into())
+        let key = key.into();
+        let value = self
+            .data
+            .entry(key.clone())
             .or_insert(default)
             .value()
-            .clone()
+            .clone();
+        self.enforce_data_limit(&key);
+        value
     }
 
     // ========== URL History ==========
@@ -505,6 +509,41 @@ impl AgentMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_memory_writer_enforces_the_entry_cap() {
+        for writer in 0..4 {
+            let memory = AgentMemory::new();
+            for i in 0..MAX_DATA_ENTRIES + 20 {
+                let key = i.to_string();
+                match writer {
+                    0 => memory.set(key, serde_json::json!(i)),
+                    1 => memory.set_value(key, &i),
+                    2 => memory.update(key, |_| serde_json::json!(i)),
+                    _ => {
+                        memory.get_or_insert(key, serde_json::json!(i));
+                    }
+                }
+            }
+            assert_eq!(memory.len(), MAX_DATA_ENTRIES);
+            assert_eq!(
+                memory.get(&(MAX_DATA_ENTRIES + 19).to_string()),
+                Some(serde_json::json!(MAX_DATA_ENTRIES + 19))
+            );
+        }
+    }
+
+    #[test]
+    fn update_callback_can_write_the_same_key() {
+        let memory = AgentMemory::new();
+        memory.set("key", serde_json::json!(1));
+        memory.update("key", |current| {
+            assert_eq!(current, Some(&serde_json::json!(1)));
+            memory.set("key", serde_json::json!(2));
+            serde_json::json!(3)
+        });
+        assert_eq!(memory.get("key"), Some(serde_json::json!(3)));
+    }
 
     #[test]
     fn test_memory_basic() {
