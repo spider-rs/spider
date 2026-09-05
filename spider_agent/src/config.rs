@@ -587,44 +587,50 @@ impl UsageStats {
         )
     }
 
+    fn add_count(counter: &AtomicU64, amount: u64) {
+        let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
+            Some(used.saturating_add(amount))
+        });
+    }
+
     /// Add tokens from an LLM response.
     pub fn add_tokens(&self, prompt: u64, completion: u64) {
-        self.prompt_tokens.fetch_add(prompt, Ordering::Relaxed);
-        self.completion_tokens
-            .fetch_add(completion, Ordering::Relaxed);
+        Self::add_count(&self.prompt_tokens, prompt);
+        Self::add_count(&self.completion_tokens, completion);
     }
 
     /// Increment LLM call count.
     pub fn increment_llm_calls(&self) {
-        self.llm_calls.fetch_add(1, Ordering::Relaxed);
+        Self::add_count(&self.llm_calls, 1);
     }
 
     /// Increment search call count.
     pub fn increment_search_calls(&self) {
-        self.search_calls.fetch_add(1, Ordering::Relaxed);
+        Self::add_count(&self.search_calls, 1);
     }
 
     /// Increment fetch call count.
     pub fn increment_fetch_calls(&self) {
-        self.fetch_calls.fetch_add(1, Ordering::Relaxed);
+        Self::add_count(&self.fetch_calls, 1);
     }
 
     /// Increment web browser call count (Chrome/WebDriver).
     pub fn increment_webbrowser_calls(&self) {
-        self.webbrowser_calls.fetch_add(1, Ordering::Relaxed);
+        Self::add_count(&self.webbrowser_calls, 1);
     }
 
     /// Increment custom tool call count for a specific tool.
     pub fn increment_custom_tool_calls(&self, tool_name: &str) {
-        self.custom_tool_calls_total.fetch_add(1, Ordering::Relaxed);
+        Self::add_count(&self.custom_tool_calls_total, 1);
         self.record_custom_tool_call(tool_name);
     }
 
     fn record_custom_tool_call(&self, tool_name: &str) {
-        self.custom_tool_calls
+        let count = self
+            .custom_tool_calls
             .entry(tool_name.to_string())
-            .or_insert_with(|| AtomicU64::new(0))
-            .fetch_add(1, Ordering::Relaxed);
+            .or_insert_with(|| AtomicU64::new(0));
+        Self::add_count(&count, 1);
     }
 
     pub(crate) fn reserve_custom_tool_call(
@@ -654,17 +660,19 @@ impl UsageStats {
         self.custom_tool_calls
             .iter()
             .map(|entry| entry.value().load(Ordering::Relaxed))
-            .sum()
+            .fold(0u64, u64::saturating_add)
     }
 
     /// Increment tool call count.
     pub fn increment_tool_calls(&self) {
-        self.tool_calls.fetch_add(1, Ordering::Relaxed);
+        Self::add_count(&self.tool_calls, 1);
     }
 
     /// Get total tokens used.
     pub fn total_tokens(&self) -> u64 {
-        self.prompt_tokens.load(Ordering::Relaxed) + self.completion_tokens.load(Ordering::Relaxed)
+        self.prompt_tokens
+            .load(Ordering::Relaxed)
+            .saturating_add(self.completion_tokens.load(Ordering::Relaxed))
     }
 
     /// Get a snapshot of all stats.
@@ -772,7 +780,7 @@ impl UsageStats {
     pub fn check_token_limits(&self, limits: &UsageLimits) -> Option<LimitType> {
         let prompt = self.prompt_tokens.load(Ordering::Relaxed);
         let completion = self.completion_tokens.load(Ordering::Relaxed);
-        let total = prompt + completion;
+        let total = prompt.saturating_add(completion);
 
         if let Some(limit) = limits.max_total_tokens {
             if total >= limit {
@@ -826,12 +834,15 @@ pub struct UsageSnapshot {
 impl UsageSnapshot {
     /// Get total tokens.
     pub fn total_tokens(&self) -> u64 {
-        self.prompt_tokens + self.completion_tokens
+        self.prompt_tokens.saturating_add(self.completion_tokens)
     }
 
     /// Get total custom tool calls across all tools.
     pub fn total_custom_tool_calls(&self) -> u64 {
-        self.custom_tool_calls.values().sum()
+        self.custom_tool_calls
+            .values()
+            .copied()
+            .fold(0u64, u64::saturating_add)
     }
 
     /// Get call count for a specific custom tool.
@@ -843,6 +854,40 @@ impl UsageSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usage_saturates_without_panicking_or_reopening_limits() {
+        let stats = UsageStats::new();
+        stats.add_tokens(u64::MAX, u64::MAX);
+        stats.add_tokens(1, 1);
+        assert_eq!(stats.total_tokens(), u64::MAX);
+        assert_eq!(stats.snapshot().total_tokens(), u64::MAX);
+        assert!(stats
+            .check_token_limits(&UsageLimits::new().with_max_total_tokens(u64::MAX))
+            .is_some());
+        stats.llm_calls.store(u64::MAX, Ordering::Relaxed);
+        stats.increment_llm_calls();
+        assert!(stats
+            .reserve_llm_call(&UsageLimits::new().with_max_llm_calls(u64::MAX))
+            .is_err());
+        stats
+            .custom_tool_calls_total
+            .store(u64::MAX, Ordering::Relaxed);
+        stats
+            .custom_tool_calls
+            .insert("a".into(), AtomicU64::new(u64::MAX));
+        stats.increment_custom_tool_calls("a");
+        stats.increment_custom_tool_calls("b");
+        assert_eq!(stats.total_custom_tool_calls(), u64::MAX);
+        assert_eq!(stats.get_custom_tool_calls("a"), u64::MAX);
+        assert_eq!(stats.snapshot().total_custom_tool_calls(), u64::MAX);
+        assert!(stats
+            .reserve_custom_tool_call(
+                "c",
+                &UsageLimits::new().with_max_custom_tool_calls(u64::MAX)
+            )
+            .is_err());
+    }
 
     #[test]
     fn concurrent_reservations_never_exceed_call_limits() {

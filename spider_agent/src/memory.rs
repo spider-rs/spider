@@ -279,9 +279,9 @@ impl AgentMemory {
 
     /// Get a typed value from memory.
     pub fn get_as<T: for<'de> Deserialize<'de>>(&self, key: &str) -> Option<T> {
-        self.data
-            .get(key)
-            .and_then(|v| serde_json::from_value(v.value().clone()).ok())
+        // Deserialization can call user code; release the shard guard first.
+        self.get(key)
+            .and_then(|value| serde_json::from_value(value).ok())
     }
 
     /// Set a typed value in memory.
@@ -509,6 +509,26 @@ impl AgentMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typed_read_deserializer_can_write_the_same_key() {
+        thread_local! {
+            static MEMORY: AgentMemory = AgentMemory::new();
+        }
+        struct ReentrantValue;
+        impl<'de> Deserialize<'de> for ReentrantValue {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                let _: u64 = Deserialize::deserialize(deserializer)?;
+                MEMORY.with(|memory| memory.set("key", serde_json::json!(2)));
+                Ok(Self)
+            }
+        }
+        MEMORY.with(|memory| {
+            memory.set("key", serde_json::json!(1));
+            assert!(memory.get_as::<ReentrantValue>("key").is_some());
+            assert_eq!(memory.get("key"), Some(serde_json::json!(2)));
+        });
+    }
 
     #[test]
     fn every_memory_writer_enforces_the_entry_cap() {
