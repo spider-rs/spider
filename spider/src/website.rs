@@ -7476,7 +7476,11 @@ impl Website {
     pub async fn configure_setup(&mut self) {
         self.status = CrawlStatus::Active;
         self.start();
-        self.setup().await;
+        let (_, handler) = self.setup().await;
+        // Send crawls create their own controller; setup must not detach one.
+        if let Some((_, task)) = handler {
+            task.abort();
+        }
         self.configuration.configure_allowlist();
         self.send_configured = true;
     }
@@ -7486,7 +7490,11 @@ impl Website {
     pub fn configure_setup_norobots(&mut self) {
         self.status = CrawlStatus::Active;
         self.start();
-        self.setup_base();
+        let (_, handler) = self.setup_base();
+        // Send crawls create their own controller; setup must not detach one.
+        if let Some((_, task)) = handler {
+            task.abort();
+        }
         self.configuration.configure_allowlist();
         self.send_configured = true;
     }
