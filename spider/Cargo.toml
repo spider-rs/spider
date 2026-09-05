@@ -418,7 +418,7 @@ cowboy = []
 # HTTP/2 multiplexing tracker for per-origin stream management.
 h2_multiplex = ["dep:http"]
 # Cross-crawl robots.txt cache with TTL-based expiry.
-robots_cache = []
+robots_cache = ["dep:http"]
 
 # mmap-backed bloom filter for URL deduplication with hugepage support.
 bloom = ["dep:libc"]
