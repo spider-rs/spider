@@ -65,12 +65,12 @@ Open an issue describing:
 
 ### Pull Requests
 
-1. Fork the repo and create a branch from `master`
+1. Fork the repo and create a branch from `main`
 2. Make your changes
 3. Add or update tests for your changes
 4. Run `cargo test` and ensure everything passes
 5. Run `cargo fmt` to format your code
-6. Open a pull request against `master`
+6. Open a pull request against `main`
 
 #### PR Guidelines
 
