@@ -92,6 +92,20 @@ use std::time::Duration;
 
 use crate::build_folders::build_local_path;
 
+/// Parse `--budget` comma-separated `path,limit` pairs.
+///
+/// Incomplete trailing segments (odd token count, e.g. `"*,100,/blog"` or a
+/// trailing comma) are ignored instead of panicking on `chunks(2)[1]`.
+fn parse_budget(budget: &str) -> HashMap<&str, u32> {
+    budget
+        .split(',')
+        .collect::<Vec<_>>()
+        .chunks(2)
+        .filter(|pair| pair.len() == 2)
+        .map(|pair| (pair[0], pair[1].parse::<u32>().unwrap_or_default()))
+        .collect()
+}
+
 /// convert the headers to json
 fn headers_to_json(headers: &Option<HeaderMap<HeaderValue>>) -> Value {
     if let Some(headers) = &headers {
@@ -275,14 +289,7 @@ async fn main() {
             cli.blacklist_url
                 .map(|blacklist_url| blacklist_url.split(',').map(|l| l.into()).collect()),
         )
-        .with_budget(cli.budget.as_ref().map(|budget| {
-            budget
-                .split(',')
-                .collect::<Vec<_>>()
-                .chunks(2)
-                .map(|x| (x[0], x[1].parse::<u32>().unwrap_or_default()))
-                .collect::<HashMap<&str, u32>>()
-        }));
+        .with_budget(cli.budget.as_deref().map(parse_budget));
 
     if let Some(agent) = &cli.agent {
         website.with_user_agent(Some(agent));
@@ -586,5 +593,52 @@ async fn main() {
             }
         }
         _ =>  println!("Invalid website URL passed in. The url should start with http:// or https:// following the website domain ex: https://example.com.")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_budget;
+
+    #[test]
+    fn parse_budget_single_pair() {
+        let map = parse_budget("*,1");
+        assert_eq!(map.get("*"), Some(&1));
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn parse_budget_multiple_pairs() {
+        let map = parse_budget("*,100,/blog/,10");
+        assert_eq!(map.get("*"), Some(&100));
+        assert_eq!(map.get("/blog/"), Some(&10));
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn parse_budget_ignores_trailing_path_without_limit() {
+        // Previously panicked: last chunk was [" /blog"] and x[1] indexed OOB.
+        let map = parse_budget("*,100,/blog");
+        assert_eq!(map.get("*"), Some(&100));
+        assert!(!map.contains_key("/blog"));
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn parse_budget_ignores_trailing_comma() {
+        let map = parse_budget("*,100,");
+        assert_eq!(map.get("*"), Some(&100));
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn parse_budget_empty_string() {
+        assert!(parse_budget("").is_empty());
+    }
+
+    #[test]
+    fn parse_budget_non_numeric_limit_defaults_to_zero() {
+        let map = parse_budget("*,abc");
+        assert_eq!(map.get("*"), Some(&0));
     }
 }
