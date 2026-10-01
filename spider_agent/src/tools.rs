@@ -86,7 +86,6 @@ pub enum AuthConfig {
 /// - `/search`
 /// - `/links`
 /// - `/transform`
-/// - `/unblocker`
 ///
 /// AI routes are disabled by default and must be explicitly enabled with
 /// `with_enable_ai_routes(true)` because they require a Spider Cloud AI plan.
@@ -121,8 +120,6 @@ pub struct SpiderCloudToolConfig {
     pub include_links: bool,
     /// Register `/transform`.
     pub include_transform: bool,
-    /// Register `/unblocker`.
-    pub include_unblocker: bool,
     /// Register `/ai/*` routes.
     ///
     /// These routes require a paid Spider Cloud AI subscription:
@@ -144,7 +141,6 @@ impl Default for SpiderCloudToolConfig {
             include_search: true,
             include_links: true,
             include_transform: true,
-            include_unblocker: true,
             enable_ai_routes: false,
         }
     }
@@ -194,12 +190,6 @@ impl SpiderCloudToolConfig {
     /// Set timeout in seconds for each registered tool.
     pub fn with_timeout_secs(mut self, timeout_secs: u64) -> Self {
         self.timeout_secs = timeout_secs.max(1);
-        self
-    }
-
-    /// Enable or disable `/unblocker` route registration.
-    pub fn with_unblocker(mut self, enabled: bool) -> Self {
-        self.include_unblocker = enabled;
         self
     }
 
@@ -281,7 +271,7 @@ impl SpiderCloudToolConfig {
             tools.push(self.build_tool(
                 &self.tool_name("scrape"),
                 "scrape",
-                "Spider Cloud /scrape endpoint for page scraping and extraction.",
+                "Spider Cloud /scrape endpoint for page scraping and extraction. Set `stealth: true` for bot-protected pages.",
             ));
         }
         if self.include_search {
@@ -303,13 +293,6 @@ impl SpiderCloudToolConfig {
                 &self.tool_name("transform"),
                 "transform",
                 "Spider Cloud /transform endpoint for structured content transformation.",
-            ));
-        }
-        if self.include_unblocker {
-            tools.push(self.build_tool(
-                &self.tool_name("unblocker"),
-                "unblocker",
-                "Spider Cloud /unblocker endpoint for anti-bot bypass and hard-to-reach pages.",
             ));
         }
 
@@ -987,13 +970,13 @@ mod tests {
         let tools = cfg.to_custom_tools();
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
 
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 5);
         assert!(names.contains(&"spider_cloud_crawl"));
         assert!(names.contains(&"spider_cloud_scrape"));
         assert!(names.contains(&"spider_cloud_search"));
         assert!(names.contains(&"spider_cloud_links"));
         assert!(names.contains(&"spider_cloud_transform"));
-        assert!(names.contains(&"spider_cloud_unblocker"));
+        assert!(!names.contains(&"spider_cloud_unblocker"));
 
         assert!(!names.contains(&"spider_cloud_ai_crawl"));
         assert!(!names.contains(&"spider_cloud_ai_scrape"));
@@ -1021,7 +1004,7 @@ mod tests {
         let tools = cfg.to_custom_tools();
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
 
-        assert_eq!(tools.len(), 11);
+        assert_eq!(tools.len(), 10);
         assert!(names.contains(&"spider_cloud_ai_crawl"));
         assert!(names.contains(&"spider_cloud_ai_scrape"));
         assert!(names.contains(&"spider_cloud_ai_search"));
@@ -1033,15 +1016,13 @@ mod tests {
     fn test_spider_cloud_registry_registration() {
         let registry = CustomToolRegistry::new();
         let cfg = SpiderCloudToolConfig::new("sk_spider_cloud")
-            .with_unblocker(true)
             .with_transform(true)
             .with_enable_ai_routes(false);
         let count = registry.register_spider_cloud(&cfg);
 
-        assert_eq!(count, 6);
+        assert_eq!(count, 5);
         assert!(registry.contains("spider_cloud_crawl"));
         assert!(registry.contains("spider_cloud_transform"));
-        assert!(registry.contains("spider_cloud_unblocker"));
         assert!(!registry.contains("spider_cloud_ai_scrape"));
     }
 

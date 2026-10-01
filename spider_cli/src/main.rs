@@ -393,7 +393,6 @@ async fn main() {
 
                     let mode = match cli.spider_cloud_mode.as_deref() {
                         Some("proxy") => SpiderCloudMode::Proxy,
-                        Some("unblocker") => SpiderCloudMode::Unblocker,
                         Some("fallback") => SpiderCloudMode::Fallback,
                         Some("smart") => SpiderCloudMode::Smart,
                         // api is the default mode.

@@ -642,4 +642,4 @@ async fn main() {
 }
 ```
 
-Modes: `Proxy` (default), `Api`, `Unblocker`, `Fallback`, `Smart` (proxy + auto-fallback on bot protection).
+Modes: `Proxy` (default), `Api`, `Fallback`, `Smart` (proxy, then `/scrape` with stealth on bot protection).

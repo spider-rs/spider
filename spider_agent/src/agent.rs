@@ -490,8 +490,8 @@ impl Agent {
 
     /// Register Spider Cloud routes as custom tools.
     ///
-    /// Core routes (`/crawl`, `/scrape`, `/search`, `/links`, `/transform`,
-    /// `/unblocker`) are enabled by default. AI routes are gated and disabled
+    /// Core routes (`/crawl`, `/scrape`, `/search`, `/links`, `/transform`)
+    /// are enabled by default. AI routes are gated and disabled
     /// by default.
     ///
     /// Returns the number of tools registered.
@@ -1205,8 +1205,7 @@ impl AgentBuilder {
 
     /// Register Spider Cloud tools using an API key.
     ///
-    /// Registers `/crawl`, `/scrape`, `/search`, `/links`, `/transform`, and
-    /// `/unblocker`.
+    /// Registers `/crawl`, `/scrape`, `/search`, `/links`, and `/transform`.
     /// AI routes remain disabled unless enabled in `with_spider_cloud_config`.
     pub fn with_spider_cloud(mut self, api_key: impl Into<String>) -> Self {
         let key = api_key.into();
@@ -1572,7 +1571,7 @@ mod tests {
         assert!(tools.contains(&"spider_cloud_search".to_string()));
         assert!(tools.contains(&"spider_cloud_links".to_string()));
         assert!(tools.contains(&"spider_cloud_transform".to_string()));
-        assert!(tools.contains(&"spider_cloud_unblocker".to_string()));
+        assert!(!tools.contains(&"spider_cloud_unblocker".to_string()));
         assert!(!tools.contains(&"spider_cloud_ai_scrape".to_string()));
     }
 

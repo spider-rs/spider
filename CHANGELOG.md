@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v2.54.0
+
+1. breaking(spider): remove `SpiderCloudMode::Unblocker`. The Spider Cloud unblocker endpoints are deprecated. Use `/scrape` (or `/ai/scrape`) with `stealth: true`. `Smart` mode now falls back to `POST /scrape` with `stealth: true`, and `SpiderCloudConfig::fallback_route` returns `"scrape"` for it.
+1. breaking(agent): remove the `spider_cloud_unblocker` tool, `SpiderCloudToolConfig::include_unblocker` and `with_unblocker`. Use `spider_cloud_scrape` with `stealth: true` for bot-protected pages. The cloud examples do the same, and `SPIDER_CLOUD_FORCE_UNBLOCKER` is now `SPIDER_CLOUD_FORCE_STEALTH`.
+1. breaking(cli): `--spider-cloud-mode unblocker` is gone.
+
 ## v2.53.5
 
 1. fix(agent_types): `ToolCallingMode::Auto` matched no current Claude model — it tested for `claude-3`/`claude-4`, which never match the hyphenated point-release IDs (`claude-opus-4-8`, `claude-opus-5`, `claude-sonnet-5`, `claude-fable-5`, `claude-haiku-4-5`). Auto silently fell back to free-form JSON parsing on every current model. Now matched on version-proof family names, plus `gpt-5` and the o-series.

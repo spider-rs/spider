@@ -142,7 +142,7 @@ Options:
       --spider-cloud-key <SPIDER_CLOUD_KEY>
           Spider Cloud API key. Sign up at https://spider.cloud for an API key
       --spider-cloud-mode <SPIDER_CLOUD_MODE>
-          Spider Cloud mode: proxy (default), api, unblocker, fallback, or smart [default: proxy]
+          Spider Cloud mode: proxy (default), api, fallback, or smart [default: proxy]
       --wait-for-idle-network <WAIT_FOR_IDLE_NETWORK>
           Wait for network request to be idle within a time frame period (500ms no network connections) with an optional timeout in milliseconds
       --wait-for-idle-network0 <WAIT_FOR_IDLE_NETWORK0>

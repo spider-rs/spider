@@ -44,14 +44,14 @@ use spider::configuration::{SpiderCloudConfig, SpiderCloudMode};
 use spider::website::Website;
 
 let cloud = SpiderCloudConfig::new("sk-...")
-    .with_mode(SpiderCloudMode::Smart); // proxy by default, auto-unblock when blocked
+    .with_mode(SpiderCloudMode::Smart); // proxy by default, stealth scrape when blocked
 
 let mut website = Website::new("https://example.com")
     .with_spider_cloud_config(cloud)
     .build()?;
 ```
 
-`Smart` mode routes through proxies first and escalates to the unblocker only on pages that fight back, so you pay for bypass only where it's needed.
+`Smart` mode routes through proxies first and escalates to a stealth `/scrape` only on pages that fight back, so you pay for bypass only where it's needed.
 
 ## Or run it locally
 
