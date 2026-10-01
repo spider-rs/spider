@@ -65,9 +65,8 @@ Spider Cloud offloads crawling to managed infrastructure with anti-bot bypass, p
 |------|-------------|-------------|
 | **Proxy** (default) | Routes HTTP through `proxy.spider.cloud` | General crawling, transparent |
 | **Api** | `POST /crawl` per page | Need API-level control |
-| **Unblocker** | `POST /unblocker` per page | Sites with heavy bot protection |
 | **Fallback** | Direct fetch first, cloud on 403/429/503 | Cost-conscious, mostly unprotected sites |
-| **Smart** | Proxy default, auto-fallback to `/unblocker` on bot detection | **Production recommended** |
+| **Smart** | Proxy default, auto-fallback to `/scrape` with `stealth: true` on bot detection | **Production recommended** |
 
 ### Configuration
 
@@ -76,7 +75,7 @@ use spider::configuration::{SpiderCloudConfig, SpiderCloudMode};
 
 // Full control via SpiderCloudConfig
 let config = SpiderCloudConfig::new("sk-...")
-    .with_mode(SpiderCloudMode::Smart)       // proxy + auto unblocker fallback
+    .with_mode(SpiderCloudMode::Smart)       // proxy + stealth scrape fallback
     .with_return_format("raw");              // "raw" = original HTML
 
 let mut website = Website::new("https://example.com")
@@ -89,7 +88,7 @@ let mut website = Website::new("https://example.com");
 website.with_spider_cloud("sk-...");
 ```
 
-**Smart mode** auto-detects bot protection via status codes (403, 429, 503, 520-530) and content markers (Cloudflare challenge, CAPTCHA, Distil, Imperva, Akamai). When detected, it falls back from proxy to `/unblocker` API automatically.
+**Smart mode** auto-detects bot protection via status codes (403, 429, 503, 520-530) and content markers (Cloudflare challenge, CAPTCHA, Distil, Imperva, Akamai). When detected, it falls back from proxy to the `/scrape` API with `stealth: true` automatically.
 
 ### Browser Cloud (remote headless Chrome via CDP)
 
@@ -135,7 +134,6 @@ spider crawl --url https://example.com --spider-cloud-browser
 | `SPIDER_CLOUD_API_KEY` | API key |
 | `SPIDER_CLOUD_API_URL` | Custom API URL (default: `https://api.spider.cloud`) |
 | `SPIDER_CLOUD_RETURN_FORMAT` | `raw\|markdown\|commonmark\|text\|bytes` |
-| `SPIDER_CLOUD_FORCE_UNBLOCKER` | Always use unblocker (`1`/`true`) |
 | `SPIDER_BROWSER_STEALTH` | Enable stealth mode (`1`/`true`) |
 | `SPIDER_BROWSER_COUNTRY` | Country code (e.g. `us`, `gb`) |
 
@@ -327,8 +325,7 @@ let agent = Agent::builder()
     .build()?;
 
 // Available tools: spider_cloud_crawl, spider_cloud_scrape,
-// spider_cloud_search, spider_cloud_links, spider_cloud_transform,
-// spider_cloud_unblocker
+// spider_cloud_search, spider_cloud_links, spider_cloud_transform
 // AI tools (paid): spider_cloud_ai_crawl, spider_cloud_ai_scrape,
 // spider_cloud_ai_search, spider_cloud_ai_browser, spider_cloud_ai_links
 ```
@@ -364,7 +361,7 @@ let agent = Agent::builder()
 SPIDER_CLOUD_API_KEY=sk-... cargo run -p spider_agent --example spider_cloud_end_to_end \
   -- "Find top travel books on https://books.toscrape.com"
 
-# Prompt-driven flows (crawl, scrape, search, transform, unblocker)
+# Prompt-driven flows (crawl, scrape, search, transform)
 SPIDER_CLOUD_API_KEY=sk-... cargo run -p spider_agent --example spider_cloud_prompt_flows \
   -- "run all flows for https://books.toscrape.com/"
 

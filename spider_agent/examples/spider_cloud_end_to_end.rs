@@ -4,7 +4,7 @@
 //! - takes one natural-language prompt
 //! - plans a multi-step route sequence
 //! - executes routes in order
-//! - runs `unblocker` fallback when scrape fails
+//! - retries `scrape` with `stealth: true` when scrape fails
 //! - optionally runs AI structured extraction when enabled
 //! - prints a structured JSON execution report
 //!
@@ -20,7 +20,7 @@
 //! - `SPIDER_CLOUD_RETURN_FORMAT` (default: `markdown`, supports `raw|bytes|markdown|commonmark|text`)
 //! - `SPIDER_CLOUD_ENABLE_AI_ROUTES=1` (required for `/ai/*` routes)
 //! - `SPIDER_CLOUD_INCLUDE_TRANSFORM=1` (only if transform is explicitly needed)
-//! - `SPIDER_CLOUD_FORCE_UNBLOCKER=1` (always include unblocker step)
+//! - `SPIDER_CLOUD_FORCE_STEALTH=1` (always scrape with `stealth: true`)
 //! - `SPIDER_FLOW_PROMPT` (fallback prompt if CLI args are not provided)
 
 use serde::Serialize;
@@ -37,7 +37,7 @@ struct Step {
 struct PlanOptions {
     return_format: String,
     include_transform: bool,
-    force_unblocker: bool,
+    force_stealth: bool,
     enable_ai_routes: bool,
 }
 
@@ -133,12 +133,11 @@ fn query_from_prompt(prompt: &str, seed_url: &str) -> String {
     )
 }
 
-fn should_use_unblocker(prompt_lc: &str, force: bool) -> bool {
+fn should_use_stealth(prompt_lc: &str, force: bool) -> bool {
     force
         || contains_any(
             prompt_lc,
             &[
-                "unblock",
                 "bypass",
                 "anti-bot",
                 "antibot",
@@ -168,7 +167,7 @@ fn should_use_ai_extract(prompt_lc: &str, ai_enabled: bool) -> bool {
 
 fn build_steps(prompt: &str, seed_url: &str, query: &str, opts: &PlanOptions) -> Vec<Step> {
     let prompt_lc = prompt.to_ascii_lowercase();
-    let use_unblocker = should_use_unblocker(&prompt_lc, opts.force_unblocker);
+    let use_stealth = should_use_stealth(&prompt_lc, opts.force_stealth);
     let use_ai_extract = should_use_ai_extract(&prompt_lc, opts.enable_ai_routes);
 
     let mut steps = vec![
@@ -201,29 +200,19 @@ fn build_steps(prompt: &str, seed_url: &str, query: &str, opts: &PlanOptions) ->
         },
         Step {
             suffix: "scrape",
-            description: "extract page content using selected return_format",
+            description: if use_stealth {
+                "extract page content with stealth for bot-protected pages"
+            } else {
+                "extract page content using selected return_format"
+            },
             body: serde_json::json!({
                 "url": seed_url,
                 "return_format": opts.return_format,
-                "metadata": true
+                "metadata": true,
+                "stealth": use_stealth
             }),
         },
     ];
-
-    if use_unblocker {
-        steps.insert(
-            3,
-            Step {
-                suffix: "unblocker",
-                description: "attempt anti-bot resistant retrieval",
-                body: serde_json::json!({
-                    "url": seed_url,
-                    "return_format": opts.return_format,
-                    "metadata": true
-                }),
-            },
-        );
-    }
 
     if opts.include_transform {
         steps.push(Step {
@@ -312,7 +301,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("SPIDER_CLOUD_RETURN_FORMAT").unwrap_or_else(|_| "markdown".into());
     let enable_ai_routes = env_flag("SPIDER_CLOUD_ENABLE_AI_ROUTES");
     let include_transform = env_flag("SPIDER_CLOUD_INCLUDE_TRANSFORM");
-    let force_unblocker = env_flag("SPIDER_CLOUD_FORCE_UNBLOCKER");
+    let force_stealth = env_flag("SPIDER_CLOUD_FORCE_STEALTH");
 
     let prompt = {
         let args: Vec<String> = std::env::args().skip(1).collect();
@@ -341,7 +330,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let plan_options = PlanOptions {
         return_format: return_format.clone(),
         include_transform,
-        force_unblocker,
+        force_stealth,
         enable_ai_routes,
     };
     let steps = build_steps(&prompt, &seed_url, &query, &plan_options);
@@ -353,7 +342,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Return format: {}", return_format);
     println!("AI routes enabled: {}", enable_ai_routes);
     println!("Transform enabled: {}", include_transform);
-    println!("Force unblocker: {}", force_unblocker);
+    println!("Force stealth: {}", force_stealth);
     println!("Planned steps: {}", steps.len());
 
     let mut reports = Vec::with_capacity(steps.len());
@@ -392,16 +381,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     },
                 });
 
-                if !result.success && step.suffix == "scrape" && !force_unblocker {
-                    let fallback_name = tool_name(&tool_prefix, "unblocker");
+                let scrape_was_stealth = step
+                    .body
+                    .get("stealth")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                if !result.success && step.suffix == "scrape" && !scrape_was_stealth {
+                    let fallback_name = name.clone();
                     let fallback_body = serde_json::json!({
                         "url": seed_url,
                         "return_format": return_format,
-                        "metadata": true
+                        "metadata": true,
+                        "stealth": true
                     })
                     .to_string();
 
-                    println!("  scrape failed, trying fallback {}", fallback_name);
+                    println!("  scrape failed, retrying {} with stealth", fallback_name);
                     match agent
                         .execute_custom_tool(&fallback_name, None, None, Some(&fallback_body))
                         .await
@@ -413,7 +408,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 summarize_json_payload(&parsed);
                             reports.push(StepReport {
                                 tool: fallback_name.clone(),
-                                description: "fallback unblocker after scrape failure".to_string(),
+                                description: "stealth scrape retry after scrape failure"
+                                    .to_string(),
                                 success: fallback.success,
                                 http_status: Some(fallback.status),
                                 status_field,
@@ -430,7 +426,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Err(err) => {
                             reports.push(StepReport {
                                 tool: fallback_name,
-                                description: "fallback unblocker after scrape failure".to_string(),
+                                description: "stealth scrape retry after scrape failure"
+                                    .to_string(),
                                 success: false,
                                 http_status: None,
                                 status_field: None,
@@ -492,11 +489,11 @@ mod tests {
     }
 
     #[test]
-    fn planner_includes_unblocker_on_blocked_intent() {
+    fn planner_scrapes_with_stealth_on_blocked_intent() {
         let opts = PlanOptions {
             return_format: "markdown".to_string(),
             include_transform: false,
-            force_unblocker: false,
+            force_stealth: false,
             enable_ai_routes: false,
         };
         let steps = build_steps(
@@ -505,7 +502,23 @@ mod tests {
             "collect blocked pages",
             &opts,
         );
-        assert!(names(&steps).contains(&"unblocker"));
+        let scrape = steps
+            .iter()
+            .find(|s| s.suffix == "scrape")
+            .expect("scrape step");
+        assert_eq!(scrape.body["stealth"], serde_json::json!(true));
+
+        let plain = build_steps(
+            "Extract docs for https://example.com",
+            "https://example.com",
+            "extract docs",
+            &opts,
+        );
+        let plain_scrape = plain
+            .iter()
+            .find(|s| s.suffix == "scrape")
+            .expect("scrape step");
+        assert_eq!(plain_scrape.body["stealth"], serde_json::json!(false));
     }
 
     #[test]
@@ -513,7 +526,7 @@ mod tests {
         let opts = PlanOptions {
             return_format: "markdown".to_string(),
             include_transform: false,
-            force_unblocker: false,
+            force_stealth: false,
             enable_ai_routes: true,
         };
         let steps = build_steps(
@@ -542,7 +555,7 @@ mod tests {
         let base = PlanOptions {
             return_format: "bytes".to_string(),
             include_transform: false,
-            force_unblocker: false,
+            force_stealth: false,
             enable_ai_routes: false,
         };
         let without = build_steps(

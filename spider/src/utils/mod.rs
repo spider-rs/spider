@@ -7362,7 +7362,7 @@ pub async fn fetch_page_html_raw_only_html(target_url: &str, client: &Client) ->
 /// Response shape (all routes): `[{"content","costs","duration_elapsed_ms","error","metadata","status","url"}]`
 ///
 /// Route selection via [`SpiderCloudConfig::fallback_route`]:
-/// - `Smart` / `Unblocker` → `POST /unblocker`
+/// - `Smart` → `POST /scrape` with `stealth: true`
 /// - `Api` / `Fallback` / `Proxy` → `POST /crawl` (with `limit: 1`)
 #[cfg(feature = "spider_cloud")]
 pub async fn fetch_page_html_spider_cloud(
@@ -7396,9 +7396,12 @@ pub async fn fetch_page_html_spider_cloud(
         })
     };
 
-    // /crawl needs limit: 1 to fetch a single page
+    // /crawl needs limit: 1 to fetch a single page; /scrape is the
+    // bot-protection fallback, so it asks for stealth.
     if route == "crawl" {
         body["limit"] = serde_json::json!(1);
+    } else if route == "scrape" {
+        body["stealth"] = serde_json::json!(true);
     }
 
     // Merge extra_params into the body
@@ -7525,7 +7528,7 @@ pub async fn fetch_page_html_spider_cloud(
 /// Tries a direct fetch first. Uses [`SpiderCloudConfig::should_fallback`] to
 /// intelligently detect when to retry via the spider.cloud API — checking status
 /// codes, bot protection markers, CAPTCHA challenges, and empty responses.
-/// The fallback route (`/crawl` or `/unblocker`) is chosen by [`SpiderCloudConfig::fallback_route`].
+/// The fallback route (`/crawl`, or `/scrape` with stealth) is chosen by [`SpiderCloudConfig::fallback_route`].
 #[cfg(feature = "spider_cloud")]
 pub async fn fetch_page_html_with_fallback(
     target_url: &str,

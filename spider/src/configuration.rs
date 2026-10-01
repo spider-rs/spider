@@ -3050,14 +3050,11 @@ pub enum SpiderCloudMode {
     /// Use the spider.cloud `POST /crawl` API (with `limit: 1`) for each page.
     /// Best for simple scraping needs.
     Api,
-    /// Use the spider.cloud `POST /unblocker` API for anti-bot bypass.
-    /// Best for hard-to-get pages behind advanced bot protection.
-    Unblocker,
     /// Direct fetch first; fall back to spider.cloud API on
     /// 403 / 429 / 503 or connection errors.
     Fallback,
     /// Intelligent mode: proxy by default, automatically falls back to
-    /// `/unblocker` when it detects bot protection (403, 429, 503, CAPTCHA
+    /// `/scrape` with `stealth: true` when it detects bot protection (403, 429, 503, CAPTCHA
     /// pages, Cloudflare challenges, empty bodies on HTML pages, etc.).
     /// This is the recommended mode for production use.
     Smart,
@@ -3275,8 +3272,8 @@ impl SpiderCloudConfig {
     /// - Known CAPTCHA / challenge page markers in the response body
     pub fn should_fallback(&self, status_code: u16, body: Option<&[u8]>) -> bool {
         match self.mode {
-            SpiderCloudMode::Api | SpiderCloudMode::Unblocker => false, // already using API
-            SpiderCloudMode::Proxy => false,                            // proxy-only, no fallback
+            SpiderCloudMode::Api => false,   // already using API
+            SpiderCloudMode::Proxy => false, // proxy-only, no fallback
             SpiderCloudMode::Fallback | SpiderCloudMode::Smart => {
                 // Status code triggers
                 if matches!(status_code, 403 | 429 | 503 | 520..=530) {
@@ -3333,12 +3330,12 @@ impl SpiderCloudConfig {
 
     /// Get the fallback API route for this config.
     ///
-    /// - `Smart` mode → `/unblocker` (best for bot-protected pages)
+    /// - `Smart` mode → `/scrape` with `stealth: true` (best for bot-protected pages)
     /// - `Fallback` mode → `/crawl` (general purpose)
     /// - Other modes → `/crawl` (default)
     pub fn fallback_route(&self) -> &'static str {
         match self.mode {
-            SpiderCloudMode::Smart | SpiderCloudMode::Unblocker => "unblocker",
+            SpiderCloudMode::Smart => "scrape",
             _ => "crawl",
         }
     }

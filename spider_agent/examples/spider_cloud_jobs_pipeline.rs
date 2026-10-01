@@ -3,8 +3,7 @@
 //! This flow demonstrates automated hiring-intel collection:
 //! - `search` discover current postings/pages
 //! - `crawl` gather nearby pages for context
-//! - `unblocker` handle harder anti-bot pages
-//! - `scrape` extract listing text/content
+//! - `scrape` extract listing text/content, with `stealth: true` for anti-bot pages
 //! - optional `transform` normalize output for alerting/storage
 //! - optional `ai_scrape` for typed extraction
 //!
@@ -148,21 +147,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }),
         },
         Step {
-            suffix: "unblocker",
-            description: "attempt anti-bot resistant retrieval",
-            body: serde_json::json!({
-                "url": seed_url,
-                "return_format": return_format,
-                "metadata": true
-            }),
-        },
-        Step {
             suffix: "scrape",
-            description: "extract normalized listing text",
+            description: "extract normalized listing text with stealth",
             body: serde_json::json!({
                 "url": seed_url,
                 "return_format": return_format,
-                "metadata": true
+                "metadata": true,
+                "stealth": true
             }),
         },
     ];

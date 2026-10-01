@@ -1,7 +1,7 @@
 //! Spider Cloud prompt-driven tool flow example.
 //!
 //! A single natural-language prompt triggers one or more Spider Cloud tool
-//! calls: search, scrape, crawl, links, transform, unblocker, and optional
+//! calls: search, scrape, crawl, links, transform, stealth scrape, and optional
 //! AI routes.
 //!
 //! Run with:
@@ -11,7 +11,7 @@
 //!
 //! Example prompt:
 //! ```text
-//! run all flows for https://books.toscrape.com/ including search scrape crawl links transform unblocker
+//! run all flows for https://books.toscrape.com/ including search scrape crawl links transform stealth
 //! ```
 //!
 //! Optional env vars:
@@ -174,17 +174,14 @@ fn build_flows(prompt: &str, enable_ai_routes: bool) -> Vec<ToolFlow> {
             }),
         });
     }
-    if wants_route(
-        &p,
-        run_all,
-        &["unblocker", "unblock", "bypass", "anti-bot", "antibot"],
-    ) {
+    if wants_route(&p, run_all, &["stealth", "bypass", "anti-bot", "antibot"]) {
         flows.push(ToolFlow {
-            suffix: "unblocker",
-            description: "Spider Cloud /unblocker",
+            suffix: "scrape",
+            description: "Spider Cloud /scrape with stealth",
             body: serde_json::json!({
                 "url": detail_url,
-                "return_format": "raw"
+                "return_format": "raw",
+                "stealth": true
             }),
         });
     }
@@ -292,7 +289,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let args: Vec<String> = std::env::args().skip(1).collect();
         if args.is_empty() {
             std::env::var("SPIDER_FLOW_PROMPT").unwrap_or_else(|_| {
-                "run all flows for https://books.toscrape.com/ including search scrape crawl links transform unblocker"
+                "run all flows for https://books.toscrape.com/ including search scrape crawl links transform stealth"
                     .to_string()
             })
         } else {
@@ -387,7 +384,9 @@ mod tests {
         assert!(has_suffix(&flows, "crawl"));
         assert!(has_suffix(&flows, "links"));
         assert!(has_suffix(&flows, "transform"));
-        assert!(has_suffix(&flows, "unblocker"));
+        assert!(flows
+            .iter()
+            .any(|f| f.suffix == "scrape" && f.body["stealth"] == serde_json::json!(true)));
         assert!(!has_suffix(&flows, "ai_search"));
     }
 

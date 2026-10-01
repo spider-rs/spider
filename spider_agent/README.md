@@ -258,7 +258,6 @@ let agent = Agent::builder()
 // - spider_cloud_search
 // - spider_cloud_links
 // - spider_cloud_transform
-// - spider_cloud_unblocker
 ```
 
 For full control (custom API URL, toggles, AI subscription gating), use `SpiderCloudToolConfig`:
@@ -283,7 +282,7 @@ Prompt-driven route orchestration example:
 
 ```bash
 SPIDER_CLOUD_API_KEY=your-key cargo run -p spider_agent --example spider_cloud_prompt_flows \
-  -- "run all flows for https://books.toscrape.com/ including search scrape crawl links transform unblocker"
+  -- "run all flows for https://books.toscrape.com/ including search scrape crawl links transform stealth"
 ```
 
 To include AI routes (`/ai/crawl`, `/ai/scrape`, `/ai/search`, `/ai/browser`, `/ai/links`), enable both:
