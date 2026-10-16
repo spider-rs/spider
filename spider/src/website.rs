@@ -1533,6 +1533,10 @@ pub struct Website {
     #[cfg(feature = "warc")]
     /// Shared WARC writer for archiving crawled pages. Lock-free via MPSC channel.
     warc_writer: Option<crate::utils::warc::WarcWriter>,
+    #[cfg(feature = "warc")]
+    /// The task bridging the page broadcast into `warc_writer`, so a later
+    /// setup can reuse it instead of starting another.
+    warc_bridge: Option<Arc<tokio::task::AbortHandle>>,
     #[cfg(feature = "parallel_backends")]
     /// Per-backend performance tracker for parallel crawl backends.
     pb_tracker: Option<Arc<crate::utils::parallel_backends::BackendTracker>>,
@@ -4072,21 +4076,52 @@ impl Website {
         #[cfg(feature = "warc")]
         {
             if let Some(ref warc_config) = self.configuration.warc {
-                match crate::utils::warc::WarcWriter::create(warc_config) {
-                    Ok((writer, file_handle)) => {
-                        self.warc_writer = Some(writer.clone());
+                // Setup runs on every crawl. Keep one writer per path: a second
+                // `WarcWriter::create` would truncate the file under the first
+                // writer's open handle, and the first bridge would keep running
+                // (the broadcast sender lives as long as the Website), so every
+                // page would be written once per crawl so far.
+                let same_path = self
+                    .warc_writer
+                    .as_ref()
+                    .is_some_and(|w| w.path() == std::path::Path::new(&warc_config.path));
+                let bridge_alive = self
+                    .warc_bridge
+                    .as_ref()
+                    .is_some_and(|bridge| !bridge.is_finished());
+
+                if !(same_path && bridge_alive) {
+                    if let Some(bridge) = self.warc_bridge.take() {
+                        bridge.abort();
+                    }
+
+                    let writer = if same_path {
+                        // The bridge ended (the channel was unsubscribed);
+                        // keep appending to the open file.
+                        self.warc_writer.clone()
+                    } else {
+                        match crate::utils::warc::WarcWriter::create(warc_config) {
+                            Ok((writer, file_handle)) => {
+                                self.warc_writer = Some(writer.clone());
+                                // Detach the file-writer handle — it completes when all writer
+                                // clones are dropped (channel closes → blocking task exits).
+                                drop(file_handle);
+                                Some(writer)
+                            }
+                            Err(_e) => {
+                                #[cfg(feature = "tracing")]
+                                tracing::error!("Failed to create WARC writer: {_e}");
+                                None
+                            }
+                        }
+                    };
+
+                    if let Some(writer) = writer {
                         // Subscribe to the page broadcast channel for lock-free WARC writing.
                         let rx = self.subscribe(512);
                         // Bridge: reads from broadcast, serializes + sends to file writer.
-                        // Already spawns its own task internally.
-                        let _bridge = crate::utils::warc::spawn_warc_writer(writer, rx);
-                        // Detach the file-writer handle — it completes when all writer
-                        // clones are dropped (channel closes → blocking task exits).
-                        drop(file_handle);
-                    }
-                    Err(_e) => {
-                        #[cfg(feature = "tracing")]
-                        tracing::error!("Failed to create WARC writer: {_e}");
+                        let bridge = crate::utils::warc::spawn_warc_writer(writer, rx);
+                        self.warc_bridge = Some(Arc::new(bridge.abort_handle()));
                     }
                 }
             }
