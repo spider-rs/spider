@@ -611,9 +611,8 @@ impl HostDnsCache {
         for kv in self.entries.iter() {
             let inserted = kv.value().inserted_at;
             if now.duration_since(inserted) >= self.ttl {
-                let key = kv.key().clone();
-                drop(kv); // Release the iter ref before mutating.
-                return self.entries.remove(&key).is_some();
+                oldest_key = Some(kv.key().clone());
+                break;
             }
             match oldest_at {
                 None => {
@@ -628,6 +627,8 @@ impl HostDnsCache {
             }
         }
 
+        // The iterator itself retains a shard read guard independently of kv.
+        // Leave its scope before removing the owned victim key.
         if let Some(k) = oldest_key {
             self.entries.remove(&k).is_some()
         } else {
@@ -802,9 +803,8 @@ impl ChromeNxdomainCache {
         for kv in self.entries.iter() {
             let inserted = *kv.value();
             if now.duration_since(inserted) >= self.ttl {
-                let key = kv.key().clone();
-                drop(kv);
-                return self.entries.remove(&key).is_some();
+                oldest_key = Some(kv.key().clone());
+                break;
             }
             match oldest_at {
                 None => {
@@ -819,6 +819,8 @@ impl ChromeNxdomainCache {
             }
         }
 
+        // The iterator itself retains a shard read guard independently of kv.
+        // Leave its scope before removing the owned victim key.
         if let Some(k) = oldest_key {
             self.entries.remove(&k).is_some()
         } else {
@@ -11558,6 +11560,126 @@ fn test_dns_error_no_retry() {
     );
 }
 
+/// Bound synchronous cache regressions without waiting for a deadlocked worker.
+/// Each operation owns its cache, so a timed-out worker cannot block other tests.
+#[cfg(test)]
+fn assert_dns_cache_progress(operation: impl FnOnce() + Send + 'static) {
+    use std::sync::mpsc::{channel, RecvTimeoutError};
+
+    let (done_tx, done_rx) = channel();
+    let worker = std::thread::spawn(move || {
+        operation();
+        let _ = done_tx.send(());
+    });
+    if done_rx.recv_timeout(std::time::Duration::from_secs(10)) == Err(RecvTimeoutError::Timeout) {
+        // Dropping JoinHandle detaches the worker. Joining here (or using a
+        // scoped thread / Tokio runtime) could hang the suite on the old bug.
+        panic!("DNS cache operations did not complete within 10 seconds");
+    }
+    if let Err(payload) = worker.join() {
+        std::panic::resume_unwind(payload);
+    }
+}
+
+#[test]
+fn test_host_dns_cache_expired_overflow_makes_progress() {
+    assert_dns_cache_progress(|| {
+        use std::time::{Duration, Instant};
+
+        let cache = HostDnsCache::new(2, Duration::from_secs(60));
+        cache.insert("live".into(), LocalDnsState::Resolved);
+        cache.insert("expired".into(), LocalDnsState::NxDomain);
+        // Age the real entry without sleeping or querying DNS.
+        cache.entries.get_mut("expired").unwrap().inserted_at =
+            Instant::now() - Duration::from_secs(120);
+
+        cache.insert("new".into(), LocalDnsState::NxDomain);
+
+        assert_eq!(cache.len(), 2);
+        // get() would also miss an expired entry left behind by broken eviction.
+        assert!(!cache.entries.contains_key("expired"));
+        assert_eq!(cache.get("live"), Some(LocalDnsState::Resolved));
+        assert_eq!(cache.get("new"), Some(LocalDnsState::NxDomain));
+    });
+}
+
+#[test]
+fn test_host_dns_cache_zero_ttl_capacity_one_makes_progress() {
+    assert_dns_cache_progress(|| {
+        for capacity in [0, 1] {
+            let cache = HostDnsCache::new(capacity, std::time::Duration::ZERO);
+            for i in 0..32 {
+                let host = format!("host-{i}");
+                cache.insert(host.clone(), LocalDnsState::Resolved);
+                assert_eq!(cache.len(), 1);
+                assert_eq!(cache.get(&host), None);
+            }
+        }
+    });
+}
+
+#[test]
+fn test_host_dns_cache_oldest_fallback_makes_progress() {
+    assert_dns_cache_progress(|| {
+        use std::time::{Duration, Instant};
+
+        let cache = HostDnsCache::new(2, Duration::from_secs(60));
+        cache.insert("retained".into(), LocalDnsState::Resolved);
+        cache.insert("oldest".into(), LocalDnsState::NxDomain);
+        let now = Instant::now();
+        cache.entries.get_mut("retained").unwrap().inserted_at = now - Duration::from_secs(1);
+        cache.entries.get_mut("oldest").unwrap().inserted_at = now - Duration::from_secs(2);
+
+        cache.insert("new".into(), LocalDnsState::Resolved);
+
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.get("oldest"), None);
+        assert_eq!(cache.get("retained"), Some(LocalDnsState::Resolved));
+        assert_eq!(cache.get("new"), Some(LocalDnsState::Resolved));
+    });
+}
+
+#[test]
+fn test_host_dns_cache_concurrent_overflow_makes_progress() {
+    assert_dns_cache_progress(|| {
+        use std::sync::{Arc, Barrier};
+        use std::time::Duration;
+
+        for ttl in [Duration::ZERO, Duration::from_secs(60)] {
+            let cache = Arc::new(HostDnsCache::new(8, ttl));
+            for i in 0..8 {
+                cache.insert(format!("seed-{i}"), LocalDnsState::Resolved);
+            }
+            let start = Arc::new(Barrier::new(4));
+            let mut workers = Vec::new();
+            for t in 0..4 {
+                let cache = Arc::clone(&cache);
+                let start = Arc::clone(&start);
+                workers.push(std::thread::spawn(move || {
+                    start.wait();
+                    for i in 0..64 {
+                        let host = format!("worker-{t}-{i}");
+                        cache.insert(host.clone(), LocalDnsState::Resolved);
+                        // Refreshes race with eviction as well as concurrent reads.
+                        cache.insert(host.clone(), LocalDnsState::Resolved);
+                        if let Some(state) = cache.get(&host) {
+                            assert_eq!(state, LocalDnsState::Resolved);
+                            assert!(!ttl.is_zero());
+                        }
+                    }
+                }));
+            }
+            for worker in workers {
+                worker.join().expect("cache worker panicked");
+            }
+            assert!(
+                cache.len() <= 8,
+                "eviction must converge after writers finish"
+            );
+        }
+    });
+}
+
 /// HostDnsCache: bounded eviction. Insert capacity+1 entries and assert
 /// (a) `len()` never exceeds `capacity` and (b) the oldest entry is the
 /// one evicted (FIFO). Protects against DoS via unbounded growth from a
@@ -14259,8 +14381,103 @@ mod empty_success_tests {
 
 #[cfg(all(test, not(feature = "decentralized")))]
 mod chrome_nxdomain_cache_tests {
-    use super::ChromeNxdomainCache;
+    use super::{assert_dns_cache_progress, ChromeNxdomainCache};
     use std::time::Duration;
+
+    #[test]
+    fn expired_overflow_makes_progress() {
+        assert_dns_cache_progress(|| {
+            let cache = ChromeNxdomainCache::new(2, Duration::from_secs(60));
+            cache.insert("live.invalid".into());
+            cache.insert("expired.invalid".into());
+            *cache.entries.get_mut("expired.invalid").unwrap() =
+                std::time::Instant::now() - Duration::from_secs(120);
+
+            cache.insert("new.invalid".into());
+
+            assert_eq!(cache.len(), 2);
+            // contains() would remove the stale entry itself and mask failed eviction.
+            assert!(!cache.entries.contains_key("expired.invalid"));
+            assert!(cache.contains("live.invalid"));
+            assert!(cache.contains("new.invalid"));
+        });
+    }
+
+    #[test]
+    fn zero_ttl_capacity_one_makes_progress() {
+        assert_dns_cache_progress(|| {
+            for capacity in [0, 1] {
+                let cache = ChromeNxdomainCache::new(capacity, Duration::ZERO);
+                for i in 0..32 {
+                    cache.insert(format!("host-{i}.invalid"));
+                    assert_eq!(cache.len(), 1);
+                    // Do not call contains() here: it eagerly removes stale entries,
+                    // which would prevent the next insert from exercising overflow.
+                }
+                let survivor = cache.entries.iter().next().unwrap().key().clone();
+                assert!(!cache.contains(&survivor));
+                assert!(cache.is_empty());
+            }
+        });
+    }
+
+    #[test]
+    fn oldest_fallback_makes_progress() {
+        assert_dns_cache_progress(|| {
+            let cache = ChromeNxdomainCache::new(2, Duration::from_secs(60));
+            cache.insert("retained.invalid".into());
+            cache.insert("oldest.invalid".into());
+            let now = std::time::Instant::now();
+            *cache.entries.get_mut("retained.invalid").unwrap() = now - Duration::from_secs(1);
+            *cache.entries.get_mut("oldest.invalid").unwrap() = now - Duration::from_secs(2);
+
+            cache.insert("new.invalid".into());
+
+            assert_eq!(cache.len(), 2);
+            assert!(!cache.contains("oldest.invalid"));
+            assert!(cache.contains("retained.invalid"));
+            assert!(cache.contains("new.invalid"));
+        });
+    }
+
+    #[test]
+    fn concurrent_overflow_makes_progress() {
+        assert_dns_cache_progress(|| {
+            use std::sync::{Arc, Barrier};
+
+            for ttl in [Duration::ZERO, Duration::from_secs(60)] {
+                let cache = Arc::new(ChromeNxdomainCache::new(8, ttl));
+                for i in 0..8 {
+                    cache.insert(format!("seed-{i}.invalid"));
+                }
+                let start = Arc::new(Barrier::new(4));
+                let mut workers = Vec::new();
+                for t in 0..4 {
+                    let cache = Arc::clone(&cache);
+                    let start = Arc::clone(&start);
+                    workers.push(std::thread::spawn(move || {
+                        start.wait();
+                        for i in 0..64 {
+                            let host = format!("worker-{t}-{i}.invalid");
+                            cache.insert(host.clone());
+                            cache.insert(host.clone());
+                            let contains = cache.contains(&host);
+                            if ttl.is_zero() {
+                                assert!(!contains);
+                            }
+                        }
+                    }));
+                }
+                for worker in workers {
+                    worker.join().expect("cache worker panicked");
+                }
+                assert!(
+                    cache.len() <= 8,
+                    "eviction must converge after writers finish"
+                );
+            }
+        });
+    }
 
     #[test]
     fn insert_then_contains_within_ttl() {
