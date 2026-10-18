@@ -9669,6 +9669,8 @@ dependencies = [
  "lazy_static",
  "rustls-pemfile",
  "spider",
+ "tempfile",
+ "tokio",
  "tokio-rustls",
  "warp",
 ]

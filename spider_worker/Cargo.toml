@@ -38,3 +38,7 @@ tls = ["tokio-rustls", "rustls-pemfile"]
 full_resources = ["spider/full_resources"]
 cache = ["spider/cache"]
 headers = ["spider/decentralized_headers", "spider/headers"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
+tempfile = "3"
