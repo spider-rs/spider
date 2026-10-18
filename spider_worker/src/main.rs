@@ -19,19 +19,55 @@ lazy_static! {
 
 use hyper_util::service::TowerToHyperService;
 use spider::tokio::sync::Semaphore;
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+#[cfg(feature = "tls")]
+use std::time::Duration;
+
+fn env_value(name: &str) -> io::Result<Option<String>> {
+    match std::env::var(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(error) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{name}: {error}"),
+        )),
+    }
+}
+
+fn parse_port(name: &str, value: Option<&str>, default: u16) -> io::Result<u16> {
+    match value {
+        None => Ok(default),
+        Some(value) => value.parse().map_err(|e| {
+            io::Error::new(io::ErrorKind::InvalidInput, format!("invalid {name}: {e}"))
+        }),
+    }
+}
+
+fn worker_port(name: &str, default: u16) -> io::Result<u16> {
+    parse_port(name, env_value(name)?.as_deref(), default)
+}
 
 /// Per-listener cap on concurrent in-flight connections. Without a bound the
 /// accept loop spawns an unbounded task (and up to ~1 GiB fetch) per connection,
 /// so a burst of connections can exhaust tasks / FDs / memory. Opt-in and
-/// **default `0` (unlimited — byte-identical to legacy behaviour)**; set
+/// **default `0` (unlimited)**; set
 /// `SPIDER_WORKER_MAX_CONCURRENCY` to a positive value to enable the bound.
-fn connection_semaphore() -> Arc<Semaphore> {
-    let limit = std::env::var("SPIDER_WORKER_MAX_CONCURRENCY")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(0);
+fn connection_semaphore() -> io::Result<Arc<Semaphore>> {
+    semaphore_from_config(env_value("SPIDER_WORKER_MAX_CONCURRENCY")?.as_deref())
+}
+
+fn semaphore_from_config(value: Option<&str>) -> io::Result<Arc<Semaphore>> {
+    let limit = match value {
+        None => 0,
+        Some(value) => value.parse::<usize>().map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("invalid SPIDER_WORKER_MAX_CONCURRENCY: {e}"),
+            )
+        })?,
+    };
     // `0` = unlimited; clamp to MAX_PERMITS so an oversized env value can't make
     // `Semaphore::new` panic.
     let permits = if limit == 0 {
@@ -39,7 +75,36 @@ fn connection_semaphore() -> Arc<Semaphore> {
     } else {
         limit.min(Semaphore::MAX_PERMITS)
     };
-    Arc::new(Semaphore::new(permits))
+    Ok(Arc::new(Semaphore::new(permits)))
+}
+
+/// Shed excess connections immediately. No accepted socket can hold the only
+/// accept loop waiting for capacity, and no task is spawned without a permit.
+fn admit_connection(
+    sem: Arc<Semaphore>,
+) -> Result<tokio::sync::OwnedSemaphorePermit, tokio::sync::TryAcquireError> {
+    sem.try_acquire_owned()
+}
+
+fn bind_result<T>(addr: SocketAddr, result: io::Result<T>) -> io::Result<T> {
+    result.map_err(|e| io::Error::new(e.kind(), format!("binding worker listener {addr}: {e}")))
+}
+
+#[cfg(feature = "tls")]
+const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[cfg(feature = "tls")]
+async fn complete_handshake<T>(
+    handshake: impl std::future::Future<Output = io::Result<T>>,
+    permit: tokio::sync::OwnedSemaphorePermit,
+    timeout: Duration,
+) -> io::Result<(T, tokio::sync::OwnedSemaphorePermit)> {
+    let stream = tokio::time::timeout(timeout, handshake)
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "worker TLS handshake timed out"))??;
+    // Ownership passes to the HTTP connection only after a successful handshake.
+    // Failure, timeout or cancellation drops the permit and the handshake future.
+    Ok((stream, permit))
 }
 
 /// Best-effort SSRF guard. When `SPIDER_WORKER_BLOCK_PRIVATE_HOSTS` is enabled,
@@ -84,22 +149,21 @@ fn target_host_blocked(host: &str) -> bool {
 }
 
 /// Serve warp routes on a TCP listener using hyper-util.
-async fn serve_plain(routes: warp::filters::BoxedFilter<(impl warp::Reply + 'static,)>, port: u16) {
+async fn serve_plain(
+    routes: warp::filters::BoxedFilter<(impl warp::Reply + 'static,)>,
+    port: u16,
+) -> io::Result<()> {
+    let sem = connection_semaphore()?;
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .expect("failed to bind");
+    let listener = bind_result(addr, tokio::net::TcpListener::bind(addr).await)?;
     let svc = TowerToHyperService::new(warp::service(routes));
-    let sem = connection_semaphore();
 
     loop {
         let (stream, _) = match listener.accept().await {
             Ok(conn) => conn,
             Err(_) => continue,
         };
-        // Backpressure: block the accept loop once the in-flight cap is reached
-        // instead of spawning an unbounded number of connection tasks.
-        let permit = match sem.clone().acquire_owned().await {
+        let permit = match admit_connection(sem.clone()) {
             Ok(p) => p,
             Err(_) => continue,
         };
@@ -115,6 +179,56 @@ async fn serve_plain(routes: warp::filters::BoxedFilter<(impl warp::Reply + 'sta
     }
 }
 
+/// Parse TLS material without global crypto-provider selection (which can panic
+/// when feature unification enables multiple providers).
+#[cfg(feature = "tls")]
+fn tls_config(
+    certs: &mut dyn io::BufRead,
+    key: &mut dyn io::BufRead,
+) -> io::Result<tokio_rustls::rustls::ServerConfig> {
+    use tokio_rustls::rustls;
+    let invalid = |context: &str, error: String| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("worker TLS {context}: {error}"),
+        )
+    };
+    let certs = rustls_pemfile::certs(certs)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| invalid("certificate PEM", e.to_string()))?;
+    if certs.is_empty() {
+        return Err(invalid("certificate PEM", "no certificates found".into()));
+    }
+    let key = rustls_pemfile::private_key(key)
+        .map_err(|e| invalid("private key PEM", e.to_string()))?
+        .ok_or_else(|| invalid("private key PEM", "no private key found".into()))?;
+    let provider = rustls::crypto::CryptoProvider::get_default()
+        .cloned()
+        .unwrap_or_else(|| Arc::new(rustls::crypto::aws_lc_rs::default_provider()));
+    rustls::ServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| invalid("protocol configuration", e.to_string()))?
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| invalid("certificate/key configuration", e.to_string()))
+}
+
+#[cfg(feature = "tls")]
+fn load_tls_config(
+    cert_path: &str,
+    key_path: &str,
+) -> io::Result<tokio_rustls::rustls::ServerConfig> {
+    let open = |path: &str, kind: &str| {
+        std::fs::File::open(path)
+            .map(io::BufReader::new)
+            .map_err(|e| io::Error::new(e.kind(), format!("opening worker TLS {kind} {path}: {e}")))
+    };
+    tls_config(
+        &mut open(cert_path, "certificate")?,
+        &mut open(key_path, "private key")?,
+    )
+}
+
 /// Serve warp routes over TLS using tokio-rustls.
 #[cfg(feature = "tls")]
 async fn serve_tls(
@@ -122,55 +236,29 @@ async fn serve_tls(
     port: u16,
     cert_path: &str,
     key_path: &str,
-) {
-    use std::sync::Arc;
-    use tokio_rustls::TlsAcceptor;
-
-    let certs = {
-        let file = std::fs::File::open(cert_path).expect("failed to open cert file");
-        let mut reader = std::io::BufReader::new(file);
-        rustls_pemfile::certs(&mut reader)
-            .collect::<Result<Vec<_>, _>>()
-            .expect("failed to read certs")
-    };
-
-    let key = {
-        let file = std::fs::File::open(key_path).expect("failed to open key file");
-        let mut reader = std::io::BufReader::new(file);
-        rustls_pemfile::private_key(&mut reader)
-            .expect("failed to read private key")
-            .expect("no private key found")
-    };
-
-    let tls_config = tokio_rustls::rustls::ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(certs, key)
-        .expect("invalid TLS config");
-
-    let tls_acceptor = TlsAcceptor::from(Arc::new(tls_config));
+) -> io::Result<()> {
+    let sem = connection_semaphore()?;
+    let tls_acceptor =
+        tokio_rustls::TlsAcceptor::from(Arc::new(load_tls_config(cert_path, key_path)?));
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .expect("failed to bind");
+    let listener = bind_result(addr, tokio::net::TcpListener::bind(addr).await)?;
     let svc = TowerToHyperService::new(warp::service(routes));
-    let sem = connection_semaphore();
 
     loop {
         let (stream, _) = match listener.accept().await {
             Ok(conn) => conn,
             Err(_) => continue,
         };
-        // Backpressure: block the accept loop once the in-flight cap is reached
-        // instead of spawning an unbounded number of connection tasks.
-        let permit = match sem.clone().acquire_owned().await {
+        let permit = match admit_connection(sem.clone()) {
             Ok(p) => p,
             Err(_) => continue,
         };
         let acceptor = tls_acceptor.clone();
         let svc = svc.clone();
         tokio::spawn(async move {
-            let _permit = permit;
-            if let Ok(tls_stream) = acceptor.accept(stream).await {
+            if let Ok((tls_stream, _permit)) =
+                complete_handshake(acceptor.accept(stream), permit, TLS_HANDSHAKE_TIMEOUT).await
+            {
                 let io = hyper_util::rt::TokioIo::new(tls_stream);
                 let _ = hyper_util::server::conn::auto::Builder::new(
                     hyper_util::rt::TokioExecutor::new(),
@@ -254,13 +342,16 @@ async fn forward(
 
     #[cfg(feature = "headers")]
     /// Return the response with the header information.
-    fn pack(page: spider::page::Page, extracted: Vec<u8>) -> Result<impl warp::Reply, Infallible> {
+    fn pack(
+        mut page: spider::page::Page,
+        extracted: Vec<u8>,
+    ) -> Result<impl warp::Reply, Infallible> {
         use spider::features::decentralized_headers::WorkerProxyHeaderBuilder;
         use warp::http::{Response, StatusCode};
 
         let mut response = Response::builder();
         {
-            let mut builder = if let Some(headers) = page.headers {
+            let mut builder = if let Some(headers) = page.headers.take() {
                 let mut builder = WorkerProxyHeaderBuilder::with_capacity(headers.len() + 1);
                 builder.extend(headers);
                 builder
@@ -273,18 +364,7 @@ async fn forward(
                 Some(headers) => {
                     let h = builder.build();
 
-                    headers.extend(h.into_iter().filter_map(|(key, value)| {
-                        if let Some(name) = key {
-                            let header_name =
-                                warp::http::HeaderName::from_bytes(name.as_str().as_bytes())
-                                    .ok()?;
-                            let header_value =
-                                warp::http::HeaderValue::from_str(value.to_str().ok()?).ok()?;
-                            Some((Some(header_name), header_value))
-                        } else {
-                            None
-                        }
-                    }));
+                    append_response_headers(headers, &h);
                 }
                 _ => (),
             }
@@ -350,17 +430,7 @@ async fn scrape(path: FullPath, host: String) -> Result<impl warp::Reply, Infall
             if let Some(headers) = response.headers_mut() {
                 let h = builder.build();
 
-                headers.extend(h.into_iter().filter_map(|(key, value)| {
-                    if let Some(name) = key {
-                        let header_name =
-                            warp::http::HeaderName::from_bytes(name.as_str().as_bytes()).ok()?;
-                        let header_value =
-                            warp::http::HeaderValue::from_str(value.to_str().ok()?).ok()?;
-                        Some((Some(header_name), header_value))
-                    } else {
-                        None
-                    }
-                }));
+                append_response_headers(headers, &h);
             }
         }
         Ok(response
@@ -377,186 +447,306 @@ async fn scrape(path: FullPath, host: String) -> Result<impl warp::Reply, Infall
     pack(data)
 }
 
+/// Copy named values so repeated and opaque upstream values survive packing.
+#[cfg(feature = "headers")]
+fn append_response_headers(
+    target: &mut warp::http::HeaderMap,
+    source: &spider::reqwest::header::HeaderMap,
+) {
+    for (name, value) in source {
+        if let (Ok(name), Ok(value)) = (
+            warp::http::HeaderName::from_bytes(name.as_str().as_bytes()),
+            warp::http::HeaderValue::from_bytes(value.as_bytes()),
+        ) {
+            target.append(name, value);
+        }
+    }
+}
+
 #[tokio::main]
-#[cfg(all(
-    not(feature = "scrape"),
-    not(feature = "full_resources"),
-    not(feature = "tls")
-))]
-async fn main() {
-    env_logger::init();
+async fn main() -> io::Result<()> {
+    env_logger::try_init()
+        .map_err(|e| io::Error::other(format!("initializing worker logging: {e}")))?;
 
-    let host = warp::header::<String>("host");
-    let referer = warp::header::optional::<String>("referer");
-
-    let routes = warp::path::full()
-        .and(host)
-        .and(referer)
-        .and_then(forward)
-        .boxed();
-
-    let port: u16 = std::env::var("SPIDER_WORKER_PORT")
-        .unwrap_or_else(|_| "3030".into())
-        .parse()
-        .unwrap_or(3030);
+    #[cfg(feature = "scrape")]
+    let (routes, port) = (
+        warp::path::full()
+            .and(warp::header::<String>("host"))
+            .and_then(scrape)
+            .boxed(),
+        worker_port("SPIDER_WORKER_SCRAPER_PORT", 3031)?,
+    );
+    #[cfg(not(feature = "scrape"))]
+    let (routes, port) = (
+        warp::path::full()
+            .and(warp::header::<String>("host"))
+            .and(warp::header::optional::<String>("referer"))
+            .and_then(forward)
+            .boxed(),
+        worker_port("SPIDER_WORKER_PORT", 3030)?,
+    );
 
     utils::log("Spider_Worker starting at 0.0.0.0:", port.to_string());
+    #[cfg(feature = "tls")]
+    let pem_cert = env_value("SPIDER_WORKER_CERT_PATH")?.unwrap_or_else(|| "/cert.pem".into());
+    #[cfg(feature = "tls")]
+    let rsa_key = env_value("SPIDER_WORKER_KEY_PATH")?.unwrap_or_else(|| "/key.rsa".into());
+    #[cfg(feature = "tls")]
+    let server = serve_tls(routes, port, &pem_cert, &rsa_key);
+    #[cfg(not(feature = "tls"))]
+    let server = serve_plain(routes, port);
 
-    serve_plain(routes, port).await;
-}
-
-#[tokio::main]
-#[cfg(all(feature = "scrape", not(feature = "tls"),))]
-async fn main() {
-    env_logger::init();
-    let host = warp::header::<String>("host");
-    let routes = warp::path::full().and(host).and_then(scrape).boxed();
-    let port: u16 = std::env::var("SPIDER_WORKER_SCRAPER_PORT")
-        .unwrap_or_else(|_| "3031".into())
-        .parse()
-        .unwrap_or_else(|_| 3031);
-
-    utils::log("Spider_Worker starting at 0.0.0.0:", &port.to_string());
-
-    serve_plain(routes, port).await;
-}
-
-#[tokio::main]
-#[cfg(all(
-    feature = "full_resources",
-    not(feature = "tls"),
-    not(feature = "scrape"),
-))]
-async fn main() {
-    env_logger::init();
-    let host = warp::header::<String>("host");
-    let referer = warp::header::optional::<String>("referer");
-    let routes = warp::path::full()
-        .and(host)
-        .and(referer)
-        .and_then(forward)
-        .boxed();
-
-    tokio::spawn(async {
-        let host = warp::header::<String>("host");
-        let routes = warp::path::full().and(host).and_then(scrape).boxed();
-        let port: u16 = std::env::var("SPIDER_WORKER_SCRAPER_PORT")
-            .unwrap_or_else(|_| "3031".into())
-            .parse()
-            .unwrap_or_else(|_| 3031);
-
+    #[cfg(all(feature = "full_resources", not(feature = "scrape")))]
+    {
+        let scrape_routes = warp::path::full()
+            .and(warp::header::<String>("host"))
+            .and_then(scrape)
+            .boxed();
+        let scrape_port = worker_port("SPIDER_WORKER_SCRAPER_PORT", 3031)?;
         utils::log(
             "Spider_Worker scraper starting at 0.0.0.0:",
-            &port.to_string(),
+            scrape_port.to_string(),
         );
-
-        serve_plain(routes, port).await;
-    });
-
-    let port: u16 = std::env::var("SPIDER_WORKER_PORT")
-        .unwrap_or_else(|_| "3030".into())
-        .parse()
-        .unwrap_or_else(|_| 3030);
-    utils::log("Spider_Worker starting at 0.0.0.0:", &port.to_string());
-
-    serve_plain(routes, port).await;
+        // Propagate startup failures from either listener; do not leave a detached
+        // scraper running after the primary listener fails (or vice versa).
+        tokio::try_join!(server, serve_plain(scrape_routes, scrape_port))?;
+        Ok(())
+    }
+    #[cfg(not(all(feature = "full_resources", not(feature = "scrape"))))]
+    server.await
 }
 
-// tls handling
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[tokio::main]
-#[cfg(all(
-    not(feature = "scrape"),
-    not(feature = "full_resources"),
-    feature = "tls"
-))]
-async fn main() {
-    env_logger::init();
+    #[test]
+    fn runtime_safety_connection_capacity_bounds_and_defaults() {
+        for value in [None, Some("0")] {
+            let sem = semaphore_from_config(value).unwrap();
+            assert_eq!(sem.available_permits(), Semaphore::MAX_PERMITS);
+            let permit = admit_connection(sem.clone()).unwrap();
+            assert_eq!(sem.available_permits(), Semaphore::MAX_PERMITS - 1);
+            drop(permit);
+            assert_eq!(sem.available_permits(), Semaphore::MAX_PERMITS);
+        }
+        for value in [
+            Semaphore::MAX_PERMITS,
+            Semaphore::MAX_PERMITS + 1,
+            usize::MAX,
+        ] {
+            let sem = semaphore_from_config(Some(&value.to_string())).unwrap();
+            assert_eq!(sem.available_permits(), Semaphore::MAX_PERMITS);
+        }
+        for value in [
+            "",
+            "-1",
+            "invalid",
+            "999999999999999999999999999999999999999",
+        ] {
+            assert_eq!(
+                semaphore_from_config(Some(value)).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
+    }
 
-    let host = warp::header::<String>("host");
-    let referer = warp::header::optional::<String>("referer");
+    #[test]
+    fn runtime_safety_connection_admission_sheds_full_and_closed_capacity() {
+        let sem = semaphore_from_config(Some("2")).unwrap();
+        let first = admit_connection(sem.clone()).unwrap();
+        let second = admit_connection(sem.clone()).unwrap();
+        assert!(matches!(
+            admit_connection(sem.clone()),
+            Err(tokio::sync::TryAcquireError::NoPermits)
+        ));
+        drop(first);
+        let replacement = admit_connection(sem.clone()).unwrap();
+        assert_eq!(sem.available_permits(), 0);
+        drop((second, replacement));
+        assert_eq!(sem.available_permits(), 2);
+        sem.close();
+        assert!(matches!(
+            admit_connection(sem),
+            Err(tokio::sync::TryAcquireError::Closed)
+        ));
+    }
 
-    let routes = warp::path::full()
-        .and(host)
-        .and(referer)
-        .and_then(forward)
-        .boxed();
+    #[test]
+    fn runtime_safety_invalid_port_and_bind_failure_are_errors() {
+        assert_eq!(parse_port("test port", None, 3030).unwrap(), 3030);
+        for (input, expected) in [("0", 0), ("3031", 3031), ("65535", 65535)] {
+            assert_eq!(
+                parse_port("test port", Some(input), 3030).unwrap(),
+                expected
+            );
+        }
+        for input in ["", "-1", "65536", "not-a-port"] {
+            assert_eq!(
+                parse_port("test port", Some(input), 3030)
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
+        let addr = SocketAddr::from(([127, 0, 0, 1], 0));
+        // Inject the bind failure; no socket is opened by this test.
+        let error = bind_result::<()>(addr, Err(io::ErrorKind::AddrInUse.into())).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::AddrInUse);
+        assert!(error
+            .to_string()
+            .contains("binding worker listener 127.0.0.1:0"));
+    }
 
-    let port: u16 = std::env::var("SPIDER_WORKER_PORT")
-        .unwrap_or_else(|_| "3030".into())
-        .parse()
-        .unwrap_or_else(|_| 3030);
+    #[cfg(feature = "tls")]
+    struct PendingHandshake(Arc<std::sync::atomic::AtomicBool>);
 
-    utils::log("Spider_Worker starting at 0.0.0.0:", &port.to_string());
+    #[cfg(feature = "tls")]
+    impl std::future::Future for PendingHandshake {
+        type Output = io::Result<()>;
 
-    let pem_cert: String =
-        std::env::var("SPIDER_WORKER_CERT_PATH").unwrap_or_else(|_| "/cert.pem".into());
-    let rsa_key: String =
-        std::env::var("SPIDER_WORKER_KEY_PATH").unwrap_or_else(|_| "/key.rsa".into());
+        fn poll(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Self::Output> {
+            std::task::Poll::Pending
+        }
+    }
 
-    serve_tls(routes, port, &pem_cert, &rsa_key).await;
-}
+    #[cfg(feature = "tls")]
+    impl Drop for PendingHandshake {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
 
-#[tokio::main]
-#[cfg(all(feature = "scrape", feature = "tls"))]
-async fn main() {
-    env_logger::init();
-    let host = warp::header::<String>("host");
-    let routes = warp::path::full().and(host).and_then(scrape).boxed();
-    let port: u16 = std::env::var("SPIDER_WORKER_SCRAPER_PORT")
-        .unwrap_or_else(|_| "3031".into())
-        .parse()
-        .unwrap_or(3031);
+    #[cfg(feature = "tls")]
+    #[tokio::test(start_paused = true)]
+    async fn runtime_safety_pending_tls_handshake_times_out_and_releases_capacity() {
+        let sem = semaphore_from_config(Some("1")).unwrap();
+        let permit = admit_connection(sem.clone()).unwrap();
+        let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let start = tokio::time::Instant::now();
+        let error = complete_handshake(
+            PendingHandshake(dropped.clone()),
+            permit,
+            TLS_HANDSHAKE_TIMEOUT,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert_eq!(start.elapsed(), TLS_HANDSHAKE_TIMEOUT);
+        assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(sem.available_permits(), 1);
+        assert!(admit_connection(sem).is_ok());
+    }
 
-    utils::log("Spider_Worker starting at 0.0.0.0:", port.to_string());
+    #[cfg(feature = "tls")]
+    #[tokio::test(start_paused = true)]
+    async fn runtime_safety_cancelled_tls_handshake_releases_capacity() {
+        let sem = semaphore_from_config(Some("1")).unwrap();
+        let permit = admit_connection(sem.clone()).unwrap();
+        let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let task = tokio::spawn(complete_handshake(
+            PendingHandshake(dropped.clone()),
+            permit,
+            TLS_HANDSHAKE_TIMEOUT,
+        ));
+        tokio::task::yield_now().await;
+        assert_eq!(sem.available_permits(), 0);
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(sem.available_permits(), 1);
+    }
 
-    let pem_cert: String =
-        std::env::var("SPIDER_WORKER_CERT_PATH").unwrap_or_else(|_| "/cert.pem".into());
-    let rsa_key: String =
-        std::env::var("SPIDER_WORKER_KEY_PATH").unwrap_or_else(|_| "/key.rsa".into());
+    #[cfg(feature = "tls")]
+    #[tokio::test(start_paused = true)]
+    async fn runtime_safety_tls_success_retains_permit_and_failure_releases_it() {
+        let sem = semaphore_from_config(Some("1")).unwrap();
+        let permit = admit_connection(sem.clone()).unwrap();
+        let (value, permit) = complete_handshake(async { Ok(42) }, permit, TLS_HANDSHAKE_TIMEOUT)
+            .await
+            .unwrap();
+        assert_eq!(value, 42);
+        assert_eq!(sem.available_permits(), 0);
+        drop(permit);
+        let permit = admit_connection(sem.clone()).unwrap();
+        let error = complete_handshake(
+            async { Err::<(), _>(io::Error::from(io::ErrorKind::InvalidData)) },
+            permit,
+            TLS_HANDSHAKE_TIMEOUT,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(sem.available_permits(), 1);
+    }
 
-    serve_tls(routes, port, &pem_cert, &rsa_key).await;
-}
+    #[cfg(feature = "tls")]
+    #[test]
+    fn runtime_safety_tls_malformed_boot_inputs() {
+        // Dummy bytes only: these contain no certificate or private key material.
+        const CERT: &[u8] = b"-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n";
+        const KEY: &[u8] = b"-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----\n";
+        for (cert, key, context) in [
+            (&b""[..], &b""[..], "certificate PEM"),
+            (
+                &b"-----BEGIN CERTIFICATE-----\n%%%\n-----END CERTIFICATE-----\n"[..],
+                KEY,
+                "certificate PEM",
+            ),
+            (CERT, &b""[..], "no private key found"),
+            (
+                CERT,
+                &b"-----BEGIN PRIVATE KEY-----\n%%%\n-----END PRIVATE KEY-----\n"[..],
+                "private key PEM",
+            ),
+            (CERT, KEY, "certificate/key configuration"),
+        ] {
+            let error =
+                tls_config(&mut io::Cursor::new(cert), &mut io::Cursor::new(key)).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert!(error.to_string().contains(context), "{error}");
+        }
+    }
 
-#[tokio::main]
-#[cfg(all(not(feature = "scrape"), feature = "full_resources", feature = "tls"))]
-async fn main() {
-    env_logger::init();
-    let host = warp::header::<String>("host");
-    let referer = warp::header::optional::<String>("referer");
-    let routes = warp::path::full()
-        .and(host)
-        .and(referer)
-        .and_then(forward)
-        .boxed();
+    #[cfg(feature = "tls")]
+    #[test]
+    fn runtime_safety_tls_missing_boot_files() {
+        let root = tempfile::tempdir().unwrap();
+        let cert = root.path().join("missing.pem");
+        let key = root.path().join("missing.key");
+        let error = load_tls_config(cert.to_str().unwrap(), key.to_str().unwrap()).unwrap_err();
+        assert!(error.to_string().contains("opening worker TLS certificate"));
+        std::fs::write(&cert, b"not a certificate").unwrap();
+        let error = load_tls_config(cert.to_str().unwrap(), key.to_str().unwrap()).unwrap_err();
+        assert!(error.to_string().contains("opening worker TLS private key"));
+    }
 
-    tokio::spawn(async {
-        let host = warp::header::<String>("host");
-        let routes = warp::path::full().and(host).and_then(scrape).boxed();
-        let port: u16 = std::env::var("SPIDER_WORKER_SCRAPER_PORT")
-            .unwrap_or_else(|_| "3031".into())
-            .parse()
-            .unwrap_or_else(|_| 3031);
-
-        utils::log(
-            "Spider_Worker scraper starting at 0.0.0.0:",
-            &port.to_string(),
+    #[cfg(feature = "headers")]
+    #[test]
+    fn runtime_safety_worker_response_preserves_duplicate_and_opaque_headers() {
+        use spider::features::decentralized_headers::WorkerProxyHeaderBuilder;
+        use spider::reqwest::header::{HeaderMap, HeaderValue};
+        let mut upstream = HeaderMap::new();
+        upstream.append("set-cookie", HeaderValue::from_static("a=1"));
+        upstream.append("set-cookie", HeaderValue::from_static("b=2"));
+        upstream.append("opaque", HeaderValue::from_bytes(&[0x80]).unwrap());
+        let mut builder = WorkerProxyHeaderBuilder::new();
+        builder.extend(upstream);
+        builder.set_status_code(201);
+        let mut response = warp::http::HeaderMap::new();
+        append_response_headers(&mut response, &builder.build());
+        assert_eq!(
+            response
+                .get_all("zz-spider-r--set-cookie")
+                .iter()
+                .map(|v| v.as_bytes())
+                .collect::<Vec<_>>(),
+            vec![&b"a=1"[..], &b"b=2"[..]]
         );
-
-        serve_plain(routes, port).await;
-    });
-
-    let port: u16 = std::env::var("SPIDER_WORKER_PORT")
-        .unwrap_or_else(|_| "3030".into())
-        .parse()
-        .unwrap_or_else(|_| 3030);
-
-    utils::log("Spider_Worker starting at 0.0.0.0:", &port.to_string());
-
-    let pem_cert: String =
-        std::env::var("SPIDER_WORKER_CERT_PATH").unwrap_or_else(|_| "/cert.pem".into());
-    let rsa_key: String =
-        std::env::var("SPIDER_WORKER_KEY_PATH").unwrap_or_else(|_| "/key.rsa".into());
-
-    serve_tls(routes, port, &pem_cert, &rsa_key).await;
+        assert_eq!(response["zz-spider-r--opaque"].as_bytes(), &[0x80]);
+        assert_eq!(response["zz-spider-r--status-code"], "201");
+    }
 }

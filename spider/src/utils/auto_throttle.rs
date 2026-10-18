@@ -81,6 +81,7 @@ mod inner {
         /// Default: 2.0.
         pub target_concurrency: f64,
         /// Minimum delay between requests in milliseconds. Default: 0.
+        /// Inverted minimum/maximum bounds are swapped when configuring a throttle.
         pub min_delay_ms: u64,
         /// Maximum delay between requests in milliseconds. Default: 60_000.
         pub max_delay_ms: u64,
@@ -103,6 +104,15 @@ mod inner {
         }
     }
 
+    impl AutoThrottleConfig {
+        pub(crate) fn normalized(mut self) -> Self {
+            if self.min_delay_ms > self.max_delay_ms {
+                std::mem::swap(&mut self.min_delay_ms, &mut self.max_delay_ms);
+            }
+            self
+        }
+    }
+
     /// Per-domain auto-throttle that dynamically computes crawl delay.
     ///
     /// Thread-safe: `DashMap` for concurrent access, atomics for per-domain state.
@@ -115,10 +125,11 @@ mod inner {
 
     impl AutoThrottle {
         /// Create a new auto-throttle with the given configuration.
+        /// Inverted delay bounds are swapped; ordered bounds are unchanged.
         pub fn new(config: AutoThrottleConfig) -> Self {
             Self {
                 domains: DashMap::with_capacity(64),
-                config,
+                config: config.normalized(),
                 access_counter: AtomicU64::new(0),
             }
         }
@@ -231,6 +242,88 @@ mod inner {
     mod tests {
         use super::*;
         use std::time::Duration;
+
+        #[test]
+        fn runtime_safety_inverted_bounds_cold_disabled_and_sampled() {
+            for enabled in [false, true] {
+                let at = AutoThrottle::new(AutoThrottleConfig {
+                    enabled,
+                    min_delay_ms: 500,
+                    max_delay_ms: 50,
+                    target_concurrency: 1.0,
+                    ..Default::default()
+                });
+                assert_eq!(at.delay_for("cold.invalid"), Duration::ZERO);
+                for (domain, sample, expected) in [
+                    ("fast.invalid", 0, 50),
+                    ("middle.invalid", 200, 200),
+                    ("slow.invalid", 2000, 500),
+                ] {
+                    at.record_latency(domain, Duration::from_millis(sample));
+                    assert_eq!(
+                        at.delay_for(domain).as_millis(),
+                        if enabled { expected } else { 0 }
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn runtime_safety_zero_and_extreme_bounds() {
+            for (min, max) in [(0, 0), (u64::MAX, u64::MAX), (u64::MAX, 0)] {
+                for target in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::MIN_POSITIVE] {
+                    let at = AutoThrottle::new(AutoThrottleConfig {
+                        min_delay_ms: min,
+                        max_delay_ms: max,
+                        target_concurrency: target,
+                        ..Default::default()
+                    });
+                    for (domain, sample) in [
+                        ("zero.invalid", Duration::ZERO),
+                        ("huge.invalid", Duration::MAX),
+                    ] {
+                        at.record_latency(domain, sample);
+                        let ms = at.delay_for(domain).as_millis();
+                        assert!(ms >= min.min(max) as u128 && ms <= min.max(max) as u128);
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn runtime_safety_valid_configuration_unchanged() {
+            let config = AutoThrottleConfig {
+                min_delay_ms: 10,
+                max_delay_ms: 1000,
+                target_concurrency: 4.0,
+                alpha: 0.5,
+                ..Default::default()
+            };
+            let at = AutoThrottle::new(config.clone());
+            assert_eq!(at.config, config);
+            at.record_latency("valid.invalid", Duration::from_millis(400));
+            assert_eq!(at.delay_for("valid.invalid"), Duration::from_millis(100));
+            at.record_latency("valid.invalid", Duration::from_millis(800));
+            assert_eq!(at.delay_for("valid.invalid"), Duration::from_millis(150));
+        }
+
+        #[test]
+        fn runtime_safety_configuration_normalizes_auto_throttle() {
+            let mut config = crate::configuration::Configuration::new();
+            config.with_auto_throttle(AutoThrottleConfig {
+                min_delay_ms: 100,
+                max_delay_ms: 10,
+                ..Default::default()
+            });
+            let bounds = config.auto_throttle.as_ref().unwrap();
+            assert_eq!((bounds.min_delay_ms, bounds.max_delay_ms), (10, 100));
+            let at = AutoThrottle::new(bounds.clone());
+            at.record_latency("configured.invalid", Duration::from_millis(100));
+            assert_eq!(
+                at.delay_for("configured.invalid"),
+                Duration::from_millis(50)
+            );
+        }
 
         #[test]
         fn cold_start_returns_zero_delay() {

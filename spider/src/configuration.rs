@@ -2931,11 +2931,12 @@ impl Configuration {
 
     #[cfg(feature = "auto_throttle")]
     /// Set the auto-throttle configuration for latency-based adaptive delay.
+    /// Inverted minimum/maximum delay bounds are swapped.
     pub fn with_auto_throttle(
         &mut self,
         config: crate::utils::auto_throttle::AutoThrottleConfig,
     ) -> &mut Self {
-        self.auto_throttle = Some(config);
+        self.auto_throttle = Some(config.normalized());
         self
     }
 

@@ -29,6 +29,8 @@ pub struct DatabaseHandler {
     pub crawl_id: Option<String>,
     /// The connection pool.
     pool: tokio::sync::OnceCell<SqlitePool>,
+    /// Closed compatibility value, separate from successfully initialized storage.
+    unavailable_pool: tokio::sync::OnceCell<SqlitePool>,
     /// Initial seed ran.
     pub seeded: bool,
 }
@@ -58,6 +60,7 @@ impl DatabaseHandler {
         Self {
             persist: false,
             pool: tokio::sync::OnceCell::const_new(),
+            unavailable_pool: tokio::sync::OnceCell::const_new(),
             crawl_id: match crawl_id {
                 Some(id) => {
                     let sanitized_id = AC.replace_all(id, &*AC_REPLACE);
@@ -90,65 +93,29 @@ impl DatabaseHandler {
         self.persist = persist;
     }
 
-    /// Generate a sqlite pool.
+    /// Generate a sqlite pool. On failure, log the storage error and return a
+    /// closed pool so legacy callers receive `PoolClosed` from database operations.
+    /// No replacement database is opened. Use `try_generate_pool` for the cause.
     pub async fn generate_pool(&self) -> SqlitePool {
-        let db_path = get_db_path(&self.crawl_id);
-        let direct = db_path.starts_with("sqlite://");
-
-        // not a shared sqlite db.
-        if direct {
-            create_file_and_directory(&db_path[9..]).await;
-        } else {
-            create_file_and_directory(&db_path).await;
-        }
-
-        let db_url = if direct {
-            db_path
-        } else {
-            format!("sqlite://{}", db_path)
-        };
-
-        let pool = SqlitePool::connect_lazy(&db_url).expect("Failed to connect to the database");
-
-        let create_resources_table = sqlx::query(
-            r#"CREATE TABLE IF NOT EXISTS resources (
-                            id INTEGER PRIMARY KEY,
-                            url TEXT NOT NULL COLLATE NOCASE
-                        );
-                        CREATE INDEX IF NOT EXISTS idx_url ON resources (url COLLATE NOCASE);"#,
-        )
-        .execute(&pool);
-
-        let create_signatures_table = sqlx::query(
-            r#"CREATE TABLE IF NOT EXISTS signatures (
-                            id INTEGER PRIMARY KEY,
-                            url INTEGER NOT NULL
-                        );
-                        CREATE INDEX IF NOT EXISTS idx_url ON signatures (url);"#,
-        )
-        .execute(&pool);
-
-        // Run the queries concurrently
-        let (resources_result, signatures_result) =
-            tokio::join!(create_resources_table, create_signatures_table);
-
-        // Handle possible errors
-        if let Err(e) = resources_result {
-            log::warn!("SQLite error creating resources table: {:?}", e);
-        }
-
-        if let Err(e) = signatures_result {
-            log::warn!("SQLite error creating signatures table: {:?}", e);
-        }
-
-        pool
+        pool_or_closed(self.try_generate_pool().await).await
     }
 
-    /// Get or initialize the database pool
+    /// Generate a pool, propagating configuration, filesystem and schema errors.
+    pub async fn try_generate_pool(&self) -> Result<SqlitePool, sqlx::Error> {
+        let path = configured_db_path(std::env::var("SQLITE_DATABASE_URL"), &self.crawl_id)
+            .map_err(|e| storage_error("invalid SQLite storage configuration", e))?;
+        generate_pool_at(&path).await
+    }
+
+    /// Get or initialize the database pool (legacy infallible API).
     pub async fn initlaize_pool(&self) {
-        if !self.pool_inited() {
-            let _ = self.pool.set(self.generate_pool().await);
-        }
+        let _ = self.get_db_pool().await;
+    }
+
+    /// Get or initialize the database pool, preserving the initialization error.
+    /// Failed initialization is not cached, allowing a later retry.
+    pub async fn try_get_db_pool(&self) -> Result<&SqlitePool, sqlx::Error> {
+        self.pool.get_or_try_init(|| self.try_generate_pool()).await
     }
 
     /// Set the pool directly.
@@ -156,9 +123,17 @@ impl DatabaseHandler {
         let _ = self.pool.set(pool);
     }
 
-    /// Get or initialize the database pool
+    /// Get or initialize the database pool. Failures return a closed pool and
+    /// leave initialization retryable; use `try_get_db_pool` for the cause.
     pub async fn get_db_pool(&self) -> &SqlitePool {
-        self.pool.get_or_init(|| self.generate_pool()).await
+        match self.try_get_db_pool().await {
+            Ok(pool) => pool,
+            Err(error) => {
+                self.unavailable_pool
+                    .get_or_init(|| pool_or_closed(Err(error)))
+                    .await
+            }
+        }
     }
 
     /// Check if a URL exists (ignore case)
@@ -348,13 +323,43 @@ fn get_id() -> usize {
     }
 }
 
-/// Get the db path.
+/// Get the db path. Invalid environment configuration returns an unusable NUL
+/// path rather than redirecting persistence or cleanup to the default database.
 pub fn get_db_path(crawl_id: &Option<String>) -> String {
-    // Get the base database URL or default to a temporary directory
-    let base_url = std::env::var("SQLITE_DATABASE_URL").unwrap_or_else(|_| {
-        let temp_dir = std::env::temp_dir();
-        temp_dir.to_string_lossy().into_owned()
-    });
+    configured_db_path(std::env::var("SQLITE_DATABASE_URL"), crawl_id).unwrap_or_else(|error| {
+        log::error!("Invalid SQLite storage configuration: {error}");
+        "\0".to_owned()
+    })
+}
+
+fn configured_db_path(
+    configured: Result<String, std::env::VarError>,
+    crawl_id: &Option<String>,
+) -> std::io::Result<String> {
+    let base_url = match configured {
+        Ok(value) => value,
+        Err(std::env::VarError::NotPresent) => std::env::temp_dir()
+            .into_os_string()
+            .into_string()
+            .map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "SQLite temporary directory is not UTF-8",
+                )
+            })?,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "SQLITE_DATABASE_URL is not UTF-8",
+            ))
+        }
+    };
+    if base_url.is_empty() || base_url.contains('\0') {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "SQLITE_DATABASE_URL is empty or contains NUL",
+        ));
+    }
 
     let delim = if base_url.starts_with("sqlite://memory:") {
         ":"
@@ -374,20 +379,83 @@ pub fn get_db_path(crawl_id: &Option<String>) -> String {
         None => format!("{}{delim}spider.db", base_url.trim_end_matches('/')),
     };
 
-    db_path
+    Ok(db_path)
 }
 
-/// Create the file and directory if locally.
+/// Attach the operation and destination without changing the selected database.
 #[cfg(feature = "disk")]
-async fn create_file_and_directory(file_path: &str) {
-    let path = std::path::Path::new(file_path);
+fn storage_error(context: &str, error: impl std::fmt::Display) -> sqlx::Error {
+    sqlx::Error::Configuration(format!("{context}: {error}").into())
+}
 
-    if let Some(parent) = path.parent() {
-        let _ = crate::utils::uring_fs::create_dir_all(parent.display().to_string()).await;
+#[cfg(feature = "disk")]
+async fn generate_pool_at(db_path: &str) -> Result<SqlitePool, sqlx::Error> {
+    use sqlx::sqlite::SqliteConnectOptions;
+
+    let db_url = if db_path.starts_with("sqlite:") {
+        db_path.to_owned()
+    } else {
+        format!("sqlite://{db_path}")
+    };
+    // Parse before touching the filesystem. In particular, do not turn an
+    // invalid URL into a filename or silently substitute an in-memory database.
+    let options: SqliteConnectOptions = db_url
+        .parse()
+        .map_err(|e| storage_error("invalid SQLite storage URL", e))?;
+    if let Some(parent) = options
+        .get_filename()
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+    {
+        tokio::fs::create_dir_all(parent).await.map_err(|e| {
+            storage_error(
+                &format!("creating SQLite directory {}", parent.display()),
+                e,
+            )
+        })?;
     }
+    // SQLite creates the file atomically; an exists/write pair could truncate a
+    // database created by another initializer between those two operations.
+    let pool = SqlitePool::connect_with(options.create_if_missing(true))
+        .await
+        .map_err(|e| storage_error(&format!("opening SQLite storage {db_path}"), e))?;
+    let schema = sqlx::raw_sql(
+        "CREATE TABLE IF NOT EXISTS resources (
+            id INTEGER PRIMARY KEY, url TEXT NOT NULL COLLATE NOCASE
+        );
+        CREATE INDEX IF NOT EXISTS idx_url ON resources (url COLLATE NOCASE);
+        CREATE TABLE IF NOT EXISTS signatures (
+            id INTEGER PRIMARY KEY, url INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_url ON signatures (url);",
+    )
+    .execute(&pool)
+    .await;
+    if let Err(e) = schema {
+        pool.close().await;
+        return Err(storage_error(
+            &format!("initializing SQLite schema {db_path}"),
+            e,
+        ));
+    }
+    Ok(pool)
+}
 
-    if !path.exists() {
-        let _ = crate::utils::uring_fs::write_file(path.display().to_string(), Vec::new()).await;
+#[cfg(feature = "disk")]
+async fn pool_or_closed(result: Result<SqlitePool, sqlx::Error>) -> SqlitePool {
+    match result {
+        Ok(pool) => pool,
+        Err(error) => {
+            log::error!("SQLite storage initialization failed: {error}");
+            // An inert compatibility value, never a fallback database. There are
+            // no initial connections, the filename is invalid on every OS, and
+            // the pool is closed before it can be returned or acquired.
+            let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .min_connections(0)
+                .connect_lazy_with(sqlx::sqlite::SqliteConnectOptions::new().filename("\0"));
+            pool.close().await;
+            pool
+        }
     }
 }
 
@@ -396,6 +464,109 @@ async fn create_file_and_directory(file_path: &str) {
 mod tests {
     use super::*;
     use tokio;
+
+    #[test]
+    fn runtime_safety_disk_invalid_environment_is_not_redirected() {
+        for value in [
+            Ok(String::new()),
+            Ok("bad\0path".into()),
+            Err(std::env::VarError::NotUnicode("invalid".into())),
+        ] {
+            assert_eq!(
+                configured_db_path(value, &None).unwrap_err().kind(),
+                std::io::ErrorKind::InvalidInput
+            );
+        }
+        let root = tempfile::tempdir().unwrap();
+        let path = configured_db_path(
+            Ok(root.path().to_str().unwrap().into()),
+            &Some("test".into()),
+        )
+        .unwrap();
+        assert_eq!(
+            std::path::Path::new(&path),
+            root.path().join("spider_test.db")
+        );
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn runtime_safety_disk_invalid_url_does_not_create_files() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("invalid.db");
+        let url = format!("sqlite://{}?mode=invalid", path.display());
+        let error = generate_pool_at(&url).await.unwrap_err();
+        assert!(error.to_string().contains("invalid SQLite storage URL"));
+        assert!(!path.exists());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn runtime_safety_disk_filesystem_error_is_contextual() {
+        let root = tempfile::tempdir().unwrap();
+        let parent = root.path().join("not-a-directory");
+        std::fs::write(&parent, b"keep").unwrap();
+        let path = parent.join("nested/db.sqlite");
+        let error = generate_pool_at(path.to_str().unwrap()).await.unwrap_err();
+        assert!(error.to_string().contains("creating SQLite directory"));
+        assert_eq!(std::fs::read(parent).unwrap(), b"keep");
+    }
+
+    #[tokio::test]
+    async fn runtime_safety_disk_legacy_failure_returns_closed_pool() {
+        let root = tempfile::tempdir().unwrap();
+        let url = format!(
+            "sqlite://{}?unknown=value",
+            root.path().join("bad.db").display()
+        );
+        let pool = pool_or_closed(generate_pool_at(&url).await).await;
+        assert!(pool.is_closed());
+        assert!(matches!(pool.acquire().await, Err(sqlx::Error::PoolClosed)));
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn runtime_safety_disk_preserves_persistent_data_and_schema_errors() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("nested/storage.db");
+        let pool = generate_pool_at(path.to_str().unwrap()).await.unwrap();
+        sqlx::query("INSERT INTO resources (url) VALUES ('https://offline.invalid')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO signatures (url) VALUES (42)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+        let pool = generate_pool_at(path.to_str().unwrap()).await.unwrap();
+        assert_eq!(DatabaseHandler::count_records(&pool).await.unwrap(), 1);
+        let signatures: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM signatures")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(signatures, 1);
+        pool.close().await;
+        // A separate malformed test schema must report initialization failure.
+        let malformed = root.path().join("malformed.db");
+        let pool = SqlitePool::connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&malformed)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+        sqlx::query("CREATE TABLE resources (wrong TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+        let error = generate_pool_at(malformed.to_str().unwrap())
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("initializing SQLite schema"));
+        assert!(path.exists());
+    }
 
     #[tokio::test]
     async fn test_connect_db() {
