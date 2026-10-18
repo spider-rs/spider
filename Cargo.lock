@@ -1821,9 +1821,8 @@ dependencies = [
 
 [[package]]
 name = "chromey"
-version = "2.54.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6772c5d361271f52cdf86cfb67b3473650a746d076cbe4a9dc44cc04880c12a3"
+version = "2.58.3"
+source = "git+https://github.com/spider-rs/chromey?rev=0312d624ea2feb4dfa77699213f1d7ca388358ac#0312d624ea2feb4dfa77699213f1d7ca388358ac"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -1859,7 +1858,7 @@ dependencies = [
  "spider_fingerprint",
  "spider_firewall",
  "spider_network_blocker",
- "spider_remote_cache 0.3.0",
+ "spider_remote_cache",
  "thiserror 2.0.20",
  "tokio",
  "tokio-stream",
@@ -9261,7 +9260,7 @@ dependencies = [
  "spider_fingerprint",
  "spider_firewall",
  "spider_network_blocker",
- "spider_remote_cache 0.4.0",
+ "spider_remote_cache",
  "sqlx",
  "statrs",
  "string-interner",
@@ -9396,8 +9395,7 @@ dependencies = [
 [[package]]
 name = "spider_chromiumoxide_cdp"
 version = "0.7.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "425d07927c18fd157c4680cee8c7868e4a9bf4723bda1a4951c3316e3abdea4b"
+source = "git+https://github.com/spider-rs/chromey?rev=0312d624ea2feb4dfa77699213f1d7ca388358ac#0312d624ea2feb4dfa77699213f1d7ca388358ac"
 dependencies = [
  "serde",
  "serde_json",
@@ -9408,11 +9406,10 @@ dependencies = [
 [[package]]
 name = "spider_chromiumoxide_pdl"
 version = "0.7.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4090793264cfc7533186505f7cc2198ef03325dfcbfe32d0e6814c6ca759051f"
+source = "git+https://github.com/spider-rs/chromey?rev=0312d624ea2feb4dfa77699213f1d7ca388358ac#0312d624ea2feb4dfa77699213f1d7ca388358ac"
 dependencies = [
  "either",
- "heck 0.4.1",
+ "heck 0.5.0",
  "once_cell",
  "proc-macro2",
  "quote",
@@ -9425,8 +9422,7 @@ dependencies = [
 [[package]]
 name = "spider_chromiumoxide_types"
 version = "0.7.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7be30fbd75f45897bedcecde72e67ccad7cb4e8d11b92f34b7301c0f62592bf3"
+source = "git+https://github.com/spider-rs/chromey?rev=0312d624ea2feb4dfa77699213f1d7ca388358ac#0312d624ea2feb4dfa77699213f1d7ca388358ac"
 dependencies = [
  "serde",
  "serde_json",
@@ -9542,25 +9538,8 @@ dependencies = [
 
 [[package]]
 name = "spider_remote_cache"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cb4e37217c3ed824584844ee87ef6e8ac44e60d4e8c7591f6a9af95ac6d306e"
-dependencies = [
- "base64 0.22.1",
- "dashmap",
- "reqwest 0.13.4",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "spider_remote_cache"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92a1bd9c92b0ab9cf2e7b4ae0b23590665989433e680294fa73576ff4f20471e"
+version = "0.5.0"
+source = "git+https://github.com/spider-rs/spider_remote_cache?rev=910fefb7aeec80d39fed5f5ff44a8bfc7f3437dc#910fefb7aeec80d39fed5f5ff44a8bfc7f3437dc"
 dependencies = [
  "base64 0.22.1",
  "bincode",
