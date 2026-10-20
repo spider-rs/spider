@@ -19,6 +19,3 @@ resolver = "2"
 # quick-xml. Patch sections are local-only and ignored on publish.
 [patch.crates-io]
 spider = { path = "spider" }
-# Pin the audited public browser and shared cache client for workspace builds.
-chromey = { git = "https://github.com/spider-rs/chromey", rev = "0312d624ea2feb4dfa77699213f1d7ca388358ac" }
-spider_remote_cache = { git = "https://github.com/spider-rs/spider_remote_cache", rev = "910fefb7aeec80d39fed5f5ff44a8bfc7f3437dc" }

@@ -1821,8 +1821,9 @@ dependencies = [
 
 [[package]]
 name = "chromey"
-version = "2.58.3"
-source = "git+https://github.com/spider-rs/chromey?rev=0312d624ea2feb4dfa77699213f1d7ca388358ac#0312d624ea2feb4dfa77699213f1d7ca388358ac"
+version = "2.58.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81c967b80cb61038057b2731abc0b0f264ec37592e83006212526ccede90cb46"
 dependencies = [
  "adblock",
  "aho-corasick",
@@ -1858,7 +1859,7 @@ dependencies = [
  "spider_fingerprint",
  "spider_firewall",
  "spider_network_blocker",
- "spider_remote_cache",
+ "spider_remote_cache 0.3.0",
  "thiserror 2.0.20",
  "tokio",
  "tokio-stream",
@@ -2819,7 +2820,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3060,7 +3061,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4665,12 +4666,12 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "system-configuration 0.7.0",
  "tokio",
  "tower-service",
  "tracing",
- "windows-registry 0.6.1",
+ "windows-registry 0.5.3",
 ]
 
 [[package]]
@@ -5319,7 +5320,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8cfc352a66ba903c23239ef51e809508b6fc2b0f90e3476ac7a9ff47e863ae95"
 dependencies = [
  "scopeguard",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7197,7 +7198,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -7376,7 +7377,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.3",
  "rustls",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -7415,9 +7416,9 @@ dependencies = [
  "cfg_aliases 0.2.2",
  "libc",
  "once_cell",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8166,7 +8167,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8244,7 +8245,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.9",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9127,7 +9128,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -9260,7 +9261,7 @@ dependencies = [
  "spider_fingerprint",
  "spider_firewall",
  "spider_network_blocker",
- "spider_remote_cache",
+ "spider_remote_cache 0.5.0",
  "sqlx",
  "statrs",
  "string-interner",
@@ -9395,7 +9396,8 @@ dependencies = [
 [[package]]
 name = "spider_chromiumoxide_cdp"
 version = "0.7.9"
-source = "git+https://github.com/spider-rs/chromey?rev=0312d624ea2feb4dfa77699213f1d7ca388358ac#0312d624ea2feb4dfa77699213f1d7ca388358ac"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "425d07927c18fd157c4680cee8c7868e4a9bf4723bda1a4951c3316e3abdea4b"
 dependencies = [
  "serde",
  "serde_json",
@@ -9406,10 +9408,11 @@ dependencies = [
 [[package]]
 name = "spider_chromiumoxide_pdl"
 version = "0.7.6"
-source = "git+https://github.com/spider-rs/chromey?rev=0312d624ea2feb4dfa77699213f1d7ca388358ac#0312d624ea2feb4dfa77699213f1d7ca388358ac"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4090793264cfc7533186505f7cc2198ef03325dfcbfe32d0e6814c6ca759051f"
 dependencies = [
  "either",
- "heck 0.5.0",
+ "heck 0.4.1",
  "once_cell",
  "proc-macro2",
  "quote",
@@ -9422,7 +9425,8 @@ dependencies = [
 [[package]]
 name = "spider_chromiumoxide_types"
 version = "0.7.6"
-source = "git+https://github.com/spider-rs/chromey?rev=0312d624ea2feb4dfa77699213f1d7ca388358ac#0312d624ea2feb4dfa77699213f1d7ca388358ac"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7be30fbd75f45897bedcecde72e67ccad7cb4e8d11b92f34b7301c0f62592bf3"
 dependencies = [
  "serde",
  "serde_json",
@@ -9538,8 +9542,25 @@ dependencies = [
 
 [[package]]
 name = "spider_remote_cache"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3cb4e37217c3ed824584844ee87ef6e8ac44e60d4e8c7591f6a9af95ac6d306e"
+dependencies = [
+ "base64 0.22.1",
+ "dashmap",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "spider_remote_cache"
 version = "0.5.0"
-source = "git+https://github.com/spider-rs/spider_remote_cache?rev=910fefb7aeec80d39fed5f5ff44a8bfc7f3437dc#910fefb7aeec80d39fed5f5ff44a8bfc7f3437dc"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7b200912694671c8fef579cc5b979a320c8be5c28350b809592c871beb61efa"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -10302,7 +10323,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11662,7 +11683,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -12055,7 +12076,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
 dependencies = [
  "cfg-if",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
