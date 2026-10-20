@@ -31,13 +31,13 @@ struct Reservation {
 impl Budget {
     fn reserve(self: &Arc<Self>, bytes: usize) -> Option<Reservation> {
         self.entries
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
                 (n < MAX_ENTRIES).then_some(n + 1)
             })
             .ok()?;
         if self
             .bytes
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
                 n.checked_add(bytes)
                     .filter(|total| *total <= MAX_CACHE_BYTES)
             })

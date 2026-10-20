@@ -8462,7 +8462,7 @@ impl Page {
                         if !is_tracker_script(&src) {
                             script_src_count = script_src_count.saturating_add(1);
                             if script_src_count >= 4 {
-                                let _ = upgrade_score.fetch_update(
+                                let _ = upgrade_score.try_update(
                                     Ordering::Relaxed,
                                     Ordering::Relaxed,
                                     |v| Some(v.saturating_add(SMART_UPGRADE_THRESHOLD)),
@@ -8559,7 +8559,7 @@ impl Page {
                         {
                             // Inline DOM mutation is a medium signal (7 points).
                             // Combined with script srcs it crosses the threshold.
-                            let _ = upgrade_score.fetch_update(
+                            let _ = upgrade_score.try_update(
                                 Ordering::Relaxed,
                                 Ordering::Relaxed,
                                 |v| Some(v.saturating_add(7)),
@@ -9078,7 +9078,7 @@ impl Page {
                                         if !is_tracker_script(&src) {
                                             script_src_count = script_src_count.saturating_add(1);
                                             if script_src_count >= 4 {
-                                                let _ = upgrade_score.fetch_update(
+                                                let _ = upgrade_score.try_update(
                                                     Ordering::Relaxed,
                                                     Ordering::Relaxed,
                                                     |v| {
@@ -9138,7 +9138,7 @@ impl Page {
                                 && upgrade_score.load(Ordering::Relaxed) < SMART_UPGRADE_THRESHOLD
                                 && DOM_SCRIPT_WATCH_METHODS.find(s).is_some()
                             {
-                                let _ = upgrade_score.fetch_update(
+                                let _ = upgrade_score.try_update(
                                     Ordering::Relaxed,
                                     Ordering::Relaxed,
                                     |v| Some(v.saturating_add(7)),

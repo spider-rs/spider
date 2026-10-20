@@ -548,7 +548,7 @@ impl UsageStats {
         exceeded: impl FnOnce(u64, u64) -> LimitType,
     ) -> Result<(), LimitType> {
         counter
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
                 if limit.is_some_and(|limit| used >= limit) {
                     None
                 } else {
@@ -580,7 +580,7 @@ impl UsageStats {
         })
     }
 
-    #[cfg(any(feature = "chrome", test))]
+    #[cfg(any(feature = "chrome", feature = "webdriver", test))]
     pub(crate) fn reserve_webbrowser_call(&self, limits: &UsageLimits) -> Result<(), LimitType> {
         Self::reserve_call(
             &self.webbrowser_calls,
@@ -590,7 +590,7 @@ impl UsageStats {
     }
 
     fn add_count(counter: &AtomicU64, amount: u64) {
-        let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
+        let _ = counter.try_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
             Some(used.saturating_add(amount))
         });
     }

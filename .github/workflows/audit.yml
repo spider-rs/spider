@@ -21,4 +21,12 @@ jobs:
         # feature. memvid-rs 1.2.0 is the latest release and hard-pins
         # `lopdf = "^0.36"`, so there is no dependency-graph path to the fix.
         # Remove this ignore once memvid-rs ships a release on lopdf >= 0.42.
-        run: cargo audit --ignore RUSTSEC-2026-0187
+        # RUSTSEC-2026-0367/0368/0369 (zip < 9): the same memvid-rs 1.2.0 pins
+        # candle-core 0.8, which pins zip 1.1. No candle 0.8 release moves to
+        # zip 9. Remove these with the lopdf ignore when memvid-rs updates.
+        run: >-
+          cargo audit
+          --ignore RUSTSEC-2026-0187
+          --ignore RUSTSEC-2026-0367
+          --ignore RUSTSEC-2026-0368
+          --ignore RUSTSEC-2026-0369

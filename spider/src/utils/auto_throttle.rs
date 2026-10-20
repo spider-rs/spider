@@ -57,7 +57,7 @@ mod inner {
                 // CAS loop to atomically update f64 EMA.
                 let _ = self
                     .ema_us
-                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |bits| {
+                    .try_update(Ordering::Relaxed, Ordering::Relaxed, |bits| {
                         let old = f64::from_bits(bits);
                         let new = old + alpha * (latency_us - old);
                         // Guard: never store NaN/Inf.

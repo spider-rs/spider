@@ -285,7 +285,7 @@ pub fn track_bytes_add(n: usize) {
 /// before the balance feature was initialised.
 #[inline]
 pub fn track_bytes_sub(n: usize) {
-    let _ = TOTAL_HTML_BYTES_IN_MEMORY.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |cur| {
+    let _ = TOTAL_HTML_BYTES_IN_MEMORY.try_update(Ordering::Relaxed, Ordering::Relaxed, |cur| {
         Some(cur.saturating_sub(n))
     });
 }
@@ -305,7 +305,7 @@ pub fn track_page_spooled() {
 /// Decrement the on-disk page counter (saturating).
 #[inline]
 pub fn track_page_unspooled() {
-    let _ = PAGES_ON_DISK.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |cur| {
+    let _ = PAGES_ON_DISK.try_update(Ordering::Relaxed, Ordering::Relaxed, |cur| {
         Some(cur.saturating_sub(1))
     });
 }

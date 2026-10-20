@@ -364,7 +364,7 @@ impl BackendTracker {
                 // CAS loop ensures concurrent record_duration() calls don't lose updates.
                 let _ = s
                     .ema_ms
-                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |old| {
+                    .try_update(Ordering::Relaxed, Ordering::Relaxed, |old| {
                         Some((old * 4 + ms) / 5)
                     });
             }

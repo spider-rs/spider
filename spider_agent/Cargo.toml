@@ -45,7 +45,7 @@ chromey = { version = "2", optional = true, default-features = false, features =
 ] }
 
 # WebDriver (optional) - uses thirtyfour
-thirtyfour = { version = "0.36", optional = true }
+thirtyfour = { version = "0.38", optional = true }
 
 # Temp filesystem for large operations
 tempfile = { version = "3", optional = true }

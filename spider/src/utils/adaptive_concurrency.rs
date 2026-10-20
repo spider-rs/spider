@@ -99,7 +99,7 @@ impl AIMDController {
             // Additive increase — try to bump by 1 if below max.
             let _ = self
                 .current_limit
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |cur| {
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |cur| {
                     if cur < self.max_limit {
                         Some(cur.saturating_add(1))
                     } else {
@@ -117,7 +117,7 @@ impl AIMDController {
         self.success_count.store(0, Ordering::Relaxed);
         let _ = self
             .current_limit
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |cur| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |cur| {
                 let halved = cur >> self.decrease_shift;
                 let next = halved.max(self.min_limit);
                 if next != cur {

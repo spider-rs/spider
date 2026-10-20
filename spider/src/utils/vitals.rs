@@ -82,7 +82,7 @@ pub fn page_add() {
 /// Decrement pages held in memory (saturating — never underflows).
 #[inline]
 pub fn page_drop() {
-    let _ = PAGES_IN_MEMORY.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+    let _ = PAGES_IN_MEMORY.try_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
         if v > 0 {
             Some(v - 1)
         } else {
@@ -104,7 +104,7 @@ pub fn chrome_tab_open() {
 #[cfg(feature = "chrome")]
 #[inline]
 pub fn chrome_tab_close() {
-    let _ = CHROME_TABS_ACTIVE.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+    let _ = CHROME_TABS_ACTIVE.try_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
         if v > 0 {
             Some(v - 1)
         } else {

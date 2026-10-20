@@ -91,13 +91,13 @@ impl HedgeTracker {
             // CAS loop ensures concurrent record() calls don't lose updates.
             let _ = self
                 .ema_ms
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |old| {
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |old| {
                     Some((old * 4 + ms) / 5)
                 });
 
             let _ = self
                 .ema_sq_ms
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |old_sq| {
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |old_sq| {
                     Some((old_sq * 4 + ms_sq) / 5)
                 });
         }

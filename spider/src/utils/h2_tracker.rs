@@ -108,7 +108,7 @@ impl H2Tracker {
             // Saturating decrement: avoid underflow if called spuriously.
             entry
                 .active_streams
-                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| {
+                .try_update(Ordering::AcqRel, Ordering::Acquire, |v| {
                     if v > 0 {
                         Some(v - 1)
                     } else {

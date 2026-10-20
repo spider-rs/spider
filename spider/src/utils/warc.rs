@@ -413,7 +413,7 @@ mod inner {
                             // error, so a producer parked on the soft limit can never
                             // be stranded by a failed write. `saturating_sub` keeps
                             // this sound even if the counters ever disagree.
-                            let _ = queued_bytes.fetch_update(
+                            let _ = queued_bytes.try_update(
                                 Ordering::AcqRel,
                                 Ordering::Relaxed,
                                 |queued| Some(queued.saturating_sub(len)),
@@ -455,7 +455,7 @@ mod inner {
                 // Receiver gone — undo the accounting so waiters don't park forever.
                 let _ =
                     self.queued_bytes
-                        .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |queued| {
+                        .try_update(Ordering::AcqRel, Ordering::Relaxed, |queued| {
                             Some(queued.saturating_sub(len))
                         });
                 self.drained.notify_waiters();
