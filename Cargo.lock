@@ -1109,7 +1109,7 @@ name = "benches"
 version = "0.0.0"
 dependencies = [
  "criterion",
- "spider",
+ "spider 2.54.0",
  "spider_utils 2.54.0",
 ]
 
@@ -9195,6 +9195,50 @@ dependencies = [
 
 [[package]]
 name = "spider"
+version = "2.53.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd745f8618f4081c53e38ca89adb5ff02f19a9e1ef3dbc87095b8e5824354775"
+dependencies = [
+ "ahash",
+ "aho-corasick",
+ "arc-swap",
+ "async-trait",
+ "auto_encoder 0.2.4",
+ "bytes",
+ "case_insensitive_string",
+ "dashmap",
+ "h2",
+ "hashbrown 0.17.1",
+ "lazy_static",
+ "libc",
+ "log",
+ "lol_html",
+ "memchr",
+ "num_cpus",
+ "percent-encoding",
+ "phf 0.13.1",
+ "pin-project-lite",
+ "quick-xml",
+ "regex",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "serde_regex",
+ "simdutf8",
+ "smallvec",
+ "spider_agent_types 2.53.9",
+ "spider_fingerprint",
+ "string-interner",
+ "string_concat",
+ "strum 0.28.0",
+ "tokio",
+ "tokio-stream",
+ "tower",
+ "url",
+]
+
+[[package]]
+name = "spider"
 version = "2.54.0"
 dependencies = [
  "ahash",
@@ -9257,7 +9301,7 @@ dependencies = [
  "sonic-rs",
  "spider-http-cache-reqwest",
  "spider_agent",
- "spider_agent_types",
+ "spider_agent_types 2.54.0",
  "spider_fingerprint",
  "spider_firewall",
  "spider_network_blocker",
@@ -9363,7 +9407,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spider_agent_html",
- "spider_agent_types",
+ "spider_agent_types 2.54.0",
  "spider_skills",
  "tempfile",
  "thirtyfour",
@@ -9379,7 +9423,20 @@ dependencies = [
  "lol_html",
  "serde",
  "serde_json",
- "spider_agent_types",
+ "spider_agent_types 2.54.0",
+]
+
+[[package]]
+name = "spider_agent_types"
+version = "2.53.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d540684645870a4f61295d2dea1a9976d3a0e5563038ffe286ecb61c5f98bd1c"
+dependencies = [
+ "aho-corasick",
+ "llm_models_spider",
+ "memchr",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -9447,7 +9504,7 @@ dependencies = [
  "reqwest 0.13.4",
  "serde_json",
  "sha2 0.10.9",
- "spider",
+ "spider 2.54.0",
  "spider_transformations",
  "tikv-jemallocator",
  "tokio",
@@ -9468,7 +9525,7 @@ dependencies = [
  "reqwest 0.13.4",
  "serde_json",
  "sha2 0.10.9",
- "spider",
+ "spider 2.54.0",
  "spider_transformations",
  "spider_utils 2.53.6",
  "tokio",
@@ -9519,7 +9576,7 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
- "spider",
+ "spider 2.54.0",
  "spider_transformations",
  "tokio",
  "uuid",
@@ -9622,7 +9679,7 @@ dependencies = [
  "phf_codegen 0.13.1",
  "regex",
  "serde",
- "spider",
+ "spider 2.53.9",
  "spider_scraper",
  "tendril 0.5.1",
  "thiserror 2.0.20",
@@ -9668,7 +9725,7 @@ dependencies = [
  "hyper-util",
  "lazy_static",
  "rustls-pemfile",
- "spider",
+ "spider 2.54.0",
  "tempfile",
  "tokio",
  "tokio-rustls",
