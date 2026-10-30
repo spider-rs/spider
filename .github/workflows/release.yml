@@ -1,34 +1,82 @@
 name: Release
 
+# Every version tag gets a GitHub release. release.sh pushes the tag after
+# `cargo publish`; workflow_dispatch backfills a release for an existing tag.
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release, e.g. v2.53.9"
+        required: true
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ env.TAG }}
+      - name: Check the tag matches the crate version
+        run: |
+          VERSION=$(grep '^version' spider/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          if [ "v${VERSION}" != "$TAG" ]; then
+            echo "::error::tag $TAG does not match spider/Cargo.toml version $VERSION"
+            exit 1
+          fi
       - name: Generate release notes
         id: notes
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          PREV_TAG=$(git tag --sort=-v:refname | grep -v "$TAG" | head -n1)
-          if [ -n "$PREV_TAG" ]; then
-            echo "## Changes since $PREV_TAG" > notes.md
-            echo "" >> notes.md
-            git log "$PREV_TAG".."$TAG" --pretty=format:"- %s" --no-merges >> notes.md
+          VERSION="${TAG#v}"
+          # The CHANGELOG section for this version, if there is one.
+          awk -v h="## v${VERSION}" '
+            $0 == h { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' CHANGELOG.md | sed '/./,$!d' > changelog.md
+
+          # Previous version tag by semver order, skipping malformed ones like vv1.7.5.
+          PREV_TAG=$(git tag --list 'v[0-9]*' --sort=-v:refname \
+            | awk -v t="$TAG" 'found { print; exit } $0 == t { found = 1 }')
+
+          {
+            if [ -s changelog.md ]; then
+              cat changelog.md
+              echo ""
+            fi
+            if [ -n "$PREV_TAG" ]; then
+              echo "## Commits since $PREV_TAG"
+              echo ""
+              git log "$PREV_TAG".."$TAG" --pretty=format:"- %s (%h)" --no-merges
+              echo ""
+            fi
+            echo ""
+            echo "Crates: https://crates.io/crates/spider/${VERSION}"
+          } > notes.md
+
+          # Only the highest version tag becomes "Latest", so backfilling old
+          # tags does not move the marker backwards.
+          HIGHEST=$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1)
+          if [ "$HIGHEST" = "$TAG" ]; then
+            echo "latest=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Initial release" > notes.md
+            echo "latest=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ env.TAG }}
+          name: ${{ env.TAG }}
           body_path: notes.md
-          generate_release_notes: true
+          make_latest: ${{ steps.notes.outputs.latest }}

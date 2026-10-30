@@ -42,3 +42,16 @@ cd spider_worker && cargo publish --no-verify; cd ../
 cd spider_mcp && cargo publish --no-verify; cd ../
 
 git push
+
+# ── Tag the release ──
+# Pushing v${VERSION} runs .github/workflows/release.yml, which creates the
+# GitHub release. Packagers (e.g. conda-forge) fetch the tag tarball.
+TAG="v${VERSION}"
+if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+  echo "Tag ${TAG} already on origin, skipping"
+else
+  if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+    git tag -a "${TAG}" -m "${TAG}"
+  fi
+  git push origin "refs/tags/${TAG}"
+fi
