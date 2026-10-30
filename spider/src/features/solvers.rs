@@ -1003,6 +1003,15 @@ pub async fn solve_enterprise_with_browser_gemini(
     challenge: &RcEnterpriseChallenge<'_>,
     timeout_ms: u64,
 ) -> Result<Vec<u8>, CdpError> {
+    // Opt-in: Solvecha takes over only when its API key is set.
+    if let Ok(key) = std::env::var("SOLVECHA_API_KEY") {
+        if !key.is_empty() {
+            return solve_with_external_solvecha(&key, challenge, timeout_ms)
+                .await
+                .map_err(|e| CdpError::msg(format!("external‑solvecha failed: {e}")));
+        }
+    }
+
     let mut tiles_json = Vec::with_capacity(challenge.tiles.len());
 
     for tile in &challenge.tiles {
@@ -1224,6 +1233,168 @@ async fn solve_with_external_gemini(
     } else {
         Ok(Vec::new())
     }
+}
+
+/// Default Solvecha API base URL (override with `SOLVECHA_ENDPOINT`).
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+const SOLVECHA_DEFAULT_ENDPOINT: &str = "https://api.solvecha.com";
+/// Max tile pictures per Solvecha 1x1 request.
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+const SOLVECHA_MAX_TILES: usize = 9;
+/// Seconds the Solvecha API holds a request open while it works.
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+const SOLVECHA_WAIT_SECS: u64 = 15;
+
+/// Build the NopeCHA-compatible `1x1` body for up to nine tile pictures.
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+fn solvecha_request_body(target: &str, images_b64: &[String]) -> serde_json::Value {
+    serde_json::json!({
+        "task": format!("Select all images with {}", target),
+        "grid": "1x1",
+        "image_data": images_b64,
+    })
+}
+
+/// Read the API error message from a Solvecha JSON body, or fall back to the raw text.
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+fn solvecha_error_message(status: u16, body: &str) -> String {
+    let msg = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(str::to_owned))
+        .unwrap_or_else(|| body.trim().to_string());
+    format!("solvecha HTTP {status}: {msg}")
+}
+
+/// Result of one Solvecha response.
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+#[derive(Debug, PartialEq)]
+enum SolvechaReply {
+    /// One boolean per tile.
+    Answer(Vec<bool>),
+    /// The job is queued; fetch it with this id.
+    Job(String),
+    /// Error 14: not ready yet.
+    NotReady,
+}
+
+/// Parse a Solvecha response (status + body).
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+fn solvecha_parse_reply(status: u16, body: &str) -> Result<SolvechaReply, String> {
+    let v: Option<serde_json::Value> = serde_json::from_str(body).ok();
+    if status == 409
+        && v.as_ref()
+            .and_then(|v| v.get("code"))
+            .and_then(|c| c.as_i64())
+            == Some(14)
+    {
+        return Ok(SolvechaReply::NotReady);
+    }
+    if !(200..300).contains(&status) {
+        return Err(solvecha_error_message(status, body));
+    }
+    match v.as_ref().and_then(|v| v.get("data")) {
+        Some(serde_json::Value::Array(a)) => Ok(SolvechaReply::Answer(
+            a.iter().map(|b| b.as_bool().unwrap_or(false)).collect(),
+        )),
+        Some(serde_json::Value::String(id)) => Ok(SolvechaReply::Job(id.clone())),
+        Some(serde_json::Value::Number(id)) => Ok(SolvechaReply::Job(id.to_string())),
+        _ => Err(format!("solvecha: unexpected response: {}", body.trim())),
+    }
+}
+
+/// Send tile pictures to Solvecha (NopeCHA-compatible recognition API) and return
+/// one boolean per picture. Image tiles only.
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+async fn solvecha_recognize(
+    base: &str,
+    api_key: &str,
+    target: &str,
+    images_b64: &[String],
+    timeout_ms: u64,
+) -> Result<Vec<bool>, String> {
+    let auth = format!("Bearer {api_key}");
+    let url = format!("{base}/v1/recognition/recaptcha");
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+
+    let resp = GEMINI_CLIENT
+        .post(format!("{url}?wait={SOLVECHA_WAIT_SECS}"))
+        .header("Authorization", &auth)
+        .json(&solvecha_request_body(target, images_b64))
+        .send()
+        .await
+        .map_err(|e| format!("solvecha request failed: {e}"))?;
+    let status = resp.status().as_u16();
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| format!("solvecha body: {e}"))?;
+
+    let id = match solvecha_parse_reply(status, &body)? {
+        SolvechaReply::Answer(a) => return Ok(a),
+        SolvechaReply::Job(id) => id,
+        SolvechaReply::NotReady => return Err("solvecha: unexpected 'not ready' on create".into()),
+    };
+
+    loop {
+        if tokio::time::Instant::now() >= deadline {
+            return Err("solvecha: timed out".into());
+        }
+        let resp = GEMINI_CLIENT
+            .get(format!("{url}?id={id}"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .map_err(|e| format!("solvecha poll failed: {e}"))?;
+        let status = resp.status().as_u16();
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| format!("solvecha body: {e}"))?;
+        match solvecha_parse_reply(status, &body)? {
+            SolvechaReply::Answer(a) => return Ok(a),
+            SolvechaReply::NotReady | SolvechaReply::Job(_) => {
+                tokio::time::sleep(Duration::from_secs(1)).await
+            }
+        }
+    }
+}
+
+/// Opt-in external solver: sends the reCAPTCHA tile pictures to Solvecha.
+/// Only used when `SOLVECHA_API_KEY` is set. Image challenges only.
+#[cfg(all(feature = "chrome", feature = "real_browser"))]
+async fn solve_with_external_solvecha(
+    api_key: &str,
+    challenge: &RcEnterpriseChallenge<'_>,
+    timeout_ms: u64,
+) -> Result<Vec<u8>, String> {
+    let base =
+        std::env::var("SOLVECHA_ENDPOINT").unwrap_or_else(|_| SOLVECHA_DEFAULT_ENDPOINT.into());
+    let base = base.trim_end_matches('/');
+    let target = challenge.target.unwrap_or("target object");
+
+    let mut tiles: Vec<(u8, String)> = Vec::with_capacity(challenge.tiles.len());
+    for tile in &challenge.tiles {
+        // Skip tiles we cannot download, like the Gemini path does.
+        if let Ok(resp) = GEMINI_CLIENT.get(tile.img_src).send().await {
+            if resp.status().is_success() {
+                if let Ok(bytes) = resp.bytes().await {
+                    tiles.push((tile.id, BASE64_STANDARD.encode(&bytes)));
+                }
+            }
+        }
+    }
+
+    let mut yes_ids = Vec::new();
+    for chunk in tiles.chunks(SOLVECHA_MAX_TILES) {
+        let images: Vec<String> = chunk.iter().map(|(_, b)| b.clone()).collect();
+        let answers = solvecha_recognize(base, api_key, target, &images, timeout_ms).await?;
+        for ((id, _), yes) in chunk.iter().zip(answers) {
+            if yes {
+                yes_ids.push(*id);
+            }
+        }
+    }
+    Ok(yes_ids)
 }
 
 /// Warm‑up the in‑page Gemini `LanguageModel` for the given Chrome page.
@@ -2734,5 +2905,75 @@ mod cf_turnstile_detection_tests {
         let body =
             br#"<HTML><BODY><DIV CLASS="CF-TURNSTILE" DATA-SITEKEY="abc"></DIV></BODY></HTML>"#;
         assert!(detect_cf_embedded_turnstile(body));
+    }
+}
+
+#[cfg(all(test, feature = "chrome", feature = "real_browser"))]
+mod solvecha_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    #[test]
+    fn body_shape() {
+        let b = solvecha_request_body("buses", &["QQ==".into()]);
+        assert_eq!(b["grid"], "1x1");
+        assert_eq!(b["task"], "Select all images with buses");
+        assert_eq!(b["image_data"][0], "QQ==");
+    }
+
+    #[test]
+    fn parse_replies() {
+        assert_eq!(
+            solvecha_parse_reply(200, r#"{"data":[true,false]}"#),
+            Ok(SolvechaReply::Answer(vec![true, false]))
+        );
+        assert_eq!(
+            solvecha_parse_reply(200, r#"{"data":"123"}"#),
+            Ok(SolvechaReply::Job("123".into()))
+        );
+        assert_eq!(
+            solvecha_parse_reply(409, r#"{"code":14,"message":"Not ready"}"#),
+            Ok(SolvechaReply::NotReady)
+        );
+        let e = solvecha_parse_reply(401, r#"{"code":15,"message":"Invalid key"}"#).unwrap_err();
+        assert!(e.contains("401") && e.contains("Invalid key"));
+    }
+
+    /// Tiny mock server: answers each request with the next canned (status, body).
+    fn mock(replies: Vec<(u16, &'static str)>) -> String {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for (status, body) in replies {
+                let (mut s, _) = l.accept().unwrap();
+                let mut buf = [0u8; 8192];
+                let _ = s.read(&mut buf);
+                let _ = write!(
+                    s,
+                    "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn create_then_poll() {
+        let base = mock(vec![
+            (200, r#"{"data":"42"}"#),
+            (409, r#"{"code":14,"message":"Not ready"}"#),
+            (200, r#"{"data":[false,true,true]}"#),
+        ]);
+        let r = solvecha_recognize(&base, "k", "cars", &vec!["QQ==".to_string(); 3], 10_000).await;
+        assert_eq!(r, Ok(vec![false, true, true]));
+    }
+
+    #[tokio::test]
+    async fn api_error_keeps_message() {
+        let base = mock(vec![(401, r#"{"code":15,"message":"Invalid key"}"#)]);
+        let r = solvecha_recognize(&base, "bad", "cars", &["QQ==".to_string()], 5_000).await;
+        assert!(r.unwrap_err().contains("Invalid key"));
     }
 }
