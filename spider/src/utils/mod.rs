@@ -3927,6 +3927,11 @@ pub async fn fetch_page_html_chrome_base<'h>(
     let openai_config = params.openai_config;
     let execution_scripts = params.execution_scripts;
     let automation_scripts = params.automation_scripts;
+    // Synthetic mouse movement and the in-page challenge solvers all follow
+    // the PointerAssist switch, so turning it off stops every one of them.
+    let pointer_assist = params
+        .enhancements
+        .enabled(crate::configuration::CrawlEnhancement::PointerAssist);
     let viewport = params.viewport;
     let request_timeout = params.request_timeout;
     let track_events = params.track_events;
@@ -4489,7 +4494,7 @@ pub async fn fetch_page_html_chrome_base<'h>(
     let mut request_cancelled = false;
 
     let page_navigate = async {
-        if cfg!(feature = "real_browser") {
+        if cfg!(feature = "real_browser") && pointer_assist {
             let notify = tokio::sync::Notify::new();
 
             let mouse_loop = async {
@@ -4655,7 +4660,7 @@ pub async fn fetch_page_html_chrome_base<'h>(
         // `page_response.content_is_markdown` once the body is final.
         let mut native_markdown = false;
         let mut page_response = if run_events {
-            if waf_check {
+            if waf_check && pointer_assist {
                 base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
                 if let Err(elasped) =
                     tokio::time::timeout(base_timeout, perform_smart_mouse_movement(page, viewport))
@@ -4958,7 +4963,10 @@ pub async fn fetch_page_html_chrome_base<'h>(
                     // HTML-byte challenge detectors below don't apply (a
                     // false match would let a solver overwrite the
                     // Markdown body with challenge-flow HTML).
-                    if !native_markdown && res.len() <= crate::page::TURNSTILE_WALL_PAGE_SIZE {
+                    if !native_markdown
+                        && pointer_assist
+                        && res.len() <= crate::page::TURNSTILE_WALL_PAGE_SIZE
+                    {
                         // Any solver below may overwrite `res` with the
                         // post-challenge body — invalidate the streaming
                         // extractor up front so the post-process layer
