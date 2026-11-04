@@ -5946,6 +5946,56 @@ fn set_page_response_headers_raw(
 ) {
 }
 
+/// A browser cookie as a `Set-Cookie` line and the URL it belongs to, so the
+/// HTTP jar keeps its domain, path, expiry and flags. Copying only
+/// `name=value; Path=/` under the current page's URL widened a path-scoped
+/// cookie to the whole host, made a persistent one a session cookie, and
+/// dropped `Secure`, so the jar could send it over plain HTTP.
+#[cfg(all(feature = "chrome", feature = "cookies"))]
+pub(crate) fn browser_cookie_to_set_cookie(
+    cookie: &chromiumoxide::cdp::browser_protocol::network::Cookie,
+) -> Option<(String, url::Url)> {
+    let host = cookie.domain.trim_start_matches('.');
+    if host.is_empty() {
+        return None;
+    }
+    let path = if cookie.path.starts_with('/') {
+        cookie.path.as_str()
+    } else {
+        "/"
+    };
+    let scheme = if cookie.secure { "https" } else { "http" };
+    let cookie_url = url::Url::parse(&format!("{scheme}://{host}{path}")).ok()?;
+    let mut line = format!("{}={}; Path={path}", cookie.name, cookie.value);
+    // A leading dot marks a domain cookie; without it the cookie is host-only.
+    if cookie.domain.starts_with('.') {
+        line.push_str("; Domain=");
+        line.push_str(host);
+    }
+    if !cookie.session && cookie.expires > 0.0 {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or_default();
+        let max_age = (cookie.expires - now).floor();
+        if max_age <= 0.0 {
+            return None;
+        }
+        line.push_str(&format!("; Max-Age={}", max_age as i64));
+    }
+    if cookie.secure {
+        line.push_str("; Secure");
+    }
+    if cookie.http_only {
+        line.push_str("; HttpOnly");
+    }
+    if let Some(same_site) = &cookie.same_site {
+        line.push_str("; SameSite=");
+        line.push_str(same_site.as_ref());
+    }
+    Some((line, cookie_url))
+}
+
 #[cfg(all(feature = "chrome", feature = "cookies"))]
 async fn set_page_response_cookies(
     page_response: &mut PageResponse,
@@ -5959,10 +6009,11 @@ async fn set_page_response_cookies(
             std::collections::HashMap::with_capacity(cookies.len().min(256));
 
         for cookie in cookies.drain(..) {
-            if let Some(scope_url) = scope_url {
+            if scope_url.is_some() {
                 if let Some(jar) = jar {
-                    let sc = format!("{}={}; Path=/", cookie.name, cookie.value);
-                    jar.add_cookie_str(&sc, scope_url);
+                    if let Some((set_cookie, cookie_url)) = browser_cookie_to_set_cookie(&cookie) {
+                        jar.add_cookie_str(&set_cookie, &cookie_url);
+                    }
                 }
             }
             cookies_map.insert(cookie.name, cookie.value);
@@ -10267,6 +10318,81 @@ pub fn emit_log_shutdown(link: &str) {
 #[cfg(not(feature = "tracing"))]
 pub fn emit_log_shutdown(link: &str) {
     log::info!("shutdown {}", &link);
+}
+
+#[cfg(all(test, feature = "chrome", feature = "cookies"))]
+mod browser_cookie_tests {
+    use super::browser_cookie_to_set_cookie;
+    use crate::client::cookie::{CookieStore, Jar};
+    use chromiumoxide::cdp::browser_protocol::network::{Cookie, CookieSameSite};
+
+    fn in_an_hour() -> f64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64()
+            + 3600.0
+    }
+
+    #[test]
+    fn a_copied_cookie_keeps_its_scope_expiry_and_flags() {
+        let cookie = Cookie {
+            name: "sid".into(),
+            value: "abc".into(),
+            domain: "example.com".into(),
+            path: "/account".into(),
+            expires: in_an_hour(),
+            secure: true,
+            http_only: true,
+            same_site: Some(CookieSameSite::Lax),
+            ..Default::default()
+        };
+        let (line, url) = browser_cookie_to_set_cookie(&cookie).unwrap();
+        assert!(line.starts_with("sid=abc; Path=/account"), "{line}");
+        for part in ["; Secure", "; HttpOnly", "; SameSite=Lax", "; Max-Age="] {
+            assert!(line.contains(part), "{line} lacks {part}");
+        }
+        assert!(
+            !line.contains("Domain="),
+            "host-only stays host-only: {line}"
+        );
+
+        let jar = Jar::default();
+        jar.add_cookie_str(&line, &url);
+        let sent = |u: &str| jar.cookies(&url::Url::parse(u).unwrap()).is_some();
+        assert!(sent("https://example.com/account/settings"));
+        assert!(!sent("https://example.com/other"), "path scope kept");
+        assert!(!sent("http://example.com/account"), "Secure kept");
+    }
+
+    #[test]
+    fn domain_session_and_expired_cookies() {
+        let domain = Cookie {
+            name: "d".into(),
+            value: "1".into(),
+            domain: ".example.com".into(),
+            path: "/".into(),
+            session: true,
+            expires: -1.0,
+            ..Default::default()
+        };
+        let (line, _) = browser_cookie_to_set_cookie(&domain).unwrap();
+        assert!(line.contains("; Domain=example.com"), "{line}");
+        assert!(
+            !line.contains("Max-Age"),
+            "a session cookie stays one: {line}"
+        );
+
+        let expired = Cookie {
+            name: "old".into(),
+            value: "1".into(),
+            domain: "example.com".into(),
+            path: "/".into(),
+            expires: 1.0,
+            ..Default::default()
+        };
+        assert!(browser_cookie_to_set_cookie(&expired).is_none());
+    }
 }
 
 #[cfg(test)]
