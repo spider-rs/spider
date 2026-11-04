@@ -3236,13 +3236,15 @@ pub async fn run_navigate_or_content_set_core(
 }
 
 /// The main frame's current URL, or `None` when it is not an http(s) document
-/// (about:blank, an error page) or the browser cannot say.
+/// (about:blank, an error page) or the browser cannot say. Asked of the
+/// browser (`Page.getFrameTree`): the page handle's cached URL can still show
+/// the previous document after a navigation the page started itself.
 #[cfg(feature = "chrome")]
 async fn current_document_url(page: &chromiumoxide::Page) -> Option<String> {
-    match page.url().await {
-        Ok(Some(url)) if url.starts_with("http://") || url.starts_with("https://") => Some(url),
-        _ => None,
-    }
+    use chromiumoxide::cdp::browser_protocol::page::GetFrameTreeParams;
+    let tree = page.execute(GetFrameTreeParams::default()).await.ok()?;
+    let url = tree.result.frame_tree.frame.url.clone();
+    (url.starts_with("http://") || url.starts_with("https://")).then_some(url)
 }
 
 #[cfg(feature = "chrome")]
