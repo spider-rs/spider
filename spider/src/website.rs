@@ -5548,6 +5548,11 @@ impl Website {
                     page.page_links = Some(Box::default());
                 }
                 let xml_file = page.is_xml;
+                // The second-pass walk reads the page's own external domains,
+                // so set them as the crawl loop does before its walk.
+                if !self.configuration.external_domains_caseless.is_empty() {
+                    page.set_external(self.configuration.external_domains_caseless.clone());
+                }
                 links = if skip_links {
                     Default::default()
                 } else if !page.is_empty() && !xml_file {
@@ -5965,6 +5970,11 @@ impl Website {
                     page.page_links = Some(Box::default());
                 }
                 let xml_file = page.is_xml;
+                // The second-pass walk reads the page's own external domains,
+                // so set them as the crawl loop does before its walk.
+                if !self.configuration.external_domains_caseless.is_empty() {
+                    page.set_external(self.configuration.external_domains_caseless.clone());
+                }
                 links = if skip_links {
                     Default::default()
                 } else if !page.is_empty() && !xml_file {
@@ -6122,6 +6132,9 @@ impl Website {
             let skip_links = self.single_page() && !self.configuration.return_page_links;
             let xml_file = page.is_xml;
 
+            if !self.configuration.external_domains_caseless.is_empty() {
+                page.set_external(self.configuration.external_domains_caseless.clone());
+            }
             let mut links = if skip_links {
                 Default::default()
             } else if !page.is_empty() && !xml_file {
