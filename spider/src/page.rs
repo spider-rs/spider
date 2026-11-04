@@ -5609,41 +5609,21 @@ impl Page {
             let fetch_fut: std::pin::Pin<
                 Box<dyn std::future::Future<Output = crate::utils::PageResponse> + Send>,
             > = Box::pin(async {
-                #[cfg(feature = "fs")]
-                {
-                    crate::utils::fetch_page_html(
-                        url,
-                        client,
-                        page,
-                        page_set,
-                        referrer,
-                        max_page_bytes,
-                        cache_options,
-                        #[cfg(feature = "cookies")]
-                        jar,
-                        cache_namespace,
-                        params,
-                        extract,
-                    )
-                    .await
-                }
-                #[cfg(not(feature = "fs"))]
-                {
-                    let _ = jar;
-                    crate::utils::fetch_page_html(
-                        url,
-                        client,
-                        page,
-                        page_set,
-                        referrer,
-                        max_page_bytes,
-                        cache_options,
-                        cache_namespace,
-                        params,
-                        extract,
-                    )
-                    .await
-                }
+                crate::utils::fetch_page_html(
+                    url,
+                    client,
+                    page,
+                    page_set,
+                    referrer,
+                    max_page_bytes,
+                    cache_options,
+                    #[cfg(feature = "cookies")]
+                    jar,
+                    cache_namespace,
+                    params,
+                    extract,
+                )
+                .await
             });
             // Heap-pin the hedge future itself, not just `fetch_fut`.
             // v2.51.188 roughly doubled `chrome_navigation_with_dns_hedge`'s

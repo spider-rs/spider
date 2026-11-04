@@ -8506,10 +8506,13 @@ pub async fn fetch_page_html<'h>(
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
     cache_options: Option<CacheOptions>,
+    #[cfg(feature = "cookies")] jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     cache_namespace: Option<&str>,
     params: &ChromeFetchParams<'_>,
     extract: Option<&mut crate::page::ChromeStreamingExtractor<'h>>,
 ) -> PageResponse {
+    #[cfg(not(feature = "cookies"))]
+    let jar = None;
     fetch_page_html_base(
         target_url,
         client,
@@ -8519,7 +8522,7 @@ pub async fn fetch_page_html<'h>(
         max_page_bytes,
         cache_options,
         None,
-        None,
+        jar,
         cache_namespace,
         params,
         extract,
