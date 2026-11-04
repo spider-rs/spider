@@ -4175,12 +4175,10 @@ impl Website {
         } else {
             self.skip_initial = !self.extra_links.is_empty();
         }
-        // Skip robots.txt fetch for single-page scrapes — no link-following
-        // means no need to check robots rules. is_allowed_robots() returns
-        // true when robot_file_parser is None, so this is safe.
-        if !self.single_page() {
-            self.configure_robots_parser(&setup.0).await;
-        }
+        // A no-op unless `respect_robots_txt` is on. When it is, a
+        // single-page scrape honours robots.txt for its one URL like any
+        // other crawl; without a parser, is_allowed_robots() allows all.
+        self.configure_robots_parser(&setup.0).await;
         if let Some(guard) = guard {
             guard.disarm();
         }
@@ -15640,6 +15638,63 @@ async fn test_crawl_subdomains() {
             .contains(&"https://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
+    );
+}
+
+#[tokio::test]
+#[cfg(not(feature = "decentralized"))]
+async fn test_single_page_crawl_respects_robots_txt() {
+    use std::sync::{Arc, Mutex};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let requested: Arc<Mutex<Vec<String>>> = Default::default();
+    let seen = requested.clone();
+    let server = tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            let seen = seen.clone();
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 8192];
+                let n = stream.read(&mut buf).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let path = request.split_whitespace().nth(1).unwrap_or("").to_string();
+                seen.lock().unwrap().push(path.clone());
+                let body = if path == "/robots.txt" {
+                    "User-agent: *\nDisallow: /private\n"
+                } else {
+                    "<html><body>private</body></html>"
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+
+    let mut website = Website::new(&format!("http://{addr}/private"));
+    website
+        .with_limit(1)
+        .with_respect_robots_txt(true)
+        .with_user_agent(Some(crate::page::TEST_AGENT_NAME));
+    website.crawl_raw().await;
+    server.abort();
+
+    let requested = requested.lock().unwrap().clone();
+    assert!(
+        requested.iter().any(|p| p == "/robots.txt"),
+        "robots.txt was not read: {requested:?}"
+    );
+    assert!(
+        !requested.iter().any(|p| p == "/private"),
+        "a disallowed single page was fetched: {requested:?}"
     );
 }
 
