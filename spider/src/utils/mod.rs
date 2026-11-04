@@ -3235,6 +3235,16 @@ pub async fn run_navigate_or_content_set_core(
     }
 }
 
+/// The main frame's current URL, or `None` when it is not an http(s) document
+/// (about:blank, an error page) or the browser cannot say.
+#[cfg(feature = "chrome")]
+async fn current_document_url(page: &chromiumoxide::Page) -> Option<String> {
+    match page.url().await {
+        Ok(Some(url)) if url.starts_with("http://") || url.starts_with("https://") => Some(url),
+        _ => None,
+    }
+}
+
 #[cfg(feature = "chrome")]
 /// Get the base redirect for the website.
 pub async fn get_final_redirect(
@@ -4649,6 +4659,13 @@ pub async fn fetch_page_html_chrome_base<'h>(
     let mut anti_bot_tech = chrome_http_req_res.anti_bot_tech;
     let mut validate_cf = false;
 
+    // The document the page navigated to during the wait, if any: its status
+    // and headers replace the first document's once the response is built.
+    let navigated_document: std::sync::Arc<
+        std::sync::Mutex<Option<(i64, chromiumoxide::cdp::browser_protocol::network::Headers)>>,
+    > = Default::default();
+    let navigated_document_in = navigated_document.clone();
+
     let run_page_response = async move {
         // Whether the response body was produced natively as Markdown by
         // the engine (see the native-format fast path below). Stamped onto
@@ -4665,6 +4682,12 @@ pub async fn fetch_page_html_chrome_base<'h>(
                 }
             }
 
+            let document_responses = if wait_for.is_some() {
+                page.event_listener::<EventResponseReceived>().await.ok()
+            } else {
+                None
+            };
+
             if wait_for.is_some() {
                 let wait_budget = sub_duration(base_timeout_measurement, start_time.elapsed());
                 #[cfg(feature = "wait_guard")]
@@ -4678,6 +4701,40 @@ pub async fn fetch_page_html_chrome_base<'h>(
             }
 
             base_timeout = sub_duration(base_timeout_measurement, start_time.elapsed());
+
+            // The page can navigate itself during the wait (a refresh or a
+            // scripted redirect). Report the document that is read below,
+            // not the one that first loaded.
+            let first_url = final_url.clone();
+            let final_url = if wait_for.is_some() {
+                match current_document_url(page).await {
+                    Some(current) if current != first_url.as_deref().unwrap_or(target_url) => {
+                        Some(current)
+                    }
+                    _ => final_url,
+                }
+            } else {
+                final_url
+            };
+            if let Some(mut responses) = document_responses {
+                if final_url != first_url {
+                    let main_frame = page.mainframe().await.ok().flatten();
+                    let mut latest = None;
+                    while let Ok(Some(event)) =
+                        tokio::time::timeout(Duration::ZERO, responses.next()).await
+                    {
+                        let main_document = event.r#type == ResourceType::Document
+                            && main_frame.is_some()
+                            && event.frame_id.as_ref() == main_frame.as_ref();
+                        if main_document && !(300..400).contains(&event.response.status) {
+                            latest = Some((event.response.status, event.response.headers.clone()));
+                        }
+                    }
+                    if let (Some(found), Ok(mut slot)) = (latest, navigated_document_in.lock()) {
+                        *slot = Some(found);
+                    }
+                }
+            }
 
             if execution_scripts.is_some() || automation_scripts.is_some() {
                 let eval_url = final_url.as_deref().unwrap_or(target_url).to_string();
@@ -5507,6 +5564,20 @@ pub async fn fetch_page_html_chrome_base<'h>(
     set_page_response_headers(&mut chrome_http_req_res, &mut page_response);
     page_response.status_code = chrome_http_req_res.status_code;
     page_response.waf_check = chrome_http_req_res.waf_check;
+
+    let navigated = navigated_document
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.take());
+    if let Some((status, headers)) = navigated {
+        if let Some(status) = u16::try_from(status)
+            .ok()
+            .and_then(|s| StatusCode::from_u16(s).ok())
+        {
+            page_response.status_code = status;
+        }
+        set_page_response_headers_raw(&mut Some(headers), &mut page_response);
+    }
 
     // Under `balance + !decentralized`, a pre-spooled page carries its
     // HTML on disk via `content_spool` — `content` is `None` by design
