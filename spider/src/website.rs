@@ -17690,26 +17690,27 @@ fn test_spool_concurrent_pages() {
             page.url = format!("https://example.com/{i}");
             page.html = Some(bytes::Bytes::from(format!("<html>{i}</html>")));
             page.spool_html_to_disk();
-            Arc::new(std::sync::Mutex::new(page))
+            Arc::new(page)
         })
         .collect();
 
     // All should be on disk.
     for p in &pages {
-        let page = p.lock().unwrap();
-        assert!(page.is_html_on_disk());
+        assert!(p.is_html_on_disk());
     }
 
-    // Read content from all concurrently.
+    // Read content from all concurrently. `get_html` and `is_html_on_disk`
+    // both take `&self`, so the readers share the page directly. A lock here
+    // would serialise readers that never conflict and would say nothing about
+    // whether the spool itself is safe under concurrent reads, which is the
+    // only thing this test is for.
     let handles: Vec<_> = pages
         .iter()
         .enumerate()
         .map(|(i, p)| {
             let p = Arc::clone(p);
             std::thread::spawn(move || {
-                let page = p.lock().unwrap();
-                let html = page.get_html();
-                assert_eq!(html, format!("<html>{i}</html>"));
+                assert_eq!(p.get_html(), format!("<html>{i}</html>"));
             })
         })
         .collect();
@@ -17718,9 +17719,17 @@ fn test_spool_concurrent_pages() {
         h.join().expect("thread should not panic");
     }
 
+    // Every reader has joined, so each `Arc` is uniquely owned again and the
+    // page can be reclaimed by value for the mutating half of the test.
+    // `ensure_html_loaded` takes `&mut self`, and ownership gives that without
+    // exclusion because nothing else can still reach the page.
+    let mut pages: Vec<Page> = pages
+        .into_iter()
+        .map(|p| Arc::into_inner(p).expect("every reader thread has joined, so this Arc is unique"))
+        .collect();
+
     // Reload half of them.
-    for p in pages.iter().take(25) {
-        let mut page = p.lock().unwrap();
+    for page in pages.iter_mut().take(25) {
         assert!(page.ensure_html_loaded());
         assert!(!page.is_html_on_disk());
     }
