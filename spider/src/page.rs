@@ -5540,6 +5540,10 @@ impl Page {
         params: &crate::utils::ChromeFetchParams<'_>,
         extract: Option<&mut ChromeStreamingExtractor<'h>>,
     ) -> Self {
+        // Callers without a jar of their own use the crawl's, so every
+        // browser page shares the session with the HTTP client.
+        #[cfg(feature = "cookies")]
+        let jar = jar.or(params.cookie_jar);
         // Reactive-NXDOMAIN cache shortcircuit. The first time a host
         // fails through chrome+proxy, the existing
         // `confirm_chrome_tunnel_failure_with_local_dns` two-signal

@@ -164,10 +164,13 @@ pub fn cookie_params_from_jar(
             .split_once('=')
             .ok_or_else(|| format!("Invalid cookie pair: {pair}"))?;
 
+        // Site-wide: without a path, CDP scopes the cookie to the URL's own
+        // directory and hides it from the rest of the site.
         let cp = CookieParam::builder()
             .name(name.trim())
             .value(value.trim())
             .url(url.as_str())
+            .path("/")
             .build()
             .map_err(|e| e.to_string())?;
 

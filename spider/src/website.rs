@@ -4163,6 +4163,12 @@ impl Website {
         &mut self,
     ) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
         let setup = self.setup_base();
+        // Browser pages share the HTTP client's jar (see `ChromeFetchParams`).
+        #[cfg(feature = "cookies")]
+        {
+            self.configuration.session_jar =
+                crate::configuration::SessionJar(Some(self.cookie_jar.clone()));
+        }
         let guard = setup
             .1
             .as_ref()
