@@ -136,6 +136,26 @@ pub async fn set_page_cookies(
     Ok(())
 }
 
+/// Whether the browser already holds a cookie named `name` for `host`. A
+/// leading dot marks a domain cookie, which also covers the domain's
+/// subdomains; without it the cookie belongs to that host only.
+#[cfg(feature = "cookies")]
+pub(crate) fn browser_holds_cookie(
+    held: &[chromiumoxide::cdp::browser_protocol::network::Cookie],
+    name: &str,
+    host: &str,
+) -> bool {
+    held.iter().any(|c| {
+        c.name == name
+            && match c.domain.strip_prefix('.') {
+                Some(domain) => host
+                    .strip_suffix(domain)
+                    .is_some_and(|rest| rest.is_empty() || rest.ends_with('.')),
+                None => host == c.domain,
+            }
+    })
+}
+
 #[cfg(feature = "cookies")]
 /// Set cookie params from jar.
 pub fn cookie_params_from_jar(
@@ -2680,5 +2700,41 @@ mod tests {
                 "proxy shape {i} must not affect an explicitly set timeout"
             );
         }
+    }
+}
+
+#[cfg(all(test, feature = "cookies"))]
+mod browser_holds_cookie_tests {
+    use super::browser_holds_cookie;
+    use chromiumoxide::cdp::browser_protocol::network::Cookie;
+
+    fn cookie(name: &str, domain: &str) -> Cookie {
+        Cookie {
+            name: name.into(),
+            domain: domain.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_host_only_cookie_covers_its_host_only() {
+        let held = [cookie("sid", "a.test")];
+        assert!(browser_holds_cookie(&held, "sid", "a.test"));
+        assert!(!browser_holds_cookie(&held, "sid", "www.a.test"));
+        assert!(!browser_holds_cookie(&held, "other", "a.test"));
+    }
+
+    #[test]
+    fn a_domain_cookie_covers_its_subdomains() {
+        let held = [cookie("sid", ".a.test")];
+        assert!(browser_holds_cookie(&held, "sid", "a.test"));
+        assert!(browser_holds_cookie(&held, "sid", "www.a.test"));
+        assert!(!browser_holds_cookie(&held, "sid", "nota.test"));
+    }
+
+    #[test]
+    fn another_hosts_cookie_does_not_count() {
+        let held = [cookie("sid", "a.test")];
+        assert!(!browser_holds_cookie(&held, "sid", "b.test"));
     }
 }

@@ -4450,12 +4450,34 @@ pub async fn fetch_page_html_chrome_base<'h>(
         (t1.0, t1.1, res_map, req_map)
     });
 
-    // The jar's cookies for this URL, from the HTTP client or an earlier
-    // crawl and for any host, reach the browser before it requests the page.
+    // The jar's cookies for this URL that the browser lacks (from the HTTP
+    // client or an earlier crawl, for any host) reach it before it requests
+    // the page. The browser's own copies stay as they are: the jar gives back
+    // name and value only, so re-setting them would drop HttpOnly, Secure and
+    // the rest. If the browser can't say what it holds, nothing is set.
     #[cfg(feature = "cookies")]
     if let (Some(jar), Ok(url)) = (jar, url::Url::parse(target_url)) {
-        if let Ok(cookies) = crate::features::chrome::cookie_params_from_jar(jar, &url) {
-            let _ = crate::features::chrome::set_page_cookies(page, cookies).await;
+        if let Ok(mut cookies) = crate::features::chrome::cookie_params_from_jar(jar, &url) {
+            if !cookies.is_empty() {
+                let held = page
+                    .execute(
+                        chromiumoxide::cdp::browser_protocol::network::GetCookiesParams {
+                            urls: Some(vec![target_url.to_string()]),
+                        },
+                    )
+                    .await;
+                if let Ok(held) = held {
+                    let host = url.host_str().unwrap_or_default();
+                    cookies.retain(|c| {
+                        !crate::features::chrome::browser_holds_cookie(
+                            &held.result.cookies,
+                            &c.name,
+                            host,
+                        )
+                    });
+                    let _ = crate::features::chrome::set_page_cookies(page, cookies).await;
+                }
+            }
         }
     }
 
