@@ -2320,7 +2320,10 @@ impl Website {
                             if budget.abs_diff(0) == 1 {
                                 true
                             } else {
-                                *budget -= 1;
+                                // A wildcard budget of 0 means no limit
+                                // (`with_limit(0)`): it stays at 0 rather
+                                // than underflowing, which panics in debug.
+                                *budget = budget.saturating_sub(1);
                                 false
                             }
                         }
@@ -18582,4 +18585,43 @@ mod control_handler_lifetime_tests {
             .is_cancelled());
         assert_handler_released(&state).await;
     }
+}
+
+#[tokio::test]
+#[cfg(not(feature = "decentralized"))]
+async fn test_with_limit_zero_is_no_limit() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 8192];
+                let n = stream.read(&mut buf).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let path = request.split_whitespace().nth(1).unwrap_or("").to_string();
+                let body = match path.as_str() {
+                    "/" => "<html><body><a href=\"/a\">a</a><a href=\"/b\">b</a></body></html>",
+                    _ => "<html><body>leaf</body></html>",
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+
+    let mut website = Website::new(&format!("http://{addr}/"));
+    website
+        .with_limit(0)
+        .with_user_agent(Some(crate::page::TEST_AGENT_NAME));
+    website.crawl_raw().await;
+    server.abort();
+
+    assert_eq!(website.get_links().len(), 3, "{:?}", website.get_links());
 }
