@@ -2933,10 +2933,17 @@ fn atom_link_href(
                     .map(|v| v.into_owned())
             })
     };
+    // A sitemap's `<xhtml:link rel="alternate" hreflang="…">` names a
+    // translation of the current URL, not a feed entry.
+    if matches!(element.try_get_attribute("hreflang"), Ok(Some(_))) {
+        return None;
+    }
     match value("rel").as_deref() {
-        None | Some("alternate") => value("href").filter(|href| !href.is_empty()),
+        None => value("href"),
+        Some(rel) if rel.eq_ignore_ascii_case("alternate") => value("href"),
         _ => None,
     }
+    .filter(|href| !href.is_empty())
 }
 
 pub(crate) fn push_link_verify<
@@ -10010,6 +10017,8 @@ async fn atom_entry_links_are_read_from_href() {
   <entry><link href="https://example.com/posts/one"/></entry>
   <entry><link rel="alternate" type="text/html" href="/posts/two"/></entry>
   <entry><link rel="enclosure" href="https://example.com/audio.mp3"/></entry>
+  <entry><link rel="Alternate" href="/posts/three"/></entry>
+  <entry><link rel="alternate" hreflang="de" href="https://example.com/de/posts/three"/></entry>
 </feed>"#;
     let mut page = build_with_parse(
         feed_url,
@@ -10027,6 +10036,7 @@ async fn atom_entry_links_are_read_from_href() {
     for wanted in [
         "https://example.com/posts/one",
         "https://example.com/posts/two",
+        "https://example.com/posts/three",
     ] {
         let wanted: CaseInsensitiveString = wanted.into();
         assert!(links.contains(&wanted), "missing {wanted:?} in {links:?}");
@@ -10034,6 +10044,7 @@ async fn atom_entry_links_are_read_from_href() {
     for unwanted in [
         "https://example.com/audio.mp3",
         "https://example.com/feed.xml",
+        "https://example.com/de/posts/three",
     ] {
         let unwanted: CaseInsensitiveString = unwanted.into();
         assert!(!links.contains(&unwanted), "should skip {unwanted:?}");
