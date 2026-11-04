@@ -8430,7 +8430,13 @@ impl Page {
                         compiled_base_element_selector(),
                         |el| {
                             if let Some(href) = el.get_attribute("href") {
-                                if let Ok(parsed_base) = Url::parse(&href) {
+                                let parsed_base = Url::parse(&href).ok().or_else(|| {
+                                    original_page
+                                        .as_ref()
+                                        .or(base1)
+                                        .and_then(|doc| doc.join(&href).ok())
+                                });
+                                if let Some(parsed_base) = parsed_base {
                                     let _ = base_input_url.set(parsed_base);
                                 }
                             }
@@ -9011,7 +9017,13 @@ impl Page {
                     let mut element_content_handlers = vec![
                         element_precompiled!(compiled_base_element_selector(), |el| {
                             if let Some(href) = el.get_attribute("href") {
-                                if let Ok(parsed_base) = Url::parse(&href) {
+                                let parsed_base = Url::parse(&href).ok().or_else(|| {
+                                    original_page
+                                        .as_ref()
+                                        .or(base1)
+                                        .and_then(|doc| doc.join(&href).ok())
+                                });
+                                if let Some(parsed_base) = parsed_base {
                                     let _ = base_input_url.set(parsed_base);
                                 }
                             }
