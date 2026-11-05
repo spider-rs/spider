@@ -4329,7 +4329,12 @@ where
         compiled_base_element_selector(),
         move |el| {
             if let Some(href) = el.get_attribute("href") {
-                if let Ok(parsed_base) = Url::parse(&href) {
+                // A relative `<base href>` resolves against the document URL,
+                // as browsers do; only an absolute one parses on its own.
+                let parsed_base = Url::parse(&href)
+                    .ok()
+                    .or_else(|| original_page.or(base).and_then(|doc| doc.join(&href).ok()));
+                if let Some(parsed_base) = parsed_base {
                     let _ = base_input_url.set(parsed_base);
                 }
             }
@@ -9931,6 +9936,36 @@ async fn test_headers() {
             .get(HeaderName::from_static("content-type"))
             .expect("There should be a content-type value"),
         HeaderValue::from_static("text/html; charset=utf-8")
+    );
+}
+
+#[tokio::test]
+#[cfg(all(
+    not(feature = "decentralized"),
+    not(feature = "chrome"),
+    not(feature = "cache_request")
+))]
+async fn parse_links_resolves_a_relative_base_href() {
+    use crate::utils::PageResponse;
+
+    let page_url = "https://example.com/news/page";
+    let html =
+        br#"<html><head><base href="/docs/"></head><body><a href="intro">Intro</a></body></html>"#;
+    let mut page = build_with_parse(
+        page_url,
+        PageResponse {
+            content: Some(html.to_vec()),
+            status_code: StatusCode::OK,
+            ..Default::default()
+        },
+    );
+    let selector = get_page_selectors(page_url, false, false);
+    let links = page.links(&selector, &None).await;
+
+    let expected: CaseInsensitiveString = "https://example.com/docs/intro".into();
+    assert!(
+        links.contains(&expected),
+        "expected {expected:?} from the relative base, found {links:?}"
     );
 }
 
