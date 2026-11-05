@@ -3235,16 +3235,15 @@ pub async fn run_navigate_or_content_set_core(
     }
 }
 
-/// The main frame's current URL, or `None` when it is not an http(s) document
-/// (about:blank, an error page) or the browser cannot say. Asked of the
-/// browser (`Page.getFrameTree`): the page handle's cached URL can still show
-/// the previous document after a navigation the page started itself.
+/// Whether two URLs name the same document: the fragment and a trailing
+/// slash don't count.
 #[cfg(feature = "chrome")]
-async fn current_document_url(page: &chromiumoxide::Page) -> Option<String> {
-    use chromiumoxide::cdp::browser_protocol::page::GetFrameTreeParams;
-    let tree = page.execute(GetFrameTreeParams::default()).await.ok()?;
-    let url = tree.result.frame_tree.frame.url.clone();
-    (url.starts_with("http://") || url.starts_with("https://")).then_some(url)
+fn same_document_url(a: &str, b: &str) -> bool {
+    fn key(u: &str) -> &str {
+        let u = u.split_once('#').map_or(u, |(head, _)| head);
+        u.strip_suffix('/').unwrap_or(u)
+    }
+    key(a) == key(b)
 }
 
 #[cfg(feature = "chrome")]
@@ -4668,10 +4667,10 @@ pub async fn fetch_page_html_chrome_base<'h>(
 
     // The document the page navigated to during the wait, if any: its status
     // and headers replace the first document's once the response is built.
-    let navigated_document: std::sync::Arc<
-        std::sync::Mutex<Option<(i64, chromiumoxide::cdp::browser_protocol::network::Headers)>>,
-    > = Default::default();
-    let navigated_document_in = navigated_document.clone();
+    let (navigated_tx, mut navigated_rx) = tokio::sync::oneshot::channel::<(
+        i64,
+        chromiumoxide::cdp::browser_protocol::network::Headers,
+    )>();
 
     let run_page_response = async move {
         // Whether the response body was produced natively as Markdown by
@@ -4711,34 +4710,38 @@ pub async fn fetch_page_html_chrome_base<'h>(
 
             // The page can navigate itself during the wait (a refresh or a
             // scripted redirect). Report the document that is read below,
-            // not the one that first loaded.
-            let first_url = final_url.clone();
-            let final_url = if wait_for.is_some() {
-                match current_document_url(page).await {
-                    Some(current) if current != first_url.as_deref().unwrap_or(target_url) => {
-                        Some(current)
-                    }
-                    _ => final_url,
-                }
-            } else {
-                final_url
-            };
+            // not the one that first loaded. The main frame's document
+            // responses seen during the wait say where it went, so this
+            // costs no extra CDP call.
+            let mut final_url = final_url;
             if let Some(mut responses) = document_responses {
-                if final_url != first_url {
-                    let main_frame = page.mainframe().await.ok().flatten();
-                    let mut latest = None;
-                    while let Ok(Some(event)) =
-                        tokio::time::timeout(Duration::ZERO, responses.next()).await
+                let mut main_frame = None;
+                let mut latest = None;
+                while let Ok(Some(event)) =
+                    tokio::time::timeout(Duration::ZERO, responses.next()).await
+                {
+                    let status = event.response.status;
+                    if event.r#type != ResourceType::Document
+                        || (300..400).contains(&status)
+                        || status == 204
                     {
-                        let main_document = event.r#type == ResourceType::Document
-                            && main_frame.is_some()
-                            && event.frame_id.as_ref() == main_frame.as_ref();
-                        if main_document && !(300..400).contains(&event.response.status) {
-                            latest = Some((event.response.status, event.response.headers.clone()));
+                        continue;
+                    }
+                    if main_frame.is_none() {
+                        main_frame = Some(page.mainframe().await.ok().flatten());
+                    }
+                    if let Some(Some(frame)) = &main_frame {
+                        if event.frame_id.as_ref() == Some(frame) {
+                            latest = Some(event);
                         }
                     }
-                    if let (Some(found), Ok(mut slot)) = (latest, navigated_document_in.lock()) {
-                        *slot = Some(found);
+                }
+                if let Some(event) = latest {
+                    let first = final_url.as_deref().unwrap_or(target_url);
+                    if !same_document_url(first, &event.response.url) {
+                        final_url = Some(event.response.url.clone());
+                        let _ = navigated_tx
+                            .send((event.response.status, event.response.headers.clone()));
                     }
                 }
             }
@@ -5575,11 +5578,7 @@ pub async fn fetch_page_html_chrome_base<'h>(
     page_response.status_code = chrome_http_req_res.status_code;
     page_response.waf_check = chrome_http_req_res.waf_check;
 
-    let navigated = navigated_document
-        .lock()
-        .ok()
-        .and_then(|mut slot| slot.take());
-    if let Some((status, headers)) = navigated {
+    if let Ok((status, headers)) = navigated_rx.try_recv() {
         if let Some(status) = u16::try_from(status)
             .ok()
             .and_then(|s| StatusCode::from_u16(s).ok())
@@ -12350,5 +12349,25 @@ error was encountered while trying to use an ErrorDocument to handle the request
             Some(false),
             "fallback should reject invalid UTF-8"
         );
+    }
+}
+
+#[cfg(all(test, feature = "chrome"))]
+mod same_document_url_tests {
+    use super::same_document_url;
+
+    #[test]
+    fn fragment_and_trailing_slash_do_not_count() {
+        assert!(same_document_url("https://a.test/x", "https://a.test/x/"));
+        assert!(same_document_url(
+            "https://a.test/x#top",
+            "https://a.test/x"
+        ));
+        assert!(same_document_url("https://a.test", "https://a.test/"));
+        assert!(!same_document_url("https://a.test/x", "https://a.test/y"));
+        assert!(!same_document_url(
+            "https://a.test/?p=1",
+            "https://a.test/?p=2"
+        ));
     }
 }
