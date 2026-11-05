@@ -54,17 +54,15 @@ pub fn parse_cookies_with_jar(
                 let name = parts[0].trim();
                 let value = parts[1].trim();
 
+                // The jar returned these cookies because they apply to `url`.
+                // Set them host-only for its host and site-wide: the page's
+                // own path would hide a session cookie from the rest of the
+                // site, and an explicit domain would widen it to subdomains.
                 let mut builder = CookieParam::builder()
                     .name(name)
                     .value(value)
-                    .url(url.as_str());
-
-                if let Some(domain) = url.domain() {
-                    builder = builder.domain(domain.to_string());
-                }
-
-                let path = url.path();
-                builder = builder.path(if path.is_empty() { "/" } else { path });
+                    .url(url.as_str())
+                    .path("/");
 
                 if cookie_str.contains("Secure") {
                     builder = builder.secure(true);

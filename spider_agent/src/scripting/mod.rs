@@ -327,11 +327,15 @@ impl ScriptEngine {
             let rx = rx.clone();
             let name = format!("spider-agent-script-{i}");
             // Workers are plain std::thread — NOT on tokio's blocking pool.
-            // Stack size matches the chrome-side default (2 MiB) to give the
-            // interpreters comfortable headroom.
+            // 8 MiB, the main-thread default. rustpython-vm 0.6 raises
+            // RecursionError once the stack pointer is within a fixed margin
+            // (256 KiB in debug builds) of the thread's stack base, and the
+            // frozen-stdlib bootstrap does not fit in 2 MiB under that rule.
+            // The stack is reserved virtual memory, committed lazily, once
+            // per worker, so this adds no per-call cost.
             let spawn_result = std::thread::Builder::new()
                 .name(name.clone())
-                .stack_size(2 * 1024 * 1024)
+                .stack_size(8 * 1024 * 1024)
                 .spawn(move || worker_loop(rx));
             if let Err(e) = spawn_result {
                 log::error!("failed to spawn script worker {name}: {e}");

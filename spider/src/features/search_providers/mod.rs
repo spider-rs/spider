@@ -7,6 +7,8 @@
 mod bing;
 #[cfg(feature = "search_brave")]
 mod brave;
+#[cfg(feature = "search_keenable")]
+mod keenable;
 #[cfg(feature = "search_serper")]
 mod serper;
 #[cfg(feature = "search_tavily")]
@@ -16,6 +18,8 @@ mod tavily;
 pub use bing::BingProvider;
 #[cfg(feature = "search_brave")]
 pub use brave::BraveProvider;
+#[cfg(feature = "search_keenable")]
+pub use keenable::KeenableProvider;
 #[cfg(feature = "search_serper")]
 pub use serper::SerperProvider;
 #[cfg(feature = "search_tavily")]

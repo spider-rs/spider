@@ -2320,7 +2320,10 @@ impl Website {
                             if budget.abs_diff(0) == 1 {
                                 true
                             } else {
-                                *budget -= 1;
+                                // A wildcard budget of 0 means no limit
+                                // (`with_limit(0)`): it stays at 0 rather
+                                // than underflowing, which panics in debug.
+                                *budget = budget.saturating_sub(1);
                                 false
                             }
                         }
@@ -4172,10 +4175,13 @@ impl Website {
         } else {
             self.skip_initial = !self.extra_links.is_empty();
         }
-        // Skip robots.txt fetch for single-page scrapes — no link-following
-        // means no need to check robots rules. is_allowed_robots() returns
-        // true when robot_file_parser is None, so this is safe.
-        if !self.single_page() {
+        // A single-page scrape skips robots.txt unless asked, since the fetch
+        // is a round trip before its one request. With
+        // `respect_robots_txt_single_page` it honours robots.txt for its URL
+        // like any other crawl. configure_robots_parser is a no-op unless
+        // `respect_robots_txt` is on; without a parser, is_allowed_robots()
+        // allows all.
+        if !self.single_page() || self.configuration.respect_robots_txt_single_page {
             self.configure_robots_parser(&setup.0).await;
         }
         if let Some(guard) = guard {
@@ -5548,6 +5554,11 @@ impl Website {
                     page.page_links = Some(Box::default());
                 }
                 let xml_file = page.is_xml;
+                // The second-pass walk reads the page's own external domains,
+                // so set them as the crawl loop does before its walk.
+                if !self.configuration.external_domains_caseless.is_empty() {
+                    page.set_external(self.configuration.external_domains_caseless.clone());
+                }
                 links = if skip_links {
                     Default::default()
                 } else if !page.is_empty() && !xml_file {
@@ -5965,6 +5976,11 @@ impl Website {
                     page.page_links = Some(Box::default());
                 }
                 let xml_file = page.is_xml;
+                // The second-pass walk reads the page's own external domains,
+                // so set them as the crawl loop does before its walk.
+                if !self.configuration.external_domains_caseless.is_empty() {
+                    page.set_external(self.configuration.external_domains_caseless.clone());
+                }
                 links = if skip_links {
                     Default::default()
                 } else if !page.is_empty() && !xml_file {
@@ -6122,6 +6138,9 @@ impl Website {
             let skip_links = self.single_page() && !self.configuration.return_page_links;
             let xml_file = page.is_xml;
 
+            if !self.configuration.external_domains_caseless.is_empty() {
+                page.set_external(self.configuration.external_domains_caseless.clone());
+            }
             let mut links = if skip_links {
                 Default::default()
             } else if !page.is_empty() && !xml_file {
@@ -13379,6 +13398,15 @@ impl Website {
         self
     }
 
+    /// Check robots.txt on single-page crawls too. Off by default, so a
+    /// `with_limit(1)` scrape makes no robots.txt request; needs
+    /// `with_respect_robots_txt(true)`.
+    pub fn with_respect_robots_txt_single_page(&mut self, enabled: bool) -> &mut Self {
+        self.configuration
+            .with_respect_robots_txt_single_page(enabled);
+        self
+    }
+
     /// Include subdomains detection.
     pub fn with_subdomains(&mut self, subdomains: bool) -> &mut Self {
         self.configuration.with_subdomains(subdomains);
@@ -15627,6 +15655,102 @@ async fn test_crawl_subdomains() {
     );
 }
 
+/// Serves a robots.txt that disallows `/private` and records which of the
+/// two paths were requested, without a lock.
+#[cfg(all(test, not(feature = "decentralized")))]
+async fn single_page_robots_server() -> (
+    std::net::SocketAddr,
+    std::sync::Arc<[std::sync::atomic::AtomicBool; 2]>,
+    tokio::task::JoinHandle<()>,
+) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    // [robots.txt requested, /private requested]
+    let seen: Arc<[AtomicBool; 2]> = Arc::new([AtomicBool::new(false), AtomicBool::new(false)]);
+    let flags = seen.clone();
+    let server = tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            let flags = flags.clone();
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 8192];
+                let n = stream.read(&mut buf).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let path = request.split_whitespace().nth(1).unwrap_or("").to_string();
+                let body = if path == "/robots.txt" {
+                    flags[0].store(true, Ordering::Relaxed);
+                    "User-agent: *\nDisallow: /private\n"
+                } else {
+                    if path == "/private" {
+                        flags[1].store(true, Ordering::Relaxed);
+                    }
+                    "<html><body>private</body></html>"
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+    (addr, seen, server)
+}
+
+#[tokio::test]
+#[cfg(not(feature = "decentralized"))]
+async fn test_single_page_crawl_skips_robots_txt_by_default() {
+    use std::sync::atomic::Ordering;
+    let (addr, seen, server) = single_page_robots_server().await;
+
+    let mut website = Website::new(&format!("http://{addr}/private"));
+    website
+        .with_limit(1)
+        .with_respect_robots_txt(true)
+        .with_user_agent(Some(crate::page::TEST_AGENT_NAME));
+    website.crawl_raw().await;
+    server.abort();
+
+    assert!(
+        !seen[0].load(Ordering::Relaxed),
+        "a single-page scrape fetched robots.txt without opting in"
+    );
+    assert!(
+        seen[1].load(Ordering::Relaxed),
+        "the page itself was not fetched"
+    );
+}
+
+#[tokio::test]
+#[cfg(not(feature = "decentralized"))]
+async fn test_single_page_crawl_respects_robots_txt_when_enabled() {
+    use std::sync::atomic::Ordering;
+    let (addr, seen, server) = single_page_robots_server().await;
+
+    let mut website = Website::new(&format!("http://{addr}/private"));
+    website
+        .with_limit(1)
+        .with_respect_robots_txt(true)
+        .with_respect_robots_txt_single_page(true)
+        .with_user_agent(Some(crate::page::TEST_AGENT_NAME));
+    website.crawl_raw().await;
+    server.abort();
+
+    assert!(seen[0].load(Ordering::Relaxed), "robots.txt was not read");
+    assert!(
+        !seen[1].load(Ordering::Relaxed),
+        "a disallowed single page was fetched"
+    );
+}
+
 #[tokio::test]
 #[cfg(all(
     not(feature = "regex"),
@@ -17690,26 +17814,27 @@ fn test_spool_concurrent_pages() {
             page.url = format!("https://example.com/{i}");
             page.html = Some(bytes::Bytes::from(format!("<html>{i}</html>")));
             page.spool_html_to_disk();
-            Arc::new(std::sync::Mutex::new(page))
+            Arc::new(page)
         })
         .collect();
 
     // All should be on disk.
     for p in &pages {
-        let page = p.lock().unwrap();
-        assert!(page.is_html_on_disk());
+        assert!(p.is_html_on_disk());
     }
 
-    // Read content from all concurrently.
+    // Read content from all concurrently. `get_html` and `is_html_on_disk`
+    // both take `&self`, so the readers share the page directly. A lock here
+    // would serialise readers that never conflict and would say nothing about
+    // whether the spool itself is safe under concurrent reads, which is the
+    // only thing this test is for.
     let handles: Vec<_> = pages
         .iter()
         .enumerate()
         .map(|(i, p)| {
             let p = Arc::clone(p);
             std::thread::spawn(move || {
-                let page = p.lock().unwrap();
-                let html = page.get_html();
-                assert_eq!(html, format!("<html>{i}</html>"));
+                assert_eq!(p.get_html(), format!("<html>{i}</html>"));
             })
         })
         .collect();
@@ -17718,9 +17843,17 @@ fn test_spool_concurrent_pages() {
         h.join().expect("thread should not panic");
     }
 
+    // Every reader has joined, so each `Arc` is uniquely owned again and the
+    // page can be reclaimed by value for the mutating half of the test.
+    // `ensure_html_loaded` takes `&mut self`, and ownership gives that without
+    // exclusion because nothing else can still reach the page.
+    let mut pages: Vec<Page> = pages
+        .into_iter()
+        .map(|p| Arc::into_inner(p).expect("every reader thread has joined, so this Arc is unique"))
+        .collect();
+
     // Reload half of them.
-    for p in pages.iter().take(25) {
-        let mut page = p.lock().unwrap();
+    for page in pages.iter_mut().take(25) {
         assert!(page.ensure_html_loaded());
         assert!(!page.is_html_on_disk());
     }
@@ -18573,4 +18706,43 @@ mod control_handler_lifetime_tests {
             .is_cancelled());
         assert_handler_released(&state).await;
     }
+}
+
+#[tokio::test]
+#[cfg(not(feature = "decentralized"))]
+async fn test_with_limit_zero_is_no_limit() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 8192];
+                let n = stream.read(&mut buf).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let path = request.split_whitespace().nth(1).unwrap_or("").to_string();
+                let body = match path.as_str() {
+                    "/" => "<html><body><a href=\"/a\">a</a><a href=\"/b\">b</a></body></html>",
+                    _ => "<html><body>leaf</body></html>",
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+
+    let mut website = Website::new(&format!("http://{addr}/"));
+    website
+        .with_limit(0)
+        .with_user_agent(Some(crate::page::TEST_AGENT_NAME));
+    website.crawl_raw().await;
+    server.abort();
+
+    assert_eq!(website.get_links().len(), 3, "{:?}", website.get_links());
 }
