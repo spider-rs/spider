@@ -428,6 +428,11 @@ pub struct Configuration {
     /// and write the same session as the HTTP client. Runtime state, not
     /// configuration.
     pub(crate) session_jar: SessionJar,
+    #[cfg(feature = "cookies")]
+    /// Share the crawl's cookie jar with browser pages: before each page the
+    /// browser gets the jar's cookies it lacks, which costs one CDP call per
+    /// page once the jar holds cookies for the site. Off by default.
+    pub chrome_cookie_jar: bool,
     #[cfg(feature = "wreq")]
     /// The type of request emulation. This does nothing without the flag `sync` enabled.
     pub emulation: Option<wreq_util::Emulation>,
@@ -1535,6 +1540,23 @@ impl Configuration {
     #[cfg(not(feature = "cookies"))]
     /// Cookie string to use in request. This does nothing without the `cookies` flag enabled.
     pub fn with_cookies(&mut self, _cookie_str: &str) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "cookies")]
+    /// Share the crawl's cookie jar with browser pages, so a session the
+    /// HTTP client or an earlier crawl holds reaches the browser. Costs one
+    /// CDP call per page once the jar holds cookies for the site. Off by
+    /// default. This does nothing without the `cookies` and `chrome` flags.
+    pub fn with_chrome_cookie_jar(&mut self, share: bool) -> &mut Self {
+        self.chrome_cookie_jar = share;
+        self
+    }
+
+    #[cfg(not(feature = "cookies"))]
+    /// Share the crawl's cookie jar with browser pages. This does nothing
+    /// without the `cookies` and `chrome` flags.
+    pub fn with_chrome_cookie_jar(&mut self, _share: bool) -> &mut Self {
         self
     }
 

@@ -4166,11 +4166,15 @@ impl Website {
         &mut self,
     ) -> (Client, Option<(Arc<AtomicI8>, tokio::task::JoinHandle<()>)>) {
         let setup = self.setup_base();
-        // Browser pages share the HTTP client's jar (see `ChromeFetchParams`).
+        // Browser pages share the HTTP client's jar when asked to (see
+        // `ChromeFetchParams`).
         #[cfg(feature = "cookies")]
         {
-            self.configuration.session_jar =
-                crate::configuration::SessionJar(Some(self.cookie_jar.clone()));
+            self.configuration.session_jar = crate::configuration::SessionJar(
+                self.configuration
+                    .chrome_cookie_jar
+                    .then(|| self.cookie_jar.clone()),
+            );
         }
         let guard = setup
             .1
@@ -13913,6 +13917,15 @@ impl Website {
         self
     }
 
+    /// Share the crawl's cookie jar with browser pages, so a session the
+    /// HTTP client or an earlier crawl holds reaches the browser. Costs one
+    /// CDP call per page once the jar holds cookies for the site. Off by
+    /// default. This does nothing without the `cookies` and `chrome` flags.
+    pub fn with_chrome_cookie_jar(&mut self, share: bool) -> &mut Self {
+        self.configuration.with_chrome_cookie_jar(share);
+        self
+    }
+
     /// Setup cron jobs to run. This does nothing without the `cron` flag enabled.
     pub fn with_cron(&mut self, cron_str: &str, cron_type: CronType) -> &mut Self {
         self.configuration.with_cron(cron_str, cron_type);
@@ -18751,4 +18764,18 @@ async fn test_with_limit_zero_is_no_limit() {
     server.abort();
 
     assert_eq!(website.get_links().len(), 3, "{:?}", website.get_links());
+}
+
+#[cfg(feature = "cookies")]
+#[tokio::test]
+async fn chrome_cookie_jar_is_opt_in() {
+    let mut website = Website::new("http://127.0.0.1:9/");
+    let _ = website.setup().await;
+    assert!(
+        website.configuration.session_jar.0.is_none(),
+        "browser pages must not get the jar unless asked"
+    );
+    website.with_chrome_cookie_jar(true);
+    let _ = website.setup().await;
+    assert!(website.configuration.session_jar.0.is_some());
 }

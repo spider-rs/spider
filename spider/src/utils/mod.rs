@@ -4460,8 +4460,14 @@ pub async fn fetch_page_html_chrome_base<'h>(
     // the page. The browser's own copies stay as they are: the jar gives back
     // name and value only, so re-setting them would drop HttpOnly, Secure and
     // the rest. If the browser can't say what it holds, nothing is set.
+    // Only when the crawl opted in (`with_chrome_cookie_jar`), since the
+    // check costs a CDP round trip before every navigation.
     #[cfg(feature = "cookies")]
-    if let (Some(jar), Ok(url)) = (jar, url::Url::parse(target_url)) {
+    if let (Some(jar), true, Ok(url)) = (
+        jar,
+        params.cookie_jar.is_some(),
+        url::Url::parse(target_url),
+    ) {
         if let Ok(mut cookies) = crate::features::chrome::cookie_params_from_jar(jar, &url) {
             if !cookies.is_empty() {
                 let held = page
