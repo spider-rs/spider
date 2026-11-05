@@ -15657,7 +15657,7 @@ async fn test_crawl_subdomains() {
 
 /// Serves a robots.txt that disallows `/private` and records which of the
 /// two paths were requested, without a lock.
-#[cfg(not(feature = "decentralized"))]
+#[cfg(all(test, not(feature = "decentralized")))]
 async fn single_page_robots_server() -> (
     std::net::SocketAddr,
     std::sync::Arc<[std::sync::atomic::AtomicBool; 2]>,
