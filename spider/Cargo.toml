@@ -368,6 +368,7 @@ search_serper = ["search"]
 search_brave = ["search"]
 search_bing = ["search"]
 search_tavily = ["search"]
+search_keenable = ["search"]
 
 # Spider Cloud integration - anti-bot, proxy, API modes
 spider_cloud = ["serde", "reqwest_json"]
@@ -457,7 +458,7 @@ features = [
     "tracing", "simd",
     "webdriver", "webdriver_headed", "webdriver_stealth",
     "webdriver_chrome", "webdriver_firefox", "webdriver_edge", "webdriver_screenshot",
-    "search", "search_serper", "search_brave", "search_bing", "search_tavily",
+    "search", "search_serper", "search_brave", "search_bing", "search_tavily", "search_keenable",
     "agent", "agent_chrome", "agent_webdriver", "agent_openai",
     "agent_skills", "agent_fs",
     "agent_search_serper", "agent_search_brave", "agent_search_bing", "agent_search_tavily",

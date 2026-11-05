@@ -71,8 +71,13 @@ aws-config = { version = "1", optional = true, default-features = false, feature
 # Scripting (pure-Rust embedded interpreters)
 # Worker pool runs on dedicated std::thread, channel-bridged to async caller.
 # No spawn_blocking, no shared HTTP stack — workers use Handle::block_on for the existing reqwest client.
-rustpython-vm = { version = "0.4", optional = true, default-features = false, features = ["freeze-stdlib", "compiler", "importlib"] }
-rustpython-pylib = { version = "0.4", optional = true, default-features = false, features = ["freeze-stdlib"] }
+rustpython-vm = { version = "0.6", optional = true, default-features = false, features = ["freeze-stdlib", "compiler", "importlib"] }
+rustpython-pylib = { version = "0.6", optional = true, default-features = false, features = ["freeze-stdlib"] }
+# rustpython-codegen 0.6.0 does not build against rustpython-ruff_* 0.16.10
+# (ExprCompare and FStringValue changed in a patch release). Pin until a
+# rustpython 0.6.x release builds against it.
+rustpython-ruff_python_ast = { version = "=0.16.5", optional = true, default-features = false }
+rustpython-ruff_python_parser = { version = "=0.16.5", optional = true, default-features = false }
 boa_engine = { version = "0.20", optional = true }
 boa_runtime = { version = "0.20", optional = true }
 flume = { version = "0.11", optional = true, default-features = false, features = ["async"] }
@@ -119,6 +124,8 @@ scripting = [
     "fs",
     "dep:rustpython-vm",
     "dep:rustpython-pylib",
+    "dep:rustpython-ruff_python_ast",
+    "dep:rustpython-ruff_python_parser",
     "dep:boa_engine",
     "dep:boa_runtime",
     "dep:flume",
