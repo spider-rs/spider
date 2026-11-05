@@ -34,10 +34,14 @@ const SMALL_PAGE: usize = 64 * 1024;
 
 /// Markers specific enough to mean a challenge at any page size.
 const CHALLENGE_MARKERS: &[&str] = &[
-    "id=\"anubis_challenge\"",        // Anubis
-    "window._cf_chl_opt",             // Cloudflare managed challenge
-    "/cdn-cgi/challenge-platform/h/", // Cloudflare challenge script
-    "sucuri_cloudproxy_js",           // Sucuri
+    "id=\"anubis_challenge\"", // Anubis
+    "window._cf_chl_opt",      // Cloudflare managed challenge
+    // Cloudflare challenge orchestration. Plain `/cdn-cgi/challenge-platform/`
+    // also loads the JS detections script on ordinary pages, so only the
+    // orchestrate paths count.
+    "/cdn-cgi/challenge-platform/h/g/orchestrate/",
+    "/cdn-cgi/challenge-platform/h/b/orchestrate/",
+    "sucuri_cloudproxy_js", // Sucuri
 ];
 
 /// Markers that mean a challenge only on a small page.
@@ -54,8 +58,12 @@ const SMALL_PAGE_CHALLENGE_MARKERS: &[&str] = &[
 const BLOCK_MARKERS: &[&str] = &[
     "<title>oh noes!</title>", // Anubis deny
     "<title>access denied | ", // Cloudflare 1020
-    "<h1>access denied</h1>",  // Akamai
 ];
+
+/// Akamai's deny page. The heading alone is common on ordinary pages, so it
+/// only counts next to Akamai's reference line.
+const AKAMAI_DENY_HEADING: &str = "<h1>access denied</h1>";
+const AKAMAI_DENY_REFERENCE: &str = "reference&#32;&#35;";
 
 /// Classify a fetched page from its status, headers, body and final URL.
 pub fn classify_page(
@@ -80,7 +88,10 @@ pub fn classify_page(
     let has = |marker: &str| lower.contains(&marker.to_ascii_lowercase());
     // A deny page can reuse the challenge template (Anubis's error page keeps
     // an empty `anubis_challenge` block), so its markers are checked first.
-    if body.len() <= SMALL_PAGE && BLOCK_MARKERS.iter().any(|m| has(m)) {
+    if body.len() <= SMALL_PAGE
+        && (BLOCK_MARKERS.iter().any(|m| has(m))
+            || (has(AKAMAI_DENY_HEADING) && has(AKAMAI_DENY_REFERENCE)))
+    {
         return PageDisposition::Blocked;
     }
     if CHALLENGE_MARKERS.iter().any(|m| has(m))
@@ -186,6 +197,34 @@ mod tests {
         assert_eq!(
             classify_page(200, None, b"<html></html>", "chrome-error://chromewebdata/"),
             PageDisposition::Error
+        );
+    }
+
+    #[test]
+    fn cloudflare_detection_script_alone_is_content() {
+        let page = br#"<html><head><title>Shop</title></head><body><p>Hello</p><script src="/cdn-cgi/challenge-platform/h/b/scripts/jsd/abc/main.js"></script></body></html>"#;
+        assert_eq!(
+            classify_page(200, None, page, URL),
+            PageDisposition::Content
+        );
+        let challenge = br#"<html><body><script src="/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1?ray=1"></script></body></html>"#;
+        assert_eq!(
+            classify_page(200, None, challenge, URL),
+            PageDisposition::Challenge
+        );
+    }
+
+    #[test]
+    fn access_denied_heading_needs_the_akamai_reference() {
+        let article = b"<html><head><title>Errors</title></head><body><h1>Access Denied</h1><p>What a 403 means.</p></body></html>";
+        assert_eq!(
+            classify_page(200, None, article, URL),
+            PageDisposition::Content
+        );
+        let akamai = b"<HTML><HEAD>\n<TITLE>Access Denied</TITLE>\n</HEAD><BODY>\n<H1>Access Denied</H1>\nYou don't have permission to access this server.<P>\nReference&#32;&#35;18&#46;1&#46;2\n</BODY></HTML>";
+        assert_eq!(
+            classify_page(200, None, akamai, URL),
+            PageDisposition::Blocked
         );
     }
 }
