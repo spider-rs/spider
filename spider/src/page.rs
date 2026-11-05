@@ -5715,12 +5715,20 @@ impl Page {
         // (v2.51.168). Pairs chrome rendered-error tunnel/proxy CONNECT failures
         // with a local DNS lookup; only flips to permanent (525) when both signals
         // agree. No-op on success / non-599 paths. See helper docs for full details.
-        confirm_chrome_tunnel_failure_with_local_dns(
-            &mut p,
-            url,
-            std::time::Duration::from_millis(1_500),
-        )
-        .await;
+        // Local DNS only overrules the browser while DnsGuard is on. It is on
+        // by default; turn it off when the browser resolves names on another
+        // network, such as a remote browser.
+        if params
+            .enhancements
+            .enabled(crate::configuration::CrawlEnhancement::DnsGuard)
+        {
+            confirm_chrome_tunnel_failure_with_local_dns(
+                &mut p,
+                url,
+                std::time::Duration::from_millis(1_500),
+            )
+            .await;
+        }
 
         p
     }
@@ -6003,12 +6011,20 @@ impl Page {
         // — on the asset-url branch this re-runs after `new_base` already did
         // it, but the gate `status != 599` short-circuits instantly so the
         // double-call is free.
-        confirm_chrome_tunnel_failure_with_local_dns(
-            &mut p,
-            url,
-            std::time::Duration::from_millis(1_500),
-        )
-        .await;
+        // Local DNS only overrules the browser while DnsGuard is on. It is on
+        // by default; turn it off when the browser resolves names on another
+        // network, such as a remote browser.
+        if params
+            .enhancements
+            .enabled(crate::configuration::CrawlEnhancement::DnsGuard)
+        {
+            confirm_chrome_tunnel_failure_with_local_dns(
+                &mut p,
+                url,
+                std::time::Duration::from_millis(1_500),
+            )
+            .await;
+        }
 
         (p, extract_succeeded)
     }
@@ -6257,12 +6273,20 @@ impl Page {
 
         // Chrome-side tunnel/proxy CONNECT confirmation (v2.51.169). Same
         // helper, same idempotent semantics as `new_streaming`.
-        confirm_chrome_tunnel_failure_with_local_dns(
-            &mut p,
-            url,
-            std::time::Duration::from_millis(1_500),
-        )
-        .await;
+        // Local DNS only overrules the browser while DnsGuard is on. It is on
+        // by default; turn it off when the browser resolves names on another
+        // network, such as a remote browser.
+        if params
+            .enhancements
+            .enabled(crate::configuration::CrawlEnhancement::DnsGuard)
+        {
+            confirm_chrome_tunnel_failure_with_local_dns(
+                &mut p,
+                url,
+                std::time::Duration::from_millis(1_500),
+            )
+            .await;
+        }
 
         (p, extract_succeeded)
     }
