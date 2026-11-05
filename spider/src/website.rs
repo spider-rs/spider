@@ -4175,10 +4175,13 @@ impl Website {
         } else {
             self.skip_initial = !self.extra_links.is_empty();
         }
-        // Skip robots.txt fetch for single-page scrapes — no link-following
-        // means no need to check robots rules. is_allowed_robots() returns
-        // true when robot_file_parser is None, so this is safe.
-        if !self.single_page() {
+        // A single-page scrape skips robots.txt unless asked, since the fetch
+        // is a round trip before its one request. With
+        // `respect_robots_txt_single_page` it honours robots.txt for its URL
+        // like any other crawl. configure_robots_parser is a no-op unless
+        // `respect_robots_txt` is on; without a parser, is_allowed_robots()
+        // allows all.
+        if !self.single_page() || self.configuration.respect_robots_txt_single_page {
             self.configure_robots_parser(&setup.0).await;
         }
         if let Some(guard) = guard {
@@ -13395,6 +13398,15 @@ impl Website {
         self
     }
 
+    /// Check robots.txt on single-page crawls too. Off by default, so a
+    /// `with_limit(1)` scrape makes no robots.txt request; needs
+    /// `with_respect_robots_txt(true)`.
+    pub fn with_respect_robots_txt_single_page(&mut self, enabled: bool) -> &mut Self {
+        self.configuration
+            .with_respect_robots_txt_single_page(enabled);
+        self
+    }
+
     /// Include subdomains detection.
     pub fn with_subdomains(&mut self, subdomains: bool) -> &mut Self {
         self.configuration.with_subdomains(subdomains);
@@ -15640,6 +15652,102 @@ async fn test_crawl_subdomains() {
             .contains(&"https://choosealicense.com/licenses/".into()),
         "{:?}",
         website.links_visited
+    );
+}
+
+/// Serves a robots.txt that disallows `/private` and records which of the
+/// two paths were requested, without a lock.
+#[cfg(all(test, not(feature = "decentralized")))]
+async fn single_page_robots_server() -> (
+    std::net::SocketAddr,
+    std::sync::Arc<[std::sync::atomic::AtomicBool; 2]>,
+    tokio::task::JoinHandle<()>,
+) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    // [robots.txt requested, /private requested]
+    let seen: Arc<[AtomicBool; 2]> = Arc::new([AtomicBool::new(false), AtomicBool::new(false)]);
+    let flags = seen.clone();
+    let server = tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            let flags = flags.clone();
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 8192];
+                let n = stream.read(&mut buf).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let path = request.split_whitespace().nth(1).unwrap_or("").to_string();
+                let body = if path == "/robots.txt" {
+                    flags[0].store(true, Ordering::Relaxed);
+                    "User-agent: *\nDisallow: /private\n"
+                } else {
+                    if path == "/private" {
+                        flags[1].store(true, Ordering::Relaxed);
+                    }
+                    "<html><body>private</body></html>"
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+    (addr, seen, server)
+}
+
+#[tokio::test]
+#[cfg(not(feature = "decentralized"))]
+async fn test_single_page_crawl_skips_robots_txt_by_default() {
+    use std::sync::atomic::Ordering;
+    let (addr, seen, server) = single_page_robots_server().await;
+
+    let mut website = Website::new(&format!("http://{addr}/private"));
+    website
+        .with_limit(1)
+        .with_respect_robots_txt(true)
+        .with_user_agent(Some(crate::page::TEST_AGENT_NAME));
+    website.crawl_raw().await;
+    server.abort();
+
+    assert!(
+        !seen[0].load(Ordering::Relaxed),
+        "a single-page scrape fetched robots.txt without opting in"
+    );
+    assert!(
+        seen[1].load(Ordering::Relaxed),
+        "the page itself was not fetched"
+    );
+}
+
+#[tokio::test]
+#[cfg(not(feature = "decentralized"))]
+async fn test_single_page_crawl_respects_robots_txt_when_enabled() {
+    use std::sync::atomic::Ordering;
+    let (addr, seen, server) = single_page_robots_server().await;
+
+    let mut website = Website::new(&format!("http://{addr}/private"));
+    website
+        .with_limit(1)
+        .with_respect_robots_txt(true)
+        .with_respect_robots_txt_single_page(true)
+        .with_user_agent(Some(crate::page::TEST_AGENT_NAME));
+    website.crawl_raw().await;
+    server.abort();
+
+    assert!(seen[0].load(Ordering::Relaxed), "robots.txt was not read");
+    assert!(
+        !seen[1].load(Ordering::Relaxed),
+        "a disallowed single page was fetched"
     );
 }
 
