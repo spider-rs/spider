@@ -74,9 +74,11 @@ pub(crate) fn run(job: &Job) -> Result<ScriptResult, String> {
         let mut borrow = cell.borrow_mut();
         let interp = borrow.get_or_insert_with(|| {
             // First call on this worker — pay the frozen-stdlib registration cost once.
-            Interpreter::with_init(Default::default(), |vm| {
-                vm.add_frozen(rustpython_pylib::FROZEN_STDLIB);
-            })
+            // 0.6 removed `vm.add_frozen`; frozen modules must be registered on
+            // the builder so they exist before `encodings` is imported at init.
+            Interpreter::builder(Default::default())
+                .add_frozen_modules(rustpython_pylib::FROZEN_STDLIB)
+                .build()
         });
         interp.enter(|vm| -> PyResult<()> {
             // We need an object that supports attribute writes (`agent.url = ...`)
@@ -92,7 +94,7 @@ pub(crate) fn run(job: &Job) -> Result<ScriptResult, String> {
                     rustpython_vm::compiler::Mode::Exec,
                     "<spider_prelude>".to_string(),
                 )
-                .map_err(|err| vm.new_syntax_error(&err, None))?;
+                .map_err(|err| err.into_pyexception(vm, None))?;
             vm.run_code_obj(prelude_code, prelude_scope.clone())?;
             let agent = prelude_scope
                 .globals
@@ -165,7 +167,7 @@ pub(crate) fn run(job: &Job) -> Result<ScriptResult, String> {
                     |args: FuncArgs, vm: &VirtualMachine| -> PyResult<PyObjectRef> {
                         let mut parts = Vec::with_capacity(args.args.len());
                         for a in args.args.iter() {
-                            parts.push(a.str(vm)?.as_str().to_string());
+                            parts.push(a.str(vm)?.to_string_lossy().into_owned());
                         }
                         let buf = OutputBuffer;
                         buf.write_str(&parts.join(" "));
@@ -185,7 +187,7 @@ pub(crate) fn run(job: &Job) -> Result<ScriptResult, String> {
                         if interrupt.load(Ordering::Relaxed) {
                             return Err(vm.new_exception_msg(
                                 vm.ctx.exceptions.keyboard_interrupt.to_owned(),
-                                "script interrupted".to_string(),
+                                "script interrupted".into(),
                             ));
                         }
                         Ok(vm.ctx.none())
@@ -211,7 +213,7 @@ pub(crate) fn run(job: &Job) -> Result<ScriptResult, String> {
                         let url_obj = args.args.first().ok_or_else(|| {
                             vm.new_type_error("agent.fetch: missing url".to_string())
                         })?;
-                        let url = url_obj.str(vm)?.as_str().to_string();
+                        let url = url_obj.str(vm)?.to_string_lossy().into_owned();
                         let req = if let Some(opts) = args.args.get(1) {
                             fetch_req_from_pyobj(vm, opts)?
                         } else {
@@ -239,8 +241,8 @@ pub(crate) fn run(job: &Job) -> Result<ScriptResult, String> {
                                 vm.new_type_error("read_file: missing path".to_string())
                             })?
                             .str(vm)?
-                            .as_str()
-                            .to_string();
+                            .to_string_lossy()
+                            .into_owned();
                         let content = sb_read.read_file(&rel).map_err(|e| vm.new_os_error(e))?;
                         Ok(vm.ctx.new_str(content).to_pyobject(vm))
                     },
@@ -258,8 +260,8 @@ pub(crate) fn run(job: &Job) -> Result<ScriptResult, String> {
                                 vm.new_type_error("write_file: missing path".to_string())
                             })?
                             .str(vm)?
-                            .as_str()
-                            .to_string();
+                            .to_string_lossy()
+                            .into_owned();
                         let content = args
                             .args
                             .get(1)
@@ -267,8 +269,8 @@ pub(crate) fn run(job: &Job) -> Result<ScriptResult, String> {
                                 vm.new_type_error("write_file: missing content".to_string())
                             })?
                             .str(vm)?
-                            .as_str()
-                            .to_string();
+                            .to_string_lossy()
+                            .into_owned();
                         sb_write
                             .write_file(&rel, &content)
                             .map_err(|e| vm.new_os_error(e))?;
@@ -287,18 +289,18 @@ pub(crate) fn run(job: &Job) -> Result<ScriptResult, String> {
                         .get("sep")
                         .map(|v| v.str(vm))
                         .transpose()?
-                        .map(|s| s.as_str().to_string())
+                        .map(|s| s.to_string_lossy().into_owned())
                         .unwrap_or_else(|| " ".to_string());
                     let end = args
                         .kwargs
                         .get("end")
                         .map(|v| v.str(vm))
                         .transpose()?
-                        .map(|s| s.as_str().to_string())
+                        .map(|s| s.to_string_lossy().into_owned())
                         .unwrap_or_else(|| "\n".to_string());
                     let mut parts = Vec::with_capacity(args.args.len());
                     for a in args.args.iter() {
-                        parts.push(a.str(vm)?.as_str().to_string());
+                        parts.push(a.str(vm)?.to_string_lossy().into_owned());
                     }
                     let buf = OutputBuffer;
                     buf.write_str(&parts.join(&sep));
@@ -319,7 +321,7 @@ pub(crate) fn run(job: &Job) -> Result<ScriptResult, String> {
                     rustpython_vm::compiler::Mode::Exec,
                     SCRIPT_NAME.to_string(),
                 )
-                .map_err(|err| vm.new_syntax_error(&err, Some(&job.code)))?;
+                .map_err(|err| err.into_pyexception(vm, Some(&job.code)))?;
             vm.run_code_obj(code_obj, scope)?;
             Ok(())
         })
@@ -385,10 +387,10 @@ fn fetch_req_from_pyobj(vm: &VirtualMachine, opts: &PyObjectRef) -> PyResult<Fet
 
     let mut req = FetchRequest::default();
     for (k, v) in dict {
-        let key = k.str(vm)?.as_str().to_string();
+        let key = k.str(vm)?.to_string_lossy().into_owned();
         match key.as_str() {
-            "method" => req.method = Some(v.str(vm)?.as_str().to_string()),
-            "body" => req.body = Some(v.str(vm)?.as_str().to_string()),
+            "method" => req.method = Some(v.str(vm)?.to_string_lossy().into_owned()),
+            "body" => req.body = Some(v.str(vm)?.to_string_lossy().into_owned()),
             "timeout_ms" => {
                 let n = v
                     .try_int(vm)
@@ -403,8 +405,8 @@ fn fetch_req_from_pyobj(vm: &VirtualMachine, opts: &PyObjectRef) -> PyResult<Fet
                 let mut map = std::collections::HashMap::new();
                 for (hk, hv) in hdrs {
                     map.insert(
-                        hk.str(vm)?.as_str().to_string(),
-                        hv.str(vm)?.as_str().to_string(),
+                        hk.str(vm)?.to_string_lossy().into_owned(),
+                        hv.str(vm)?.to_string_lossy().into_owned(),
                     );
                 }
                 req.headers = Some(map);
