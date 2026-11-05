@@ -2913,7 +2913,6 @@ pub(crate) fn push_link<
     }
 }
 
-/// Validate link and push into the map
 /// The page link in an Atom `<link>` element, which carries it in `href`
 /// rather than as text (RSS). Only entry links count: no `rel`, or
 /// `rel="alternate"`. A feed's own `self` link, `enclosure` media and the
@@ -2946,6 +2945,7 @@ fn atom_link_href(
     .filter(|href| !href.is_empty())
 }
 
+/// Validate link and push into the map
 pub(crate) fn push_link_verify<
     A: PartialEq + Eq + std::hash::Hash + From<String> + for<'a> From<&'a str>,
 >(
