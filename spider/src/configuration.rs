@@ -347,6 +347,11 @@ pub struct CustomAntibotPatterns {
 pub struct Configuration {
     /// Respect robots.txt file and not scrape not allowed files. This may slow down crawls if robots.txt file has a delay included.
     pub respect_robots_txt: bool,
+    /// Also check robots.txt on single-page crawls (`with_limit(1)`). Off by
+    /// default, so a single-page scrape skips the robots.txt round trip even
+    /// when `respect_robots_txt` is on. No effect unless `respect_robots_txt`
+    /// is set.
+    pub respect_robots_txt_single_page: bool,
     /// Allow sub-domains.
     pub subdomains: bool,
     /// Allow all tlds for domain.
@@ -1304,6 +1309,13 @@ impl Configuration {
     /// Respect robots.txt file.
     pub fn with_respect_robots_txt(&mut self, respect_robots_txt: bool) -> &mut Self {
         self.respect_robots_txt = respect_robots_txt;
+        self
+    }
+
+    /// Check robots.txt on single-page crawls too. Off by default; needs
+    /// `respect_robots_txt`.
+    pub fn with_respect_robots_txt_single_page(&mut self, enabled: bool) -> &mut Self {
+        self.respect_robots_txt_single_page = enabled;
         self
     }
 
