@@ -93,8 +93,7 @@ impl SearchProvider for KeenableProvider {
 
         let mut request = c
             .post(self.endpoint())
-            .header("Content-Type", "application/json")
-            .header("X-Keenable-Title", "spider");
+            .header("Content-Type", "application/json");
         if let Some(ref key) = self.api_key {
             request = request.header("X-API-Key", key);
         }
