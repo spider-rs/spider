@@ -446,11 +446,6 @@ pub fn create_handler_config(config: &Configuration) -> HandlerConfig {
     }
 }
 
-/// Whether `CHROME_URL` points spider at an already-running remote browser.
-pub(crate) fn remote_browser_from_env() -> bool {
-    CHROM_BASE.is_some()
-}
-
 lazy_static! {
     static ref CHROM_BASE: Option<String> = std::env::var("CHROME_URL").ok();
     /// Per-endpoint connect retries for the multi-URL failover ring before

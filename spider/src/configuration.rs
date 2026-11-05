@@ -2738,33 +2738,9 @@ impl Configuration {
                 .chrome_failover
                 .last_connected_url()
                 .or(self.chrome_connection_url.as_deref()),
-            enhancements: self.chrome_enhancements(),
+            enhancements: self.enhancements,
             prefer_native_markdown: self.prefer_native_markdown && self.native_markdown_safe(),
         }
-    }
-
-    /// The enhancement settings chrome fetches use. With a remote browser (a
-    /// connection URL in the config or `CHROME_URL`), `DnsGuard` and
-    /// `DnsHedge` default to off unless set explicitly: the browser resolves
-    /// names itself, often on another network, so a failed lookup on the
-    /// crawler host is no evidence that the host does not exist.
-    #[cfg(feature = "chrome")]
-    pub(crate) fn chrome_enhancements(&self) -> EnhancementSettings {
-        let mut enhancements = self.enhancements;
-        let remote = self.chrome_connection_url.is_some()
-            || self
-                .chrome_connection_urls
-                .as_ref()
-                .is_some_and(|urls| !urls.is_empty())
-            || crate::features::chrome::remote_browser_from_env();
-        if remote {
-            for section in [CrawlEnhancement::DnsGuard, CrawlEnhancement::DnsHedge] {
-                if enhancements.get(section).is_none() {
-                    enhancements.set(section, false);
-                }
-            }
-        }
-        enhancements
     }
 
     /// Get the cache option to use for the run. This does nothing without the 'cache_request' feature.
@@ -3920,34 +3896,6 @@ mod tests {
             assert_eq!(s.get(e), None, "{e:?} should have no override by default");
         }
         assert_eq!(EnhancementSettings::default(), s);
-    }
-
-    #[test]
-    #[cfg(feature = "chrome")]
-    fn a_remote_browser_turns_local_dns_checks_off_by_default() {
-        let mut remote = Configuration::default();
-        remote.chrome_connection_url = Some("ws://127.0.0.1:9333/devtools/browser".into());
-        let e = remote.chrome_enhancements();
-        assert!(!e.enabled(CrawlEnhancement::DnsGuard));
-        assert!(!e.enabled(CrawlEnhancement::DnsHedge));
-        assert_eq!(
-            e.get(CrawlEnhancement::PointerAssist),
-            None,
-            "others untouched"
-        );
-
-        // An explicit choice still wins.
-        remote.with_enhancement(CrawlEnhancement::DnsGuard, true);
-        assert!(remote
-            .chrome_enhancements()
-            .enabled(CrawlEnhancement::DnsGuard));
-
-        // A local launch keeps the defaults.
-        let local = Configuration::default();
-        assert_eq!(
-            local.chrome_enhancements().get(CrawlEnhancement::DnsGuard),
-            None
-        );
     }
 
     #[test]
