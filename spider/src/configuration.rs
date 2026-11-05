@@ -422,6 +422,17 @@ pub struct Configuration {
     #[cfg(feature = "cookies")]
     /// Cookie string to use for network requests ex: "foo=bar; Domain=blog.spider"
     pub cookie_str: String,
+    #[cfg(feature = "cookies")]
+    #[cfg_attr(feature = "serde", serde(skip))]
+    /// The crawl's cookie jar, set by `Website::setup`, so browser pages read
+    /// and write the same session as the HTTP client. Runtime state, not
+    /// configuration.
+    pub(crate) session_jar: SessionJar,
+    #[cfg(feature = "cookies")]
+    /// Share the crawl's cookie jar with browser pages: before each page the
+    /// browser gets the jar's cookies it lacks, which costs one CDP call per
+    /// page once the jar holds cookies for the site. Off by default.
+    pub chrome_cookie_jar: bool,
     #[cfg(feature = "wreq")]
     /// The type of request emulation. This does nothing without the flag `sync` enabled.
     pub emulation: Option<wreq_util::Emulation>,
@@ -1016,6 +1027,34 @@ impl<'de> serde::Deserialize<'de> for AllowListSet {
     }
 }
 
+/// A handle to the crawl's cookie jar. Its `Debug` leaves the cookies out,
+/// because they can be session tokens, and two handles are equal only when
+/// they share one jar.
+#[cfg(feature = "cookies")]
+#[derive(Clone, Default)]
+pub(crate) struct SessionJar(pub(crate) Option<std::sync::Arc<crate::client::cookie::Jar>>);
+
+#[cfg(feature = "cookies")]
+impl std::fmt::Debug for SessionJar {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.is_some() {
+            "SessionJar(..)"
+        } else {
+            "SessionJar(None)"
+        })
+    }
+}
+
+#[cfg(feature = "cookies")]
+impl PartialEq for SessionJar {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+            (a, b) => a.is_none() && b.is_none(),
+        }
+    }
+}
+
 /// Get the user agent from the top agent list randomly.
 #[cfg(feature = "ua_generator")]
 pub fn get_ua(chrome: bool) -> &'static str {
@@ -1501,6 +1540,23 @@ impl Configuration {
     #[cfg(not(feature = "cookies"))]
     /// Cookie string to use in request. This does nothing without the `cookies` flag enabled.
     pub fn with_cookies(&mut self, _cookie_str: &str) -> &mut Self {
+        self
+    }
+
+    #[cfg(feature = "cookies")]
+    /// Share the crawl's cookie jar with browser pages, so a session the
+    /// HTTP client or an earlier crawl holds reaches the browser. Costs one
+    /// CDP call per page once the jar holds cookies for the site. Off by
+    /// default. This does nothing without the `cookies` and `chrome` flags.
+    pub fn with_chrome_cookie_jar(&mut self, share: bool) -> &mut Self {
+        self.chrome_cookie_jar = share;
+        self
+    }
+
+    #[cfg(not(feature = "cookies"))]
+    /// Share the crawl's cookie jar with browser pages. This does nothing
+    /// without the `cookies` and `chrome` flags.
+    pub fn with_chrome_cookie_jar(&mut self, _share: bool) -> &mut Self {
         self
     }
 
@@ -2740,6 +2796,8 @@ impl Configuration {
                 .or(self.chrome_connection_url.as_deref()),
             enhancements: self.enhancements,
             prefer_native_markdown: self.prefer_native_markdown && self.native_markdown_safe(),
+            #[cfg(feature = "cookies")]
+            cookie_jar: self.session_jar.0.as_ref(),
         }
     }
 
@@ -3592,6 +3650,21 @@ mod native_markdown_gate_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "cookies")]
+    #[test]
+    fn debug_leaves_out_the_session_cookies() {
+        use crate::client::cookie::CookieStore;
+        let jar = std::sync::Arc::new(crate::client::cookie::Jar::default());
+        let url = url::Url::parse("https://example.com/").unwrap();
+        jar.add_cookie_str("sid=secret-session-token; Path=/", &url);
+        assert!(jar.cookies(&url).is_some());
+        let mut config = Configuration::default();
+        config.session_jar = SessionJar(Some(jar));
+        let printed = format!("{config:?}");
+        assert!(printed.contains("SessionJar(..)"));
+        assert!(!printed.contains("secret-session-token"));
+    }
 
     #[test]
     fn test_configuration_defaults() {

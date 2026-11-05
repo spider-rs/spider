@@ -5577,6 +5577,10 @@ impl Page {
         params: &crate::utils::ChromeFetchParams<'_>,
         extract: Option<&mut ChromeStreamingExtractor<'h>>,
     ) -> Self {
+        // Callers without a jar of their own use the crawl's, so every
+        // browser page shares the session with the HTTP client.
+        #[cfg(feature = "cookies")]
+        let jar = jar.or(params.cookie_jar);
         // Reactive-NXDOMAIN cache shortcircuit. The first time a host
         // fails through chrome+proxy, the existing
         // `confirm_chrome_tunnel_failure_with_local_dns` two-signal
@@ -5646,41 +5650,21 @@ impl Page {
             let fetch_fut: std::pin::Pin<
                 Box<dyn std::future::Future<Output = crate::utils::PageResponse> + Send>,
             > = Box::pin(async {
-                #[cfg(feature = "fs")]
-                {
-                    crate::utils::fetch_page_html(
-                        url,
-                        client,
-                        page,
-                        page_set,
-                        referrer,
-                        max_page_bytes,
-                        cache_options,
-                        #[cfg(feature = "cookies")]
-                        jar,
-                        cache_namespace,
-                        params,
-                        extract,
-                    )
-                    .await
-                }
-                #[cfg(not(feature = "fs"))]
-                {
-                    let _ = jar;
-                    crate::utils::fetch_page_html(
-                        url,
-                        client,
-                        page,
-                        page_set,
-                        referrer,
-                        max_page_bytes,
-                        cache_options,
-                        cache_namespace,
-                        params,
-                        extract,
-                    )
-                    .await
-                }
+                crate::utils::fetch_page_html(
+                    url,
+                    client,
+                    page,
+                    page_set,
+                    referrer,
+                    max_page_bytes,
+                    cache_options,
+                    #[cfg(feature = "cookies")]
+                    jar,
+                    cache_namespace,
+                    params,
+                    extract,
+                )
+                .await
             });
             // Heap-pin the hedge future itself, not just `fetch_fut`.
             // v2.51.188 roughly doubled `chrome_navigation_with_dns_hedge`'s
