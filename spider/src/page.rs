@@ -2913,6 +2913,38 @@ pub(crate) fn push_link<
     }
 }
 
+/// The page link in an Atom `<link>` element, which carries it in `href`
+/// rather than as text (RSS). Only entry links count: no `rel`, or
+/// `rel="alternate"`. A feed's own `self` link, `enclosure` media and the
+/// like are not pages to crawl.
+fn atom_link_href(
+    element: &quick_xml::events::BytesStart,
+    decoder: quick_xml::encoding::Decoder,
+) -> Option<String> {
+    let value = |name: &str| {
+        element
+            .try_get_attribute(name)
+            .ok()
+            .flatten()
+            .and_then(|attr| {
+                attr.decoded_and_normalized_value(quick_xml::XmlVersion::Implicit1_0, decoder)
+                    .ok()
+                    .map(|v| v.into_owned())
+            })
+    };
+    // A sitemap's `<xhtml:link rel="alternate" hreflang="…">` names a
+    // translation of the current URL, not a feed entry.
+    if matches!(element.try_get_attribute("hreflang"), Ok(Some(_))) {
+        return None;
+    }
+    match value("rel").as_deref() {
+        None => value("href"),
+        Some(rel) if rel.eq_ignore_ascii_case("alternate") => value("href"),
+        _ => None,
+    }
+    .filter(|href| !href.is_empty())
+}
+
 /// Validate link and push into the map
 pub(crate) fn push_link_verify<
     A: PartialEq + Eq + std::hash::Hash + From<String> + for<'a> From<&'a str>,
@@ -4329,7 +4361,12 @@ where
         compiled_base_element_selector(),
         move |el| {
             if let Some(href) = el.get_attribute("href") {
-                if let Ok(parsed_base) = Url::parse(&href) {
+                // A relative `<base href>` resolves against the document URL,
+                // as browsers do; only an absolute one parses on its own.
+                let parsed_base = Url::parse(&href)
+                    .ok()
+                    .or_else(|| original_page.or(base).and_then(|doc| doc.join(&href).ok()));
+                if let Some(parsed_base) = parsed_base {
                     let _ = base_input_url.set(parsed_base);
                 }
             }
@@ -7475,6 +7512,24 @@ impl Page {
             base
         };
 
+        let external_domains_caseless = &self.external_domains_caseless;
+        let mut push = |href: &str, links_pages: &mut Option<HashSet<A>>| {
+            push_link_verify(
+                &base,
+                href,
+                map,
+                &selectors.0,
+                parent_host,
+                parent_host_scheme,
+                base_input_domain,
+                sub_matcher,
+                external_domains_caseless,
+                false,
+                links_pages,
+                true,
+            );
+        };
+
         loop {
             match reader.read_event_into_async(&mut buf).await {
                 Ok(e) => match e {
@@ -7483,25 +7538,25 @@ impl Page {
 
                         if local.as_ref() == b"link" {
                             is_link_tag = true;
+                            if let Some(href) = atom_link_href(&e, reader.decoder()) {
+                                push(&href, &mut links_pages);
+                            }
+                        }
+                    }
+                    // Atom's `<link href="…"/>` is usually self-closing.
+                    Event::Empty(e) => {
+                        let (_, local) = reader.resolver().resolve_element(e.name());
+
+                        if local.as_ref() == b"link" {
+                            if let Some(href) = atom_link_href(&e, reader.decoder()) {
+                                push(&href, &mut links_pages);
+                            }
                         }
                     }
                     Event::Text(e) => {
                         if is_link_tag {
                             if let Ok(v) = e.decode() {
-                                push_link_verify(
-                                    &base,
-                                    &v,
-                                    map,
-                                    &selectors.0,
-                                    parent_host,
-                                    parent_host_scheme,
-                                    base_input_domain,
-                                    sub_matcher,
-                                    &self.external_domains_caseless,
-                                    false,
-                                    &mut links_pages,
-                                    true,
-                                );
+                                push(&v, &mut links_pages);
                             }
                         }
                     }
@@ -8438,7 +8493,13 @@ impl Page {
                         compiled_base_element_selector(),
                         |el| {
                             if let Some(href) = el.get_attribute("href") {
-                                if let Ok(parsed_base) = Url::parse(&href) {
+                                let parsed_base = Url::parse(&href).ok().or_else(|| {
+                                    original_page
+                                        .as_ref()
+                                        .or(base1)
+                                        .and_then(|doc| doc.join(&href).ok())
+                                });
+                                if let Some(parsed_base) = parsed_base {
                                     let _ = base_input_url.set(parsed_base);
                                 }
                             }
@@ -9019,7 +9080,13 @@ impl Page {
                     let mut element_content_handlers = vec![
                         element_precompiled!(compiled_base_element_selector(), |el| {
                             if let Some(href) = el.get_attribute("href") {
-                                if let Ok(parsed_base) = Url::parse(&href) {
+                                let parsed_base = Url::parse(&href).ok().or_else(|| {
+                                    original_page
+                                        .as_ref()
+                                        .or(base1)
+                                        .and_then(|doc| doc.join(&href).ok())
+                                });
+                                if let Some(parsed_base) = parsed_base {
                                     let _ = base_input_url.set(parsed_base);
                                 }
                             }
@@ -9944,6 +10011,86 @@ async fn test_headers() {
             .get(HeaderName::from_static("content-type"))
             .expect("There should be a content-type value"),
         HeaderValue::from_static("text/html; charset=utf-8")
+    );
+}
+
+#[tokio::test]
+#[cfg(all(
+    not(feature = "decentralized"),
+    not(feature = "chrome"),
+    not(feature = "cache_request")
+))]
+async fn atom_entry_links_are_read_from_href() {
+    use crate::utils::PageResponse;
+
+    let feed_url = "https://example.com/feed.xml";
+    let xml = br#"<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <link rel="self" href="https://example.com/feed.xml"/>
+  <entry><link href="https://example.com/posts/one"/></entry>
+  <entry><link rel="alternate" type="text/html" href="/posts/two"/></entry>
+  <entry><link rel="enclosure" href="https://example.com/audio.mp3"/></entry>
+  <entry><link rel="Alternate" href="/posts/three"/></entry>
+  <entry><link rel="alternate" hreflang="de" href="https://example.com/de/posts/three"/></entry>
+</feed>"#;
+    let mut page = build_with_parse(
+        feed_url,
+        PageResponse {
+            content: Some(xml.to_vec()),
+            status_code: StatusCode::OK,
+            ..Default::default()
+        },
+    );
+    let selectors = get_page_selectors(feed_url, false, false);
+    let mut links: HashSet<CaseInsensitiveString> = HashSet::new();
+    page.links_stream_xml_links_stream_base(&selectors, xml, &mut links, &None)
+        .await;
+
+    for wanted in [
+        "https://example.com/posts/one",
+        "https://example.com/posts/two",
+        "https://example.com/posts/three",
+    ] {
+        let wanted: CaseInsensitiveString = wanted.into();
+        assert!(links.contains(&wanted), "missing {wanted:?} in {links:?}");
+    }
+    for unwanted in [
+        "https://example.com/audio.mp3",
+        "https://example.com/feed.xml",
+        "https://example.com/de/posts/three",
+    ] {
+        let unwanted: CaseInsensitiveString = unwanted.into();
+        assert!(!links.contains(&unwanted), "should skip {unwanted:?}");
+    }
+}
+
+#[tokio::test]
+#[cfg(all(
+    not(feature = "decentralized"),
+    not(feature = "chrome"),
+    not(feature = "cache_request")
+))]
+async fn parse_links_resolves_a_relative_base_href() {
+    use crate::utils::PageResponse;
+
+    let page_url = "https://example.com/news/page";
+    let html =
+        br#"<html><head><base href="/docs/"></head><body><a href="intro">Intro</a></body></html>"#;
+    let mut page = build_with_parse(
+        page_url,
+        PageResponse {
+            content: Some(html.to_vec()),
+            status_code: StatusCode::OK,
+            ..Default::default()
+        },
+    );
+    let selector = get_page_selectors(page_url, false, false);
+    let links = page.links(&selector, &None).await;
+
+    let expected: CaseInsensitiveString = "https://example.com/docs/intro".into();
+    assert!(
+        links.contains(&expected),
+        "expected {expected:?} from the relative base, found {links:?}"
     );
 }
 
