@@ -4483,23 +4483,35 @@ pub async fn fetch_page_html_chrome_base<'h>(
     ) {
         if let Ok(mut cookies) = crate::features::chrome::cookie_params_from_jar(jar, &url) {
             if !cookies.is_empty() {
-                let held = page
-                    .execute(
-                        chromiumoxide::cdp::browser_protocol::network::GetCookiesParams {
-                            urls: Some(vec![target_url.to_string()]),
-                        },
-                    )
-                    .await;
-                if let Ok(held) = held {
-                    let host = url.host_str().unwrap_or_default();
-                    cookies.retain(|c| {
-                        !crate::features::chrome::browser_holds_cookie(
-                            &held.result.cookies,
-                            &c.name,
-                            host,
+                // Bounded: a slow browser costs this page at most the cap,
+                // then it navigates without the jar's cookies.
+                let sync = async {
+                    let held = page
+                        .execute(
+                            chromiumoxide::cdp::browser_protocol::network::GetCookiesParams {
+                                urls: Some(vec![target_url.to_string()]),
+                            },
                         )
-                    });
-                    let _ = crate::features::chrome::set_page_cookies(page, cookies).await;
+                        .await;
+                    if let Ok(held) = held {
+                        let host = url.host_str().unwrap_or_default();
+                        cookies.retain(|c| {
+                            !crate::features::chrome::browser_holds_cookie(
+                                &held.result.cookies,
+                                &c.name,
+                                host,
+                            )
+                        });
+                        if !cookies.is_empty() {
+                            let _ = crate::features::chrome::set_page_cookies(page, cookies).await;
+                        }
+                    }
+                };
+                if tokio::time::timeout(COOKIE_JAR_SYNC_CAP, sync)
+                    .await
+                    .is_err()
+                {
+                    log::debug!("cookie jar sync to the browser timed out for {target_url}");
                 }
             }
         }
@@ -6149,6 +6161,10 @@ async fn set_page_response_cookies(
         }
     }
 }
+
+/// The most the jar-to-browser cookie sync may hold up a navigation.
+#[cfg(all(feature = "chrome", feature = "cookies"))]
+const COOKIE_JAR_SYNC_CAP: std::time::Duration = std::time::Duration::from_millis(1_500);
 
 /// Perform a screenshot shortcut.
 #[cfg(feature = "chrome")]
