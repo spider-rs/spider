@@ -4,6 +4,8 @@ pub mod abs;
 pub mod connect;
 /// Generic CSS selectors.
 pub mod css_selectors;
+/// Classify a fetched page as content, challenge, block or error.
+pub mod disposition;
 /// Fragment templates.
 pub mod templates;
 

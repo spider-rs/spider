@@ -6584,6 +6584,19 @@ impl Page {
         None
     }
 
+    /// What this page turned out to be: the site's content, an anti-bot
+    /// challenge, a block, or no usable document. Challenge and block pages
+    /// often arrive with status 200, so check this before indexing a page.
+    /// A spooled page (the `balance` feature) needs `ensure_html_loaded` first.
+    pub fn disposition(&self) -> crate::utils::disposition::PageDisposition {
+        crate::utils::disposition::classify_page(
+            self.status_code.as_u16(),
+            self.headers.as_ref(),
+            self.get_html_bytes_u8(),
+            self.get_url_final(),
+        )
+    }
+
     /// Url getter for page after redirects.
     #[cfg(not(feature = "decentralized"))]
     pub fn get_url_final(&self) -> &str {
