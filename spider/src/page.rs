@@ -6581,11 +6581,15 @@ impl Page {
     /// often arrive with status 200, so check this before indexing a page.
     /// A spooled page (the `balance` feature) needs `ensure_html_loaded` first.
     pub fn disposition(&self) -> crate::utils::disposition::PageDisposition {
+        #[cfg(not(feature = "decentralized"))]
+        let final_url = self.get_url_final();
+        #[cfg(feature = "decentralized")]
+        let final_url = self.get_url();
         crate::utils::disposition::classify_page(
             self.status_code.as_u16(),
             self.headers.as_ref(),
             self.get_html_bytes_u8(),
-            self.get_url_final(),
+            final_url,
         )
     }
 

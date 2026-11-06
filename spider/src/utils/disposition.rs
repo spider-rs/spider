@@ -65,6 +65,53 @@ const BLOCK_MARKERS: &[&str] = &[
 const AKAMAI_DENY_HEADING: &str = "<h1>access denied</h1>";
 const AKAMAI_DENY_REFERENCE: &str = "reference&#32;&#35;";
 
+/// Marker groups, as bits in the set [`scan_markers`] returns.
+const CHALLENGE: u8 = 1;
+const SMALL_CHALLENGE: u8 = 1 << 1;
+const BLOCK: u8 = 1 << 2;
+const AKAMAI_HEADING: u8 = 1 << 3;
+const AKAMAI_REFERENCE: u8 = 1 << 4;
+
+/// Every marker in one ASCII case-insensitive automaton, built once, with the
+/// group bit of each pattern.
+static MARKERS: std::sync::LazyLock<(aho_corasick::AhoCorasick, Vec<u8>)> =
+    std::sync::LazyLock::new(|| {
+        let groups: [(&[&str], u8); 5] = [
+            (CHALLENGE_MARKERS, CHALLENGE),
+            (SMALL_PAGE_CHALLENGE_MARKERS, SMALL_CHALLENGE),
+            (BLOCK_MARKERS, BLOCK),
+            (&[AKAMAI_DENY_HEADING], AKAMAI_HEADING),
+            (&[AKAMAI_DENY_REFERENCE], AKAMAI_REFERENCE),
+        ];
+        let mut patterns = Vec::new();
+        let mut bits = Vec::new();
+        for (markers, bit) in groups {
+            for m in markers {
+                patterns.push(*m);
+                bits.push(bit);
+            }
+        }
+        let automaton = aho_corasick::AhoCorasick::builder()
+            .ascii_case_insensitive(true)
+            .build(patterns)
+            .expect("static disposition markers build");
+        (automaton, bits)
+    });
+
+/// The groups whose markers appear in `head`: one pass, no allocation.
+fn scan_markers(head: &[u8]) -> u8 {
+    let (automaton, bits) = &*MARKERS;
+    let all = CHALLENGE | SMALL_CHALLENGE | BLOCK | AKAMAI_HEADING | AKAMAI_REFERENCE;
+    let mut found = 0u8;
+    for m in automaton.find_overlapping_iter(head) {
+        found |= bits[m.pattern().as_usize()];
+        if found == all {
+            break;
+        }
+    }
+    found
+}
+
 /// Classify a fetched page from its status, headers, body and final URL.
 pub fn classify_page(
     status: u16,
@@ -84,19 +131,17 @@ pub fn classify_page(
     }
 
     let head = &body[..body.len().min(SMALL_PAGE)];
-    let lower = String::from_utf8_lossy(head).to_ascii_lowercase();
-    let has = |marker: &str| lower.contains(&marker.to_ascii_lowercase());
+    let found = scan_markers(head);
+    let small = body.len() <= SMALL_PAGE;
     // A deny page can reuse the challenge template (Anubis's error page keeps
     // an empty `anubis_challenge` block), so its markers are checked first.
-    if body.len() <= SMALL_PAGE
-        && (BLOCK_MARKERS.iter().any(|m| has(m))
-            || (has(AKAMAI_DENY_HEADING) && has(AKAMAI_DENY_REFERENCE)))
+    if small
+        && (found & BLOCK != 0
+            || found & (AKAMAI_HEADING | AKAMAI_REFERENCE) == AKAMAI_HEADING | AKAMAI_REFERENCE)
     {
         return PageDisposition::Blocked;
     }
-    if CHALLENGE_MARKERS.iter().any(|m| has(m))
-        || (body.len() <= SMALL_PAGE && SMALL_PAGE_CHALLENGE_MARKERS.iter().any(|m| has(m)))
-    {
+    if found & CHALLENGE != 0 || (small && found & SMALL_CHALLENGE != 0) {
         return PageDisposition::Challenge;
     }
     // After the markers: Cloudflare serves its challenge with a 403.
