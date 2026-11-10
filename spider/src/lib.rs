@@ -263,6 +263,7 @@
 //! - `search_bing`: Enables [Bing Search](https://www.microsoft.com/en-us/bing/apis/bing-web-search-api) integration.
 //! - `search_tavily`: Enables [Tavily](https://tavily.com) search integration.
 //! - `search_keenable`: Enables [Keenable](https://keenable.ai) search integration (works without an API key).
+//! - `search_specstream`: Enables [SpecStream](https://specstream.ai) search integration (source URL and snippet on each result, publish date when the page states one).
 //!
 //! ### Networking
 //!

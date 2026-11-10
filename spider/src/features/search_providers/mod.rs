@@ -11,6 +11,8 @@ mod brave;
 mod keenable;
 #[cfg(feature = "search_serper")]
 mod serper;
+#[cfg(feature = "search_specstream")]
+mod specstream;
 #[cfg(feature = "search_tavily")]
 mod tavily;
 
@@ -22,6 +24,8 @@ pub use brave::BraveProvider;
 pub use keenable::KeenableProvider;
 #[cfg(feature = "search_serper")]
 pub use serper::SerperProvider;
+#[cfg(feature = "search_specstream")]
+pub use specstream::SpecStreamProvider;
 #[cfg(feature = "search_tavily")]
 pub use tavily::TavilyProvider;
 
