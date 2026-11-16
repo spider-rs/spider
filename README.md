@@ -26,7 +26,7 @@
 
 ---
 
-Spider is a concurrency-first crawling engine written in Rust. It streams pages as they arrive, renders JavaScript only on pages that need it, and scales from a single script to a distributed fleet without changing your code. The same engine runs [Spider Cloud](https://spider.cloud?utm_source=github&utm_medium=readme&utm_campaign=spider_rs), so you can prototype locally and move to managed infrastructure with one config change. New to crawling? The [guide to web scraping](https://spider.cloud/web-scraping/?utm_source=github&utm_medium=readme&utm_campaign=spider_rs) shows what a plain fetch returns and when a page needs a browser, with requests you can repeat.
+Spider is a concurrency-first crawling engine written in Rust. It streams pages as they arrive, renders JavaScript only on pages that need it, and scales from a single script to a distributed fleet without changing your code. The same engine runs [Spider Cloud](https://spider.cloud?utm_source=github&utm_medium=readme&utm_campaign=spider_rs), so you can prototype locally and move to managed infrastructure with one config change. New to crawling? The [guide to web scraping](https://spider.cloud/web-scraping/?utm_source=github&utm_medium=readme&utm_campaign=sspider-rs) shows what a plain fetch returns and when a page needs a browser, with requests you can repeat.
 
 ## Start in the cloud
 
