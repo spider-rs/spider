@@ -127,6 +127,7 @@ Teams use Spider to feed the open web into vector stores for LLM and RAG pipelin
 
 - [Guides](https://spider.cloud/guides?utm_source=github&utm_medium=readme&utm_campaign=spider_rs) for recipes and integrations
 - [API docs](https://docs.rs/spider) for every option and method
+- [Web scraper API](https://spider.cloud/web-scraper/?utm_source=github&utm_medium=readme&utm_campaign=spider_rs) to scrape a single page to markdown or JSON without running a crawler
 - [Discord](https://discord.spider.cloud) for questions and ideas
 - [Issues](https://github.com/spider-rs/spider/issues) for bugs and feature requests
 - [Spider Shield](https://spider.cloud/shield/?utm_source=github&utm_medium=readme&utm_campaign=spider_rs), a free firewall app built on the same blocklists as the `firewall` feature
