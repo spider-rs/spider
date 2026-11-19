@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## v2.54.1
+
+1. perf(website): the crawl entry points box their crawl body. `run_with_crawl_timeout` stored a by-value body twice, so `Website::crawl` was a 58,520 byte future around a 29,104 byte body with `chrome,smart,sitemap`. It is now 2,968 bytes, and `website/future_layout.rs` holds a 16 KiB budget on each entry point.
+1. feat(page): classify a page as content, challenge, block or error (#434).
+1. feat(chrome): browser pages can share the crawl's cookie jar, opt-in (#437).
+1. feat(search): add the Keenable search provider, which needs no API key (#427).
+1. fix(chrome): keep cookie scope and attributes when syncing with the jar (#435), and cap the jar-to-browser cookie sync before navigation (#447).
+1. fix(chrome): report the document reached after the wait (#430).
+1. fix(chrome): local DNS overrules the browser only while DnsGuard is on (#431).
+1. fix(chrome): `PointerAssist` can turn off all synthetic pointer activity (#433).
+1. fix(website): single-page crawls can opt in to robots.txt (#432).
+1. fix(page): resolve a relative `<base href>` against the document URL (#428), and follow Atom entry links (#429).
+1. fix: keep external links on a crawl's first page when streaming extraction declines (#438).
+1. fix: `with_limit(0)` no longer panics in debug builds (#439).
+1. fix(cli): ignore incomplete `--budget` pairs instead of panicking (#415).
+1. perf: keep one WARC writer per `Website` instead of one per crawl (#418).
+
 ## v2.54.0
 
 1. breaking(spider): remove `SpiderCloudMode::Unblocker`. The Spider Cloud unblocker endpoints are deprecated. Use `/scrape` (or `/ai/scrape`) with `stealth: true`. `Smart` mode now falls back to `POST /scrape` with `stealth: true`, and `SpiderCloudConfig::fallback_route` returns `"scrape"` for it.
