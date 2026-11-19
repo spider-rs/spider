@@ -45,14 +45,28 @@ impl Drop for ControlHandlerGuard {
     }
 }
 
-/// Run a future with an optional hard wall-clock timeout.
-/// When `timeout` is `None`, the future runs without any timer overhead.
-/// When the timeout fires, the future is dropped (cancelling all in-flight work).
-async fn run_with_crawl_timeout(
+/// Run a boxed crawl body with an optional hard wall-clock timeout.
+///
+/// The body arrives already pinned on the heap, and that is deliberate.
+/// An `async fn` keeps each parameter alive as an upvar for its whole
+/// life, while `tokio::time::timeout` moves the body into a `Timeout<F>`
+/// that is a separate saved local. rustc never overlaps the two, so a
+/// by-value body was stored twice: `Website::crawl` measured 58,520
+/// bytes against a 29,104 byte body. With the body boxed the parameter
+/// slot is pointer sized and this future is about 200 bytes whatever it
+/// wraps. `F: ?Sized` also admits `Pin<Box<dyn Future>>`. The box costs
+/// one allocation per crawl, since every caller is a top level entry
+/// point. `website/future_layout.rs` holds the line.
+///
+/// When `timeout` is `None`, the body runs without any timer overhead.
+/// When the timeout fires, the body is dropped (cancelling all in-flight work).
+async fn run_with_crawl_timeout<F>(
     timeout: Option<core::time::Duration>,
     url: &str,
-    fut: impl core::future::Future<Output = ()>,
-) {
+    fut: core::pin::Pin<Box<F>>,
+) where
+    F: core::future::Future<Output = ()> + ?Sized,
+{
     match timeout {
         Some(t) => {
             if tokio::time::timeout(t, fut).await.is_err() {
@@ -7447,10 +7461,14 @@ impl Website {
                 };
                 let crawl_timeout = self.configuration.crawl_timeout;
                 let url = self.url.inner().to_string();
-                run_with_crawl_timeout(crawl_timeout, &url, async {
-                    self.crawl_concurrent(&client, &handle).await;
-                    self.sitemap_crawl_chain(&client, &handle, false).await;
-                })
+                run_with_crawl_timeout(
+                    crawl_timeout,
+                    &url,
+                    Box::pin(async {
+                        self.crawl_concurrent(&client, &handle).await;
+                        self.sitemap_crawl_chain(&client, &handle, false).await;
+                    }),
+                )
                 .await;
                 self.set_crawl_status();
                 drop(control_guard);
@@ -7483,9 +7501,13 @@ impl Website {
                 };
                 let crawl_timeout = self.configuration.crawl_timeout;
                 let url = self.url.inner().to_string();
-                run_with_crawl_timeout(crawl_timeout, &url, async {
-                    self.sitemap_crawl(&client, &handle, false).await;
-                })
+                run_with_crawl_timeout(
+                    crawl_timeout,
+                    &url,
+                    Box::pin(async {
+                        self.sitemap_crawl(&client, &handle, false).await;
+                    }),
+                )
                 .await;
                 self.set_crawl_status();
                 drop(control_guard);
@@ -7519,9 +7541,13 @@ impl Website {
                 };
                 let crawl_timeout = self.configuration.crawl_timeout;
                 let url = self.url.inner().to_string();
-                run_with_crawl_timeout(crawl_timeout, &url, async {
-                    self.sitemap_crawl_chrome(&client, &handle, false).await;
-                })
+                run_with_crawl_timeout(
+                    crawl_timeout,
+                    &url,
+                    Box::pin(async {
+                        self.sitemap_crawl_chrome(&client, &handle, false).await;
+                    }),
+                )
                 .await;
                 self.set_crawl_status();
                 drop(control_guard);
@@ -7586,9 +7612,13 @@ impl Website {
                 };
                 let crawl_timeout = self.configuration.crawl_timeout;
                 let u = self.url.inner().to_string();
-                run_with_crawl_timeout(crawl_timeout, &u, async {
-                    self.crawl_concurrent_raw_send(&client, &handle, &url).await;
-                })
+                run_with_crawl_timeout(
+                    crawl_timeout,
+                    &u,
+                    Box::pin(async {
+                        self.crawl_concurrent_raw_send(&client, &handle, &url).await;
+                    }),
+                )
                 .await;
                 drop(control_guard);
             }
@@ -7623,9 +7653,13 @@ impl Website {
                 };
                 let crawl_timeout = self.configuration.crawl_timeout;
                 let u = self.url.inner().to_string();
-                run_with_crawl_timeout(crawl_timeout, &u, async {
-                    self.crawl_concurrent_send(&client, &handle, &url).await;
-                })
+                run_with_crawl_timeout(
+                    crawl_timeout,
+                    &u,
+                    Box::pin(async {
+                        self.crawl_concurrent_send(&client, &handle, &url).await;
+                    }),
+                )
                 .await;
                 drop(control_guard);
             }
@@ -7717,9 +7751,13 @@ impl Website {
                 };
                 let crawl_timeout = self.configuration.crawl_timeout;
                 let url = self.url.inner().to_string();
-                run_with_crawl_timeout(crawl_timeout, &url, async {
-                    self.crawl_concurrent_smart(&client, &handle).await;
-                })
+                run_with_crawl_timeout(
+                    crawl_timeout,
+                    &url,
+                    Box::pin(async {
+                        self.crawl_concurrent_smart(&client, &handle).await;
+                    }),
+                )
                 .await;
                 self.set_crawl_status();
                 drop(control_guard);
@@ -7758,10 +7796,14 @@ impl Website {
                 };
                 let crawl_timeout = self.configuration.crawl_timeout;
                 let url = self.url.inner().to_string();
-                run_with_crawl_timeout(crawl_timeout, &url, async {
-                    self.crawl_concurrent_raw(&client, &handle).await;
-                    self.sitemap_crawl_chain_raw(&client, &handle, false).await;
-                })
+                run_with_crawl_timeout(
+                    crawl_timeout,
+                    &url,
+                    Box::pin(async {
+                        self.crawl_concurrent_raw(&client, &handle).await;
+                        self.sitemap_crawl_chain_raw(&client, &handle, false).await;
+                    }),
+                )
                 .await;
                 self.set_crawl_status();
                 drop(control_guard);
@@ -18814,3 +18856,6 @@ async fn chrome_cookie_jar_is_opt_in() {
     let _ = website.setup().await;
     assert!(website.configuration.session_jar.0.is_some());
 }
+
+#[cfg(test)]
+mod future_layout;

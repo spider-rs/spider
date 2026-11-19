@@ -5616,7 +5616,12 @@ impl Page {
             // DNS resolution happens. Adding a DNS hedge here would
             // burn a spawned task on every seeded call for no
             // possible benefit.
-            crate::utils::fetch_page_html_seeded(
+            //
+            // Boxed like the sibling arm below. Awaited inline, the
+            // seeded fetch made every `Page::new_base` future carry its
+            // whole state machine, seeded or not. The box is paid only
+            // when a seed is present.
+            Box::pin(crate::utils::fetch_page_html_seeded(
                 url,
                 client,
                 page,
@@ -5629,7 +5634,7 @@ impl Page {
                 cache_namespace,
                 params,
                 extract,
-            )
+            ))
             .await
         } else {
             // Non-seeded path runs the DNS hedge alongside chrome's
