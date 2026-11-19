@@ -6499,10 +6499,13 @@ impl Page {
         match self.html.as_deref() {
             None => {
                 #[cfg(all(feature = "balance", not(feature = "decentralized")))]
-                if self.html_spool_path.is_some() {
-                    return false;
+                {
+                    self.html_spool_path.is_none()
                 }
-                true
+                #[cfg(not(all(feature = "balance", not(feature = "decentralized"))))]
+                {
+                    true
+                }
             }
             Some(html) => {
                 let html = html.trim_ascii();
