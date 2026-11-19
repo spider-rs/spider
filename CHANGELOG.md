@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v2.54.2
+
+1. chore(deps): lockfile bumps past open RustSec advisories. `hickory-net`, `hickory-proto` and `hickory-resolver` 0.26.1 to 0.26.3, `quinn-udp` 0.5.15 to 0.5.16, `rustix` 1.1.4 to 1.1.6, `tokio` 1.53.1 to 1.53.3 (#453).
+
 ## v2.54.1
 
 1. perf(website): the crawl entry points box their crawl body. `run_with_crawl_timeout` stored a by-value body twice, so `Website::crawl` was a 58,520 byte future around a 29,104 byte body with `chrome,smart,sitemap`. It is now 2,968 bytes, and `website/future_layout.rs` holds a 16 KiB budget on each entry point.
