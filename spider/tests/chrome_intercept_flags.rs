@@ -7,11 +7,11 @@
 
 #[cfg(feature = "chrome")]
 mod chrome_intercept_flag_tests {
-    use chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused;
-    use chromiumoxide::cdp::browser_protocol::network::{
+    use chromey::cdp::browser_protocol::fetch::EventRequestPaused;
+    use chromey::cdp::browser_protocol::network::{
         Headers, Request, RequestId, RequestReferrerPolicy, ResourcePriority, ResourceType,
     };
-    use chromiumoxide::handler::network::{NetworkEvent, NetworkManager};
+    use chromey::handler::network::{NetworkEvent, NetworkManager};
     use std::time::Duration;
 
     /// Create a synthetic EventRequestPaused (mirrors chromey's test helper).
@@ -33,7 +33,7 @@ mod chrome_intercept_flag_tests {
                 is_same_site: Some(true),
                 is_ad_related: None,
             },
-            frame_id: chromiumoxide::cdp::browser_protocol::page::FrameId::from(
+            frame_id: chromey::cdp::browser_protocol::page::FrameId::from(
                 "frame1".to_string(),
             ),
             resource_type,

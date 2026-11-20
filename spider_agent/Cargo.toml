@@ -39,7 +39,7 @@ aho-corasick = "1"
 llm_models_spider = "0.1"
 
 # Browser (optional) - uses chromey (spider's chrome library)
-chromey = { version = "2", optional = true, default-features = false, features = [
+chromey = { version = "3", optional = true, default-features = false, features = [
     "bytes",
     "stream",
 ] }

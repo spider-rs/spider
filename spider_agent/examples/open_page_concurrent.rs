@@ -14,7 +14,7 @@
 //! OPENAI_API_KEY=your-key cargo run --example open_page_concurrent --features chrome
 //! ```
 
-use chromiumoxide::{Browser, BrowserConfig};
+use chromey::{Browser, BrowserConfig};
 use futures::StreamExt;
 use spider_agent::automation::{RemoteMultimodalConfig, RemoteMultimodalConfigs};
 use spider_agent::{
@@ -131,7 +131,7 @@ Do NOT use Click, Navigate, or any other action. ONLY use OpenPage.
 
         // Setup a page setup callback for event tracking propagation
         // In a real spider integration, this would setup ChromeEventTracker
-        let page_setup = std::sync::Arc::new(Box::new(|_page: &chromiumoxide::Page| {
+        let page_setup = std::sync::Arc::new(Box::new(|_page: &chromey::Page| {
             Box::pin(async move {
                 // Example: Setup event tracking on this spawned page
                 // In spider, you would call setup_chrome_events(page, tracker) here

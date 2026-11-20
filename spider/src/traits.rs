@@ -44,7 +44,7 @@ pub trait PageTimingExt: PageData {
 #[cfg_attr(docsrs, doc(cfg(feature = "chrome")))]
 pub trait PageChromeExt: PageData {
     /// The underlying Chrome DevTools Protocol page handle, if available.
-    fn chrome_page(&self) -> Option<&chromiumoxide::Page>;
+    fn chrome_page(&self) -> Option<&chromey::Page>;
     /// A screenshot of the page as raw bytes, if captured.
     fn screenshot_bytes(&self) -> Option<&[u8]>;
 }

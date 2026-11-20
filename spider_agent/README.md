@@ -114,7 +114,7 @@ println!("Summary: {}", research.summary.unwrap());
 | Feature | Description |
 |---------|-------------|
 | `openai` | OpenAI/OpenAI-compatible LLM provider |
-| `chrome` | Browser automation via chromiumoxide |
+| `chrome` | Browser automation via chromey |
 | `webdriver` | Browser automation via thirtyfour |
 | `search` | Base search functionality |
 | `search_serper` | Serper.dev search provider |

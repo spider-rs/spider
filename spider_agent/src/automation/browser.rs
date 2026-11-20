@@ -1,4 +1,4 @@
-//! Browser-specific automation methods for chromiumoxide integration.
+//! Browser-specific automation methods for chromey integration.
 //!
 //! This module provides browser automation capabilities that require a
 //! Chrome browser page. All methods are gated behind `#[cfg(feature = "chrome")]`.
@@ -6,7 +6,7 @@
 #[cfg(feature = "chrome")]
 use base64::{engine::general_purpose, Engine as _};
 #[cfg(feature = "chrome")]
-use chromiumoxide::{
+use chromey::{
     cdp::browser_protocol::page::CaptureScreenshotFormat, layout::Point, page::ScreenshotParams,
     Page,
 };
@@ -1011,7 +1011,7 @@ impl RemoteMultimodalEngine {
                                                 )
                                                 .await;
                                                 let _ = page
-                                                    .click(chromiumoxide::layout::Point::new(
+                                                    .click(chromey::layout::Point::new(
                                                         0.0, 0.0,
                                                     ))
                                                     .await; // defocus
@@ -1239,7 +1239,7 @@ impl RemoteMultimodalEngine {
                                                             Some((id, (x, y)))
                                                         })
                                                         .collect();
-                                                    use chromiumoxide::cdp::browser_protocol::input::{
+                                                    use chromey::cdp::browser_protocol::input::{
                                                         DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
                                                     };
                                                     let mut clicked_this_round = 0u32;
@@ -1392,7 +1392,7 @@ impl RemoteMultimodalEngine {
                                                 })
                                                 .collect();
                                             if coords.len() >= 2 {
-                                                use chromiumoxide::cdp::browser_protocol::input::{
+                                                use chromey::cdp::browser_protocol::input::{
                                                     DispatchMouseEventParams,
                                                     DispatchMouseEventType, MouseButton,
                                                 };
@@ -1580,7 +1580,7 @@ impl RemoteMultimodalEngine {
                                                 });
                                             }
                                             if !all_coords.is_empty() {
-                                                use chromiumoxide::cdp::browser_protocol::input::{
+                                                use chromey::cdp::browser_protocol::input::{
                                                     DispatchMouseEventParams,
                                                     DispatchMouseEventType, MouseButton,
                                                 };
@@ -2820,7 +2820,7 @@ impl RemoteMultimodalEngine {
     /// Creates a session and sends a trivial prompt to ensure the model
     /// is loaded and ready. Mirrors `warm_gemini_model` from solvers.rs.
     async fn warm_chrome_ai(page: &Page) -> EngineResult<()> {
-        use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
+        use chromey::cdp::js_protocol::runtime::EvaluateParams;
 
         // No try/catch — errors propagate to Rust so we can detect missing API.
         // First checks typeof to give a clear error before attempting .create().
@@ -2872,7 +2872,7 @@ impl RemoteMultimodalEngine {
     /// Called after errors or timeouts so the next retry creates a fresh session
     /// rather than reusing one that may be in a broken state (e.g. after navigation).
     async fn invalidate_chrome_ai_session(page: &Page) {
-        use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
+        use chromey::cdp::js_protocol::runtime::EvaluateParams;
         if let Ok(params) = EvaluateParams::builder()
             .expression(
                 "try{if(window.__spiderSession){window.__spiderSession.destroy();}window.__spiderSession=null;window.__spiderSessionHash=0;}catch(e){}",
@@ -2979,7 +2979,7 @@ impl RemoteMultimodalEngine {
             best_effort_parse_json_object, fnv1a64, CHROME_AI_SYSTEM_PROMPT,
             EXTRACTION_ONLY_SYSTEM_PROMPT,
         };
-        use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
+        use chromey::cdp::js_protocol::runtime::EvaluateParams;
 
         // ── Build system prompt (compact Chrome AI variant) ──
         let mut system_msg = if effective_cfg.is_extraction_only() {
@@ -4335,7 +4335,7 @@ return await s.prompt(msg);
                 let dur = std::time::Duration::from_millis(timeout.min(60_000));
                 if let Ok(mut events) = page
                     .event_listener::<
-                        chromiumoxide::cdp::browser_protocol::page::EventLoadEventFired,
+                        chromey::cdp::browser_protocol::page::EventLoadEventFired,
                     >()
                     .await
                 {
@@ -4546,7 +4546,7 @@ return await s.prompt(msg);
                         .unwrap_or(2.0);
                     let mobile = obj.get("mobile").and_then(|v| v.as_bool()).unwrap_or(false);
 
-                    use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
+                    use chromey::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
                     let params = SetDeviceMetricsOverrideParams::new(
                         width,
                         height,
@@ -5385,7 +5385,7 @@ impl Clone for SpawnPageOptions {
 /// ```
 #[cfg(feature = "chrome")]
 pub async fn run_spawn_pages_concurrent(
-    browser: &std::sync::Arc<chromiumoxide::browser::Browser>,
+    browser: &std::sync::Arc<chromey::browser::Browser>,
     urls: Vec<String>,
     cfgs: &super::RemoteMultimodalConfigs,
 ) -> Vec<SpawnedPageResult> {
@@ -5394,7 +5394,7 @@ pub async fn run_spawn_pages_concurrent(
 
 /// Closes a spawned automation page's browser target when it leaves scope.
 ///
-/// Dropping a chromiumoxide [`Page`] does **not** close the underlying CDP
+/// Dropping a chromey [`Page`] does **not** close the underlying CDP
 /// target, so each URL processed by the spawn-pages helpers would otherwise
 /// leak a tab for the lifetime of the shared `Browser`. This is the single
 /// in-crate tab guard ([`crate::browser::PageCloseGuard`]), aliased here under
@@ -5441,12 +5441,12 @@ type SpawnPageCloseGuard = crate::browser::PageCloseGuard;
 /// ```
 #[cfg(feature = "chrome")]
 pub async fn run_spawn_pages_with_options(
-    browser: &std::sync::Arc<chromiumoxide::browser::Browser>,
+    browser: &std::sync::Arc<chromey::browser::Browser>,
     urls: Vec<String>,
     base_cfgs: &super::RemoteMultimodalConfigs,
     options: SpawnPageOptions,
 ) -> Vec<SpawnedPageResult> {
-    use chromiumoxide::cdp::browser_protocol::network::EventDataReceived;
+    use chromey::cdp::browser_protocol::network::EventDataReceived;
     use dashmap::DashMap;
     use futures::StreamExt;
     use std::sync::atomic::{AtomicU64, Ordering};

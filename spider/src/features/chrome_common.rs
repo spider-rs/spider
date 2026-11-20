@@ -1,7 +1,7 @@
 use crate::utils::trie::Trie;
 
 #[cfg(feature = "chrome")]
-use chromiumoxide::handler::blockers::NetworkInterceptManager;
+use chromey::handler::blockers::NetworkInterceptManager;
 
 /// wrapper for non chrome interception. does nothing.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -139,18 +139,18 @@ pub enum CaptureScreenshotFormat {
 
 #[cfg(feature = "chrome")]
 impl From<CaptureScreenshotFormat>
-    for chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat
+    for chromey::cdp::browser_protocol::page::CaptureScreenshotFormat
 {
     fn from(format: CaptureScreenshotFormat) -> Self {
         match format {
             CaptureScreenshotFormat::Jpeg => {
-                chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Jpeg
+                chromey::cdp::browser_protocol::page::CaptureScreenshotFormat::Jpeg
             }
             CaptureScreenshotFormat::Png => {
-                chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png
+                chromey::cdp::browser_protocol::page::CaptureScreenshotFormat::Png
             }
             CaptureScreenshotFormat::Webp => {
-                chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Webp
+                chromey::cdp::browser_protocol::page::CaptureScreenshotFormat::Webp
             }
         }
     }
@@ -215,7 +215,7 @@ impl Viewport {
 }
 
 #[cfg(feature = "chrome")]
-impl From<Viewport> for chromiumoxide::handler::viewport::Viewport {
+impl From<Viewport> for chromey::handler::viewport::Viewport {
     fn from(viewport: Viewport) -> Self {
         Self {
             width: viewport.width,
@@ -279,7 +279,7 @@ pub struct ClipViewport {
 }
 
 #[cfg(feature = "chrome")]
-impl From<ClipViewport> for chromiumoxide::cdp::browser_protocol::page::Viewport {
+impl From<ClipViewport> for chromey::cdp::browser_protocol::page::Viewport {
     fn from(viewport: ClipViewport) -> Self {
         Self {
             x: viewport.x,
@@ -350,7 +350,7 @@ impl ScreenshotParams {
 }
 
 #[cfg(feature = "chrome")]
-impl From<ScreenshotParams> for chromiumoxide::page::ScreenshotParams {
+impl From<ScreenshotParams> for chromey::page::ScreenshotParams {
     fn from(params: ScreenshotParams) -> Self {
         let full_page = if params.full_page.is_some() {
             params.full_page.unwrap_or_default()
@@ -368,13 +368,13 @@ impl From<ScreenshotParams> for chromiumoxide::page::ScreenshotParams {
         let format = if params.cdp_params.format.is_some() {
             match params.cdp_params.format {
                 Some(v) => v.into(),
-                _ => chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png,
+                _ => chromey::cdp::browser_protocol::page::CaptureScreenshotFormat::Png,
             }
         } else {
-            chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png
+            chromey::cdp::browser_protocol::page::CaptureScreenshotFormat::Png
         };
 
-        let params_builder = chromiumoxide::page::ScreenshotParams::builder()
+        let params_builder = chromey::page::ScreenshotParams::builder()
             .format(format)
             .full_page(full_page)
             .omit_background(omit_background);
@@ -388,7 +388,7 @@ impl From<ScreenshotParams> for chromiumoxide::page::ScreenshotParams {
         let params_builder = if params.cdp_params.clip.is_some() {
             match params.cdp_params.clip {
                 Some(vp) => params_builder.clip(
-                    chromiumoxide::cdp::browser_protocol::page::Viewport::from(vp),
+                    chromey::cdp::browser_protocol::page::Viewport::from(vp),
                 ),
                 _ => params_builder,
             }
@@ -447,14 +447,14 @@ pub struct AuthChallengeResponse {
 
 #[cfg(feature = "chrome")]
 impl From<AuthChallengeResponse>
-    for chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse
+    for chromey::cdp::browser_protocol::fetch::AuthChallengeResponse
 {
     fn from(auth_challenge_response: AuthChallengeResponse) -> Self {
         Self {
             response: match auth_challenge_response.response {
-                AuthChallengeResponseResponse::CancelAuth => chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponseResponse::CancelAuth ,
-                AuthChallengeResponseResponse::ProvideCredentials => chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponseResponse::ProvideCredentials ,
-                AuthChallengeResponseResponse::Default => chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponseResponse::Default ,
+                AuthChallengeResponseResponse::CancelAuth => chromey::cdp::browser_protocol::fetch::AuthChallengeResponseResponse::CancelAuth ,
+                AuthChallengeResponseResponse::ProvideCredentials => chromey::cdp::browser_protocol::fetch::AuthChallengeResponseResponse::ProvideCredentials ,
+                AuthChallengeResponseResponse::Default => chromey::cdp::browser_protocol::fetch::AuthChallengeResponseResponse::Default ,
 
             },
             username: auth_challenge_response.username,
@@ -818,7 +818,7 @@ const CLICKABLE_SELECTOR: &str = concat!(
 impl WebAutomation {
     #[cfg(feature = "chrome")]
     /// Run the web automation step.
-    pub async fn run(&self, page: &chromiumoxide::Page) -> bool {
+    pub async fn run(&self, page: &chromey::Page) -> bool {
         use crate::utils::wait_for_selector;
         use std::time::Duration;
 
@@ -853,7 +853,7 @@ impl WebAutomation {
                 }
             }
             WebAutomation::ClickHoldPoint { x, y, hold_ms } => {
-                let pt = chromiumoxide::layout::Point { x: *x, y: *y };
+                let pt = chromey::layout::Point { x: *x, y: *y };
                 valid = page
                     .click_and_hold(pt, Duration::from_millis(*hold_ms))
                     .await
@@ -892,11 +892,11 @@ impl WebAutomation {
                 to_y,
                 modifier,
             } => {
-                let p1 = chromiumoxide::layout::Point {
+                let p1 = chromey::layout::Point {
                     x: *from_x,
                     y: *from_y,
                 };
-                let p2 = chromiumoxide::layout::Point { x: *to_x, y: *to_y };
+                let p2 = chromey::layout::Point { x: *to_x, y: *to_y };
 
                 valid = match modifier {
                     Some(m) => page
@@ -915,7 +915,7 @@ impl WebAutomation {
             }
             WebAutomation::ClickPoint { x, y } => {
                 valid = page
-                    .click_smooth(chromiumoxide::layout::Point { x: *x, y: *y })
+                    .click_smooth(chromey::layout::Point { x: *x, y: *y })
                     .await
                     .is_ok();
             }
@@ -936,7 +936,7 @@ impl WebAutomation {
             }
             WebAutomation::WaitForLoad { timeout } => {
                 crate::utils::wait_for_event::<
-                    chromiumoxide::cdp::browser_protocol::page::EventLoadEventFired,
+                    chromey::cdp::browser_protocol::page::EventLoadEventFired,
                 >(page, Some(Duration::from_millis(*timeout)))
                 .await;
                 valid = true;
@@ -1236,7 +1236,7 @@ pub fn convert_to_trie_automation_scripts(
 /// Eval execution scripts.
 #[cfg(feature = "chrome")]
 pub async fn eval_execution_scripts(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     target_url: &str,
     execution_scripts: &Option<ExecutionScripts>,
 ) {
@@ -1254,7 +1254,7 @@ pub async fn eval_execution_scripts(
 /// Run automation scripts.
 #[cfg(feature = "chrome")]
 pub async fn eval_automation_scripts(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     target_url: &str,
     automation_scripts: &Option<AutomationScripts>,
 ) {
@@ -1326,13 +1326,13 @@ fn gen_symbol_key() -> String {
 #[cfg(feature = "chrome")]
 /// Run automation scripts with state tracking.
 pub async fn eval_automation_scripts_tracking(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     target_url: &str,
     automation_scripts: &Option<AutomationScripts>,
     automation_data: &mut Vec<crate::page::AutomationResults>,
 ) {
     use base64::{engine::general_purpose::STANDARD, Engine};
-    use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
+    use chromey::cdp::js_protocol::runtime::EvaluateParams;
 
     fn eval_expr(expr: &str) -> EvaluateParams {
         EvaluateParams::builder()
@@ -1359,9 +1359,9 @@ pub async fn eval_automation_scripts_tracking(
     let _ = page.evaluate(eval_value(&drain)).await;
 
     /// The generic screenshot params.
-    fn ss_params() -> chromiumoxide::page::ScreenshotParams {
-        chromiumoxide::page::ScreenshotParams::builder()
-            .format(chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png)
+    fn ss_params() -> chromey::page::ScreenshotParams {
+        chromey::page::ScreenshotParams::builder()
+            .format(chromey::cdp::browser_protocol::page::CaptureScreenshotFormat::Png)
             .full_page(true)
             .quality(45)
             .omit_background(false)
@@ -1370,7 +1370,7 @@ pub async fn eval_automation_scripts_tracking(
 
     // Helper to drain recorded changes as a single JSON string
     async fn drain_changes_json(
-        page: &chromiumoxide::Page,
+        page: &chromey::Page,
         drain_eval: &str,
     ) -> Option<serde_json::Value> {
         if let Ok(eval) = page.evaluate(eval_value(drain_eval)).await {

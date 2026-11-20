@@ -113,7 +113,7 @@ async fn measure_chrome_first_byte_timing() {
         return;
     }
 
-    use chromiumoxide::cdp::browser_protocol::network::{EventDataReceived, EventResponseReceived};
+    use chromey::cdp::browser_protocol::network::{EventDataReceived, EventResponseReceived};
     use spider::tokio_stream::StreamExt;
 
     // Launch / connect chrome via spider's existing config plumbing —

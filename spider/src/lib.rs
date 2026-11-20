@@ -429,7 +429,12 @@ pub use traits::Crawler;
 pub use traits::PageData;
 
 #[cfg(feature = "chrome")]
-pub use chromiumoxide;
+pub use chromey;
+
+/// The old name of the [`chromey`] re-export, kept so `spider::chromiumoxide::` paths still compile.
+#[cfg(feature = "chrome")]
+#[doc(hidden)]
+pub use chromey as chromiumoxide;
 
 #[cfg(feature = "search")]
 pub use features::search;

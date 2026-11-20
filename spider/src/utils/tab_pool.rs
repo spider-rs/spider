@@ -1,7 +1,7 @@
 /// Pool of reusable Chrome CDP tabs backed by a bounded lock-free queue.
 /// Idle tabs are reused in FIFO order. Browser I/O happens outside the queue.
 pub struct TabPool {
-    slots: PoolSlots<chromiumoxide::Page>,
+    slots: PoolSlots<chromey::Page>,
 }
 
 struct PoolSlots<T> {
@@ -42,7 +42,7 @@ impl<T> PoolSlots<T> {
 
 /// Hand a pooled tab off to actually be closed.
 ///
-/// Dropping a `chromiumoxide::Page` does **not** close the underlying CDP tab — it only
+/// Dropping a `chromey::Page` does **not** close the underlying CDP tab — it only
 /// decrements an internal counter (see the note on
 /// [`crate::features::chrome::TabCloseGuard`]). Every path in this pool that stops
 /// holding a tab must route it through here, or the tab leaks and Chrome eventually
@@ -51,7 +51,7 @@ impl<T> PoolSlots<T> {
 /// Synchronous and infallible so it is safe to call from non-async paths such as
 /// [`TabPool::clear`], and from a `Drop` if this pool ever grows one.
 #[inline]
-fn close_pooled_tab(page: chromiumoxide::Page) {
+fn close_pooled_tab(page: chromey::Page) {
     #[cfg(not(feature = "decentralized"))]
     {
         // Reuse the crate-wide background closer: it dedups by `target_id` and bounds
@@ -82,8 +82,8 @@ impl TabPool {
     /// Acquire an idle tab, or create a new one.
     pub async fn acquire(
         &self,
-        browser: &chromiumoxide::Browser,
-    ) -> Result<chromiumoxide::Page, chromiumoxide::error::CdpError> {
+        browser: &chromey::Browser,
+    ) -> Result<chromey::Page, chromey::error::CdpError> {
         if let Some(page) = self.slots.pop() {
             return Ok(page);
         }
@@ -91,7 +91,7 @@ impl TabPool {
     }
 
     /// Clear page state and return it to the pool, closing surplus tabs.
-    pub async fn release(&self, page: chromiumoxide::Page) {
+    pub async fn release(&self, page: chromey::Page) {
         if self.slots.len() >= self.slots.max_size {
             close_pooled_tab(page);
             return;
@@ -130,7 +130,7 @@ impl TabPool {
     }
 }
 
-struct PendingTab(Option<chromiumoxide::Page>);
+struct PendingTab(Option<chromey::Page>);
 impl Drop for PendingTab {
     fn drop(&mut self) {
         if let Some(page) = self.0.take() {

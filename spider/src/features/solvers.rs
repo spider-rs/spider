@@ -1,7 +1,7 @@
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
-use chromiumoxide::{
+use chromey::{
     cdp::js_protocol::runtime::{CallFunctionOnParams, EvaluateParams},
     error::CdpError,
     layout::Point,
@@ -424,10 +424,10 @@ pub fn contains_verification(text: &Vec<u8>) -> bool {
 #[inline(always)]
 pub async fn cf_handle(
     b: &mut Vec<u8>,
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     target_url: &str,
     viewport: &Option<crate::configuration::Viewport>,
-) -> Result<bool, chromiumoxide::error::CdpError> {
+) -> Result<bool, chromey::error::CdpError> {
     let mut validated = false;
 
     let page_result = tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
@@ -452,7 +452,7 @@ pub async fn cf_handle(
                 }
             }
 
-            Ok::<(), chromiumoxide::error::CdpError>(())
+            Ok::<(), chromey::error::CdpError>(())
         };
 
         // get the csp settings before hand
@@ -554,13 +554,13 @@ pub async fn cf_handle(
             }
         }
 
-        Ok::<(), chromiumoxide::error::CdpError>(())
+        Ok::<(), chromey::error::CdpError>(())
     })
     .await;
 
     match page_result {
         Ok(_) => Ok(validated),
-        _ => Err(chromiumoxide::error::CdpError::Timeout),
+        _ => Err(chromey::error::CdpError::Timeout),
     }
 }
 
@@ -569,10 +569,10 @@ pub async fn cf_handle(
 #[inline(always)]
 pub async fn imperva_handle(
     b: &mut Vec<u8>,
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     _target_url: &str,
     viewport: &Option<crate::configuration::Viewport>,
-) -> Result<bool, chromiumoxide::error::CdpError> {
+) -> Result<bool, chromey::error::CdpError> {
     // -----------------------------------------------------------------
     // Fast‑path – bail out early if the response does not look like an
     // Imperva challenge at all.
@@ -585,8 +585,8 @@ pub async fn imperva_handle(
     // Drag‑helpers (unchanged)
     // -----------------------------------------------------------------
     #[inline(always)]
-    fn pt(x: f64, y: f64) -> chromiumoxide::layout::Point {
-        chromiumoxide::layout::Point { x, y }
+    fn pt(x: f64, y: f64) -> chromey::layout::Point {
+        chromey::layout::Point { x, y }
     }
 
     #[inline(always)]
@@ -954,13 +954,13 @@ fire(at(tx,ty)||el0,'mouseup',tx,ty);return true;}})()"#,
             }
         }
 
-        Ok::<(), chromiumoxide::error::CdpError>(())
+        Ok::<(), chromey::error::CdpError>(())
     })
     .await;
 
     match page_result {
         Ok(_) => Ok(validated),
-        _ => Err(chromiumoxide::error::CdpError::Timeout),
+        _ => Err(chromey::error::CdpError::Timeout),
     }
 }
 
@@ -969,7 +969,7 @@ fire(at(tx,ty)||el0,'mouseup',tx,ty);return true;}})()"#,
 /// `src` attribute equals `src`.  The image is already loaded in the
 /// page, so this does **not** trigger a network request – it draws the
 /// image onto a temporary canvas and reads the data‑URL from that canvas.
-async fn extract_image_dataurl(page: &chromiumoxide::Page, src: &str) -> Result<String, CdpError> {
+async fn extract_image_dataurl(page: &chromey::Page, src: &str) -> Result<String, CdpError> {
     // JavaScript that receives the exact `src` value, finds the <img>,
     // draws it onto a canvas, and returns `canvas.toDataURL()`.
     let js = format!(
@@ -999,7 +999,7 @@ async fn extract_image_dataurl(page: &chromiumoxide::Page, src: &str) -> Result<
 /// falls back to the external Gemini HTTP call when the helper is missing.
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
 pub async fn solve_enterprise_with_browser_gemini(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     challenge: &RcEnterpriseChallenge<'_>,
     timeout_ms: u64,
 ) -> Result<Vec<u8>, CdpError> {
@@ -1027,7 +1027,7 @@ pub async fn solve_enterprise_with_browser_gemini(
 /// `dataurl` field (the image as a `data:image/...;base64,…` string).
 #[cfg(all(feature = "chrome", feature = "real_browser"))]
 async fn solve_with_inpage_helper(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     tiles_json: &[serde_json::Value],
     target: &str,
     timeout_ms: u64,
@@ -1248,7 +1248,7 @@ pub async fn warm_gemini_model(page: &Page) -> Result<(), CdpError> {
 #[inline(always)]
 pub async fn recaptcha_handle(
     b: &mut Vec<u8>,
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     viewport: &Option<crate::configuration::Viewport>,
 ) -> Result<bool, CdpError> {
     if !detect_recaptcha(b.as_slice()) {
@@ -1313,7 +1313,7 @@ pub async fn recaptcha_handle(
                 }
 
                 // 2️⃣  Click the classic checkbox (same logic as before).
-                async fn click_anchor(page: &chromiumoxide::Page) -> bool {
+                async fn click_anchor(page: &chromey::Page) -> bool {
                     if let Ok(els) = page.find_elements_pierced(r#"#recaptcha-anchor"#).await {
                         if let Some(el) = els.into_iter().next() {
                             return match el.clickable_point().await {
@@ -2502,7 +2502,7 @@ pub async fn geetest_handle(
                         page: &Page,
                         sel_a: &str,
                         sel_b: &str,
-                    ) -> Result<chromiumoxide::Element, CdpError> {
+                    ) -> Result<chromey::Element, CdpError> {
                         // Try selector A.
                         if let Ok(els) = page.find_elements_pierced(sel_a).await {
                             if let Some(el) = els.into_iter().next() {

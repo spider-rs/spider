@@ -147,7 +147,7 @@ pub use spider_agent::automation::{
 
 // Chrome page type for browser automation (needed for both agent and stub implementations)
 #[cfg(feature = "chrome")]
-use chromiumoxide::Page;
+use chromey::Page;
 
 // =============================================================================
 // Types from spider_agent_types (always available, no heavy deps)
@@ -788,8 +788,8 @@ impl AutomationResultExt for AutomationResult {
 /// ```
 #[cfg(all(feature = "agent", feature = "agent_chrome"))]
 pub async fn process_spawn_pages_with_config(
-    browser: &std::sync::Arc<chromiumoxide::browser::Browser>,
-    browser_context_id: &Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
+    browser: &std::sync::Arc<chromey::browser::Browser>,
+    browser_context_id: &Option<chromey::cdp::browser_protocol::browser::BrowserContextId>,
     urls: Vec<String>,
     mm_cfgs: &RemoteMultimodalConfigs,
     spider_config: &crate::configuration::Configuration,
@@ -824,7 +824,7 @@ pub async fn process_spawn_pages_with_config(
         let url_clone = url.clone();
 
         handles.push(tokio::spawn(async move {
-            use chromiumoxide::cdp::browser_protocol::network::EventDataReceived;
+            use chromey::cdp::browser_protocol::network::EventDataReceived;
             use tokio_stream::StreamExt;
 
             // Create new page using attempt_navigation (spider's standard approach)
