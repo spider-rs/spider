@@ -8,7 +8,7 @@
 //! - **Feature-gated**: Only include dependencies you need
 //! - **Multiple LLM providers**: OpenAI, OpenAI-compatible APIs
 //! - **Multiple search providers**: Serper, Brave, Bing, Tavily
-//! - **Browser automation**: Chrome support via chromiumoxide
+//! - **Browser automation**: Chrome support via chromey
 //!
 //! ## Quick Start
 //!

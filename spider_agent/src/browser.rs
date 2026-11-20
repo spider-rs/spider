@@ -11,16 +11,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 // Re-export chromey types
-pub use chromiumoxide::browser::Browser;
-pub use chromiumoxide::error::CdpError;
-pub use chromiumoxide::page::Page;
+pub use chromey::browser::Browser;
+pub use chromey::error::CdpError;
+pub use chromey::page::Page;
 
 /// How long a detached `page.close()` may run before it is abandoned.
 const CLOSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Closes a Chrome page's CDP target when the guard leaves scope.
 ///
-/// Dropping a chromiumoxide [`Page`] does **not** close the underlying CDP
+/// Dropping a chromey [`Page`] does **not** close the underlying CDP
 /// target — it only decrements an internal counter. Every page the agent
 /// creates and forgets therefore leaks a browser tab for the lifetime of the
 /// shared [`Browser`], until `new_page()` hangs and the browser wedges. This
@@ -304,7 +304,7 @@ impl BrowserContext {
     pub async fn screenshot(&self) -> Result<Vec<u8>, CdpError> {
         self.page
             .screenshot(
-                chromiumoxide::page::ScreenshotParams::builder()
+                chromey::page::ScreenshotParams::builder()
                     .full_page(true)
                     .build(),
             )
@@ -315,7 +315,7 @@ impl BrowserContext {
     pub async fn screenshot_viewport(&self) -> Result<Vec<u8>, CdpError> {
         self.page
             .screenshot(
-                chromiumoxide::page::ScreenshotParams::builder()
+                chromey::page::ScreenshotParams::builder()
                     .full_page(false)
                     .build(),
             )
@@ -342,7 +342,7 @@ impl BrowserContext {
 
     /// Click at specific x,y coordinates with smooth human-like mouse movement.
     pub async fn click_point(&self, x: f64, y: f64) -> Result<(), CdpError> {
-        use chromiumoxide::layout::Point;
+        use chromey::layout::Point;
         self.page.click_smooth(Point::new(x, y)).await?;
         Ok(())
     }
@@ -360,7 +360,7 @@ impl BrowserContext {
 
     /// Click and hold at a specific point with smooth mouse movement.
     pub async fn click_hold_point(&self, x: f64, y: f64, hold_ms: u64) -> Result<(), CdpError> {
-        use chromiumoxide::layout::Point;
+        use chromey::layout::Point;
         let point = Point::new(x, y);
         self.page.move_mouse_smooth(point).await?;
         self.page
@@ -397,7 +397,7 @@ impl BrowserContext {
         to: (f64, f64),
         modifier: Option<i64>,
     ) -> Result<(), CdpError> {
-        use chromiumoxide::layout::Point;
+        use chromey::layout::Point;
         let from_point = Point::new(from.0, from.1);
         let to_point = Point::new(to.0, to.1);
         match modifier {
@@ -610,9 +610,7 @@ impl BrowserContext {
         element.click().await?;
 
         // Clear with keyboard
-        use chromiumoxide::cdp::browser_protocol::input::{
-            DispatchKeyEventParams, DispatchKeyEventType,
-        };
+        use chromey::cdp::browser_protocol::input::{DispatchKeyEventParams, DispatchKeyEventType};
         self.page
             .execute(
                 DispatchKeyEventParams::builder()
@@ -642,7 +640,7 @@ impl BrowserContext {
     pub async fn find_elements(
         &self,
         selector: &str,
-    ) -> Result<Vec<chromiumoxide::element::Element>, CdpError> {
+    ) -> Result<Vec<chromey::element::Element>, CdpError> {
         self.page.find_elements(selector).await
     }
 

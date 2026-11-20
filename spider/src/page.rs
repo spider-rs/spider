@@ -985,13 +985,13 @@ fn is_chrome_hedge_trigger_error(error_text: &str) -> bool {
 /// match — no busy poll, no Mutex, no lock held across the await.
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 async fn spawn_chrome_loading_failed_signal(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
 ) -> Option<(
     std::sync::Arc<tokio::sync::Notify>,
     tokio::task::JoinHandle<()>,
 )> {
     let stream = page
-        .event_listener::<chromiumoxide::cdp::browser_protocol::network::EventLoadingFailed>()
+        .event_listener::<chromey::cdp::browser_protocol::network::EventLoadingFailed>()
         .await
         .ok()?;
     let notify = std::sync::Arc::new(tokio::sync::Notify::new());
@@ -1007,7 +1007,7 @@ async fn spawn_chrome_loading_failed_signal(
             // overall page navigation.
             if matches!(
                 event.r#type,
-                chromiumoxide::cdp::browser_protocol::network::ResourceType::Document
+                chromey::cdp::browser_protocol::network::ResourceType::Document
             ) && is_chrome_hedge_trigger_error(&event.error_text)
             {
                 notify_clone.notify_one();
@@ -1071,17 +1071,17 @@ impl Drop for ChromeEventTaskAbortGuard {
 /// / `unwrap_or`.
 ///
 /// **Drop safety.** When the hedge wins, `fetch_fut` is dropped
-/// after `page.stop_loading()` resolves. Chromiumoxide's `page.goto`
+/// after `page.stop_loading()` resolves. chromey's `page.goto`
 /// future drops cleanly (no CDP state machine corruption — the
 /// underlying `chromey::Handler` owns the connection and continues
-/// servicing it) and the pool-returned `chromiumoxide::Page` is
+/// servicing it) and the pool-returned `chromey::Page` is
 /// reusable. The atomic signal lives on the DNS task; if the task
 /// outlives the hedge it sets the signal and exits — the orphaned
 /// Arc<AtomicU8> drops with the task. No leaks.
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 async fn chrome_navigation_with_dns_hedge<'a>(
     url: &str,
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     mut fetch_fut: std::pin::Pin<
         Box<dyn std::future::Future<Output = crate::utils::PageResponse> + Send + 'a>,
     >,
@@ -1863,7 +1863,7 @@ pub(crate) fn get_error_http_status_code(err: &crate::client::Error) -> StatusCo
 #[cfg(all(not(feature = "decentralized"), feature = "smart"))]
 #[inline]
 fn is_tracker_script(src: &str) -> bool {
-    use chromiumoxide::spider_network_blocker;
+    use chromey::spider_network_blocker;
     if src.starts_with("http") {
         // Absolute URL — trie prefix match against known tracker domains.
         spider_network_blocker::scripts::URL_IGNORE_TRIE.contains_prefix(src)
@@ -2455,7 +2455,7 @@ pub struct Page {
     duration: Option<Instant>,
     #[cfg(feature = "chrome")]
     /// Page object for chrome. The page may be closed when accessing it on another thread from concurrency.
-    chrome_page: Option<chromiumoxide::Page>,
+    chrome_page: Option<chromey::Page>,
     #[cfg(feature = "chrome")]
     /// The screenshot bytes of the page.
     pub screenshot_bytes: Option<Vec<u8>>,
@@ -5566,7 +5566,7 @@ impl Page {
     pub(crate) async fn new_base<'h>(
         url: &str,
         client: &Client,
-        page: &chromiumoxide::Page,
+        page: &chromey::Page,
         page_set: bool,
         referrer: Option<String>,
         max_page_bytes: Option<f64>,
@@ -5728,7 +5728,7 @@ impl Page {
     pub async fn new(
         url: &str,
         client: &Client,
-        page: &chromiumoxide::Page,
+        page: &chromey::Page,
         page_set: bool,
         referrer: Option<String>,
         max_page_bytes: Option<f64>,
@@ -5775,7 +5775,7 @@ impl Page {
     pub(crate) async fn new_streaming<A>(
         url: &str,
         client: &Client,
-        page: &chromiumoxide::Page,
+        page: &chromey::Page,
         page_set: bool,
         referrer: Option<String>,
         max_page_bytes: Option<f64>,
@@ -6024,7 +6024,7 @@ impl Page {
     pub async fn new_seeded(
         url: &str,
         client: &Client,
-        page: &chromiumoxide::Page,
+        page: &chromey::Page,
         page_set: bool,
         referrer: Option<String>,
         max_page_bytes: Option<f64>,
@@ -6065,7 +6065,7 @@ impl Page {
     pub(crate) async fn new_seeded_streaming<A>(
         url: &str,
         client: &Client,
-        page: &chromiumoxide::Page,
+        page: &chromey::Page,
         page_set: bool,
         referrer: Option<String>,
         max_page_bytes: Option<f64>,
@@ -6375,12 +6375,10 @@ impl Page {
     ) -> Vec<u8> {
         match &page.chrome_page {
             Some(chrome_page) => {
-                let format: chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat =
-                    chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::from(
-                        format,
-                    );
+                let format: chromey::cdp::browser_protocol::page::CaptureScreenshotFormat =
+                    chromey::cdp::browser_protocol::page::CaptureScreenshotFormat::from(format);
 
-                let screenshot_configs = chromiumoxide::page::ScreenshotParams::builder()
+                let screenshot_configs = chromey::page::ScreenshotParams::builder()
                     .format(format)
                     .full_page(full_page)
                     .omit_background(omit_background);
@@ -6391,9 +6389,8 @@ impl Page {
                 };
 
                 let screenshot_configs = match clip {
-                    Some(vp) => screenshot_configs.clip(
-                        chromiumoxide::cdp::browser_protocol::page::Viewport::from(vp),
-                    ),
+                    Some(vp) => screenshot_configs
+                        .clip(chromey::cdp::browser_protocol::page::Viewport::from(vp)),
                     _ => screenshot_configs,
                 };
 
@@ -6467,13 +6464,13 @@ impl Page {
 
     #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
     /// Get the chrome page used. The feature flag `chrome` is required.
-    pub fn get_chrome_page(&self) -> Option<&chromiumoxide::Page> {
+    pub fn get_chrome_page(&self) -> Option<&chromey::Page> {
         self.chrome_page.as_ref()
     }
 
     #[cfg(all(feature = "chrome", feature = "decentralized"))]
     /// Get the chrome page used. The feature flag `chrome` is required.
-    pub fn get_chrome_page(&self) -> Option<&chromiumoxide::Page> {
+    pub fn get_chrome_page(&self) -> Option<&chromey::Page> {
         None
     }
 
@@ -6482,7 +6479,7 @@ impl Page {
     pub async fn close_page(&mut self) {
         if let Some(page) = self.chrome_page.as_mut() {
             let _ = page
-                .send_command(chromiumoxide::cdp::browser_protocol::page::CloseParams::default())
+                .send_command(chromey::cdp::browser_protocol::page::CloseParams::default())
                 .await;
         }
     }
@@ -8587,9 +8584,7 @@ impl Page {
                             let abs = convert_abs_path(base, &src);
 
                             if abs.path_segments().is_some_and(|mut segs| {
-                                segs.any(|p| {
-                                    chromiumoxide::handler::network::ALLOWED_MATCHER.is_match(p)
-                                })
+                                segs.any(|p| chromey::handler::network::ALLOWED_MATCHER.is_match(p))
                             }) {
                                 upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
                             }
@@ -9161,7 +9156,7 @@ impl Page {
 
                                 if abs.path_segments().is_some_and(|mut segs| {
                                     segs.any(|p| {
-                                        chromiumoxide::handler::network::ALLOWED_MATCHER.is_match(p)
+                                        chromey::handler::network::ALLOWED_MATCHER.is_match(p)
                                     })
                                 }) {
                                     upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
@@ -14289,7 +14284,7 @@ impl crate::traits::PageTimingExt for Page {
 #[cfg(feature = "chrome")]
 impl crate::traits::PageChromeExt for Page {
     #[inline]
-    fn chrome_page(&self) -> Option<&chromiumoxide::Page> {
+    fn chrome_page(&self) -> Option<&chromey::Page> {
         self.get_chrome_page()
     }
 

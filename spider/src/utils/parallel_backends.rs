@@ -810,7 +810,7 @@ pub async fn fetch_cdp(
     // Connect with a short timeout so down backends fail fast.
     let connect_result = tokio::time::timeout(
         connect_timeout,
-        chromiumoxide::Browser::connect_with_config(endpoint, handler_config),
+        chromey::Browser::connect_with_config(endpoint, handler_config),
     )
     .await;
 
@@ -840,12 +840,12 @@ pub async fn fetch_cdp(
     // remote browser's storage/cookies are freed even when the connection
     // stays alive (e.g. pooled connections).
     let mut ctx_params =
-        chromiumoxide::cdp::browser_protocol::target::CreateBrowserContextParams::default();
+        chromey::cdp::browser_protocol::target::CreateBrowserContextParams::default();
     ctx_params.dispose_on_detach = Some(true);
     if let Some(ref proxy_addr) = proxy {
         ctx_params.proxy_server = Some(proxy_addr.clone());
     }
-    let context_id: Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId> =
+    let context_id: Option<chromey::cdp::browser_protocol::browser::BrowserContextId> =
         match browser.create_browser_context(ctx_params).await {
             Ok(ctx) => {
                 let _ = browser.send_new_context(ctx.clone()).await;

@@ -4032,7 +4032,7 @@ impl Website {
     #[cfg(all(feature = "chrome", feature = "chrome_intercept"))]
     pub async fn setup_chrome_interception(
         &self,
-        page: &chromiumoxide::Page,
+        page: &chromey::Page,
     ) -> Option<tokio::task::JoinHandle<()>> {
         crate::features::chrome::setup_chrome_interception_base(
             page,
@@ -4048,7 +4048,7 @@ impl Website {
     #[cfg(all(feature = "chrome", not(feature = "chrome_intercept")))]
     pub async fn setup_chrome_interception(
         &self,
-        _chrome_page: &chromiumoxide::Page,
+        _chrome_page: &chromey::Page,
     ) -> Option<tokio::task::JoinHandle<()>> {
         None
     }
@@ -5193,13 +5193,13 @@ impl Website {
         client: &Client,
         base: &mut RelativeSelectors,
         _: bool,
-        chrome_page: &chromiumoxide::Page,
+        chrome_page: &chromey::Page,
         // Gateway re-acquire inputs: the primary browser (for `websocket_address()`)
         // and its `browser_dead` flag. Used to re-dial the gateway for a fresh
         // acquisition on a dead-browser / gateway-timeout failure. (The endpoint
         // may resolve to a gateway ingress rather than a specific backend, so
         // this is a fresh acquisition retry, not a pinned reconnect.)
-        browser: &chromiumoxide::Browser,
+        browser: &chromey::Browser,
         browser_dead: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> HashSet<CaseInsensitiveString> {
         if self.skip_initial {
@@ -5667,9 +5667,9 @@ impl Website {
         client: &Client,
         base: &mut RelativeSelectors,
         url: &Option<&str>,
-        chrome_page: &chromiumoxide::Page,
+        chrome_page: &chromey::Page,
         // Gateway re-acquire inputs (see `crawl_establish`).
-        browser: &chromiumoxide::Browser,
+        browser: &chromey::Browser,
         browser_dead: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> HashSet<CaseInsensitiveString> {
         if self
@@ -6367,11 +6367,11 @@ impl Website {
         client: &Client,
         base: &mut RelativeSelectors,
         _: bool,
-        page: &chromiumoxide::Page,
+        page: &chromey::Page,
         // Gateway re-acquire inputs — accepted for signature parity with the
         // non-glob `crawl_establish`; the per-glob-link loop does not yet wire
         // the re-acquire.
-        _browser: &chromiumoxide::Browser,
+        _browser: &chromey::Browser,
         _browser_dead: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> HashSet<CaseInsensitiveString> {
         if self.skip_initial {
@@ -13412,7 +13412,7 @@ impl Website {
     ) -> Option<crate::features::chrome::BrowserController> {
         match crate::features::chrome::launch_browser_cookies(config, url_parsed, jar).await {
             Some((browser, browser_handle, context_id, browser_dead, connected_url)) => {
-                let browser: Arc<chromiumoxide::Browser> = Arc::new(browser);
+                let browser: Arc<chromey::Browser> = Arc::new(browser);
                 let b = (browser, Some(browser_handle), context_id);
 
                 Some(crate::features::chrome::BrowserController::new(

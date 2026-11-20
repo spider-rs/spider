@@ -722,9 +722,9 @@ impl PageResponse {
 
 /// wait for event with timeout
 #[cfg(feature = "chrome")]
-pub async fn wait_for_event<T>(page: &chromiumoxide::Page, timeout: Option<core::time::Duration>)
+pub async fn wait_for_event<T>(page: &chromey::Page, timeout: Option<core::time::Duration>)
 where
-    T: chromiumoxide::cdp::IntoEventKind + Unpin + std::fmt::Debug,
+    T: chromey::cdp::IntoEventKind + Unpin + std::fmt::Debug,
 {
     if let Ok(mut events) = page.event_listener::<T>().await {
         let wait_until = async {
@@ -756,7 +756,7 @@ where
 /// wait for a selector
 #[cfg(feature = "chrome")]
 pub async fn wait_for_selector(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     timeout: Option<core::time::Duration>,
     selector: &str,
 ) -> bool {
@@ -797,7 +797,7 @@ pub async fn wait_for_selector(
 /// wait for dom to finish updating target selector
 #[cfg(feature = "chrome")]
 pub async fn wait_for_dom(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     timeout: Option<core::time::Duration>,
     selector: &str,
 ) {
@@ -853,17 +853,14 @@ pub async fn create_output_path(
 /// Wait for page events in two phases:
 /// 1. Network waits run concurrently (resources must arrive before DOM settles).
 /// 2. Selector + DOM + delay run concurrently (check rendering results).
-pub async fn page_wait(
-    page: &chromiumoxide::Page,
-    wait_for: &Option<crate::configuration::WaitFor>,
-) {
+pub async fn page_wait(page: &chromey::Page, wait_for: &Option<crate::configuration::WaitFor>) {
     if let Some(wait_for) = wait_for {
         // Phase 1: wait for network to settle (all network conditions concurrent).
         tokio::join!(
             async {
                 if let Some(wait) = &wait_for.idle_network {
                     wait_for_event::<
-                        chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished,
+                        chromey::cdp::browser_protocol::network::EventLoadingFinished,
                     >(page, wait.timeout)
                     .await;
                 }
@@ -1379,10 +1376,10 @@ lazy_static::lazy_static! {
 /// `ChromeMessage` borrows the message string with zero allocations; other
 /// variants materialise Display exactly once and scan that buffer.
 #[inline]
-fn cdp_error_matches(err: &chromiumoxide::error::CdpError, ac: &aho_corasick::AhoCorasick) -> bool {
+fn cdp_error_matches(err: &chromey::error::CdpError, ac: &aho_corasick::AhoCorasick) -> bool {
     match err {
         // Fast path: borrow the message — zero allocations.
-        chromiumoxide::error::CdpError::ChromeMessage(msg) => ac.is_match(msg.as_str()),
+        chromey::error::CdpError::ChromeMessage(msg) => ac.is_match(msg.as_str()),
         // Slow path: materialise Display once, then a single AC pass.
         other => ac.is_match(other.to_string().as_str()),
     }
@@ -1391,14 +1388,14 @@ fn cdp_error_matches(err: &chromiumoxide::error::CdpError, ac: &aho_corasick::Ah
 #[cfg(feature = "chrome")]
 /// Is a cipher mismatch.
 #[inline]
-fn is_cipher_mismatch(err: &chromiumoxide::error::CdpError) -> bool {
+fn is_cipher_mismatch(err: &chromey::error::CdpError) -> bool {
     cdp_error_matches(err, &CHROME_CIPHER_MISMATCH_AC)
 }
 
 #[cfg(feature = "chrome")]
 /// Is an SSL protocol error (e.g. multi-subdomain www. cert issues).
 #[inline]
-fn is_ssl_protocol_error(err: &chromiumoxide::error::CdpError) -> bool {
+fn is_ssl_protocol_error(err: &chromey::error::CdpError) -> bool {
     cdp_error_matches(err, &CHROME_SSL_PROTOCOL_AC)
 }
 
@@ -1411,7 +1408,7 @@ fn is_ssl_protocol_error(err: &chromiumoxide::error::CdpError) -> bool {
 /// fast path stays zero-allocation; non-ChromeMessage variants materialise
 /// Display exactly once.
 #[inline]
-fn is_chrome_ssl_failure(err: &chromiumoxide::error::CdpError) -> bool {
+fn is_chrome_ssl_failure(err: &chromey::error::CdpError) -> bool {
     cdp_error_matches(err, &CHROME_SSL_ANY_AC)
 }
 
@@ -1457,15 +1454,15 @@ pub fn strip_www(url: &str) -> Option<String> {
 #[cfg(feature = "chrome")]
 /// Perform a chrome http request.
 pub async fn perform_chrome_http_request(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     source: &str,
     referrer: Option<String>,
-) -> Result<ChromeHTTPReqRes, chromiumoxide::error::CdpError> {
+) -> Result<ChromeHTTPReqRes, chromey::error::CdpError> {
     async fn attempt_once(
-        page: &chromiumoxide::Page,
+        page: &chromey::Page,
         source: &str,
         referrer: Option<String>,
-    ) -> Result<ChromeHTTPReqRes, chromiumoxide::error::CdpError> {
+    ) -> Result<ChromeHTTPReqRes, chromey::error::CdpError> {
         let mut waf_check = false;
         // Default to 599 (unknown) — only set 200 when we actually get a
         // valid HTTP response from Chrome.  This ensures callers see a
@@ -1480,16 +1477,13 @@ pub async fn perform_chrome_http_request(
 
         let frame_id = page.mainframe().await?;
 
-        let page_base =
-            page.http_future(chromiumoxide::cdp::browser_protocol::page::NavigateParams {
-                url: source.to_string(),
-                transition_type: Some(
-                    chromiumoxide::cdp::browser_protocol::page::TransitionType::Other,
-                ),
-                frame_id,
-                referrer,
-                referrer_policy: None,
-            })?;
+        let page_base = page.http_future(chromey::cdp::browser_protocol::page::NavigateParams {
+            url: source.to_string(),
+            transition_type: Some(chromey::cdp::browser_protocol::page::TransitionType::Other),
+            frame_id,
+            referrer,
+            referrer_policy: None,
+        })?;
 
         match page_base.await {
             Ok(page_base) => {
@@ -1640,7 +1634,7 @@ pub async fn perform_chrome_http_request(
             // Navigation-loop guard tripped. Surface as 310 (same bucket as
             // ERR_TOO_MANY_REDIRECTS) so retry paths treat it as permanent —
             // replaying a JS/meta-refresh loop is deterministic and wasteful.
-            if let chromiumoxide::error::CdpError::TooManyNavigations(_) = e {
+            if let chromey::error::CdpError::TooManyNavigations(_) = e {
                 return Ok(ChromeHTTPReqRes {
                     waf_check: false,
                     status_code: *crate::page::TOO_MANY_REDIRECTS_ERROR,
@@ -1659,21 +1653,21 @@ pub async fn perform_chrome_http_request(
 #[cfg(all(feature = "chrome", feature = "chrome_remote_cache"))]
 /// Perform a http future with chrome cached.
 pub async fn perform_chrome_http_request_cache(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     source: &str,
     referrer: Option<String>,
     cache_options: &Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
     cache_namespace: Option<&str>,
-) -> Result<ChromeHTTPReqRes, chromiumoxide::error::CdpError> {
+) -> Result<ChromeHTTPReqRes, chromey::error::CdpError> {
     async fn attempt_once(
-        page: &chromiumoxide::Page,
+        page: &chromey::Page,
         source: &str,
         referrer: Option<String>,
         cache_options: &Option<CacheOptions>,
         cache_policy: &Option<BasicCachePolicy>,
         cache_namespace: Option<&str>,
-    ) -> Result<ChromeHTTPReqRes, chromiumoxide::error::CdpError> {
+    ) -> Result<ChromeHTTPReqRes, chromey::error::CdpError> {
         let mut waf_check = false;
         let mut status_code = *crate::page::UNKNOWN_STATUS_ERROR;
         let mut method = String::from("GET");
@@ -1685,11 +1679,9 @@ pub async fn perform_chrome_http_request_cache(
 
         let frame_id = page.mainframe().await?;
 
-        let cmd = chromiumoxide::cdp::browser_protocol::page::NavigateParams {
+        let cmd = chromey::cdp::browser_protocol::page::NavigateParams {
             url: source.to_string(),
-            transition_type: Some(
-                chromiumoxide::cdp::browser_protocol::page::TransitionType::Other,
-            ),
+            transition_type: Some(chromey::cdp::browser_protocol::page::TransitionType::Other),
             frame_id,
             referrer,
             referrer_policy: None,
@@ -1868,7 +1860,7 @@ pub async fn perform_chrome_http_request_cache(
                 return Ok(ssl_handshake_permanent_response());
             }
             // Navigation-loop guard — reuse 310 permanent classification.
-            if let chromiumoxide::error::CdpError::TooManyNavigations(_) = e {
+            if let chromey::error::CdpError::TooManyNavigations(_) = e {
                 return Ok(ChromeHTTPReqRes {
                     waf_check: false,
                     status_code: *crate::page::TOO_MANY_REDIRECTS_ERROR,
@@ -1888,7 +1880,7 @@ pub async fn perform_chrome_http_request_cache(
 #[cfg(all(feature = "chrome", not(feature = "openai")))]
 pub async fn run_openai_request(
     _source: &str,
-    _page: &chromiumoxide::Page,
+    _page: &chromey::Page,
     _wait_for: &Option<crate::configuration::WaitFor>,
     _openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
     _page_response: &mut PageResponse,
@@ -1900,7 +1892,7 @@ pub async fn run_openai_request(
 #[cfg(all(feature = "chrome", feature = "openai"))]
 pub async fn run_openai_request(
     source: &str,
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     wait_for: &Option<crate::configuration::WaitFor>,
     openai_config: &Option<Box<crate::configuration::GPTConfigs>>,
     page_response: &mut PageResponse,
@@ -1993,9 +1985,10 @@ pub async fn run_openai_request(
                 // attach the data to the page
                 if gpt_configs.extra_ai_data {
                     let screenshot_bytes = if gpt_configs.screenshot && !json_res.js.is_empty() {
-                        let format = chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png;
+                        let format =
+                            chromey::cdp::browser_protocol::page::CaptureScreenshotFormat::Png;
 
-                        let screenshot_configs = chromiumoxide::page::ScreenshotParams::builder()
+                        let screenshot_configs = chromey::page::ScreenshotParams::builder()
                             .format(format)
                             .full_page(true)
                             .quality(45)
@@ -2289,11 +2282,11 @@ fn sub_duration(
 /// Get the initial page headers of the page with navigation.
 #[cfg(feature = "chrome")]
 async fn navigate(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     url: &str,
     chrome_http_req_res: &mut ChromeHTTPReqRes,
     referrer: Option<String>,
-) -> Result<(), chromiumoxide::error::CdpError> {
+) -> Result<(), chromey::error::CdpError> {
     *chrome_http_req_res = perform_chrome_http_request(page, url, referrer).await?;
     Ok(())
 }
@@ -2301,14 +2294,14 @@ async fn navigate(
 /// Get the initial page headers of the page with navigation from the remote cache.
 #[cfg(all(feature = "chrome", feature = "chrome_remote_cache"))]
 async fn navigate_cache(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     url: &str,
     chrome_http_req_res: &mut ChromeHTTPReqRes,
     referrer: Option<String>,
     cache_options: &Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
     cache_namespace: Option<&str>,
-) -> Result<(), chromiumoxide::error::CdpError> {
+) -> Result<(), chromey::error::CdpError> {
     *chrome_http_req_res = perform_chrome_http_request_cache(
         page,
         url,
@@ -2324,10 +2317,10 @@ async fn navigate_cache(
 #[cfg(all(feature = "real_browser", feature = "chrome"))]
 /// Generate random mouse movement. This does nothing without the 'real_browser' flag enabled.
 pub async fn perform_smart_mouse_movement(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     viewport: &Option<crate::configuration::Viewport>,
 ) {
-    use chromiumoxide::layout::Point;
+    use chromey::layout::Point;
     use spider_fingerprint::spoof_mouse_movement::GaussianMouse;
 
     let (viewport_width, viewport_height) = match viewport {
@@ -2343,7 +2336,7 @@ pub async fn perform_smart_mouse_movement(
 #[cfg(all(not(feature = "real_browser"), feature = "chrome"))]
 /// Generate random mouse movement. This does nothing without the 'real_browser' flag enabled.
 async fn perform_smart_mouse_movement(
-    _page: &chromiumoxide::Page,
+    _page: &chromey::Page,
     _viewport: &Option<crate::configuration::Viewport>,
 ) {
 }
@@ -2422,7 +2415,7 @@ pub async fn cache_chrome_response(
         None
     } else {
         let cache_site =
-            chromiumoxide::cache::manager::site_key_for_target_url(target_url, None, namespace);
+            chromey::cache::manager::site_key_for_target_url(target_url, None, namespace);
         let remote_version = match chromey_version {
             HttpVersion::Http09 => spider_remote_cache::HttpVersion::Http09,
             HttpVersion::Http10 => spider_remote_cache::HttpVersion::Http10,
@@ -2551,8 +2544,7 @@ pub async fn cache_http_response_skip_browser(
 
     let auth_opt = cache_auth_token(cache_options);
     let cache_key = create_cache_key_raw(target_url, Some(method), auth_opt, namespace);
-    let cache_site =
-        chromiumoxide::cache::manager::site_key_for_target_url(target_url, None, namespace);
+    let cache_site = chromey::cache::manager::site_key_for_target_url(target_url, None, namespace);
 
     let response_headers: std::collections::HashMap<String, String> = page_response
         .headers
@@ -2703,7 +2695,7 @@ struct ResponseBase {
     /// The map of the response.
     response_map: Option<hashbrown::HashMap<String, ResponseMap>>,
     /// The headers of request.
-    headers: Option<chromiumoxide::cdp::browser_protocol::network::Headers>,
+    headers: Option<chromey::cdp::browser_protocol::network::Headers>,
     /// The status code.
     status_code: Option<i64>,
     #[cfg(feature = "cache_request")]
@@ -2728,26 +2720,26 @@ fn log_target<'a>(source: &'a str, url_target: Option<&'a str>) -> &'a str {
 #[cfg(feature = "chrome")]
 #[inline]
 /// Is this a timeout error?
-fn is_timeout(e: &chromiumoxide::error::CdpError) -> bool {
-    matches!(e, chromiumoxide::error::CdpError::Timeout)
+fn is_timeout(e: &chromey::error::CdpError) -> bool {
+    matches!(e, chromey::error::CdpError::Timeout)
 }
 
 #[cfg(feature = "chrome")]
 /// Go to the html with interception.
 async fn goto_with_html_once(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     target_url: &str,
     html: &[u8],
     block_bytes: &mut bool,
     resp_headers: &Option<reqwest::header::HeaderMap<reqwest::header::HeaderValue>>,
     _chrome_intercept: &Option<&crate::features::chrome_common::RequestInterceptConfiguration>,
-) -> Result<(), chromiumoxide::error::CdpError> {
+) -> Result<(), chromey::error::CdpError> {
     use base64::Engine;
-    use chromiumoxide::cdp::browser_protocol::fetch::{
+    use chromey::cdp::browser_protocol::fetch::{
         DisableParams, EnableParams, EventRequestPaused, FulfillRequestParams, RequestPattern,
         RequestStage,
     };
-    use chromiumoxide::cdp::browser_protocol::network::ResourceType;
+    use chromey::cdp::browser_protocol::network::ResourceType;
     use tokio_stream::StreamExt;
 
     let fulfill_headers =
@@ -2793,7 +2785,7 @@ async fn goto_with_html_once(
             res = page.goto(target_url), if !did_goto => {
                 did_goto = true;
                 if let Err(e) = res {
-                    if matches!(e, chromiumoxide::error::CdpError::Timeout) {
+                    if matches!(e, chromey::error::CdpError::Timeout) {
                         *block_bytes = true;
                     }
                     let _ = tokio::join!(
@@ -2819,7 +2811,7 @@ async fn goto_with_html_once(
                     response_code: 200,
                     response_phrase: None,
                     response_headers: Some(fulfill_headers.clone()),
-                    body: Some(chromiumoxide::Binary(body_b64)),
+                    body: Some(chromey::Binary(body_b64)),
                     binary_response_headers: None,
                 }).await;
 
@@ -2846,7 +2838,7 @@ async fn goto_with_html_once(
                         return Ok(());
                     }
                     Err(e) => {
-                        if matches!(e, chromiumoxide::error::CdpError::Timeout) {
+                        if matches!(e, chromey::error::CdpError::Timeout) {
                             *block_bytes = true;
                         }
                         return Err(e);
@@ -2867,7 +2859,7 @@ async fn goto_with_html_once(
 #[cfg(feature = "chrome")]
 /// Set the document if requested.
 async fn set_document_content_if_requested(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     source: &[u8],
     url_target: Option<&str>,
     block_bytes: &mut bool,
@@ -2917,7 +2909,7 @@ fn ensure_remote_cache_client() {
 #[cfg(all(feature = "chrome", feature = "chrome_remote_cache"))]
 /// Set the document if requested cached.
 async fn set_document_content_if_requested_cached(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     source: &[u8],
     url_target: Option<&str>,
     block_bytes: &mut bool,
@@ -2949,7 +2941,7 @@ async fn set_document_content_if_requested_cached(
     };
     let target_url = url_target.unwrap_or_default();
     let cache_site =
-        chromiumoxide::cache::manager::site_key_for_target_url(target_url, auth_opt, namespace);
+        chromey::cache::manager::site_key_for_target_url(target_url, auth_opt, namespace);
 
     let _ = page
         .set_cache_key((Some(cache_site.clone()), cache_policy.clone()))
@@ -3011,13 +3003,13 @@ async fn set_document_content_if_requested_cached(
 
 #[cfg(feature = "chrome")]
 async fn navigate_if_requested(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     source: &str,
     url_target: Option<&str>,
     chrome_http_req_res: &mut ChromeHTTPReqRes,
     referrer: Option<String>,
     block_bytes: &mut bool,
-) -> Result<(), chromiumoxide::error::CdpError> {
+) -> Result<(), chromey::error::CdpError> {
     if let Err(e) = navigate(page, source, chrome_http_req_res, referrer).await {
         log::info!(
             "Navigation Error({:?}) - {:?}",
@@ -3035,7 +3027,7 @@ async fn navigate_if_requested(
 #[cfg(all(feature = "chrome", feature = "chrome_remote_cache"))]
 /// Navigate with the cache options.
 async fn navigate_if_requested_cache(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     source: &str,
     url_target: Option<&str>,
     chrome_http_req_res: &mut ChromeHTTPReqRes,
@@ -3044,7 +3036,7 @@ async fn navigate_if_requested_cache(
     cache_options: &Option<CacheOptions>,
     cache_policy: &Option<BasicCachePolicy>,
     cache_namespace: Option<&str>,
-) -> Result<(), chromiumoxide::error::CdpError> {
+) -> Result<(), chromey::error::CdpError> {
     if let Err(e) = navigate_cache(
         page,
         source,
@@ -3082,7 +3074,7 @@ fn cache_enabled(cache_options: &Option<CacheOptions>) -> bool {
 /// The chrome cache policy
 fn chrome_cache_policy(
     cache_policy: &Option<BasicCachePolicy>,
-) -> Option<chromiumoxide::cache::BasicCachePolicy> {
+) -> Option<chromey::cache::BasicCachePolicy> {
     cache_policy.as_ref().map(BasicCachePolicy::from_basic)
 }
 
@@ -3094,7 +3086,7 @@ fn chrome_cache_policy(
 /// - If `content == true`: tries SetDocumentContent; logs errors; sets `block_bytes` on timeout; does NOT return Err.
 /// - Else: performs navigation; returns Err on failure; sets `block_bytes` on timeout.
 pub async fn run_navigate_or_content_set_core(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     page_set: bool,
     content: bool,
     source: &[u8],
@@ -3109,7 +3101,7 @@ pub async fn run_navigate_or_content_set_core(
     _namespace: Option<&str>,
     _remote_cache_read_only: bool,
     _remote_cache_main_doc_only: bool,
-) -> Result<(), chromiumoxide::error::CdpError> {
+) -> Result<(), chromey::error::CdpError> {
     if page_set {
         return Ok(());
     }
@@ -3152,7 +3144,7 @@ pub async fn run_navigate_or_content_set_core(
 /// - If `content == true`: tries SetDocumentContent; logs errors; sets `block_bytes` on timeout; does NOT return Err.
 /// - Else: performs navigation; returns Err on failure; sets `block_bytes` on timeout.
 pub async fn run_navigate_or_content_set_core(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     page_set: bool,
     content: bool,
     source: &[u8],
@@ -3167,7 +3159,7 @@ pub async fn run_navigate_or_content_set_core(
     namespace: Option<&str>,
     remote_cache_read_only: bool,
     remote_cache_main_doc_only: bool,
-) -> Result<(), chromiumoxide::error::CdpError> {
+) -> Result<(), chromey::error::CdpError> {
     if page_set {
         return Ok(());
     }
@@ -3251,7 +3243,7 @@ fn same_document_url(a: &str, b: &str) -> bool {
 #[cfg(feature = "chrome")]
 /// Get the base redirect for the website.
 pub async fn get_final_redirect(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     source: &str,
     base_timeout: Duration,
 ) -> Option<String> {
@@ -3282,8 +3274,8 @@ pub async fn get_final_redirect(
 pub fn chrome_fulfill_headers_from_reqwest(
     headers: Option<&reqwest::header::HeaderMap<reqwest::header::HeaderValue>>,
     default_content_type: &'static str,
-) -> Vec<chromiumoxide::cdp::browser_protocol::fetch::HeaderEntry> {
-    use chromiumoxide::cdp::browser_protocol::fetch::HeaderEntry;
+) -> Vec<chromey::cdp::browser_protocol::fetch::HeaderEntry> {
+    use chromey::cdp::browser_protocol::fetch::HeaderEntry;
 
     let mut out: Vec<HeaderEntry> =
         Vec::with_capacity(headers.as_ref().map_or(1, |hm| hm.len().min(32) + 1));
@@ -3368,8 +3360,8 @@ const SKIP_BYTES_AMOUNT: f64 = 17.0;
 #[cfg(feature = "chrome")]
 #[inline]
 async fn fetch_chrome_html_adaptive(
-    page: &chromiumoxide::Page,
-) -> Result<Vec<u8>, chromiumoxide::error::CdpError> {
+    page: &chromey::Page,
+) -> Result<Vec<u8>, chromey::error::CdpError> {
     #[cfg(feature = "balance")]
     {
         // Single atomic load — the cached memory state is refreshed by the
@@ -3426,10 +3418,10 @@ async fn fetch_chrome_html_adaptive(
 #[cfg(feature = "chrome")]
 #[allow(dead_code)] // wired in Step 4 (chrome_page_fetch! macro changes)
 pub(crate) async fn fetch_chrome_html_streaming_into_writer<'h>(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     extractor: &mut crate::page::ChromeStreamingExtractor<'h>,
     collected: &mut Vec<u8>,
-) -> Result<(), chromiumoxide::error::CdpError> {
+) -> Result<(), chromey::error::CdpError> {
     use tokio_stream::StreamExt;
 
     let mut stream = Box::pin(page.content_bytes_stream(None));
@@ -3458,8 +3450,8 @@ pub(crate) async fn fetch_chrome_html_streaming_into_writer<'h>(
 #[cfg(feature = "chrome")]
 #[allow(dead_code)] // wired in Step 4
 pub(crate) async fn fetch_chrome_html_bytes(
-    page: &chromiumoxide::Page,
-) -> Result<Vec<u8>, chromiumoxide::error::CdpError> {
+    page: &chromey::Page,
+) -> Result<Vec<u8>, chromey::error::CdpError> {
     use tokio_stream::StreamExt;
 
     let mut stream = Box::pin(page.content_bytes_stream(None));
@@ -3495,7 +3487,7 @@ pub(crate) async fn fetch_chrome_html_bytes(
 ))]
 #[allow(dead_code)]
 pub(crate) async fn fetch_chrome_html_to_spool(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
 ) -> Option<crate::utils::html_spool::SpooledContent> {
     use tokio_stream::StreamExt;
 
@@ -3649,7 +3641,7 @@ pub(crate) async fn fetch_chrome_html_to_spool(
 ))]
 #[allow(dead_code)] // wired in Step 4 (chrome_page_fetch! macro changes)
 pub(crate) async fn fetch_chrome_html_to_spool_with_writer<'h>(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     extractor: &mut crate::page::ChromeStreamingExtractor<'h>,
 ) -> Option<crate::utils::html_spool::SpooledContent> {
     use tokio_stream::StreamExt;
@@ -3765,7 +3757,7 @@ pub(crate) async fn fetch_chrome_html_to_spool_with_writer<'h>(
     not(feature = "decentralized")
 ))]
 #[inline]
-async fn chrome_doc_length_above_solver_threshold(page: &chromiumoxide::Page) -> bool {
+async fn chrome_doc_length_above_solver_threshold(page: &chromey::Page) -> bool {
     match page.content_byte_length().await {
         Ok(n) => n > crate::page::TURNSTILE_WALL_PAGE_SIZE as u64,
         Err(_) => false,
@@ -3925,7 +3917,7 @@ pub(crate) fn opt_out_flag(value: Option<&str>) -> bool {
 #[allow(private_interfaces)]
 pub async fn fetch_page_html_chrome_base<'h>(
     source: &[u8],
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     content: bool,
     wait_for_navigation: bool,
     page_set: bool,
@@ -3939,7 +3931,7 @@ pub async fn fetch_page_html_chrome_base<'h>(
     cache_namespace: Option<&str>,
     params: &ChromeFetchParams<'_>,
     mut extract: Option<&mut crate::page::ChromeStreamingExtractor<'h>>,
-) -> Result<PageResponse, chromiumoxide::error::CdpError> {
+) -> Result<PageResponse, chromey::error::CdpError> {
     let wait_for = params.wait_for;
     let screenshot = params.screenshot;
     let openai_config = params.openai_config;
@@ -3960,7 +3952,7 @@ pub async fn fetch_page_html_chrome_base<'h>(
     #[cfg(any(feature = "cache_request", feature = "chrome_remote_cache"))]
     let remote_cache_main_doc_only = params.remote_cache_main_doc_only;
     use crate::page::{is_asset_url, DOWNLOADABLE_MEDIA_TYPES, UNKNOWN_STATUS_ERROR};
-    use chromiumoxide::{
+    use chromey::{
         cdp::browser_protocol::network::{
             EventDataReceived, EventLoadingFailed, EventRequestWillBeSent, EventResponseReceived,
             GetResponseBodyParams, RequestId, ResourceType,
@@ -4035,8 +4027,7 @@ pub async fn fetch_page_html_chrome_base<'h>(
         event_sent_listener,
         event_data_received,
     ) = tokio::join!(
-        page.event_listener::<chromiumoxide::cdp::browser_protocol::network::EventLoadingFinished>(
-        ),
+        page.event_listener::<chromey::cdp::browser_protocol::network::EventLoadingFinished>(),
         page.event_listener::<EventLoadingFailed>(),
         page.event_listener::<EventResponseReceived>(),
         async {
@@ -4487,11 +4478,9 @@ pub async fn fetch_page_html_chrome_base<'h>(
                 // then it navigates without the jar's cookies.
                 let sync = async {
                     let held = page
-                        .execute(
-                            chromiumoxide::cdp::browser_protocol::network::GetCookiesParams {
-                                urls: Some(vec![target_url.to_string()]),
-                            },
-                        )
+                        .execute(chromey::cdp::browser_protocol::network::GetCookiesParams {
+                            urls: Some(vec![target_url.to_string()]),
+                        })
                         .await;
                     if let Ok(held) = held {
                         let host = url.host_str().unwrap_or_default();
@@ -4723,10 +4712,8 @@ pub async fn fetch_page_html_chrome_base<'h>(
 
     // The document the page navigated to during the wait, if any: its status
     // and headers replace the first document's once the response is built.
-    let (navigated_tx, mut navigated_rx) = tokio::sync::oneshot::channel::<(
-        i64,
-        chromiumoxide::cdp::browser_protocol::network::Headers,
-    )>();
+    let (navigated_tx, mut navigated_rx) =
+        tokio::sync::oneshot::channel::<(i64, chromey::cdp::browser_protocol::network::Headers)>();
 
     let run_page_response = async move {
         // Whether the response body was produced natively as Markdown by
@@ -5565,7 +5552,7 @@ pub async fn fetch_page_html_chrome_base<'h>(
                               let body_response = command_response;
 
                               let media_file = if body_response.base64_encoded {
-                                  chromiumoxide::utils::base64::decode(
+                                  chromey::utils::base64::decode(
                                       &body_response.body,
                                   )
                                   .unwrap_or_default()
@@ -5691,7 +5678,7 @@ pub async fn fetch_page_html_chrome_base<'h>(
 
     // Every byte source feeding `page_response.content` on this chrome
     // path originates as a Rust `String`/`Vec<u8>` deserialised from CDP
-    // (chromiumoxide's `outer_html_bytes`, `evaluate_function`,
+    // (chromey's `outer_html_bytes`, `evaluate_function`,
     // `content_bytes_streaming`, etc.) — chromium serialises the DOM as
     // UTF-8 and serde rejects ill-formed strings before bytes reach us,
     // so the contents are valid UTF-8 by construction.  Stamp the field
@@ -5780,8 +5767,7 @@ pub async fn fetch_page_html_chrome_base<'h>(
                 {
                     Ok(body_result) => {
                         let raw_body: Vec<u8> = if body_result.base64_encoded {
-                            chromiumoxide::utils::base64::decode(&body_result.body)
-                                .unwrap_or_default()
+                            chromey::utils::base64::decode(&body_result.body).unwrap_or_default()
                         } else {
                             body_result.body.clone().into_bytes()
                         };
@@ -5811,7 +5797,7 @@ pub async fn fetch_page_html_chrome_base<'h>(
 
     if cfg!(not(feature = "chrome_store_page")) {
         let _ = page
-            .send_command(chromiumoxide::cdp::browser_protocol::page::CloseParams::default())
+            .send_command(chromey::cdp::browser_protocol::page::CloseParams::default())
             .await;
 
         // Signal CDP event listeners to exit now that the page is closed,
@@ -6040,7 +6026,7 @@ fn set_page_response_headers(
 /// Set the page response.
 #[cfg(all(feature = "chrome", feature = "headers"))]
 fn set_page_response_headers_raw(
-    chrome_http_req_res: &mut Option<chromiumoxide::cdp::browser_protocol::network::Headers>,
+    chrome_http_req_res: &mut Option<chromey::cdp::browser_protocol::network::Headers>,
     page_response: &mut PageResponse,
 ) {
     if let Some(chrome_headers) = chrome_http_req_res {
@@ -6077,7 +6063,7 @@ fn set_page_response_headers_raw(
 /// Set the page response.
 #[cfg(all(feature = "chrome", not(feature = "headers")))]
 fn set_page_response_headers_raw(
-    _chrome_http_req_res: &mut Option<chromiumoxide::cdp::browser_protocol::network::Headers>,
+    _chrome_http_req_res: &mut Option<chromey::cdp::browser_protocol::network::Headers>,
     _page_response: &mut PageResponse,
 ) {
 }
@@ -6089,7 +6075,7 @@ fn set_page_response_headers_raw(
 /// dropped `Secure`, so the jar could send it over plain HTTP.
 #[cfg(all(feature = "chrome", feature = "cookies"))]
 pub(crate) fn browser_cookie_to_set_cookie(
-    cookie: &chromiumoxide::cdp::browser_protocol::network::Cookie,
+    cookie: &chromey::cdp::browser_protocol::network::Cookie,
 ) -> Option<(String, url::Url)> {
     let host = cookie.domain.trim_start_matches('.');
     if host.is_empty() {
@@ -6135,7 +6121,7 @@ pub(crate) fn browser_cookie_to_set_cookie(
 #[cfg(all(feature = "chrome", feature = "cookies"))]
 async fn set_page_response_cookies(
     page_response: &mut PageResponse,
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     jar: Option<&std::sync::Arc<crate::client::cookie::Jar>>,
     scope_url: Option<&url::Url>,
 ) {
@@ -6170,7 +6156,7 @@ const COOKIE_JAR_SYNC_CAP: std::time::Duration = std::time::Duration::from_milli
 #[cfg(feature = "chrome")]
 pub async fn perform_screenshot(
     target_url: &str,
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     screenshot: &Option<crate::configuration::ScreenShotConfig>,
     page_response: &mut PageResponse,
 ) {
@@ -6188,7 +6174,7 @@ pub async fn perform_screenshot(
                     .unwrap_or(&crate::configuration::CaptureScreenshotFormat::Png)
                     .to_string()
             );
-            let ss_params = chromiumoxide::page::ScreenshotParams::from(ss.params.clone());
+            let ss_params = chromey::page::ScreenshotParams::from(ss.params.clone());
 
             let full_page = ss_params.full_page.unwrap_or_default();
             let omit_background = ss_params.omit_background.unwrap_or_default();
@@ -6201,8 +6187,8 @@ pub async fn perform_screenshot(
             }
 
             if omit_background {
-                let _ = page.send_command(chromiumoxide::cdp::browser_protocol::emulation::SetDefaultBackgroundColorOverrideParams {
-                    color: Some(chromiumoxide::cdp::browser_protocol::dom::Rgba {
+                let _ = page.send_command(chromey::cdp::browser_protocol::emulation::SetDefaultBackgroundColorOverrideParams {
+                    color: Some(chromey::cdp::browser_protocol::dom::Rgba {
                         r: 0,
                         g: 0,
                         b: 0,
@@ -6235,7 +6221,7 @@ pub async fn perform_screenshot(
             };
 
             if omit_background {
-                let _ = page.send_command(chromiumoxide::cdp::browser_protocol::emulation::SetDefaultBackgroundColorOverrideParams { color: None })
+                let _ = page.send_command(chromey::cdp::browser_protocol::emulation::SetDefaultBackgroundColorOverrideParams { color: None })
                         .await;
             }
         }
@@ -6251,10 +6237,8 @@ pub async fn perform_screenshot(
 
             match page
                 .save_screenshot(
-                    chromiumoxide::page::ScreenshotParams::builder()
-                        .format(
-                            chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png,
-                        )
+                    chromey::page::ScreenshotParams::builder()
+                        .format(chromey::cdp::browser_protocol::page::CaptureScreenshotFormat::Png)
                         .full_page(match std::env::var("SCREENSHOT_FULL_PAGE") {
                             Ok(t) => t == "true",
                             _ => true,
@@ -6279,8 +6263,8 @@ pub async fn perform_screenshot(
 /// Check if url matches the last item in a redirect chain for chrome CDP
 pub async fn get_last_redirect(
     target_url: &str,
-    u: &Option<std::sync::Arc<chromiumoxide::handler::http::HttpRequest>>,
-    page: &chromiumoxide::Page,
+    u: &Option<std::sync::Arc<chromey::handler::http::HttpRequest>>,
+    page: &chromey::Page,
 ) -> Option<String> {
     if let Some(http_request) = u {
         if let Some(redirect) = http_request.redirect_chain.last() {
@@ -6293,7 +6277,7 @@ pub async fn get_last_redirect(
             }
         }
     }
-    // Fallback: chromiumoxide didn't report a redirect chain (common when
+    // Fallback: chromey didn't report a redirect chain (common when
     // the smart upgrade fulfills the navigation via Fetch.fulfillRequest —
     // there is no real redirect, just a navigation). Filter out the no-op
     // case where `page.url()` equals the URL we asked Chrome to load, so
@@ -7963,7 +7947,7 @@ pub async fn fetch_page_html(target_url: &str, client: &Client) -> PageResponse 
 pub async fn fetch_page_html<'h>(
     target_url: &str,
     client: &Client,
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     page_set: bool,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
@@ -8174,7 +8158,7 @@ pub async fn fetch_page_html<'h>(
 pub async fn fetch_page_html_seeded<'h>(
     target_url: &str,
     client: &Client,
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     page_set: bool,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
@@ -8294,11 +8278,11 @@ pub enum BasicCachePolicy {
 #[cfg(feature = "chrome_remote_cache")]
 impl BasicCachePolicy {
     /// Convert the cache policy to chrome.
-    pub fn from_basic(&self) -> chromiumoxide::cache::BasicCachePolicy {
+    pub fn from_basic(&self) -> chromey::cache::BasicCachePolicy {
         match &self {
-            BasicCachePolicy::AllowStale => chromiumoxide::cache::BasicCachePolicy::AllowStale,
-            BasicCachePolicy::Normal => chromiumoxide::cache::BasicCachePolicy::Normal,
-            BasicCachePolicy::Period(p) => chromiumoxide::cache::BasicCachePolicy::Period(*p),
+            BasicCachePolicy::AllowStale => chromey::cache::BasicCachePolicy::AllowStale,
+            BasicCachePolicy::Normal => chromey::cache::BasicCachePolicy::Normal,
+            BasicCachePolicy::Period(p) => chromey::cache::BasicCachePolicy::Period(*p),
         }
     }
 }
@@ -8413,7 +8397,7 @@ pub async fn get_cached_url_base(
         // env-var) before the first GET fires. Idempotent.
         ensure_remote_cache_client();
 
-        let cache_site = chromiumoxide::cache::manager::site_key_for_target_url(
+        let cache_site = chromey::cache::manager::site_key_for_target_url(
             target_url,
             auth_opt.as_deref(),
             namespace,
@@ -8421,25 +8405,22 @@ pub async fn get_cached_url_base(
         let make_session_key = |url: &str| format!("GET:{}", url);
 
         let try_session_get = |url: &str| {
-            chromiumoxide::cache::remote::get_session_cache_item(
-                &cache_site,
-                &make_session_key(url),
-            )
-            .and_then(|(http_response, stored_policy)| {
-                if allow_stale || !stored_policy.is_stale(now) {
-                    let accept_lang = http_response
-                        .headers
-                        .get("accept-language")
-                        .or_else(|| http_response.headers.get("Accept-Language"))
-                        .map(|h| h.as_str());
-                    decode_cached_html_bytes(&http_response.body, accept_lang)
-                } else {
-                    None
-                }
-            })
+            chromey::cache::remote::get_session_cache_item(&cache_site, &make_session_key(url))
+                .and_then(|(http_response, stored_policy)| {
+                    if allow_stale || !stored_policy.is_stale(now) {
+                        let accept_lang = http_response
+                            .headers
+                            .get("accept-language")
+                            .or_else(|| http_response.headers.get("Accept-Language"))
+                            .map(|h| h.as_str());
+                        decode_cached_html_bytes(&http_response.body, accept_lang)
+                    } else {
+                        None
+                    }
+                })
         };
 
-        // Check chromiumoxide session cache (may have been seeded by a prior navigation).
+        // Check chromey session cache (may have been seeded by a prior navigation).
         if let Some(body) = try_session_get(target_url) {
             return Some(body);
         }
@@ -8448,7 +8429,7 @@ pub async fn get_cached_url_base(
         // Timeout prevents blocking the critical path if the cache server is slow/down.
         let _ = tokio::time::timeout(
             Duration::from_secs(3),
-            chromiumoxide::cache::remote::get_cache_site(
+            chromey::cache::remote::get_cache_site(
                 target_url,
                 auth_opt.as_deref(),
                 Some("true"),
@@ -8500,7 +8481,7 @@ pub async fn get_cached_url_base(
     // before the first GET fires. Idempotent.
     ensure_remote_cache_client();
 
-    let cache_site = chromiumoxide::cache::manager::site_key_for_target_url(
+    let cache_site = chromey::cache::manager::site_key_for_target_url(
         target_url,
         auth_opt.as_deref(),
         namespace,
@@ -8508,7 +8489,7 @@ pub async fn get_cached_url_base(
     let make_session_key = |url: &str| format!("GET:{}", url);
 
     let try_get = |url: &str| {
-        chromiumoxide::cache::remote::get_session_cache_item(&cache_site, &make_session_key(url))
+        chromey::cache::remote::get_session_cache_item(&cache_site, &make_session_key(url))
             .and_then(|(http_response, stored_policy)| {
                 if allow_stale || !stored_policy.is_stale(now) {
                     let accept_lang = http_response
@@ -8552,7 +8533,7 @@ pub async fn get_cached_url_base(
     // Timeout prevents blocking the critical path if the cache server is slow/down.
     let _ = tokio::time::timeout(
         Duration::from_secs(3),
-        chromiumoxide::cache::remote::get_cache_site(
+        chromey::cache::remote::get_cache_site(
             target_url,
             auth_opt.as_deref(),
             Some("true"),
@@ -8613,7 +8594,7 @@ pub async fn get_cached_url(
 pub async fn fetch_page_html_base<'h>(
     target_url: &str,
     client: &Client,
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     page_set: bool,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
@@ -8692,7 +8673,7 @@ pub async fn fetch_page_html_base<'h>(
 pub async fn fetch_page_html<'h>(
     target_url: &str,
     client: &Client,
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     page_set: bool,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
@@ -8727,7 +8708,7 @@ pub async fn fetch_page_html<'h>(
 pub async fn fetch_page_html_seeded<'h>(
     target_url: &str,
     client: &Client,
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     page_set: bool,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
@@ -8760,7 +8741,7 @@ pub async fn fetch_page_html_seeded<'h>(
 async fn _fetch_page_html_chrome<'h>(
     target_url: &str,
     client: &Client,
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     page_set: bool,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
@@ -8925,7 +8906,7 @@ async fn _fetch_page_html_chrome<'h>(
 pub async fn fetch_page_html_chrome<'h>(
     target_url: &str,
     client: &Client,
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     page_set: bool,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
@@ -8958,7 +8939,7 @@ pub async fn fetch_page_html_chrome<'h>(
 pub async fn fetch_page_html_chrome_seeded<'h>(
     target_url: &str,
     client: &Client,
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     page_set: bool,
     referrer: Option<String>,
     max_page_bytes: Option<f64>,
@@ -10467,7 +10448,7 @@ pub fn emit_log_shutdown(link: &str) {
 mod browser_cookie_tests {
     use super::browser_cookie_to_set_cookie;
     use crate::client::cookie::{CookieStore, Jar};
-    use chromiumoxide::cdp::browser_protocol::network::{Cookie, CookieSameSite};
+    use chromey::cdp::browser_protocol::network::{Cookie, CookieSameSite};
 
     fn in_an_hour() -> f64 {
         std::time::SystemTime::now()
@@ -10689,9 +10670,7 @@ mod tests {
             "content-length": "340",
             "etag": "\"22c-641f9d036a3fc-gzip\"",
         });
-        let mut headers = Some(chromiumoxide::cdp::browser_protocol::network::Headers::new(
-            raw,
-        ));
+        let mut headers = Some(chromey::cdp::browser_protocol::network::Headers::new(raw));
         let mut page_response = PageResponse::default();
         set_page_response_headers_raw(&mut headers, &mut page_response);
         let map = page_response.headers.expect("headers should be populated");

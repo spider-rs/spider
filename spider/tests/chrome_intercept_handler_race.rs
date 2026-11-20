@@ -3,11 +3,11 @@
 
 #[cfg(feature = "chrome")]
 mod handler_race_tests {
-    use chromiumoxide::cdp::browser_protocol::fetch::EventRequestPaused;
-    use chromiumoxide::cdp::browser_protocol::network::{
+    use chromey::cdp::browser_protocol::fetch::EventRequestPaused;
+    use chromey::cdp::browser_protocol::network::{
         Headers, Request, RequestId, RequestReferrerPolicy, ResourcePriority, ResourceType,
     };
-    use chromiumoxide::handler::network::{NetworkEvent, NetworkManager};
+    use chromey::handler::network::{NetworkEvent, NetworkManager};
     use std::time::Duration;
 
     fn make_request_paused(url: &str, resource_type: ResourceType) -> EventRequestPaused {
@@ -28,9 +28,7 @@ mod handler_race_tests {
                 is_same_site: Some(true),
                 is_ad_related: None,
             },
-            frame_id: chromiumoxide::cdp::browser_protocol::page::FrameId::from(
-                "frame1".to_string(),
-            ),
+            frame_id: chromey::cdp::browser_protocol::page::FrameId::from("frame1".to_string()),
             resource_type,
             response_error_reason: None,
             response_status_code: None,

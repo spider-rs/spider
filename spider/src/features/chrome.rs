@@ -4,20 +4,20 @@ use crate::{
     configuration::{Configuration, RedirectPolicy},
     tokio_stream::StreamExt,
 };
-use chromiumoxide::cdp::browser_protocol::browser::{
+use chromey::cdp::browser_protocol::browser::{
     SetDownloadBehaviorBehavior, SetDownloadBehaviorParamsBuilder,
 };
-use chromiumoxide::cdp::browser_protocol::{
+use chromey::cdp::browser_protocol::{
     browser::BrowserContextId,
     emulation::{SetGeolocationOverrideParams, SetScriptExecutionDisabledParams},
     network::CookieParam,
     target::CreateTargetParams,
 };
-use chromiumoxide::error::CdpError;
-use chromiumoxide::handler::REQUEST_TIMEOUT;
-use chromiumoxide::serde_json;
-use chromiumoxide::Page;
-use chromiumoxide::{handler::HandlerConfig, Browser, BrowserConfig};
+use chromey::error::CdpError;
+use chromey::handler::REQUEST_TIMEOUT;
+use chromey::serde_json;
+use chromey::Page;
+use chromey::{handler::HandlerConfig, Browser, BrowserConfig};
 use lazy_static::lazy_static;
 #[cfg(feature = "cookies")]
 use std::sync::Arc;
@@ -118,10 +118,10 @@ pub fn seed_jar_from_cookie_header(
 #[cfg(all(feature = "cookies", feature = "chrome"))]
 /// Set the page cookies.
 pub async fn set_page_cookies(
-    page: &chromiumoxide::Page,
-    cookies: Vec<chromiumoxide::cdp::browser_protocol::network::CookieParam>,
+    page: &chromey::Page,
+    cookies: Vec<chromey::cdp::browser_protocol::network::CookieParam>,
 ) -> Result<(), String> {
-    use chromiumoxide::cdp::browser_protocol::network::SetCookiesParams;
+    use chromey::cdp::browser_protocol::network::SetCookiesParams;
 
     if cookies.is_empty() {
         return Ok(());
@@ -139,7 +139,7 @@ pub async fn set_page_cookies(
 /// subdomains; without it the cookie belongs to that host only.
 #[cfg(feature = "cookies")]
 pub(crate) fn browser_holds_cookie(
-    held: &[chromiumoxide::cdp::browser_protocol::network::Cookie],
+    held: &[chromey::cdp::browser_protocol::network::Cookie],
     name: &str,
     host: &str,
 ) -> bool {
@@ -159,9 +159,9 @@ pub(crate) fn browser_holds_cookie(
 pub fn cookie_params_from_jar(
     jar: &std::sync::Arc<crate::client::cookie::Jar>,
     url: &url::Url,
-) -> Result<Vec<chromiumoxide::cdp::browser_protocol::network::CookieParam>, String> {
+) -> Result<Vec<chromey::cdp::browser_protocol::network::CookieParam>, String> {
     use crate::client::cookie::CookieStore;
-    use chromiumoxide::cdp::browser_protocol::network::CookieParam;
+    use chromey::cdp::browser_protocol::network::CookieParam;
 
     let Some(header_value) = jar.cookies(url) else {
         return Ok(Vec::new());
@@ -255,7 +255,7 @@ pub fn get_browser_config(
     proxies: &Option<Vec<crate::configuration::RequestProxy>>,
     intercept: bool,
     cache_enabled: bool,
-    viewport: impl Into<Option<chromiumoxide::handler::viewport::Viewport>>,
+    viewport: impl Into<Option<chromey::handler::viewport::Viewport>>,
     request_timeout: &Option<core::time::Duration>,
     use_chrome_ai: bool,
 ) -> Option<BrowserConfig> {
@@ -334,7 +334,7 @@ pub fn get_browser_config(
     proxies: &Option<Vec<crate::configuration::RequestProxy>>,
     intercept: bool,
     cache_enabled: bool,
-    viewport: impl Into<Option<chromiumoxide::handler::viewport::Viewport>>,
+    viewport: impl Into<Option<chromey::handler::viewport::Viewport>>,
     request_timeout: &Option<core::time::Duration>,
     use_chrome_ai: bool,
 ) -> Option<BrowserConfig> {
@@ -414,9 +414,7 @@ pub fn create_handler_config(config: &Configuration) -> HandlerConfig {
         cache_enabled: config.cache,
         service_worker_enabled: config.service_worker_enabled,
         viewport: match config.viewport {
-            Some(ref v) => Some(chromiumoxide::handler::viewport::Viewport::from(
-                v.to_owned(),
-            )),
+            Some(ref v) => Some(chromey::handler::viewport::Viewport::from(v.to_owned())),
             _ => default_viewport(),
         },
         ignore_visuals: config.chrome_intercept.block_visuals,
@@ -681,7 +679,7 @@ impl ChromeConnectionFailover {
     pub async fn connect(
         &self,
         config: &Configuration,
-    ) -> Option<(Browser, chromiumoxide::Handler, String)> {
+    ) -> Option<(Browser, chromey::Handler, String)> {
         let handler_config_base = create_handler_config(config);
 
         // Bound each connect attempt so a hung peer fails over instead of
@@ -847,15 +845,15 @@ impl ChromeConnectionFailover {
 
 /// Get the default viewport
 #[cfg(not(feature = "real_browser"))]
-pub fn default_viewport() -> Option<chromiumoxide::handler::viewport::Viewport> {
+pub fn default_viewport() -> Option<chromey::handler::viewport::Viewport> {
     None
 }
 
 /// Get the default viewport
 #[cfg(feature = "real_browser")]
-pub fn default_viewport() -> Option<chromiumoxide::handler::viewport::Viewport> {
+pub fn default_viewport() -> Option<chromey::handler::viewport::Viewport> {
     use super::chrome_viewport::get_random_viewport;
-    Some(chromiumoxide::handler::viewport::Viewport::from(
+    Some(chromey::handler::viewport::Viewport::from(
         get_random_viewport(),
     ))
 }
@@ -881,7 +879,7 @@ pub fn cleanup_invalid_headers(hm: &mut std::collections::HashMap<String, String
 /// the local-launch path.
 pub async fn setup_browser_configuration(
     config: &Configuration,
-) -> Option<(Browser, chromiumoxide::Handler, Option<String>)> {
+) -> Option<(Browser, chromey::Handler, Option<String>)> {
     let proxies = &config.proxies;
 
     // ── Multi-endpoint failover path (priority) ──
@@ -995,9 +993,7 @@ pub async fn setup_browser_configuration(
             config.chrome_intercept.enabled,
             config.cache,
             match config.viewport {
-                Some(ref v) => Some(chromiumoxide::handler::viewport::Viewport::from(
-                    v.to_owned(),
-                )),
+                Some(ref v) => Some(chromey::handler::viewport::Viewport::from(v.to_owned())),
                 _ => default_viewport(),
             },
             &config.request_timeout,
@@ -1073,9 +1069,7 @@ pub async fn launch_browser_base(
     std::sync::Arc<std::sync::atomic::AtomicBool>,
     Option<String>,
 )> {
-    use chromiumoxide::{
-        cdp::browser_protocol::target::CreateBrowserContextParams, error::CdpError,
-    };
+    use chromey::{cdp::browser_protocol::target::CreateBrowserContextParams, error::CdpError};
 
     let browser_configuration = setup_browser_configuration(config).await;
 
@@ -1197,7 +1191,7 @@ pub(crate) async fn relaunch_browser_at(
     std::sync::Arc<std::sync::atomic::AtomicBool>,
     Option<String>,
 )> {
-    use chromiumoxide::error::CdpError;
+    use chromey::error::CdpError;
 
     let handler_config = create_handler_config(config);
 
@@ -1251,7 +1245,7 @@ pub(crate) async fn relaunch_browser_at(
 
     // Isolated context so tabs don't collide with the (dead) primary's.
     let mut create_ctx =
-        chromiumoxide::cdp::browser_protocol::target::CreateBrowserContextParams::default();
+        chromey::cdp::browser_protocol::target::CreateBrowserContextParams::default();
     create_ctx.dispose_on_detach = Some(true);
     let context_id = match browser.create_browser_context(create_ctx).await {
         Ok(id) => {
@@ -1434,7 +1428,7 @@ pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
                 if !timezone_id.is_empty() {
                     let _ = new_page
                     .emulate_timezone(
-                        chromiumoxide::cdp::browser_protocol::emulation::SetTimezoneOverrideParams::new(
+                        chromey::cdp::browser_protocol::emulation::SetTimezoneOverrideParams::new(
                             timezone_id,
                         ),
                     )
@@ -1448,7 +1442,7 @@ pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
                 if !locale.is_empty() {
                     let _ = new_page
                         .emulate_locale(
-                            chromiumoxide::cdp::browser_protocol::emulation::SetLocaleOverrideParams {
+                            chromey::cdp::browser_protocol::emulation::SetLocaleOverrideParams {
                                 locale: Some(locale.into()),
                             },
                         )
@@ -1463,7 +1457,7 @@ pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
             if !timezone_id.is_empty() {
                 let _ = new_page
                     .emulate_timezone(
-                        chromiumoxide::cdp::browser_protocol::emulation::SetTimezoneOverrideParams::new(
+                        chromey::cdp::browser_protocol::emulation::SetTimezoneOverrideParams::new(
                             timezone_id,
                         ),
                     )
@@ -1475,7 +1469,7 @@ pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
             if !locale.is_empty() {
                 let _ = new_page
                     .emulate_locale(
-                        chromiumoxide::cdp::browser_protocol::emulation::SetLocaleOverrideParams {
+                        chromey::cdp::browser_protocol::emulation::SetLocaleOverrideParams {
                             locale: Some(locale.into()),
                         },
                     )
@@ -1485,7 +1479,7 @@ pub async fn configure_browser(new_page: &Page, configuration: &Configuration) {
     }
 }
 
-/// attempt to navigate to a page respecting the request timeout. This will attempt to get a response for up to 60 seconds. There is a bug in the browser hanging if the CDP connection or handler errors. [https://github.com/mattsse/chromiumoxide/issues/64]
+/// attempt to navigate to a page respecting the request timeout. This will attempt to get a response for up to 60 seconds. There is a bug in the browser hanging if the CDP connection or handler errors. [https://github.com/mattsse/chromey/issues/64]
 #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
 pub(crate) async fn attempt_navigation(
     url: &str,
@@ -1550,14 +1544,14 @@ pub async fn close_browser(
 /// Setup interception for auth challenges. This does nothing without the 'chrome_intercept' flag.
 #[cfg(feature = "chrome")]
 pub async fn setup_auth_challenge_response(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     chrome_intercept: bool,
     auth_challenge_response: &Option<crate::configuration::AuthChallengeResponse>,
 ) {
     if chrome_intercept {
         if let Some(ref auth_challenge_response) = auth_challenge_response {
             if let Ok(mut rp) = page
-                .event_listener::<chromiumoxide::cdp::browser_protocol::fetch::EventAuthRequired>()
+                .event_listener::<chromey::cdp::browser_protocol::fetch::EventAuthRequired>()
                 .await
             {
                 let intercept_page = page.clone();
@@ -1567,9 +1561,12 @@ pub async fn setup_auth_challenge_response(
                 crate::utils::spawn_task("auth_interception", async move {
                     while let Some(event) = rp.next().await {
                         let u = &event.request.url;
-                        let acr = chromiumoxide::cdp::browser_protocol::fetch::AuthChallengeResponse::from(auth_challenge_response.clone());
+                        let acr =
+                            chromey::cdp::browser_protocol::fetch::AuthChallengeResponse::from(
+                                auth_challenge_response.clone(),
+                            );
 
-                        match chromiumoxide::cdp::browser_protocol::fetch::ContinueWithAuthParams::builder()
+                        match chromey::cdp::browser_protocol::fetch::ContinueWithAuthParams::builder()
                         .request_id(event.request_id.clone())
                         .auth_challenge_response(acr)
                         .build() {
@@ -1593,7 +1590,7 @@ pub async fn setup_auth_challenge_response(
 /// Setup interception for chrome request. This does nothing without the 'chrome_intercept' flag.
 #[cfg(feature = "chrome")]
 pub async fn setup_chrome_interception_base(
-    page: &chromiumoxide::Page,
+    page: &chromey::Page,
     chrome_intercept: bool,
     auth_challenge_response: &Option<crate::configuration::AuthChallengeResponse>,
     _ignore_visuals: bool,
@@ -1606,7 +1603,7 @@ pub async fn setup_chrome_interception_base(
 }
 
 /// establish all the page events.
-pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Configuration) {
+pub async fn setup_chrome_events(chrome_page: &chromey::Page, config: &Configuration) {
     let ua_opt = config.user_agent.as_deref().filter(|ua| !ua.is_empty());
 
     let ua_for_profiles: &str = ua_opt.map_or("", |v| v);
@@ -1711,9 +1708,9 @@ pub async fn setup_chrome_events(chrome_page: &chromiumoxide::Page, config: &Con
 }
 
 pub(crate) type BrowserControl = (
-    std::sync::Arc<chromiumoxide::Browser>,
+    std::sync::Arc<chromey::Browser>,
     Option<tokio::task::JoinHandle<()>>,
-    Option<chromiumoxide::cdp::browser_protocol::browser::BrowserContextId>,
+    Option<chromey::cdp::browser_protocol::browser::BrowserContextId>,
 );
 
 /// Once cell browser
@@ -1890,7 +1887,7 @@ impl HedgeBrowser {
 
         // Create an isolated browser context so tabs don't collide with primary.
         let mut create_ctx =
-            chromiumoxide::cdp::browser_protocol::target::CreateBrowserContextParams::default();
+            chromey::cdp::browser_protocol::target::CreateBrowserContextParams::default();
         create_ctx.dispose_on_detach = Some(true);
 
         let context_id = match browser.create_browser_context(create_ctx).await {
@@ -1962,7 +1959,7 @@ impl Drop for HedgeBrowser {
 /// `#[tokio::test]` bodies that spin up + tear down a runtime per test, which
 /// would otherwise silently lose closes after the first runtime shuts down.
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
-static TAB_CLOSER_TX: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<chromiumoxide::Page>> =
+static TAB_CLOSER_TX: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<chromey::Page>> =
     std::sync::OnceLock::new();
 
 /// Tracks `target_id`s currently queued for close so re-entrant Drop paths
@@ -1970,12 +1967,12 @@ static TAB_CLOSER_TX: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<chr
 /// after the close future resolves (or times out).
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 static TAB_CLOSER_IN_FLIGHT: std::sync::OnceLock<
-    dashmap::DashMap<chromiumoxide::cdp::browser_protocol::target::TargetId, ()>,
+    dashmap::DashMap<chromey::cdp::browser_protocol::target::TargetId, ()>,
 > = std::sync::OnceLock::new();
 
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 fn tab_closer_in_flight(
-) -> &'static dashmap::DashMap<chromiumoxide::cdp::browser_protocol::target::TargetId, ()> {
+) -> &'static dashmap::DashMap<chromey::cdp::browser_protocol::target::TargetId, ()> {
     // Lock-free lazy init via get/set. `get_or_init` would block concurrent
     // first-callers inside std's internal mutex; with get/set, losers of the
     // atomic set() race simply drop their freshly-constructed DashMap (cheap)
@@ -1990,7 +1987,7 @@ fn tab_closer_in_flight(
 }
 
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
-fn tab_closer() -> &'static tokio::sync::mpsc::UnboundedSender<chromiumoxide::Page> {
+fn tab_closer() -> &'static tokio::sync::mpsc::UnboundedSender<chromey::Page> {
     // Fast path: already initialised — pure atomic load, no lock.
     if let Some(tx) = TAB_CLOSER_TX.get() {
         return tx;
@@ -2002,7 +1999,7 @@ fn tab_closer() -> &'static tokio::sync::mpsc::UnboundedSender<chromiumoxide::Pa
     // else to clean up. This avoids `get_or_init`'s internal Mutex and the
     // wasted thread spawns that a naïve get/set pattern would produce on
     // every concurrent first-call.
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<chromiumoxide::Page>();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<chromey::Page>();
 
     match TAB_CLOSER_TX.set(tx) {
         Ok(()) => {
@@ -2027,10 +2024,10 @@ fn tab_closer() -> &'static tokio::sync::mpsc::UnboundedSender<chromiumoxide::Pa
                     // for the same tab.
                     struct DedupCleanup {
                         map: &'static dashmap::DashMap<
-                            chromiumoxide::cdp::browser_protocol::target::TargetId,
+                            chromey::cdp::browser_protocol::target::TargetId,
                             (),
                         >,
-                        key: Option<chromiumoxide::cdp::browser_protocol::target::TargetId>,
+                        key: Option<chromey::cdp::browser_protocol::target::TargetId>,
                     }
                     impl Drop for DedupCleanup {
                         fn drop(&mut self) {
@@ -2112,7 +2109,7 @@ fn tab_closer() -> &'static tokio::sync::mpsc::UnboundedSender<chromiumoxide::Pa
 
 /// Guard that closes a Chrome tab when dropped.
 ///
-/// chromiumoxide's `Page` does **not** close the underlying Chrome tab on drop —
+/// chromey's `Page` does **not** close the underlying Chrome tab on drop —
 /// it only decrements an internal counter.  When `tokio::select!` cancels the
 /// losing future during a hedge race, the tab stays open and keeps consuming
 /// browser resources.  Over time the leaked tabs exhaust Chrome, causing
@@ -2125,13 +2122,13 @@ fn tab_closer() -> &'static tokio::sync::mpsc::UnboundedSender<chromiumoxide::Pa
 /// Call [`defuse`](Self::defuse) before an explicit `.close().await` to skip
 /// the channel send entirely.
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
-pub(crate) struct TabCloseGuard(Option<chromiumoxide::Page>);
+pub(crate) struct TabCloseGuard(Option<chromey::Page>);
 
 #[cfg(all(feature = "chrome", not(feature = "decentralized")))]
 impl TabCloseGuard {
     /// Create a guard that will close `page` on drop.
     #[inline]
-    pub fn new(page: chromiumoxide::Page) -> Self {
+    pub fn new(page: chromey::Page) -> Self {
         Self(Some(page))
     }
 
@@ -2150,7 +2147,7 @@ impl TabCloseGuard {
     /// the prior tab via the caller still holding it (if it kept the value) and
     /// the new tab via the guard's own Drop.
     #[inline]
-    pub fn swap(&mut self, page: chromiumoxide::Page) -> Option<chromiumoxide::Page> {
+    pub fn swap(&mut self, page: chromey::Page) -> Option<chromey::Page> {
         self.0.replace(page)
     }
 
@@ -2161,7 +2158,7 @@ impl TabCloseGuard {
     /// `None`. Used by retry-loop callers that want to choose whether to close
     /// the final tab based on a runtime / feature-flag decision.
     #[inline]
-    pub fn into_inner(mut self) -> Option<chromiumoxide::Page> {
+    pub fn into_inner(mut self) -> Option<chromey::Page> {
         self.0.take()
     }
 }
@@ -2704,7 +2701,7 @@ mod tests {
 #[cfg(all(test, feature = "cookies"))]
 mod browser_holds_cookie_tests {
     use super::browser_holds_cookie;
-    use chromiumoxide::cdp::browser_protocol::network::Cookie;
+    use chromey::cdp::browser_protocol::network::Cookie;
 
     fn cookie(name: &str, domain: &str) -> Cookie {
         Cookie {
