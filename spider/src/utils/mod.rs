@@ -853,10 +853,7 @@ pub async fn create_output_path(
 /// Wait for page events in two phases:
 /// 1. Network waits run concurrently (resources must arrive before DOM settles).
 /// 2. Selector + DOM + delay run concurrently (check rendering results).
-pub async fn page_wait(
-    page: &chromey::Page,
-    wait_for: &Option<crate::configuration::WaitFor>,
-) {
+pub async fn page_wait(page: &chromey::Page, wait_for: &Option<crate::configuration::WaitFor>) {
     if let Some(wait_for) = wait_for {
         // Phase 1: wait for network to settle (all network conditions concurrent).
         tokio::join!(
@@ -1480,16 +1477,13 @@ pub async fn perform_chrome_http_request(
 
         let frame_id = page.mainframe().await?;
 
-        let page_base =
-            page.http_future(chromey::cdp::browser_protocol::page::NavigateParams {
-                url: source.to_string(),
-                transition_type: Some(
-                    chromey::cdp::browser_protocol::page::TransitionType::Other,
-                ),
-                frame_id,
-                referrer,
-                referrer_policy: None,
-            })?;
+        let page_base = page.http_future(chromey::cdp::browser_protocol::page::NavigateParams {
+            url: source.to_string(),
+            transition_type: Some(chromey::cdp::browser_protocol::page::TransitionType::Other),
+            frame_id,
+            referrer,
+            referrer_policy: None,
+        })?;
 
         match page_base.await {
             Ok(page_base) => {
@@ -1687,9 +1681,7 @@ pub async fn perform_chrome_http_request_cache(
 
         let cmd = chromey::cdp::browser_protocol::page::NavigateParams {
             url: source.to_string(),
-            transition_type: Some(
-                chromey::cdp::browser_protocol::page::TransitionType::Other,
-            ),
+            transition_type: Some(chromey::cdp::browser_protocol::page::TransitionType::Other),
             frame_id,
             referrer,
             referrer_policy: None,
@@ -1993,7 +1985,8 @@ pub async fn run_openai_request(
                 // attach the data to the page
                 if gpt_configs.extra_ai_data {
                     let screenshot_bytes = if gpt_configs.screenshot && !json_res.js.is_empty() {
-                        let format = chromey::cdp::browser_protocol::page::CaptureScreenshotFormat::Png;
+                        let format =
+                            chromey::cdp::browser_protocol::page::CaptureScreenshotFormat::Png;
 
                         let screenshot_configs = chromey::page::ScreenshotParams::builder()
                             .format(format)
@@ -2551,8 +2544,7 @@ pub async fn cache_http_response_skip_browser(
 
     let auth_opt = cache_auth_token(cache_options);
     let cache_key = create_cache_key_raw(target_url, Some(method), auth_opt, namespace);
-    let cache_site =
-        chromey::cache::manager::site_key_for_target_url(target_url, None, namespace);
+    let cache_site = chromey::cache::manager::site_key_for_target_url(target_url, None, namespace);
 
     let response_headers: std::collections::HashMap<String, String> = page_response
         .headers
@@ -4035,8 +4027,7 @@ pub async fn fetch_page_html_chrome_base<'h>(
         event_sent_listener,
         event_data_received,
     ) = tokio::join!(
-        page.event_listener::<chromey::cdp::browser_protocol::network::EventLoadingFinished>(
-        ),
+        page.event_listener::<chromey::cdp::browser_protocol::network::EventLoadingFinished>(),
         page.event_listener::<EventLoadingFailed>(),
         page.event_listener::<EventResponseReceived>(),
         async {
@@ -4487,11 +4478,9 @@ pub async fn fetch_page_html_chrome_base<'h>(
                 // then it navigates without the jar's cookies.
                 let sync = async {
                     let held = page
-                        .execute(
-                            chromey::cdp::browser_protocol::network::GetCookiesParams {
-                                urls: Some(vec![target_url.to_string()]),
-                            },
-                        )
+                        .execute(chromey::cdp::browser_protocol::network::GetCookiesParams {
+                            urls: Some(vec![target_url.to_string()]),
+                        })
                         .await;
                     if let Ok(held) = held {
                         let host = url.host_str().unwrap_or_default();
@@ -4723,10 +4712,8 @@ pub async fn fetch_page_html_chrome_base<'h>(
 
     // The document the page navigated to during the wait, if any: its status
     // and headers replace the first document's once the response is built.
-    let (navigated_tx, mut navigated_rx) = tokio::sync::oneshot::channel::<(
-        i64,
-        chromey::cdp::browser_protocol::network::Headers,
-    )>();
+    let (navigated_tx, mut navigated_rx) =
+        tokio::sync::oneshot::channel::<(i64, chromey::cdp::browser_protocol::network::Headers)>();
 
     let run_page_response = async move {
         // Whether the response body was produced natively as Markdown by
@@ -5780,8 +5767,7 @@ pub async fn fetch_page_html_chrome_base<'h>(
                 {
                     Ok(body_result) => {
                         let raw_body: Vec<u8> = if body_result.base64_encoded {
-                            chromey::utils::base64::decode(&body_result.body)
-                                .unwrap_or_default()
+                            chromey::utils::base64::decode(&body_result.body).unwrap_or_default()
                         } else {
                             body_result.body.clone().into_bytes()
                         };
@@ -6252,9 +6238,7 @@ pub async fn perform_screenshot(
             match page
                 .save_screenshot(
                     chromey::page::ScreenshotParams::builder()
-                        .format(
-                            chromey::cdp::browser_protocol::page::CaptureScreenshotFormat::Png,
-                        )
+                        .format(chromey::cdp::browser_protocol::page::CaptureScreenshotFormat::Png)
                         .full_page(match std::env::var("SCREENSHOT_FULL_PAGE") {
                             Ok(t) => t == "true",
                             _ => true,
@@ -8421,22 +8405,19 @@ pub async fn get_cached_url_base(
         let make_session_key = |url: &str| format!("GET:{}", url);
 
         let try_session_get = |url: &str| {
-            chromey::cache::remote::get_session_cache_item(
-                &cache_site,
-                &make_session_key(url),
-            )
-            .and_then(|(http_response, stored_policy)| {
-                if allow_stale || !stored_policy.is_stale(now) {
-                    let accept_lang = http_response
-                        .headers
-                        .get("accept-language")
-                        .or_else(|| http_response.headers.get("Accept-Language"))
-                        .map(|h| h.as_str());
-                    decode_cached_html_bytes(&http_response.body, accept_lang)
-                } else {
-                    None
-                }
-            })
+            chromey::cache::remote::get_session_cache_item(&cache_site, &make_session_key(url))
+                .and_then(|(http_response, stored_policy)| {
+                    if allow_stale || !stored_policy.is_stale(now) {
+                        let accept_lang = http_response
+                            .headers
+                            .get("accept-language")
+                            .or_else(|| http_response.headers.get("Accept-Language"))
+                            .map(|h| h.as_str());
+                        decode_cached_html_bytes(&http_response.body, accept_lang)
+                    } else {
+                        None
+                    }
+                })
         };
 
         // Check chromey session cache (may have been seeded by a prior navigation).
@@ -10689,9 +10670,7 @@ mod tests {
             "content-length": "340",
             "etag": "\"22c-641f9d036a3fc-gzip\"",
         });
-        let mut headers = Some(chromey::cdp::browser_protocol::network::Headers::new(
-            raw,
-        ));
+        let mut headers = Some(chromey::cdp::browser_protocol::network::Headers::new(raw));
         let mut page_response = PageResponse::default();
         set_page_response_headers_raw(&mut headers, &mut page_response);
         let map = page_response.headers.expect("headers should be populated");

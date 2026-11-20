@@ -6376,9 +6376,7 @@ impl Page {
         match &page.chrome_page {
             Some(chrome_page) => {
                 let format: chromey::cdp::browser_protocol::page::CaptureScreenshotFormat =
-                    chromey::cdp::browser_protocol::page::CaptureScreenshotFormat::from(
-                        format,
-                    );
+                    chromey::cdp::browser_protocol::page::CaptureScreenshotFormat::from(format);
 
                 let screenshot_configs = chromey::page::ScreenshotParams::builder()
                     .format(format)
@@ -6391,9 +6389,8 @@ impl Page {
                 };
 
                 let screenshot_configs = match clip {
-                    Some(vp) => screenshot_configs.clip(
-                        chromey::cdp::browser_protocol::page::Viewport::from(vp),
-                    ),
+                    Some(vp) => screenshot_configs
+                        .clip(chromey::cdp::browser_protocol::page::Viewport::from(vp)),
                     _ => screenshot_configs,
                 };
 
@@ -8587,9 +8584,7 @@ impl Page {
                             let abs = convert_abs_path(base, &src);
 
                             if abs.path_segments().is_some_and(|mut segs| {
-                                segs.any(|p| {
-                                    chromey::handler::network::ALLOWED_MATCHER.is_match(p)
-                                })
+                                segs.any(|p| chromey::handler::network::ALLOWED_MATCHER.is_match(p))
                             }) {
                                 upgrade_score.store(SMART_UPGRADE_THRESHOLD, Ordering::Relaxed);
                             }

@@ -610,9 +610,7 @@ impl BrowserContext {
         element.click().await?;
 
         // Clear with keyboard
-        use chromey::cdp::browser_protocol::input::{
-            DispatchKeyEventParams, DispatchKeyEventType,
-        };
+        use chromey::cdp::browser_protocol::input::{DispatchKeyEventParams, DispatchKeyEventType};
         self.page
             .execute(
                 DispatchKeyEventParams::builder()

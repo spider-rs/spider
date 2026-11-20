@@ -1011,9 +1011,7 @@ impl RemoteMultimodalEngine {
                                                 )
                                                 .await;
                                                 let _ = page
-                                                    .click(chromey::layout::Point::new(
-                                                        0.0, 0.0,
-                                                    ))
+                                                    .click(chromey::layout::Point::new(0.0, 0.0))
                                                     .await; // defocus
                                                 let verify_js = r#"(function(){
                                                     var btn=document.querySelector('#captcha-verify-button,button.captcha-verify,.verify-button,[class*=verify]');
@@ -1240,7 +1238,8 @@ impl RemoteMultimodalEngine {
                                                         })
                                                         .collect();
                                                     use chromey::cdp::browser_protocol::input::{
-                                                        DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
+                                                        DispatchMouseEventParams,
+                                                        DispatchMouseEventType, MouseButton,
                                                     };
                                                     let mut clicked_this_round = 0u32;
                                                     let mut cdp_errors = 0u32;
@@ -4334,9 +4333,7 @@ return await s.prompt(msg);
                     .unwrap_or(15000);
                 let dur = std::time::Duration::from_millis(timeout.min(60_000));
                 if let Ok(mut events) = page
-                    .event_listener::<
-                        chromey::cdp::browser_protocol::page::EventLoadEventFired,
-                    >()
+                    .event_listener::<chromey::cdp::browser_protocol::page::EventLoadEventFired>()
                     .await
                 {
                     let _ = tokio::time::timeout(dur, events.next()).await;

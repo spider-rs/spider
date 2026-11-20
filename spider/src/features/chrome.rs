@@ -414,9 +414,7 @@ pub fn create_handler_config(config: &Configuration) -> HandlerConfig {
         cache_enabled: config.cache,
         service_worker_enabled: config.service_worker_enabled,
         viewport: match config.viewport {
-            Some(ref v) => Some(chromey::handler::viewport::Viewport::from(
-                v.to_owned(),
-            )),
+            Some(ref v) => Some(chromey::handler::viewport::Viewport::from(v.to_owned())),
             _ => default_viewport(),
         },
         ignore_visuals: config.chrome_intercept.block_visuals,
@@ -995,9 +993,7 @@ pub async fn setup_browser_configuration(
             config.chrome_intercept.enabled,
             config.cache,
             match config.viewport {
-                Some(ref v) => Some(chromey::handler::viewport::Viewport::from(
-                    v.to_owned(),
-                )),
+                Some(ref v) => Some(chromey::handler::viewport::Viewport::from(v.to_owned())),
                 _ => default_viewport(),
             },
             &config.request_timeout,
@@ -1073,9 +1069,7 @@ pub async fn launch_browser_base(
     std::sync::Arc<std::sync::atomic::AtomicBool>,
     Option<String>,
 )> {
-    use chromey::{
-        cdp::browser_protocol::target::CreateBrowserContextParams, error::CdpError,
-    };
+    use chromey::{cdp::browser_protocol::target::CreateBrowserContextParams, error::CdpError};
 
     let browser_configuration = setup_browser_configuration(config).await;
 
@@ -1567,7 +1561,10 @@ pub async fn setup_auth_challenge_response(
                 crate::utils::spawn_task("auth_interception", async move {
                     while let Some(event) = rp.next().await {
                         let u = &event.request.url;
-                        let acr = chromey::cdp::browser_protocol::fetch::AuthChallengeResponse::from(auth_challenge_response.clone());
+                        let acr =
+                            chromey::cdp::browser_protocol::fetch::AuthChallengeResponse::from(
+                                auth_challenge_response.clone(),
+                            );
 
                         match chromey::cdp::browser_protocol::fetch::ContinueWithAuthParams::builder()
                         .request_id(event.request_id.clone())

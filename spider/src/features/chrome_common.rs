@@ -387,9 +387,9 @@ impl From<ScreenshotParams> for chromey::page::ScreenshotParams {
 
         let params_builder = if params.cdp_params.clip.is_some() {
             match params.cdp_params.clip {
-                Some(vp) => params_builder.clip(
-                    chromey::cdp::browser_protocol::page::Viewport::from(vp),
-                ),
+                Some(vp) => {
+                    params_builder.clip(chromey::cdp::browser_protocol::page::Viewport::from(vp))
+                }
                 _ => params_builder,
             }
         } else {
@@ -446,9 +446,7 @@ pub struct AuthChallengeResponse {
 }
 
 #[cfg(feature = "chrome")]
-impl From<AuthChallengeResponse>
-    for chromey::cdp::browser_protocol::fetch::AuthChallengeResponse
-{
+impl From<AuthChallengeResponse> for chromey::cdp::browser_protocol::fetch::AuthChallengeResponse {
     fn from(auth_challenge_response: AuthChallengeResponse) -> Self {
         Self {
             response: match auth_challenge_response.response {

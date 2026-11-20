@@ -28,9 +28,7 @@ mod handler_race_tests {
                 is_same_site: Some(true),
                 is_ad_related: None,
             },
-            frame_id: chromey::cdp::browser_protocol::page::FrameId::from(
-                "frame1".to_string(),
-            ),
+            frame_id: chromey::cdp::browser_protocol::page::FrameId::from("frame1".to_string()),
             resource_type,
             response_error_reason: None,
             response_status_code: None,
